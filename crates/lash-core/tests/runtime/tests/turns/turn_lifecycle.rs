@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5_f410;
+
 #[test]
 pub(super) fn cancel_watch_test_clock_wall_clock_faces_agree() {
     let clock = CancelWatchTestClock(lash_core::testing::TestClock::new(1_700_000_000_123));
@@ -64,9 +66,10 @@ pub(super) fn manual_clock_wall_clock_faces_agree() {
     assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let post_commit_entered = Arc::new(AtomicBool::new(false));
     let plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
         RuntimeTestPluginFactory {
@@ -95,7 +98,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
             }),
         },
     );
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
         Arc::new(EmptyTools),
@@ -138,20 +141,17 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         release: Arc::clone(&release),
     };
 
-    let mut turn = Box::pin(
-        runtime.stream_turn(
-            TurnInput::text("commit before delivering"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("commit-before-delivery"),
-                ),
-            )
-            .with_events(&sink),
-        ),
-    );
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("commit-before-delivery"),
+        ))
+        .await
+        .expect("open the turn's handler");
+    let mut turn = Box::pin(runtime.stream_turn(
+        TurnInput::text("commit before delivering"),
+        TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
+    ));
     tokio::select! {
         entered = entered_rx.recv() => assert!(entered.is_some(), "sink entered"),
         result = turn.as_mut() => panic!("turn must suspend in host delivery: {result:?}"),
@@ -162,32 +162,38 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         .expect("committed session");
     assert_eq!(durable.head_revision, 1);
     drop(turn);
+    handler.close().await.expect("close the turn's handler");
     assert_eq!(runtime.state.turn_index, 1);
     assert_eq!(
         *runtime.resident_session.validity(),
         ResidentSessionState::Valid
     );
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("after-dropped-host-delivery"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let recovered = runtime
         .run_turn_assembled(
             TurnInput::text("continue after dropped host delivery"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("after-dropped-host-delivery"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("the adopted resident state remains usable");
+    handler.close().await.expect("close the turn's handler");
     assert_eq!(
         recovered.assistant_output.safe_text,
         "resident commit survived drop"
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let protocol = Arc::new(FailNextProtocolRestore {
         fail_next: AtomicBool::new(false),
         restore_count: AtomicUsize::new(0),
@@ -196,7 +202,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         protocol.clone(),
         None,
     );
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let call_index = Arc::new(AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("mock")
@@ -245,18 +251,22 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
     .await;
     protocol.fail_next.store(true, Ordering::SeqCst);
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("post-commit-restore-failure"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let committed = runtime
         .run_turn_assembled(
             TurnInput::text("switch frames"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("post-commit-restore-failure"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("a published commit must not become a whole-turn error");
+    handler.close().await.expect("close the turn's handler");
     assert!(matches!(
         committed.outcome,
         TurnOutcome::AgentFrameSwitch { .. }
@@ -353,18 +363,22 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
     // The switch committed its follow-on onto the head before the restore
     // failed, so the next direct turn reloads and then waits behind it
     // (ADR 0101 §3); the next drain runs the follow-on in its frame.
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("after-post-commit-restore-failure"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let held = runtime
         .run_turn_assembled(
             TurnInput::text("use the reloaded state"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("after-post-commit-restore-failure"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("next use reloads durable resident state");
+    handler.close().await.expect("close the turn's handler");
     assert!(
         matches!(held.outcome, TurnOutcome::Queued { .. }),
         "{:?}",
@@ -375,19 +389,20 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         ResidentSessionState::Valid
     );
     assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
-    let follow_on = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            lash_core::testing::runtime_helpers::host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("after-post-commit-restore-failure-drain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "after-post-commit-restore-failure-drain",
         ))
+        .await
+        .expect("open the drain's handler");
+    let follow_on = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("the drain runs")
         .ran()
         .expect("the drain answers the owed follow-on");
+    handler.close().await.expect("close the drain's handler");
     assert_eq!(
         follow_on.assistant_output.safe_text,
         "resident state reloaded"
@@ -405,7 +420,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
 
 #[tokio::test]
 pub(super) async fn double_invalidation_preserves_first_decision_id() {
-    let backend = memory_backend().await;
+    let backend = memory_store_backend().await;
     let mut runtime = runtime_with_plugins_and_tools(
         &backend,
         Vec::new(),
@@ -440,8 +455,8 @@ pub(super) async fn double_invalidation_preserves_first_decision_id() {
 
 #[tokio::test]
 pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let backend = memory_store_backend().await;
+    let store = recording_unbound_store_on(&backend).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -473,9 +488,9 @@ pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
     let cases = [
         (
             lash_core::StoreError::HeadRevisionConflict {
@@ -511,21 +526,25 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
             })
             .build();
         let (mut runtime, store) =
-            standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+            standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
         store.fail_next_runtime_commit(store_error);
 
+        let handler = double
+            .open_handler(AdmittedScope::turn(
+                SessionId::from("root"),
+                TurnId::from(format!("host-commit-refusal-{case_index}")),
+            ))
+            .await
+            .expect("open the turn's handler");
         let error = runtime
             .run_turn_assembled(
                 lash_core::TurnInput::text("reach the production final commit caller"),
                 CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from(format!("host-commit-refusal-{case_index}")),
-                ),
+                handler.scoped(),
             )
             .await
             .expect_err("the injected final commit refusal must reject the turn");
+        handler.close().await.expect("close the turn's handler");
 
         assert_eq!(error.code, expected_code);
         assert_eq!(error.deleted_session_id(), expected_deleted_session_id);
@@ -543,12 +562,13 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
 /// does in the field. The teardown owes the row the same repair, and this test
 /// reads the durable row directly so it proves the teardown trigger and not the
 /// drain-time backstop.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = "root";
     let live_turn_id = "fig1573-live-turn";
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let transport = TestProvider::builder()
         .kind("mock")
@@ -589,18 +609,22 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     store.fail_next_runtime_commit(lash_core::StoreError::SessionExecutionLeaseExpired {
         session_id: SessionId::from(session_id.to_string()),
     });
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id),
+            TurnId::from(live_turn_id),
+        ))
+        .await
+        .expect("open the turn's handler");
     let error = runtime
         .run_turn_assembled(
             lash_core::TurnInput::text("run the turn that will be fenced at commit"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from(session_id),
-                &TurnId::from(live_turn_id),
-            ),
+            handler.scoped(),
         )
         .await
         .expect_err("a fenced commit must fail the turn");
+    handler.close().await.expect("close the turn's handler");
     assert_eq!(
         error.code,
         lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
@@ -631,10 +655,11 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_prior_state()
  {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),
@@ -650,7 +675,7 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         protocol,
         Some(code_executor),
     );
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let provider_executor = Arc::clone(&executor);
     let provider_call = Arc::new(AtomicUsize::new(0));
@@ -691,32 +716,40 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("execution-state-baseline"),
+        ))
+        .await
+        .expect("open the turn's handler");
     runtime
         .run_turn_assembled(
             TurnInput::text("commit the baseline"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("execution-state-baseline"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("baseline turn commits its execution state");
+    handler.close().await.expect("close the turn's handler");
     executor.dirty.store(false, Ordering::SeqCst);
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("execution-state-capture-failure"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let error = runtime
         .run_turn_assembled(
             TurnInput::text("capture must fail"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("execution-state-capture-failure"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect_err("dirty capture failure must abort before the turn commit");
+    handler.close().await.expect("close the turn's handler");
     assert_eq!(
         error.code,
         lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed
@@ -777,10 +810,11 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_preserves_execution_state()
  {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),
@@ -798,7 +832,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         protocol,
         Some(code_executor),
     );
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let transport = TestProvider::builder()
         .kind("mock")
@@ -845,18 +879,22 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         .clone()
         .expect("runtime initializes the current frame");
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("already-current-frame-switch"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let switched = runtime
         .run_turn_assembled(
             TurnInput::text("redrive an already materialized frame switch"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("already-current-frame-switch"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("an already-current frame switch remains an idempotent no-op");
+    handler.close().await.expect("close the turn's handler");
     assert!(
         matches!(switched.outcome, TurnOutcome::AgentFrameSwitch { .. }),
         "unexpected no-op switch outcome: {switched:?}"
@@ -927,10 +965,11 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_resets_resident_executor()
  {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),
@@ -948,7 +987,7 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
         protocol,
         Some(code_executor),
     );
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -970,18 +1009,22 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
     }));
     executor.restored.lock_recover().clear();
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("materialized-frame-switch"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let switched = runtime
         .run_turn_assembled(
             TurnInput::text("switch to a distinct frame"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("materialized-frame-switch"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("materialized frame switch commits");
+    handler.close().await.expect("close the turn's handler");
     assert!(matches!(
         switched.outcome,
         TurnOutcome::AgentFrameSwitch { .. }
@@ -1097,10 +1140,11 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_retry_safe()
  {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(false),
         fail_capture: AtomicBool::new(false),
@@ -1116,7 +1160,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         protocol,
         Some(code_executor),
     );
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let call_index = Arc::new(AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("mock")
@@ -1174,17 +1218,18 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     )
     .await;
 
-    let committed = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("follow-on-capture-failure"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "follow-on-capture-failure",
         ))
         .await
+        .expect("open the drain's handler");
+    let committed = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .await
         .expect_err("failed follow-on remains a recoverable admission");
+    handler.close().await.expect("close the drain's handler");
     assert_eq!(
         committed.code,
         lash_core::RuntimeErrorCode::QueuedRunPending
@@ -1209,19 +1254,20 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
 
     executor.fail_capture.store(false, Ordering::SeqCst);
     executor.dirty.store(false, Ordering::SeqCst);
-    let recovered = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("follow-on-capture-failure"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "follow-on-capture-failure",
         ))
+        .await
+        .expect("open the drain's handler");
+    let recovered = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("retrying the logical queue call is safe")
         .ran()
         .expect("the durable handoff is reclaimed");
+    handler.close().await.expect("close the drain's handler");
     assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
     assert!(
         lash_core::store::QueuedWorkStore::list_queued_work(
@@ -1232,83 +1278,6 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         .expect("queue after recovered handoff")
         .is_empty()
     );
-}
-
-#[derive(Debug)]
-pub(super) struct StepExpiryClock {
-    epoch_ms: u64,
-    live_timestamp_calls: std::sync::atomic::AtomicU64,
-    timestamp_calls: std::sync::atomic::AtomicU64,
-    armed: AtomicBool,
-}
-
-impl StepExpiryClock {
-    pub(super) fn new(epoch_ms: u64) -> Self {
-        Self {
-            epoch_ms,
-            live_timestamp_calls: std::sync::atomic::AtomicU64::new(u64::MAX),
-            timestamp_calls: std::sync::atomic::AtomicU64::new(0),
-            armed: AtomicBool::new(false),
-        }
-    }
-
-    pub(super) fn expire_after_timestamp_calls(&self, live_calls: u64) {
-        self.timestamp_calls
-            .store(0, std::sync::atomic::Ordering::SeqCst);
-        self.live_timestamp_calls
-            .store(live_calls, std::sync::atomic::Ordering::SeqCst);
-        self.armed.store(true, Ordering::SeqCst);
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::Clock for StepExpiryClock {
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        let timestamp_ms = if !self.armed.load(Ordering::SeqCst) {
-            self.epoch_ms
-        } else {
-            let call = self
-                .timestamp_calls
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if call
-                < self
-                    .live_timestamp_calls
-                    .load(std::sync::atomic::Ordering::SeqCst)
-            {
-                self.epoch_ms
-            } else {
-                self.epoch_ms
-                    .saturating_add(lash_core::facade_support::LeaseTimings::default().ttl_ms())
-            }
-        };
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
-        )
-    }
-
-    async fn sleep(&self, duration: std::time::Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-    }
-}
-
-#[test]
-pub(super) fn step_expiry_clock_wall_clock_faces_agree() {
-    let clock = StepExpiryClock::new(1_700_000_000_123);
-    let clock: &dyn lash_core::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 pub(super) struct FrameRotatingDynamicTool {
@@ -1381,9 +1350,10 @@ impl lash_core::ToolProvider for FrameRotatingDynamicTool {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -1465,20 +1435,21 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
         .await
         .expect("apply pre-rotation curation");
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("live-surface-frame-rotation"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("rotate the frame"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("live-surface-frame-rotation"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("AgentFrame run");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(run.frame_switch_count(), 1);
     let final_turn = run.final_turn().expect("final frame");
@@ -1630,72 +1601,9 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PauseAtPreparedTurn {
     fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
-pub(super) struct PauseFirstProductCommitAttempt {
-    pub(super) entered: Arc<AtomicBool>,
-    pub(super) release: Arc<AtomicBool>,
-    pub(super) attempts: AtomicUsize,
-}
-
-impl lash_core::runtime::RuntimeTurnPhaseProbe for PauseFirstProductCommitAttempt {
-    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
-
-    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
-
-    fn begin_named(&self, phase: &str) {
-        if phase == "commit_admission.product_attempt"
-            && self.attempts.fetch_add(1, Ordering::SeqCst) == 0
-        {
-            self.entered.store(true, Ordering::SeqCst);
-            while !self.release.load(Ordering::SeqCst) {
-                std::thread::yield_now();
-            }
-        }
-    }
-}
-
 pub(super) struct PauseAfterEffectLoop {
     pub(super) entered: Arc<AtomicBool>,
     pub(super) release: Arc<AtomicBool>,
-}
-
-pub(super) struct CasSurvivorIntentTools {
-    pub(super) calls: Arc<AtomicUsize>,
-}
-
-pub(super) fn cas_survivor_intent_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        "tool:cas_survivor_intent",
-        "cas_survivor_intent",
-        "Emit durable evidence before the enclosing turn competes on head CAS.",
-        lash_core::ToolDefinition::default_input_schema(),
-        serde_json::json!({"type": "object", "additionalProperties": true}),
-    )
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for CasSurvivorIntentTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![cas_survivor_intent_tool().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "cas_survivor_intent").then(|| Arc::new(cas_survivor_intent_tool().contract()))
-    }
-
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        lash_core::ToolAttemptOutcome::done(
-            lash_core::ToolOutcomeDone::ok(serde_json::json!({"intent": "committed"})),
-            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
-                lash_core::EmitProcessEventIntent {
-                    session_id: SessionId::from(call.context.session_id()),
-                    process_id: ProcessId::from("cas-survivor-intent-target"),
-                    event_type: "intent.survivor.committed".to_string(),
-                    payload: serde_json::json!({"survives": true}),
-                },
-            )]),
-        )
-    }
 }
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for PauseAfterEffectLoop {
@@ -1783,6 +1691,61 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store_clock(
     )
     .await;
     (runtime, store)
+}
+
+/// [`standard_runtime_with_transport_and_queue_store`] on the Restate server
+/// double (D1 F2): the same runtime build over `double`'s backend, with the
+/// double's unbound store under the recording decorator.
+pub(super) async fn standard_runtime_with_transport_and_double_queue_store(
+    double: &lash_restate_test::RestateTestBackend,
+    transport: TestProvider,
+) -> (LashRuntime, Arc<RecordingStore>) {
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(double).await;
+    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(&backend),
+        runtime_store,
+    )
+    .await;
+    (runtime, store)
+}
+
+/// [`standard_runtime_with_transport_and_queue_store_for_session`] on the
+/// Restate server double (D1 F2).
+pub(super) async fn standard_runtime_with_transport_and_double_queue_store_for_session(
+    double: &lash_restate_test::RestateTestBackend,
+    transport: TestProvider,
+    session_id: &SessionId,
+) -> (LashRuntime, Arc<RecordingStore>) {
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(double).await;
+    let runtime = TestRuntime::new(&backend, transport)
+        .tools(Arc::new(EmptyTools))
+        .host(test_host_config(&backend))
+        .store(store.clone())
+        .with_session_id(session_id)
+        .build()
+        .await;
+    (runtime, store)
+}
+
+/// `unbound_recording_store`'s store-only-backend twin (D1 F3): an unbound
+/// store on `backend`'s session catalog under the recording decorator, for
+/// tests that run no effect.
+pub(super) async fn recording_unbound_store_on(
+    backend: &lash_core::Backend,
+) -> Arc<RecordingStore> {
+    Arc::new(RecordingStore::over(
+        lash_core::SessionStoreFactory::open_unbound_store(
+            backend.session_store_factory().as_ref(),
+        )
+        .await
+        .expect("open an unbound store on the backend's catalog"),
+    ))
 }
 
 #[derive(Clone, Default)]

@@ -1,8 +1,11 @@
 use super::*;
 
+const SEED: u64 = 0x5_f450;
+
 #[tokio::test]
 pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
@@ -36,6 +39,13 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
     let transport = mock_provider(Vec::new());
     let mut runtime = runtime_with_plugins(&backend, vec![plugin], transport).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("plugin-extension-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -48,14 +58,11 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("plugin-extension-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(&turn.outcome, TurnOutcome::Stopped(_)));
     assert!(matches!(
@@ -81,7 +88,8 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
 
 #[tokio::test]
 pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -95,6 +103,13 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
     }]);
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("skill-command-visibility-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -107,14 +122,11 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("skill-command-visibility-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let read_model = turn.state.read_model();
     let read_model = read_model.expect("accepted turn frame scope resolves");
@@ -146,7 +158,8 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
 
 #[tokio::test]
 pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -194,6 +207,13 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
         1_700_000_000_123,
     )));
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("retryable-error-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -206,14 +226,11 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("retryable-error-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(&turn.outcome, TurnOutcome::Stopped(_)));
     assert!(matches!(
@@ -242,7 +259,8 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
 
 #[tokio::test]
 pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     // A 400 classifies as a non-retryable Validation failure, so the turn
     // fails on the first attempt with fully typed failure signals.
     let transport = mock_provider(vec![MockCall {
@@ -255,6 +273,13 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
     }]);
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("typed-provider-failure-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -267,14 +292,11 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("typed-provider-failure-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         &turn.outcome,
@@ -297,7 +319,8 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
 
 #[tokio::test]
 pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -312,6 +335,13 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
     runtime.host.core.clock = Arc::new(ManualClock::new(4_242));
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("turn-timing-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -324,14 +354,11 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("turn-timing-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     // `started_at_ms` is read from the injected wall clock, so a
     // deterministic clock yields a deterministic timestamp (the OS clock
@@ -341,7 +368,7 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
 
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -367,7 +394,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
         },
     ]);
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         &SessionId::from("root"),
@@ -377,6 +404,13 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("queued-checkpoint-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -389,14 +423,11 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("queued-checkpoint-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(
         active_conversation_messages(&turn.state)
@@ -434,7 +465,8 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
 
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_preserves_images() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -463,7 +495,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
             }
         })
         .build();
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let mut runtime = TestRuntime::new(&backend, transport)
         .plugins(Vec::new())
         .host(test_host_config(&backend))
@@ -485,6 +517,13 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("image-attachment-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     runtime
         .run_turn_assembled(
             TurnInput {
@@ -497,14 +536,11 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("image-attachment-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2);
@@ -525,7 +561,8 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
 /// Scenarios own the host-level active-input redrive/cancel/queue invariants.
 #[tokio::test]
 pub(super) async fn checkpoint_hook_can_inject_messages() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
@@ -580,6 +617,13 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
     ]);
     let mut runtime = runtime_with_plugins(&backend, vec![plugin], transport).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("plugin-action-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -592,14 +636,11 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("plugin-action-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(
         active_conversation_messages(&turn.state)
@@ -617,7 +658,8 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
 #[tokio::test]
 pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application_evidence()
  {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
@@ -651,7 +693,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
             ..LlmResponse::default()
         }),
     }]);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
@@ -671,21 +713,22 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
     .await;
     let turn_events = RecordingTurnEvents::default();
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("checkpoint-plugin-abort-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .stream_turn(
             TurnInput::text("hello"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("checkpoint-plugin-abort-turn"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("plugin-aborted turn assembles");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(
         matches!(turn.outcome, TurnOutcome::Stopped(_)),
@@ -745,7 +788,8 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
 #[tokio::test]
 pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence()
  {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     #[derive(Debug)]
     struct DenyHostCheckpointAttachments;
 
@@ -817,7 +861,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
             ..LlmResponse::default()
         }),
     }]);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
@@ -838,21 +882,22 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
     .await;
     let turn_events = RecordingTurnEvents::default();
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("checkpoint-attachment-failure-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .stream_turn(
             TurnInput::text("hello"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("checkpoint-attachment-failure-turn"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("attachment-failed turn assembles");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(
         matches!(turn.outcome, TurnOutcome::Stopped(_)),
@@ -911,7 +956,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
 
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -937,7 +982,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
         },
     ]);
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         &SessionId::from("root"),
@@ -947,6 +992,13 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
     )
     .await;
     let sink = RecordingSink::default();
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("injection-accepted-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .stream_turn(
             TurnInput {
@@ -958,18 +1010,11 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("injection-accepted-turn"),
-                ),
-            )
-            .with_events(&sink),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let mut saw_injected_accept = false;
     for event in sink.snapshot() {
@@ -1306,7 +1351,7 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1337,7 +1382,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
         })
         .build();
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     let entered = Arc::new(AtomicBool::new(false));
     let release = Arc::new(AtomicBool::new(false));
     runtime.set_turn_phase_probe(Arc::new(PauseAtPreparedTurn {
@@ -1345,20 +1390,24 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
         release: Arc::clone(&release),
     }));
 
-    let first_scope = backend_turn_scope(
-        &backend,
-        &SessionId::from("root"),
-        &TurnId::from("after-last-call-turn"),
-    );
+    let task_double = double.clone();
     let first_turn = lash_core::task::spawn(async move {
+        let handler = task_double
+            .open_handler(AdmittedScope::turn(
+                SessionId::from("root"),
+                TurnId::from("after-last-call-turn"),
+            ))
+            .await
+            .expect("open the turn's handler");
         runtime
             .run_turn_assembled(
                 TurnInput::text("first turn input"),
                 CancellationToken::new(),
-                first_scope,
+                handler.scoped(),
             )
             .await
             .expect("first turn");
+        handler.close().await.expect("close the turn's handler");
         runtime
     });
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -1395,19 +1444,20 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
         lash_core::TurnInputState::DeferredNextTurn
     );
 
-    runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("late-active-next-turn"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "late-active-next-turn",
         ))
+        .await
+        .expect("open the drain's handler");
+    runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("drain deferred input")
         .ran()
         .expect("deferred input starts a turn");
+    handler.close().await.expect("close the drain's handler");
 
     let requests = requests.lock_recover();
     assert_eq!(requests.len(), 2);
@@ -1422,24 +1472,26 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
 // command-only work returns `None` rather than fabricating a turn.
 #[tokio::test]
 pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, mock_provider(Vec::new())).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
+            .await;
     let command =
         enqueue_session_command(store.as_ref(), &SessionId::from("root"), "test refresh").await;
 
-    let drained = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("command-only-queue-drain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "command-only-queue-drain",
         ))
+        .await
+        .expect("open the drain's handler");
+    let drained = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("command-only drain succeeds")
         .ran();
+    handler.close().await.expect("close the drain's handler");
 
     assert!(drained.is_none());
     assert!(
@@ -1466,7 +1518,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
 // pending input.
 #[tokio::test]
 pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1497,7 +1549,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         })
         .build();
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     let queued_input = enqueue_idle_turn_input(
         store.as_ref(),
         &SessionId::from("root"),
@@ -1545,19 +1597,20 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
     )
     .await;
 
-    let drained = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("next-input-before-wake-drain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "next-input-before-wake-drain",
         ))
+        .await
+        .expect("open the drain's handler");
+    let drained = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("queued drain succeeds")
         .ran()
         .expect("pending turn input drains first");
+    handler.close().await.expect("close the drain's handler");
 
     assert_eq!(
         drained.assistant_output.safe_text,
@@ -1717,7 +1770,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
 
 #[tokio::test]
 pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
     // FIG-3157: a terminal finish ends the turn. A wake claimed at the
     // `BeforeCompletion` checkpoint never extends it — the committed answer
     // stays the turn's answer, and the claim is carried into a follow-on
@@ -1780,8 +1833,8 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
             }
         })
         .build();
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
-        &backend,
+    let (mut runtime, store) = standard_runtime_with_transport_and_double_queue_store_for_session(
+        &double,
         transport,
         &SessionId::from(SESSION_ID),
     )
@@ -1828,20 +1881,21 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(SESSION_ID),
+            TurnId::from("terminal-checkpoint-follow-on-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("hello"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from(SESSION_ID),
-                    &TurnId::from("terminal-checkpoint-follow-on-turn"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the terminal-checkpoint wake drives its own follow-on turn");
+    handler.close().await.expect("close the turn's handler");
 
     // One logical run, two physical turns, and the first one is a finish —
     // not a frame switch, and not a turn that was re-prompted into a second
@@ -1918,7 +1972,7 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
 
 #[tokio::test]
 pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
     // Keep this cancellation rendezvous out of the shared `root` lane so unrelated libtest
     // cases cannot make its final commit contend with their turn.
     const SESSION_ID: &str = "process-wake-cancelled";
@@ -1957,8 +2011,8 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
             }
         })
         .build();
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
-        &backend,
+    let (mut runtime, store) = standard_runtime_with_transport_and_double_queue_store_for_session(
+        &double,
         transport,
         &SessionId::from(SESSION_ID),
     )
@@ -2018,22 +2072,23 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         cancel_after_wake_started.cancel();
     });
 
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from(SESSION_ID),
+            "cancel-claimed-wake-drain",
+        ))
+        .await
+        .expect("open the drain's handler");
     let drained = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        runtime.stream_next_queued_work(TurnOptions::new(
-            cancel,
-            backend_queued_scope(
-                &backend,
-                &SessionId::from(SESSION_ID),
-                &TurnId::from("cancel-claimed-wake-drain"),
-            ),
-        )),
+        runtime.stream_next_queued_work(TurnOptions::new(cancel, handler.scoped())),
     )
     .await
     .expect("cancelled wake drain should finish")
     .expect("cancelled wake drain should not error")
     .ran()
     .expect("cancelled queued input turn should still assemble");
+    handler.close().await.expect("close the drain's handler");
     canceller.await.expect("canceller task");
 
     assert!(matches!(
@@ -2062,22 +2117,23 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         "claimed wake `{}` should be completed by the cancelled turn",
         wake.wake_id
     );
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from(SESSION_ID),
+            "after-cancel-claimed-wake-drain",
+        ))
+        .await
+        .expect("open the drain's handler");
     assert!(
         runtime
-            .stream_next_queued_work(TurnOptions::new(
-                CancellationToken::new(),
-                backend_queued_scope(
-                    &backend,
-                    &SessionId::from(SESSION_ID),
-                    &TurnId::from("after-cancel-claimed-wake-drain")
-                ),
-            ))
+            .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped(),))
             .await
             .expect("post-cancel drain should succeed")
             .ran()
             .is_none(),
         "neither the cancelled input nor the claimed wake should replay"
     );
+    handler.close().await.expect("close the drain's handler");
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2);
     assert!(request_contains_text(

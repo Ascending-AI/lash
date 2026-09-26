@@ -501,12 +501,14 @@ pub(super) async fn prepared_checkpoint_continues_after_advisory_lease_expiry() 
     assert_eq!(assembled.assistant_output.safe_text, "provider reached");
 }
 
+const SEED: u64 = 0x5_f440;
+
 // Boundary: this durable process-wake case stays in `turns.rs` because it
 // asserts committed conversation history, streamed turn events, and process
 // origin metadata across the full runtime, not only persistence ownership.
 #[tokio::test]
 pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -532,7 +534,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
         },
     ]);
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     let registry = runtime
         .host
         .process_registry()
@@ -586,22 +588,23 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
 
     let sink = RecordingSink::default();
     let turn_events = RecordingTurnEvents::default();
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("process-wake-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     runtime
         .stream_turn(
             TurnInput::text("hello"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("process-wake-turn"),
-                ),
-            )
-            .with_events(&sink)
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_events(&sink)
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let turn_event_snapshot = turn_events.snapshot();
     let queued_started = turn_event_snapshot
@@ -1090,7 +1093,8 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
 
 #[tokio::test]
 pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(RuntimeTestPluginFactory {
             build: Arc::new(|_| {
@@ -1125,7 +1129,7 @@ pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() 
                 }))
             }),
         });
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let store_trait = store.clone() as Arc<dyn lash_core::RuntimePersistence>;
     let mut first = runtime_with_plugins_and_tools_and_host_and_store(
         vec![Arc::clone(&plugin)],
@@ -1167,7 +1171,8 @@ pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() 
 
 #[tokio::test]
 pub(super) async fn session_manager_can_run_child_session_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -1219,6 +1224,13 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
         .expect("child session");
     let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
     let turn_id = "child-lifecycle-turn";
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            handle.session_id.clone(),
+            TurnId::from(turn_id),
+        ))
+        .await
+        .expect("open the child turn's handler");
     let assembled = child
         .run_turn_assembled(
             TurnInput {
@@ -1231,10 +1243,14 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(&backend, &handle.session_id, &TurnId::from(turn_id)),
+            handler.scoped(),
         )
         .await
         .expect("child turn");
+    handler
+        .close()
+        .await
+        .expect("close the child turn's handler");
     assert_eq!(handle.session_id, "child");
     assert_eq!(handle.policy.model.id, "mock-model");
     assert_eq!(assembled.state.session_id, "child");
@@ -1242,7 +1258,8 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
 
 #[tokio::test]
 pub(super) async fn session_manager_preserves_runtime_error_from_child_session_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|_| Arc::new(factory.clone()))
@@ -1294,14 +1311,25 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
     let turn_id = "busy-child-turn";
     let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            handle.session_id.clone(),
+            TurnId::from(turn_id),
+        ))
+        .await
+        .expect("open the child turn's handler");
     let error = child
         .run_turn_assembled(
             TurnInput::text("preserve the runtime error"),
             CancellationToken::new(),
-            backend_turn_scope(&backend, &handle.session_id, &TurnId::from(turn_id)),
+            handler.scoped(),
         )
         .await
         .expect_err("the held child session lane must refuse the turn");
+    handler
+        .close()
+        .await
+        .expect("close the child turn's handler");
 
     assert!(
         error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy,
@@ -1317,7 +1345,8 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
 
 #[tokio::test]
 pub(super) async fn session_manager_persists_child_sessions_in_separate_store() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|_| Arc::new(factory.clone()))
@@ -1404,7 +1433,8 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
 
 #[tokio::test]
 pub(super) async fn child_relation_does_not_replace_active_session() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -1430,6 +1460,13 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
         .expect("child session");
 
     assert_eq!(runtime.session_id(), "root");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("ordinary-child-parent-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1442,14 +1479,11 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("ordinary-child-parent-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("parent turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(assembled.state.session_id, "root");
     assert_eq!(assembled.state.turn_index, 1);
@@ -1457,7 +1491,8 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
 
 #[tokio::test]
 pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -1525,7 +1560,8 @@ pub(super) fn queued_work_payload_cannot_encode_persisted_turn_input() {
 
 #[tokio::test]
 pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     use std::sync::{Arc, Mutex};
 
     let captured: Arc<Mutex<Option<lash_core::ReasoningSelection>>> = Arc::new(Mutex::new(None));
@@ -1585,6 +1621,13 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
         .await
         .expect("update session config");
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("alias-normalize-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1597,14 +1640,11 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("alias-normalize-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(turn.assistant_output.safe_text, "ok");
     let seen = captured
@@ -1620,7 +1660,8 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
 
 #[tokio::test]
 pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -1673,6 +1714,13 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         .await
         .expect("update session config");
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("unsupported-effort-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1685,14 +1733,11 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("unsupported-effort-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(
         !called.load(Ordering::SeqCst),
@@ -1712,7 +1757,8 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
 
 #[tokio::test]
 pub(super) async fn session_generation_options_reach_every_provider_request() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
 
@@ -1754,6 +1800,13 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
         .expect("update session config");
 
     let run_turn = async |runtime: &mut LashRuntime, turn_id: &TurnId| {
+        let handler = double
+            .open_handler(AdmittedScope::turn(
+                SessionId::from("root"),
+                turn_id.clone(),
+            ))
+            .await
+            .expect("open the turn's handler");
         runtime
             .run_turn_assembled(
                 TurnInput {
@@ -1766,10 +1819,11 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
                     turn_context: lash_core::TurnContext::default(),
                 },
                 CancellationToken::new(),
-                backend_turn_scope(&backend, &SessionId::from("root"), turn_id),
+                handler.scoped(),
             )
             .await
             .expect("turn");
+        handler.close().await.expect("close the turn's handler");
     };
 
     run_turn(&mut runtime, &TurnId::from("generation-default-turn")).await;
@@ -1812,7 +1866,8 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
 
 #[tokio::test]
 pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     use std::num::NonZeroUsize;
 
     // The adapter's silent omission (a model that pins sampling, a wire with
@@ -1862,6 +1917,13 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
         .await
         .expect("update session config");
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("generation-disposition-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1874,14 +1936,11 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("generation-disposition-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let attempt = turn
         .llm_calls
@@ -1902,7 +1961,8 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
 
 #[tokio::test]
 pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
 
@@ -1967,6 +2027,13 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .await
         .expect("update session config");
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("clamped-cap-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1979,14 +2046,11 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("clamped-cap-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("a cap above the model's capacity must not fail the turn");
+    handler.close().await.expect("close the turn's handler");
 
     let seen = captured.lock_recover().clone();
     assert_eq!(
@@ -2025,7 +2089,8 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
 
 #[tokio::test]
 pub(super) async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     use std::num::NonZeroUsize;
 
     // Both surfaces that set generation options speak one vocabulary. A patch
@@ -2096,19 +2161,21 @@ pub(super) async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does
 /// abandon work that was never queued.
 #[tokio::test]
 pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let mut runtime = standard_runtime_with_transport(&backend, mock_provider(Vec::new())).await;
-    let drain = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("storeless-drain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "storeless-drain",
         ))
         .await
+        .expect("open the drain's handler");
+    let drain = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .await
         .expect("a storeless drain still answers");
+    handler.close().await.expect("close the drain's handler");
     assert!(
         matches!(
             drain,
@@ -2122,9 +2189,10 @@ pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
 
 #[tokio::test]
 pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_state() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, mock_provider(Vec::new())).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
+            .await;
     let full_loads_before = store.load_session_count();
     let head_reads_before = store.load_session_head_meta_count();
 

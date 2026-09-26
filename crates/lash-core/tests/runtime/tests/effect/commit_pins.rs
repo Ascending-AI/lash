@@ -13,6 +13,8 @@
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
 
+const SEED: u64 = 0x5_f460;
+
 async fn run_pinned_controller_turn(
     recorder: RecordingEffectController,
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
@@ -20,9 +22,16 @@ async fn run_pinned_controller_turn(
     prompt: &str,
     turn_id: &str,
 ) -> (Vec<lash_core::RuntimeCommit>, AssembledTurn) {
-    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(1_000));
-    let backend = memory_backend_with_clock(Arc::clone(&clock)).await;
-    let store = unbound_recording_store_with_clock(&backend, clock).await;
+    let double = kernel_double(
+        SEED,
+        lash_restate_test::ServerConfig {
+            start_time_ms: 1_000,
+            ..lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual)
+        },
+    )
+    .await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let session_id = format!("pin:{turn_id}");
     let mut runtime = crate::runtime_support::commit_pins::pinned_runtime(
         &session_id,
@@ -35,22 +44,30 @@ async fn run_pinned_controller_turn(
     .await;
     let sessions = RecordingSink::default();
     let activities = RecordingTurnEvents::default();
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            session_id.as_str(),
+            TurnId::from(turn_id),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .stream_turn(
             TurnInput::text(prompt),
             TurnOptions::new(
                 CancellationToken::new(),
-                layered_scope(
-                    &backend,
+                lash_core::testing::LayeredEffectHost::layer_scoped(
+                    handler.scoped(),
                     Arc::new(recorder.clone()),
-                    AdmittedScope::turn(session_id.as_str(), TurnId::from(turn_id)),
-                ),
+                )
+                .expect("layer the turn's scoped controller"),
             )
             .with_events(&sessions)
             .with_turn_events(&activities),
         )
         .await
         .expect("the turn assembles");
+    handler.close().await.expect("close the turn's handler");
     (store.runtime_commits(), turn)
 }
 
