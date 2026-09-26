@@ -722,7 +722,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             lash_restate::RestateQueuedWork::Disabled,
         ),
     ));
-    let durable_host: Arc<dyn lash::durability::EffectHost> = restate.effect_host();
+    let durable_host: Arc<dyn lash::durability::EffectHost> = restate.restate_effect_host();
     let scope = lash::runtime::AdmittedScope::turn("routing-session", "routing-turn");
     let durable_scoped = durable_host.scoped(scope).expect("durable scope");
     let binding = durable_host

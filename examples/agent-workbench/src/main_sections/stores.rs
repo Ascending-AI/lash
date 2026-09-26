@@ -7,7 +7,7 @@ pub(crate) type WorkbenchRestateBackend = lash_restate::RestateEngine;
 /// The SQL store set the workbench runs its Restate backend over: SQLite
 /// under the data directory, or PostgreSQL when a database URL is configured.
 pub(crate) struct WorkbenchStores {
-    pub(crate) stores: Arc<dyn lash::durability::StoreSet>,
+    pub(crate) stores: Arc<dyn lash::StoreSet>,
     pub(crate) backend: &'static str,
 }
 

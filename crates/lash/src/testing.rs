@@ -15,6 +15,9 @@ pub use lash_core::testing::run_tool;
 /// Runs one granted tool call with mock contexts, so a provider's granted
 /// branch is exercisable outside a live turn.
 pub use lash_core::testing::run_tool_granted;
+/// One backend with some of its ports decorated by a test that observes or
+/// faults them: the decorated backend is still one substrate (ADR 0104, B2).
+pub use lash_core::testing::runtime_helpers::LayeredBackend;
 /// A standalone [`ToolRegistry`](crate::tools::ToolRegistry) plus the
 /// [`ToolSourceHandle`](crate::tools::ToolSourceHandle) `provider` registered
 /// under — the same live-source route `session.admin().tools().add_provider`

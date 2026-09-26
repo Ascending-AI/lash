@@ -179,7 +179,10 @@ impl RestateEngine {
     }
 
     /// The Restate effect host every runtime of this engine runs on.
-    pub fn effect_host(&self) -> Arc<RestateEffectHost> {
+    ///
+    /// Named for the concrete host it returns; the `EffectEngine` trait's
+    /// `effect_host` is the same host as `dyn`.
+    pub fn restate_effect_host(&self) -> Arc<RestateEffectHost> {
         Arc::clone(&self.effect_host)
     }
 
@@ -190,7 +193,10 @@ impl RestateEngine {
     }
 
     /// The store set this engine journals its effects beside.
-    pub fn stores(&self) -> &Arc<dyn StoreSet> {
+    ///
+    /// Named `store_set` so a method call cannot be misread as the
+    /// `EffectEngine` trait's `stores`, which returns the same set by value.
+    pub fn store_set(&self) -> &Arc<dyn StoreSet> {
         &self.stores
     }
 
@@ -222,7 +228,7 @@ impl lash_core::EffectEngine for RestateEngine {
     }
 
     fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        self.effect_host()
+        self.restate_effect_host()
     }
 
     fn build_generation(&self) -> &BuildGeneration {

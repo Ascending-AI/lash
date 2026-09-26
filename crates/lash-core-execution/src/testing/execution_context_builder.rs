@@ -75,18 +75,6 @@ impl From<&crate::Backend> for TestExecutionPorts {
     }
 }
 
-impl<E: crate::EffectEngine> From<&E> for TestExecutionPorts {
-    fn from(engine: &E) -> Self {
-        let stores = engine.stores();
-        Self {
-            effect_host: engine.effect_host(),
-            process_env_store: stores.process_env_store(),
-            attachment_store: stores.attachment_store(),
-            clock: stores.clock(),
-        }
-    }
-}
-
 pub struct TestExecutionContextBuilder<'run> {
     session_id: SessionId,
     provider: Arc<dyn crate::ToolProvider>,

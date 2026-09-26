@@ -196,7 +196,7 @@ impl Session {
     fn cell_context(&self) -> lash_core::RuntimeExecutionContext<'static> {
         let cell = self.history.len();
         lash_core::testing::code_execution_context_with_invocation(
-            &self.backend,
+            &lash_core::Backend::from(self.backend.clone()),
             lash_core::testing::exec_code_invocation(
                 "cell-conformance-session",
                 "cell-conformance-turn",
@@ -329,7 +329,7 @@ impl Session {
                 .expect("open a memory backend");
             Box::pin(execute_parked_cell_for_tests(
                 &mut state,
-                crate::executor::parked_cell_context_for_tests(&backend),
+                crate::executor::parked_cell_context_for_tests(&lash_core::Backend::from(backend)),
                 LANGUAGE_ID,
                 code,
                 false,
@@ -355,7 +355,7 @@ impl Session {
                 .expect("open a memory backend");
             Box::pin(execute_parked_cell_for_tests(
                 &mut state,
-                crate::executor::parked_cell_context_for_tests(&backend),
+                crate::executor::parked_cell_context_for_tests(&lash_core::Backend::from(backend)),
                 LANGUAGE_ID,
                 code,
                 true,
