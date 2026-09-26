@@ -9,7 +9,7 @@ use std::time::Duration;
 use lash_core::drive::{physical_turn_of, root_of_physical_turn};
 use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
-use lash_core::{InputId, SessionId, TurnId};
+use lash_core::{InputId, TurnId};
 
 use super::{ParkedTurn, SendParts};
 use crate::error::Result;
@@ -34,66 +34,38 @@ fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
     crate::EmbedError::Store(error)
 }
 
-/// The root an input starts when no turn applied it yet: the host's id, or
-/// the input's own id (the admission rule).
-pub(super) fn input_root(receipt: &TurnInputAcceptanceReceipt) -> TurnId {
-    TurnId::from(
-        receipt
-            .source_key
-            .clone()
-            .unwrap_or_else(|| receipt.input_id.to_string()),
-    )
-}
-
-/// The session's input applications in commit order, or `None` when the
-/// store keeps no application records (it cannot say which turn applied an
-/// input, so an input's own root is the only one a handle can name).
+/// Committed input applications, in commit order.
+///
+/// Only an input no claim bound needs them: a checkpoint delivery acquires
+/// application evidence at its turn's commit. A store that keeps no
+/// application records (a test double) has none to show; every durable
+/// backend keeps them.
 pub(super) async fn applications(
     parts: &SendParts,
-) -> Result<Option<Vec<lash_core::TurnInputApplication>>> {
+) -> Result<Vec<lash_core::TurnInputApplication>> {
     match parts
         .store
         .list_turn_input_applications(&parts.session_id)
         .await
     {
-        Ok(applications) => Ok(Some(applications)),
-        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => Ok(None),
+        Ok(applications) => Ok(applications),
+        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => Ok(Vec::new()),
         Err(error) => Err(store_error(error)),
     }
 }
 
-/// The physical turn that applied `input`, when one committed.
-fn applying_turn(
-    applications: &[lash_core::TurnInputApplication],
-    input: &InputId,
-) -> Option<TurnId> {
-    applications
-        .iter()
-        .find(|application| application.input_id == *input)
-        .map(|application| application.turn_id.clone())
-}
-
-/// Resolve an accepted input.
+/// Resolve an accepted input through the durable binding made by its claim.
 pub(super) async fn resolve_input(
     parts: &SendParts,
     receipt: &TurnInputAcceptanceReceipt,
 ) -> Result<Resolution> {
-    let recorded = applications(parts).await?;
-    if let Some(turn) = recorded
-        .as_deref()
-        .and_then(|applications| applying_turn(applications, &receipt.input_id))
+    if let Some(root) = parts
+        .store
+        .root_of_input(&parts.session_id, &receipt.input_id)
+        .await
+        .map_err(store_error)?
     {
-        return resolve_from_turn(parts, &turn).await;
-    }
-    let own_root = input_root(receipt);
-    if recorded.is_none() {
-        let own = resolve_from_turn(parts, &own_root).await?;
-        if !matches!(own, Resolution::Undecided { .. }) {
-            return Ok(own);
-        }
-    }
-    if let Some(parked) = park_of(parts, &own_root).await? {
-        return Ok(Resolution::Parked(parked));
+        return resolve_root(parts, &root).await;
     }
     let open = parts
         .store
@@ -102,43 +74,30 @@ pub(super) async fn resolve_input(
         .map_err(store_error)?
         .iter()
         .any(|read| read.input.input_id == receipt.input_id);
-    if open {
-        return Ok(Resolution::Undecided { root: None });
+    // Claim and settlement can race the pending read. Re-read the binding
+    // before interpreting a missing row as a withdrawal.
+    if let Some(root) = parts
+        .store
+        .root_of_input(&parts.session_id, &receipt.input_id)
+        .await
+        .map_err(store_error)?
+    {
+        return resolve_root(parts, &root).await;
     }
-    // Gone from the queue: either a commit that applied it raced the first
-    // read (the commit writes the application and settles the row in one
-    // transaction), or it was withdrawn.
-    match applications(parts).await? {
-        Some(applications) => match applying_turn(&applications, &receipt.input_id) {
-            Some(turn) => resolve_from_turn(parts, &turn).await,
-            None => Ok(Resolution::Withdrawn),
-        },
-        // Without application records, an input that left the queue was
-        // applied by its own root once that root committed a turn; a store
-        // that cannot say whether it did leaves the input undecided.
-        None => {
-            let own = resolve_from_turn(parts, &own_root).await?;
-            if !matches!(own, Resolution::Undecided { .. }) {
-                return Ok(own);
-            }
-            match parts
-                .store
-                .turn_is_committed(&TurnAddress::new(
-                    parts.session_id.clone(),
-                    own_root.clone(),
-                ))
-                .await
-            {
-                Ok(false) => Ok(Resolution::Withdrawn),
-                Ok(true) | Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => {
-                    Ok(Resolution::Undecided {
-                        root: Some(own_root),
-                    })
-                }
-                Err(error) => Err(store_error(error)),
-            }
-        }
+    // Checkpoint inputs in the interim ingress acquire application evidence
+    // at commit. Never infer their root from their host id.
+    if let Some(application) = applications(parts)
+        .await?
+        .into_iter()
+        .find(|application| application.input_id == receipt.input_id)
+    {
+        return resolve_from_turn(parts, &application.turn_id).await;
     }
+    Ok(if open {
+        Resolution::Undecided { root: None }
+    } else {
+        Resolution::Withdrawn
+    })
 }
 
 /// Resolve a logical root.
@@ -228,37 +187,8 @@ async fn park_of(parts: &SendParts, root: &TurnId) -> Result<Option<ParkedTurn>>
 pub(super) async fn inputs_of_root(parts: &SendParts, root: &TurnId) -> Result<Vec<InputId>> {
     Ok(applications(parts)
         .await?
-        .unwrap_or_default()
         .into_iter()
         .filter(|application| root_of_physical_turn(&application.turn_id).0 == *root)
         .map(|application| application.input_id)
         .collect())
-}
-
-/// D2 Q6: the settled input whose host id is `id`, when root `id` already
-/// has terminal evidence. A send under that id then commits nothing.
-pub(super) async fn settled_by_id(
-    parts: &SendParts,
-    id: &TurnId,
-) -> Result<Option<(TurnInputAcceptanceReceipt, TurnOutcome)>> {
-    let Some(application) = applications(parts)
-        .await?
-        .unwrap_or_default()
-        .into_iter()
-        .find(|application| application.source_key.as_deref() == Some(id.as_str()))
-    else {
-        return Ok(None);
-    };
-    match resolve_from_turn(parts, id).await? {
-        Resolution::Settled { outcome, .. } => Ok(Some((
-            TurnInputAcceptanceReceipt {
-                input_id: application.input_id,
-                session_id: SessionId::from(parts.session_id.to_string()),
-                source_key: application.source_key,
-                ingress: lash_core::runtime::TurnInputIngress::NextTurn,
-            },
-            outcome,
-        ))),
-        _ => Ok(None),
-    }
 }

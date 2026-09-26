@@ -1,0 +1,35 @@
+error[E0277]: the trait bound `ObjectContext<'_>: RestateWaitContext<'_>` is not satisfied
+  --> tests/ui/restate_exclusive_handler_cannot_wait_for_a_root.rs:10:36
+   |
+10 |     let _ = handle.outcome_restate(&ctx, RestateWait::new()).await;
+   |                    --------------- ^^^^ the trait `RestateWaitContext<'_>` is not implemented for `ObjectContext<'_>`
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the following other types implement trait `RestateWaitContext<'ctx>`
+  --> src/send/restate.rs
+   |
+   |           impl<'ctx> RestateWaitContext<'ctx> for $context<'ctx> {}
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |           |
+   |           `SharedObjectContext<'ctx>`
+   |           `SharedWorkflowContext<'ctx>`
+   |           `WorkflowContext<'ctx>`
+   |           `lash_restate::restate_sdk::context::Context<'ctx>`
+...
+   | / wait_context!(
+   | |     Context,
+   | |     SharedObjectContext,
+   | |     WorkflowContext,
+   | |     SharedWorkflowContext
+   | | );
+   | |_- in this macro invocation
+note: required by a bound in `lash::send::restate::<impl lash::SendHandle>::outcome_restate`
+  --> src/send/restate.rs
+   |
+   |     pub fn outcome_restate<'ctx: 'a, 'a, C>(
+   |            --------------- required by a bound in this associated function
+...
+   |         C: RestateWaitContext<'ctx>,
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `lash::send::restate::<impl SendHandle>::outcome_restate`
+   = note: this error originates in the macro `wait_context` (in Nightly builds, run with -Z macro-backtrace for more info)

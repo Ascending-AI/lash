@@ -368,20 +368,23 @@ async fn follow_once(
     from: FollowFrom,
 ) -> Result<(), AppError> {
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-    let output = match from {
+    let outcome = match from {
         FollowFrom::Send(handle) => {
             let ui_events = ChannelTurnEvents {
                 turn_state: Arc::clone(&turn_state),
             };
-            (*handle).output_into(&ui_events).await
+            (*handle).outcome_into(&ui_events).await
         }
-        FollowFrom::Root => session
-            .root(turn_id.clone())
-            .output()
-            .await
-            .map(|output| output.result),
+        FollowFrom::Root => session.root(turn_id.clone()).outcome().await,
     }
     .map_err(AppError::runtime)?;
+    // Answered, Failed and Cancelled roots ran and settled: each has a report
+    // the page shows. A parked root, or an input withdrawn before it ran, has
+    // none.
+    let output = match outcome.output {
+        Some(output) if !matches!(outcome.status, lash::TurnStatus::Parked(_)) => output.result,
+        _ => return Err(unsettled_turn(&outcome.status)),
+    };
     let selected_model;
     let model = match model {
         Some(model) => Some(model),
@@ -538,5 +541,25 @@ fn root_of_physical_turn(turn_id: &TurnId) -> TurnId {
             TurnId::from(root)
         }
         _ => turn_id.clone(),
+    }
+}
+
+/// A followed root that did not settle: it parked, holding its work until an
+/// operator resolves the park, or its input was withdrawn before any turn ran
+/// it.
+fn unsettled_turn(status: &lash::TurnStatus) -> AppError {
+    match status {
+        lash::TurnStatus::Parked(_) => AppError {
+            status: axum::http::StatusCode::CONFLICT,
+            message: format!("turn_parked: {}", crate::PARKED_TURN_MESSAGE),
+            verdict: AppErrorVerdict::Parked,
+            retirement: None,
+        },
+        status => AppError {
+            status: axum::http::StatusCode::CONFLICT,
+            message: format!("the turn ended {status:?} before any turn ran its input"),
+            verdict: AppErrorVerdict::Terminal,
+            retirement: None,
+        },
     }
 }

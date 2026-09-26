@@ -291,9 +291,20 @@ crate::statements! {
                AND claim_id IS NULL
                AND {{nonterminal_turn_input_state(state)}}";
 
-        /// Reclaim session `?1`'s terminal input rows. Retention only.
-        delete_terminal = "DELETE FROM pending_turn_inputs
-             WHERE session_id = ?1 AND {{terminal_turn_input_state(state)}}
+        /// Reclaim session `?1`'s withdrawn inputs: cancelled before any
+        /// root took them. Every other settled input keeps its submission
+        /// digest and receipt until session deletion, alongside the terminal
+        /// evidence of the root that took it, so a retry under its id is
+        /// validated against its digest and answered from that root for the
+        /// root's whole retained life (FIG-3837). An applied input stays even
+        /// when no claim bound it (a checkpoint delivery).
+        delete_withdrawn = "DELETE FROM pending_turn_inputs
+             WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
+               AND NOT EXISTS (
+                 SELECT 1 FROM session_root_inputs binding
+                 WHERE binding.session_id = pending_turn_inputs.session_id
+                   AND binding.input_id = pending_turn_inputs.input_id
+               )
                AND NOT EXISTS (
                  SELECT 1 FROM queued_run_members m
                  JOIN queued_runs r ON r.session_id = m.session_id AND r.scope_id = m.scope_id

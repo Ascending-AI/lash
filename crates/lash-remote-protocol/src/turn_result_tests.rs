@@ -300,3 +300,100 @@ fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
         serde_json::json!("a_kind_from_a_newer_peer")
     );
 }
+
+fn answered_report() -> RemoteTurnReport {
+    RemoteTurnReport {
+        session_id: SessionId::from("session"),
+        turn_id: TurnId::from("root"),
+        outcome: RemoteTurnOutcome::Finished {
+            finish: RemoteTurnFinish::AssistantMessage {
+                text: "done".to_string(),
+            },
+        },
+        assistant_output: RemoteAssistantOutput::default(),
+        usage: RemoteTurnUsageReport::default(),
+        execution: RemoteTurnExecutionMetrics::default(),
+        tool_calls: Vec::new(),
+        llm_calls: Vec::new(),
+        issues: Vec::new(),
+        activities: Vec::new(),
+        metadata: HashMap::new(),
+    }
+}
+
+fn parked_status() -> RemoteTurnStatus {
+    RemoteTurnStatus::Parked {
+        root: TurnId::from("root"),
+        park_id: 7,
+        reason: RemoteTurnParkReason {
+            code: "binding_drift".to_string(),
+            message: "tool `search` changed".to_string(),
+        },
+        since_ms: 1_000,
+        attempts: 2,
+    }
+}
+
+fn send_outcome(
+    status: RemoteTurnStatus,
+    root_id: Option<&str>,
+    report: Option<RemoteTurnReport>,
+) -> RemoteSendOutcome {
+    RemoteSendOutcome {
+        session_id: SessionId::from("session"),
+        input_id: "ti:input".to_string(),
+        root_id: root_id.map(TurnId::from),
+        status,
+        report,
+        gaps: Vec::new(),
+    }
+}
+
+/// FIG-3837: the remote send outcome carries all four answers, and its
+/// status, root and report must agree: a transport never fabricates a failed
+/// turn for a parked root, nor a report for one.
+#[test]
+fn a_remote_send_outcome_carries_four_statuses_and_refuses_inconsistent_ones() {
+    let consistent = [
+        send_outcome(
+            RemoteTurnStatus::Answered,
+            Some("root"),
+            Some(answered_report()),
+        ),
+        send_outcome(parked_status(), Some("root"), None),
+        // An input withdrawn before any root took it.
+        send_outcome(RemoteTurnStatus::Cancelled, None, None),
+    ];
+    for outcome in consistent {
+        outcome.validate().expect("a consistent outcome");
+        let wire = outcome.encode_json().expect("encode");
+        assert_eq!(
+            RemoteSendOutcome::decode_json(&wire).expect("decode"),
+            outcome
+        );
+    }
+
+    let inconsistent = [
+        // An answered root without its report.
+        send_outcome(RemoteTurnStatus::Answered, Some("root"), None),
+        // A failed status over an answered report.
+        send_outcome(
+            RemoteTurnStatus::Failed,
+            Some("root"),
+            Some(answered_report()),
+        ),
+        // A parked root with a report.
+        send_outcome(parked_status(), Some("root"), Some(answered_report())),
+        // A parked root that names another root.
+        send_outcome(parked_status(), Some("other"), None),
+        // A settled report with no root.
+        send_outcome(RemoteTurnStatus::Answered, None, Some(answered_report())),
+    ];
+    for outcome in inconsistent {
+        outcome
+            .validate()
+            .expect_err("an inconsistent outcome is refused");
+        let wire = outcome.encode_json().expect("encode");
+        RemoteSendOutcome::decode_json(&wire).expect_err("decode refuses it too");
+    }
+}

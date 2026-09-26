@@ -396,11 +396,9 @@ pub(crate) fn drive_abort(root: Option<&TurnId>, error: RuntimeError) -> DriveAb
 
 /// A controller for one step of a drive under `admitted`: the drive's own
 /// controller when it already serves that scope, a rescope of it when it can
-/// build itself for another scope, its engine's own binding of it when it is
-/// the handler controller a host lent the drive, and otherwise one the
-/// runtime's effect host lends for the scope. A lent handler controller is
-/// never passed over for the host: an engine's host serves no effect outside
-/// a handler, and the step belongs on the handler's journal.
+/// build itself for another scope, and otherwise one the runtime's effect
+/// host lends for the scope. A host never lends a drive its handler's
+/// controller: the engine's session drive is the only executor (D5).
 fn step_controller<'a>(
     controller: &ScopedEffectController<'a>,
     host: &'a dyn crate::EffectHost,
@@ -411,9 +409,6 @@ fn step_controller<'a>(
     }
     if controller.is_scope_bound() {
         return controller.rescope(admitted);
-    }
-    if let Some(bound) = controller.engine_scoped(admitted.clone()) {
-        return bound;
     }
     host.scoped(admitted)
 }

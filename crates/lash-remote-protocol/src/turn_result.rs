@@ -242,6 +242,98 @@ pub enum RemoteTurnStatus {
     },
 }
 
+/// What a sent input's root answered, for a transport: the four-way status,
+/// the settled report when the root ran, and the ids a peer re-attaches by.
+///
+/// A settled turn is only one of the four answers: a parked root holds its
+/// work and has no report yet, and an input withdrawn before any root took it
+/// has neither report nor root. A peer resumes a parked or unfinished send by
+/// `input_id`, never by fabricating a failed turn.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteSendOutcome {
+    pub session_id: SessionId,
+    /// The accepted input's id.
+    pub input_id: String,
+    /// The root that took the input; `None` only for an input withdrawn
+    /// before any root took it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<TurnId>,
+    pub status: RemoteTurnStatus,
+    /// The settled turn: present for Answered and Failed, for a Cancelled
+    /// root that ran, and never for Parked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<RemoteTurnReport>,
+    /// Where the report's activity list is incomplete: the follower lost
+    /// replay events, or the root ran where it could not be observed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+}
+
+impl RemoteSendOutcome {
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
+    /// Decodes one JSON outcome after refusing a mismatched protocol
+    /// version, then refuses an inconsistent one.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        let outcome = crate::Envelope::<Self>::decode_json_expecting_protocol_version(
+            bytes,
+            crate::REMOTE_PROTOCOL_VERSION,
+        )?
+        .into_body();
+        outcome.validate()?;
+        Ok(outcome)
+    }
+
+    /// The status, root and report agree: a report's own status is the
+    /// outcome's; Answered and Failed carry one; Parked carries none and names
+    /// its root; only an input no root took lacks a root.
+    pub fn validate(&self) -> Result<(), RemoteProtocolError> {
+        const TYPE: &str = "RemoteSendOutcome";
+        require_non_empty(TYPE, "session_id", &self.session_id)?;
+        require_non_empty(TYPE, "input_id", &self.input_id)?;
+        let invalid = |message: &str| RemoteProtocolError::InvalidEnvelope {
+            type_name: TYPE,
+            message: message.to_string(),
+        };
+        if let Some(root) = &self.root_id {
+            require_non_empty(TYPE, "root_id", root)?;
+        }
+        if let Some(report) = &self.report {
+            report.validate()?;
+            if report.status() != self.status {
+                return Err(invalid("the report's status is not the outcome's"));
+            }
+            if report.session_id != self.session_id {
+                return Err(invalid("the report belongs to another session"));
+            }
+            if self.root_id.is_none() {
+                return Err(invalid("a settled report names the root that ran it"));
+            }
+        }
+        for gap in &self.gaps {
+            gap.validate()?;
+        }
+        match &self.status {
+            RemoteTurnStatus::Answered | RemoteTurnStatus::Failed if self.report.is_none() => {
+                Err(invalid("an Answered or Failed outcome carries its report"))
+            }
+            RemoteTurnStatus::Parked { root, .. } => {
+                if self.report.is_some() {
+                    return Err(invalid("a parked root has no settled report"));
+                }
+                require_non_empty(TYPE, "status.root", root)?;
+                if self.root_id.as_ref() != Some(root) {
+                    return Err(invalid("a parked outcome's root is its park's root"));
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 /// Why a root parked.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnParkReason {

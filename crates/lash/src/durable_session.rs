@@ -255,6 +255,28 @@ impl DurableSession {
         crate::SendBuilder::new(crate::send::SendTarget::Durable(self.clone()), input)
     }
 
+    /// Re-attach to an input accepted earlier, by its input id.
+    pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {
+        crate::send::attach(crate::send::SendTarget::Durable(self.clone()), input_id)
+    }
+
+    /// Re-attach to the input a send accepted under host id `id`, with
+    /// nothing but the id: see [`LashSession::attach_id`](crate::LashSession::attach_id).
+    pub fn attach_id(&self, id: impl Into<lash_core::TurnId>) -> crate::SendHandle {
+        crate::send::attach_id(crate::send::SendTarget::Durable(self.clone()), id.into())
+    }
+
+    /// Re-await a logical root by id.
+    pub fn root(&self, root: impl Into<lash_core::TurnId>) -> crate::RootHandle {
+        crate::send::root(crate::send::SendTarget::Durable(self.clone()), root.into())
+    }
+
+    /// Withdraw a queued input, or cooperatively cancel a running root
+    /// (ADR 0039).
+    pub fn cancel(&self, target: crate::CancelTarget) -> crate::CancelBuilder {
+        crate::CancelBuilder::new(crate::send::SendTarget::Durable(self.clone()), target)
+    }
+
     /// A held input remains present with the exact expiry of the matching live
     /// session-execution lease. That status does not prove the holder is alive;
     /// resubmitting while it is held creates another admission unless the host

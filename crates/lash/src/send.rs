@@ -17,6 +17,8 @@ mod cancel;
 mod follow;
 mod mailbox;
 mod resolve;
+#[cfg(feature = "restate")]
+pub(crate) mod restate;
 
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -205,8 +207,9 @@ impl SendBuilder {
     /// root the input starts: it is stored verbatim as the row's source key,
     /// so the input's root is `TurnId(id)`.
     ///
-    /// A send whose root already has terminal evidence commits nothing and
-    /// answers from that evidence.
+    /// A retry validates the original submission digest, including after
+    /// settlement. Identical content returns the original acceptance; changed
+    /// content is refused.
     pub fn id(mut self, id: impl Into<TurnId>) -> Self {
         self.id = Some(id.into());
         self
@@ -229,8 +232,14 @@ impl SendBuilder {
         self.await?.output().await
     }
 
-    /// Accept, forward the turn's live activity to `sink`, then return the
-    /// settled report.
+    /// Accept, forward the root's live activity to `sink`, and answer its
+    /// [`SendHandle::outcome_into`].
+    pub async fn outcome_into(self, sink: &dyn TurnActivitySink) -> Result<SendOutcome> {
+        self.await?.outcome_into(sink).await
+    }
+
+    /// Accept, forward the root's live activity to `sink`, then return the
+    /// settled report ([`SendHandle::output_into`]).
     pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnReport> {
         self.await?.output_into(sink).await
     }
@@ -257,28 +266,6 @@ impl SendBuilder {
         // like any other.
         let host_id = id.or_else(|| input.trace_turn_id.take());
         input.trace_turn_id = None;
-        if let Some(id) = &host_id
-            && let Some((receipt, outcome)) = resolve::settled_by_id(&context.parts, id).await?
-        {
-            // D2 Q6: the root already has terminal evidence. Nothing is
-            // committed; the handle answers from the evidence.
-            let status = status_of_outcome(&outcome);
-            let result = follow::durable_report(&context, outcome, Some(receipt.clone())).await?;
-            let settled = SendOutcome {
-                status,
-                output: Some(TurnOutput {
-                    result,
-                    activities: Vec::new(),
-                }),
-            };
-            return Ok(SendHandle {
-                cursor: target.current_cursor(),
-                target,
-                receipt,
-                id: Some(id.clone()),
-                shared: Arc::new(HandleShared::settled(settled)),
-            });
-        }
         let id = Some(host_id.unwrap_or_else(crate::turn::fresh_turn_id));
         let cursor = target.current_cursor();
         let enqueued = context
@@ -316,14 +303,23 @@ impl std::future::IntoFuture for SendBuilder {
 // Outcomes
 // ---------------------------------------------------------------------------
 
-/// What an input's root answered: the four-way status, and the settled turn
-/// when there is one.
-#[derive(Clone, Debug)]
+/// What an input's root answered: the four-way status, the settled turn when
+/// there is one, and the gaps in the live activity the follower observed.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SendOutcome {
     pub status: TurnStatus,
+    /// The root that took the input: the one that answered it, or holds it
+    /// parked. `None` only for an input withdrawn before any root took it.
+    pub root: Option<TurnId>,
     /// `Some` for Answered, Failed, and Cancelled after the root ran; `None`
     /// for Parked and for an input withdrawn before it ran.
     pub output: Option<TurnOutput>,
+    /// Where the follower's live activity is incomplete: the replay lost
+    /// events, or the root ran where this process could not observe it (in
+    /// another process, or before the handle's cursor). The collected
+    /// [`TurnOutput::activities`] are then not the root's whole history; the
+    /// report is still read from the store.
+    pub gaps: Vec<lash_core::facade_support::LiveReplayGap>,
 }
 
 /// How an input's root stands once it stopped moving.
@@ -331,7 +327,7 @@ pub struct SendOutcome {
 /// Parked is not terminal: the root holds its work until an operator
 /// redrives, cancels or forks it, and a host re-awaits it through
 /// [`LashSession::root`](crate::LashSession::root).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum TurnStatus {
     Answered,
@@ -341,7 +337,7 @@ pub enum TurnStatus {
 }
 
 /// A root that parked (ADR 0104 O3): durable and non-terminal.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParkedTurn {
     pub session_id: SessionId,
     pub root: TurnId,
@@ -349,6 +345,47 @@ pub struct ParkedTurn {
     pub reason: ParkReason,
     pub since_ms: u64,
     pub attempts: u32,
+}
+
+impl SendOutcome {
+    /// This outcome for a transport: the four-way status, the report (with
+    /// its collected activity) when the root ran, and the ids to re-attach
+    /// by.
+    pub fn to_remote(
+        &self,
+        session_id: &SessionId,
+        input_id: &InputId,
+    ) -> lash_remote_protocol::RemoteSendOutcome {
+        let root_id = self.root.clone();
+        let report = self.output.as_ref().map(|output| {
+            let turn_id = root_id
+                .clone()
+                .unwrap_or_else(|| TurnId::from(input_id.as_str()));
+            output
+                .result
+                .to_remote(session_id, &turn_id, &output.activities)
+        });
+        let status = match &self.status {
+            TurnStatus::Answered => lash_remote_protocol::RemoteTurnStatus::Answered,
+            TurnStatus::Failed => lash_remote_protocol::RemoteTurnStatus::Failed,
+            TurnStatus::Cancelled => lash_remote_protocol::RemoteTurnStatus::Cancelled,
+            TurnStatus::Parked(parked) => lash_remote_protocol::RemoteTurnStatus::Parked {
+                root: parked.root.clone(),
+                park_id: parked.park_id.feed_sequence(),
+                reason: lash_remote_protocol::RemoteTurnParkReason::from(&parked.reason),
+                since_ms: parked.since_ms,
+                attempts: parked.attempts,
+            },
+        };
+        lash_remote_protocol::RemoteSendOutcome {
+            session_id: session_id.clone(),
+            input_id: input_id.to_string(),
+            root_id,
+            status,
+            report,
+            gaps: self.gaps.iter().cloned().map(Into::into).collect(),
+        }
+    }
 }
 
 /// The status a committed outcome answers.
@@ -378,13 +415,6 @@ impl HandleShared {
         Self {
             settled: Mutex::new(None),
             _registration: registration,
-        }
-    }
-
-    fn settled(outcome: SendOutcome) -> Self {
-        Self {
-            settled: Mutex::new(Some(outcome)),
-            _registration: None,
         }
     }
 
@@ -418,7 +448,15 @@ async fn settle(
         return Ok(outcome);
     }
     let context = target.context().await?;
-    let outcome = Box::pin(follow::follow(&context, subject, cursor, tap)).await?;
+    let mut from = follow::Position::at(cursor.clone());
+    // A follow without a window answers; a pending one would go on from its
+    // position.
+    let outcome = loop {
+        match Box::pin(follow::follow(&context, subject, from, &mut tap, None)).await? {
+            follow::Followed::Answered(outcome) => break *outcome,
+            follow::Followed::Pending(position) => from = position,
+        }
+    };
     shared.remember(&outcome);
     Ok(outcome)
 }
@@ -506,26 +544,26 @@ impl SendHandle {
         settled_output(input_id, self.outcome().await?)
     }
 
-    /// Forward [`events`](Self::events) to `sink` as they arrive, then
-    /// [`output`](Self::output), returning its report.
-    pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnReport> {
-        Ok(self.output_into_collecting(sink).await?.result)
-    }
-
-    /// [`output_into`](Self::output_into), keeping the collected activity.
-    pub(crate) async fn output_into_collecting(
-        self,
-        sink: &dyn TurnActivitySink,
-    ) -> Result<TurnOutput> {
-        let outcome = settle(
+    /// Forward the root's live activity to `sink` as it arrives, and answer
+    /// [`outcome`](Self::outcome) with that activity collected in its
+    /// output. The outcome's [`gaps`](SendOutcome::gaps) say where the
+    /// forwarded activity is incomplete.
+    pub async fn outcome_into(self, sink: &dyn TurnActivitySink) -> Result<SendOutcome> {
+        settle(
             &self.target,
             &Subject::Input(self.receipt.clone()),
             &self.cursor,
             &self.shared,
             Tap::Sink(sink),
         )
-        .await?;
-        settled_output(self.receipt.input_id.clone(), outcome)
+        .await
+    }
+
+    /// [`outcome_into`](Self::outcome_into) narrowed to a settled turn's
+    /// report, as [`output`](Self::output) narrows [`outcome`](Self::outcome).
+    pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnReport> {
+        let input_id = self.receipt.input_id.clone();
+        Ok(settled_output(input_id, self.outcome_into(sink).await?)?.result)
     }
 
     /// Withdraw the input if it is still queued, or cooperatively cancel its
@@ -601,6 +639,20 @@ pub(crate) fn attach(target: SendTarget, input_id: InputId) -> SendHandle {
     }
 }
 
+/// A handle on the input a send accepted under host id `id`: a keyed input's
+/// id is derived from its session and key, so no read finds it. An id that
+/// was never accepted answers like a withdrawn input.
+pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
+    let input_id = InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
+        &target.session_id(),
+        id.as_str(),
+    ));
+    let mut handle = attach(target, input_id);
+    handle.receipt.source_key = Some(id.to_string());
+    handle.id = Some(id);
+    handle
+}
+
 /// A handle on `root`; its cursor is the observation's current position.
 pub(crate) fn root(target: SendTarget, root: TurnId) -> RootHandle {
     let cursor = target.current_cursor();
@@ -612,7 +664,7 @@ pub(crate) fn root(target: SendTarget, root: TurnId) -> RootHandle {
     }
 }
 
-fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutput> {
+pub(crate) fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutput> {
     match outcome.output {
         Some(output) => Ok(output),
         None => Err(EmbedError::from(SendError::NotSettled {

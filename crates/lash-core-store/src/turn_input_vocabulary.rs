@@ -322,6 +322,22 @@ impl PendingTurnInputDraft {
         }
     }
 
+    /// The input id a keyed submission is accepted under: a function of its
+    /// session and source key alone, `ti:<blake3-hex>` like every minted id.
+    /// A host that knows the key it sent under can re-attach to the input
+    /// after a restart without any read (FIG-3837).
+    #[must_use]
+    pub fn keyed_input_id(session_id: &SessionId, source_key: &str) -> String {
+        format!(
+            "ti:{}",
+            crate::stable_hash::blake3_hex(
+                "lash-keyed-turn-input/v1",
+                // Length-prefixed, so no session and key pair spells another.
+                format!("{}:{session_id}:{source_key}", session_id.as_str().len()).as_bytes(),
+            )
+        )
+    }
+
     /// Sets the input id carried by a `PendingTurnInputDraft` for store and durable-substrate
     /// implementors while claiming and settling durable turn inputs.
     pub fn with_input_id(mut self, input_id: impl Into<String>) -> Self {

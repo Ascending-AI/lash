@@ -881,6 +881,14 @@ impl LashSession {
         crate::send::attach(crate::send::SendTarget::Live(self.clone()), input_id)
     }
 
+    /// Re-attach to the input a send accepted under host id `id`
+    /// ([`SendBuilder::id`](crate::SendBuilder::id)): after a restart, with
+    /// nothing but the id. It follows the input wherever it went, including
+    /// into another root, and never commits anything.
+    pub fn attach_id(&self, id: impl Into<TurnId>) -> crate::SendHandle {
+        crate::send::attach_id(crate::send::SendTarget::Live(self.clone()), id.into())
+    }
+
     /// Re-await a logical root: after a park verb, or by the host id a send
     /// named.
     pub fn root(&self, root: impl Into<TurnId>) -> crate::RootHandle {

@@ -38,8 +38,8 @@ fn a_state_token_renders_to_the_predicate_its_generator_spells() {
     // what the generator produces: the enum stays the one source of the
     // vocabulary, and the two backends' predicates cannot drift apart.
     let sql = turn_ingress_sql();
-    assert!(sql.pending_inputs.delete_terminal.sql().contains(
-        &vocabulary::terminal_turn_input_state_predicate_sql("state")
+    assert!(sql.pending_inputs.delete_withdrawn.sql().contains(
+        &vocabulary::cancelled_turn_input_state_predicate_sql("state")
     ),);
     assert!(sql.pending_inputs.settle_unclaimed.sql().contains(
         &vocabulary::nonterminal_turn_input_state_predicate_sql("state")

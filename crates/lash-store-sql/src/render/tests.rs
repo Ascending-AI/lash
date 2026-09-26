@@ -450,6 +450,7 @@ fn every_owned_statement_renders_for_both_backends() {
         VocabularyTerm::new("not_enqueued_wake_delivery_state", stub_predicate),
         VocabularyTerm::new("accepted_turn_input_state", stub_predicate),
         VocabularyTerm::new("active_turn_input_state", stub_predicate),
+        VocabularyTerm::new("cancelled_turn_input_state", stub_predicate),
         VocabularyTerm::new("deferred_next_turn_turn_input_state", stub_predicate),
         VocabularyTerm::new("nonterminal_turn_input_state", stub_predicate),
         VocabularyTerm::new("pending_active_turn_input_state", stub_predicate),

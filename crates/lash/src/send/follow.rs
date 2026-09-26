@@ -91,11 +91,17 @@ impl Tap<'_> {
         }
     }
 
-    async fn gap(&mut self, gap: LiveReplayGap) {
-        if let Self::Channel(tx) = self {
-            let _ = tx
-                .send(Err(EmbedError::from(SendError::ObservationGap(gap))))
-                .await;
+    /// Report `gap` in-stream. A stream keeps delivering what follows the
+    /// gap: the follower resubscribes past it.
+    async fn gap(&mut self, gap: &LiveReplayGap) {
+        if let Self::Channel(tx) = self
+            && tx
+                .send(Err(EmbedError::from(SendError::ObservationGap(
+                    gap.clone(),
+                ))))
+                .await
+                .is_err()
+        {
             *self = Self::Quiet;
         }
     }
@@ -224,30 +230,120 @@ fn await_drive(
     })
 }
 
-/// Follow `subject` from `cursor` until it answers.
+/// Where a follower stands in its subject's live activity: the replay
+/// cursor to go on from, whether it has observed any of the root's activity,
+/// and the gaps it has met so far. A windowed follower hands its position to
+/// the next window; the host's Restate wait journals it between probes.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Position {
+    pub(crate) cursor: SessionCursor,
+    pub(crate) observed: bool,
+    pub(crate) gaps: Vec<LiveReplayGap>,
+}
+
+impl Position {
+    pub(crate) fn at(cursor: SessionCursor) -> Self {
+        Self {
+            cursor,
+            observed: false,
+            gaps: Vec::new(),
+        }
+    }
+}
+
+/// What one follow answered.
+pub(super) enum Followed {
+    /// The subject stopped moving.
+    Answered(Box<SendOutcome>),
+    /// The window closed first: go on from here.
+    Pending(Position),
+}
+
+/// A follower's live replay: its subscription, the cursor it last read, and
+/// the gaps it met. A gap is reported, then the follower resubscribes at the
+/// replay's current head, so a gap is bounded to what the replay lost.
+struct Observation {
+    replay: Replay,
+    last_cursor: SessionCursor,
+    gaps: Vec<LiveReplayGap>,
+}
+
+impl Observation {
+    async fn subscribe(ctx: &SendContext, from: Position, tap: &mut Tap<'_>) -> Self {
+        let mut observation = Self {
+            replay: Replay::Ended,
+            last_cursor: from.cursor,
+            gaps: from.gaps,
+        };
+        observation.resubscribe(ctx, tap).await;
+        observation
+    }
+
+    /// Subscribe after `last_cursor`, or past a gap at the replay's head: a
+    /// trimmed window, or a cursor this process's replay cannot place (one
+    /// taken in another process, before a restart).
+    async fn resubscribe(&mut self, ctx: &SendContext, tap: &mut Tap<'_>) {
+        let store = &ctx.parts.live_replay_store;
+        let reason = match store.subscribe_after_cursor(&self.last_cursor) {
+            Ok(LiveReplaySubscribeOutcome::Subscribed(subscription)) => {
+                self.replay = Replay::Live(subscription);
+                return;
+            }
+            Ok(LiveReplaySubscribeOutcome::Gap(reason)) => reason,
+            Err(error) => {
+                tracing::debug!(
+                    session_id = %ctx.parts.session_id,
+                    error = %error,
+                    "send handle's cursor is not this process's live replay; observing from its head"
+                );
+                LiveReplayGapReason::Unavailable
+            }
+        };
+        let gap = replay_gap(ctx, &self.last_cursor, reason);
+        self.last_cursor = gap.latest_cursor.clone();
+        self.report(gap, tap).await;
+        self.replay = match store.subscribe_after_cursor(&self.last_cursor) {
+            Ok(LiveReplaySubscribeOutcome::Subscribed(subscription)) => Replay::Live(subscription),
+            _ => Replay::Ended,
+        };
+    }
+
+    async fn report(&mut self, gap: LiveReplayGap, tap: &mut Tap<'_>) {
+        tap.gap(&gap).await;
+        self.gaps.push(gap);
+    }
+
+    /// The subscription ended under the follower: report the loss, then
+    /// resubscribe at the replay's head.
+    async fn lost(&mut self, ctx: &SendContext, tap: &mut Tap<'_>) {
+        let gap = replay_gap(ctx, &self.last_cursor, LiveReplayGapReason::Unavailable);
+        self.last_cursor = gap.latest_cursor.clone();
+        self.report(gap, tap).await;
+        self.replay = Replay::Ended;
+        self.resubscribe(ctx, tap).await;
+    }
+}
+
+/// Follow `subject` from `from` until it answers, or until `window` closes.
+///
+/// A follower answers from the store, never from events. Activity is only
+/// what this process's live replay published: a root that ran in another
+/// process is observed through its durable record alone, and a settled root
+/// whose activity this follower never saw answers with a reported
+/// [`LiveReplayGapReason::Unavailable`] gap, so a collected activity list is
+/// never mistaken for the root's whole history.
 pub(super) async fn follow(
     ctx: &SendContext,
     subject: &Subject,
-    cursor: &SessionCursor,
-    mut tap: Tap<'_>,
-) -> Result<SendOutcome> {
+    from: Position,
+    tap: &mut Tap<'_>,
+    window: Option<Duration>,
+) -> Result<Followed> {
+    let deadline = window.map(|window| tokio::time::Instant::now() + window);
+    let start_cursor = from.cursor.clone();
     let mut adoption = Adoption::new(subject);
-    let mut last_cursor = cursor.clone();
-    let mut replay = match ctx.parts.live_replay_store.subscribe_after_cursor(cursor) {
-        Ok(LiveReplaySubscribeOutcome::Subscribed(subscription)) => Replay::Live(subscription),
-        Ok(LiveReplaySubscribeOutcome::Gap(reason)) => {
-            tap.gap(replay_gap(ctx, cursor, reason)).await;
-            Replay::Ended
-        }
-        Err(error) => {
-            tracing::warn!(
-                session_id = %ctx.parts.session_id,
-                error = %error,
-                "send handle could not subscribe to live replay; it answers from the store"
-            );
-            Replay::Ended
-        }
-    };
+    let observed_before = from.observed;
+    let mut observation = Observation::subscribe(ctx, from, tap).await;
     let request = subject.drive_request();
     let mut drive = Some(await_drive(ctx, &request, None));
     let mut drive_stopped: Option<tokio::time::Instant> = None;
@@ -255,6 +351,7 @@ pub(super) async fn follow(
     let mut settled_at: Option<tokio::time::Instant> = None;
     let mut poll = POLL_FLOOR;
     let mut resolve_now = true;
+    let mut last_pass = false;
     loop {
         if resolve_now {
             // A root this process ran to its commit deposited its final turn
@@ -264,11 +361,24 @@ pub(super) async fn follow(
                 && let Some((root, turn)) =
                     mailbox::take_settled_root(&ctx.parts.session_id, &receipt.input_id)
             {
-                adoption.adopt(root, &mut tap).await;
-                drain(ctx, &mut adoption, &mut replay, &last_cursor, &mut tap).await;
+                adoption.adopt(root.clone(), tap).await;
+                drain(ctx, &mut adoption, &mut observation, tap).await;
                 ctx.refresh().await?;
                 let outcome = turn.outcome.clone();
-                return finish_settled(ctx, subject, outcome, Some(turn), adoption.collected).await;
+                let observed = observed_before || !adoption.collected.is_empty();
+                return finish_settled(
+                    ctx,
+                    subject,
+                    root,
+                    outcome,
+                    Some(turn),
+                    adoption.collected,
+                    observation,
+                    observed,
+                    tap,
+                )
+                .await
+                .map(|outcome| Followed::Answered(Box::new(outcome)));
             }
             let resolution = match subject {
                 Subject::Input(receipt) => resolve::resolve_input(&ctx.parts, receipt).await?,
@@ -276,27 +386,42 @@ pub(super) async fn follow(
             };
             match resolution {
                 Resolution::Settled { root, outcome } => {
-                    adoption.adopt(root.clone(), &mut tap).await;
+                    adoption.adopt(root.clone(), tap).await;
                     let live = live_report(ctx, subject, &root).await?;
                     let settled_since = *settled_at.get_or_insert_with(tokio::time::Instant::now);
                     let waiting_for_live = live.is_none()
+                        && !last_pass
                         && drive_stopped.is_none()
                         && settled_since.elapsed() < LIVE_REPORT_GRACE;
                     if !waiting_for_live {
-                        drain(ctx, &mut adoption, &mut replay, &last_cursor, &mut tap).await;
+                        drain(ctx, &mut adoption, &mut observation, tap).await;
                         ctx.refresh().await?;
-                        return finish_settled(ctx, subject, outcome, live, adoption.collected)
-                            .await;
+                        let observed = observed_before || !adoption.collected.is_empty();
+                        return finish_settled(
+                            ctx,
+                            subject,
+                            root,
+                            outcome,
+                            live,
+                            adoption.collected,
+                            observation,
+                            observed,
+                            tap,
+                        )
+                        .await
+                        .map(|outcome| Followed::Answered(Box::new(outcome)));
                     }
                 }
                 Resolution::Parked(parked) => {
-                    adoption.adopt(parked.root.clone(), &mut tap).await;
-                    drain(ctx, &mut adoption, &mut replay, &last_cursor, &mut tap).await;
+                    adoption.adopt(parked.root.clone(), tap).await;
+                    drain(ctx, &mut adoption, &mut observation, tap).await;
                     ctx.refresh().await?;
-                    return Ok(SendOutcome {
+                    return Ok(Followed::Answered(Box::new(SendOutcome {
+                        root: Some(parked.root.clone()),
                         status: TurnStatus::Parked(parked),
                         output: None,
-                    });
+                        gaps: observation.gaps,
+                    })));
                 }
                 Resolution::Withdrawn => {
                     // A drive refused after it claimed the input leaves no
@@ -305,14 +430,16 @@ pub(super) async fn follow(
                         return Err(EmbedError::Runtime(error));
                     }
                     ctx.refresh().await?;
-                    return Ok(SendOutcome {
+                    return Ok(Followed::Answered(Box::new(SendOutcome {
                         status: TurnStatus::Cancelled,
+                        root: None,
                         output: None,
-                    });
+                        gaps: observation.gaps,
+                    })));
                 }
                 Resolution::Undecided { root } => {
                     if let Some(root) = root {
-                        adoption.adopt(root, &mut tap).await;
+                        adoption.adopt(root, tap).await;
                         if let Some(stopped) = drive_stopped
                             && stopped.elapsed() >= UNRESOLVED_CEILING
                             && let Subject::Input(receipt) = subject
@@ -327,17 +454,38 @@ pub(super) async fn follow(
                     }
                 }
             }
+            if last_pass {
+                // The window closed on an undecided subject. A follower that
+                // adopted no root yet goes on from where it started, so the
+                // activity it buffered is read again.
+                let cursor = if adoption.root.is_some() {
+                    observation.last_cursor
+                } else {
+                    start_cursor
+                };
+                return Ok(Followed::Pending(Position {
+                    cursor,
+                    observed: observed_before || !adoption.collected.is_empty(),
+                    gaps: observation.gaps,
+                }));
+            }
         }
         resolve_now = true;
         // Wait for the first wake.
         let sleep = tokio::time::sleep(poll);
         tokio::pin!(sleep);
+        let closes = async {
+            match deadline {
+                Some(deadline) => tokio::time::sleep_until(deadline).await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
-            event = next_event(&mut replay) => {
+            event = next_event(&mut observation.replay) => {
                 match event {
                     Some(Ok(event)) => {
-                        last_cursor = event.cursor.clone();
-                        resolve_now = adoption.observe(&event, &mut tap).await;
+                        observation.last_cursor = event.cursor.clone();
+                        resolve_now = adoption.observe(&event, tap).await;
                         if resolve_now {
                             poll = POLL_FLOOR;
                         }
@@ -346,12 +494,11 @@ pub(super) async fn follow(
                         tracing::debug!(
                             session_id = %ctx.parts.session_id,
                             error = %error,
-                            "send handle's live replay ended"
+                            "send handle's live replay lost events; resubscribing past the gap"
                         );
-                        tap.gap(replay_gap(ctx, &last_cursor, LiveReplayGapReason::Unavailable)).await;
-                        replay = Replay::Ended;
+                        observation.lost(ctx, tap).await;
                     }
-                    None => replay = Replay::Ended,
+                    None => observation.replay = Replay::Ended,
                 }
             }
             answer = async {
@@ -385,6 +532,9 @@ pub(super) async fn follow(
             () = &mut sleep => {
                 poll = (poll * 2).min(POLL_CEILING);
             }
+            () = closes => {
+                last_pass = true;
+            }
         }
     }
 }
@@ -405,23 +555,25 @@ async fn next_event(
     }
 }
 
-/// Deliver what the live replay already holds past `last_cursor`: the
-/// subject's root settled, so its activity is published up to here.
+/// Deliver what the live replay already holds past the last cursor read: the
+/// subject's root stopped, so its activity is published up to here.
 async fn drain(
     ctx: &SendContext,
     adoption: &mut Adoption,
-    replay: &mut Replay,
-    last_cursor: &SessionCursor,
+    observation: &mut Observation,
     tap: &mut Tap<'_>,
 ) {
-    if matches!(replay, Replay::Ended) {
+    if matches!(observation.replay, Replay::Ended) {
         return;
     }
-    *replay = Replay::Ended;
-    if let Ok(LiveReplayOutcome::Replayed(events)) =
-        ctx.parts.live_replay_store.replay_after_cursor(last_cursor)
+    observation.replay = Replay::Ended;
+    if let Ok(LiveReplayOutcome::Replayed(events)) = ctx
+        .parts
+        .live_replay_store
+        .replay_after_cursor(&observation.last_cursor)
     {
         for event in events {
+            observation.last_cursor = event.cursor.clone();
             let _ = adoption.observe(&event, tap).await;
         }
     }
@@ -442,13 +594,31 @@ async fn live_report(
     }))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the settled answer's parts are each read at a different point of the follow"
+)]
 async fn finish_settled(
     ctx: &SendContext,
     subject: &Subject,
+    root: TurnId,
     outcome: TurnOutcome,
     live: Option<std::sync::Arc<lash_core::facade_support::AssembledTurn>>,
     activities: Vec<TurnActivity>,
+    mut observation: Observation,
+    observed: bool,
+    tap: &mut Tap<'_>,
 ) -> Result<SendOutcome> {
+    if !observed {
+        // The root settled, yet none of its activity reached this follower:
+        // it ran in another process, or before this follower's cursor.
+        let gap = replay_gap(
+            ctx,
+            &observation.last_cursor,
+            LiveReplayGapReason::Unavailable,
+        );
+        observation.report(gap, tap).await;
+    }
     let status = status_of_outcome(&outcome);
     let acceptance = match subject {
         Subject::Input(receipt) => Some(receipt.clone()),
@@ -466,7 +636,9 @@ async fn finish_settled(
     };
     Ok(SendOutcome {
         status,
+        root: Some(root),
         output: Some(TurnOutput { result, activities }),
+        gaps: observation.gaps,
     })
 }
 

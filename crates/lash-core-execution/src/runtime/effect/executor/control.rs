@@ -387,23 +387,6 @@ impl TurnCancelClosureOwnerBinding {
 /// Boundary for nondeterministic runtime work.
 #[async_trait::async_trait]
 pub trait RuntimeEffectController: AwaitEventResolver {
-    /// This controller bound to `admitted` by its own engine, when it is an
-    /// engine's handler controller that serves every scope of its handler.
-    ///
-    /// A host that runs a turn inside its own engine handler lends the turn
-    /// that handler's controller. The turn's session drive runs steps under
-    /// scopes of their own (its admission, a queued root), and each must run
-    /// on the handler's journal, which only this controller can bind: an
-    /// engine's effect host serves no effect outside a handler. A controller
-    /// that is already bound to one scope, or that journals by scope through
-    /// its host, answers `None`, and the drive asks the host instead.
-    fn scoped_for<'run>(
-        &'run self,
-        _admitted: AdmittedScope,
-    ) -> Option<Result<ScopedEffectController<'run>, RuntimeError>> {
-        None
-    }
-
     /// Store-backed replay controllers leave this false: durable journal participation alone
     /// does not imply engine-owned backpressure.
     fn owns_commit_backpressure(&self) -> bool {

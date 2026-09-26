@@ -13,11 +13,20 @@ use rusqlite::Connection;
 use super::{closure_participant_sql, tool_intent_sql, turn_ingress_sql};
 use crate::schema_layout::Schema;
 
-/// A catalog with this crate's real session schema, in memory.
+/// A catalog with this crate's real durable-core schema, in memory: the
+/// session schema and the fragments the durable core database carries beside
+/// it (the retention delete reads the root family's input bindings).
 fn catalog() -> Connection {
     let conn = Connection::open_in_memory().expect("in-memory database opens");
     conn.execute_batch(crate::schema::SCHEMA)
         .expect("session schema applies");
+    for fragment in [
+        crate::schema_fragments::SESSION_INGRESS_TABLE,
+        crate::schema_fragments::SESSION_ROOTS_TABLES,
+    ] {
+        conn.execute_batch(fragment)
+            .expect("durable-core fragment applies");
+    }
     conn
 }
 
@@ -78,7 +87,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.release_bound_claim.sql(),
         sql.pending_inputs.settle_claimed.sql(),
         sql.pending_inputs.settle_unclaimed.sql(),
-        sql.pending_inputs.delete_terminal.sql(),
+        sql.pending_inputs.delete_withdrawn.sql(),
         sql.pending_inputs.delete_by_session.sql(),
         sql.pending_inputs_sqlite.insert_new.sql(),
         sql.pending_inputs_sqlite.select_id_by_source_key.sql(),
@@ -271,10 +280,10 @@ mod byte_identity {
         // by a predicate the planner can match against the column.
         let sql = turn_ingress_sql();
         assert!(
-            sql.pending_inputs.delete_terminal.sql().contains(
-                &vocabulary::terminal_turn_input_state_predicate_sql("state")
+            sql.pending_inputs.delete_withdrawn.sql().contains(
+                &vocabulary::cancelled_turn_input_state_predicate_sql("state")
             ),
-            "the retention delete no longer spells the generated terminal set",
+            "the retention delete no longer spells the generated cancelled state",
         );
         assert!(
             sql.pending_inputs.settle_unclaimed.sql().contains(

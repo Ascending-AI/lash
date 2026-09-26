@@ -141,10 +141,14 @@ are reconstructed from the SQLite durable-core catalog instead of running in the
 route process. The service binds only its effect-group demo workflow beside
 them: it runs no turn itself. The chat id names the session and the turn id
 names the root, so Restate replay and Lash's final commit address the same
-operation. The route reads the settled turn through the send handle
-(`output_into`), the same way in both durability modes; a host whose HTTP
-process is not the `LashTurn` worker sees live events only through a shared
-`LiveReplayStore`, while the settled outcome always resolves from the store.
+operation. The route follows the input through the send handle
+(`outcome_into`), the same way in both durability modes, and maps all four
+statuses: an Answered root's reply is persisted, while a Failed, Cancelled or
+Parked root is reported on the stream, and a retryable refusal is marked
+retryable there. The raw activity route accepts before it responds, so a
+retryable refusal of its acceptance answers 503. A host whose HTTP process is
+not the `LashTurn` worker sees no live events for the turn; the outcome then
+reports that gap, and the settled outcome always resolves from the store.
 
 Among the Lash-owned services are the effect-group ones: `EffectGroupIndex`,
 `EffectGroupPayload`, `EffectGroupDispatch`, `LashDurableWaitWorkflow`, and

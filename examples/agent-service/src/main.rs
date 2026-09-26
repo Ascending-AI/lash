@@ -301,9 +301,8 @@ async fn async_main() -> anyhow_like::Result<()> {
                             .unwrap_or_else(|| panic!("Restate authority configured")),
                     ),
                 ));
-                // Restate-backed turns pass a handler-scoped controller per
-                // turn via `.stream_to_with_effects(..., &controller)`; the
-                // backend host serves paths outside a workflow scope and
+                // Turns run in lash's own `LashSession`/`LashTurn` handlers;
+                // the backend host serves paths outside a workflow scope and
                 // fails loudly if an effect tries to execute without a
                 // handler. The worked example keeps its Sleep-only resolver as
                 // the host's one answer, so no tool-child host is installed —

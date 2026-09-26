@@ -41,33 +41,6 @@ impl<'run> ScopedEffectController<'run> {
         }
     }
 
-    /// The borrowed controller bound to `admitted` by its own engine
-    /// ([`RuntimeEffectController::scoped_for`]): how an in-process drive
-    /// keeps a step under another scope on the handler controller a host
-    /// lent it. `None` when the controller is not borrowed, or its engine
-    /// binds no scope of its own. Like [`rescope`](Self::rescope), it never
-    /// rebinds a controller onto another process.
-    pub fn engine_scoped(
-        &self,
-        admitted: AdmittedScope,
-    ) -> Option<Result<ScopedEffectController<'run>, RuntimeError>> {
-        let ScopedEffectControllerInner::Borrowed(controller) = &self.controller else {
-            return None;
-        };
-        if let Some(target) = admitted.process_id()
-            && self.admitted.process_id() != Some(target)
-        {
-            return Some(Err(RuntimeError::new(
-                crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
-                format!(
-                    "cannot bind {existing} onto process {target}: a scoped controller carries its admission and is never rebound",
-                    existing = self.admitted.scope().id(),
-                ),
-            )));
-        }
-        controller.scoped_for(admitted)
-    }
-
     /// Whether this controller was built for its scope and can build itself
     /// for another ([`ScopeBoundController`]): a [`rescope`](Self::rescope)
     /// of it keeps every effect under the new scope. A borrowed or shared

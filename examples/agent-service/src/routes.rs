@@ -112,8 +112,64 @@ pub(crate) enum StreamItem {
     },
     Error {
         message: String,
+        /// The same request may succeed if sent again: the session was
+        /// briefly busy, not the turn broken.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        retryable: bool,
     },
     Done,
+}
+
+/// Why a sent turn produced no answer to persist: the send or its follow
+/// failed, or the input's root did not answer (FIG-3837: a host maps all four
+/// outcome statuses, never only `output()?`).
+#[derive(Debug)]
+pub(crate) struct TurnRefusal {
+    pub(crate) message: String,
+    pub(crate) retryable: bool,
+}
+
+impl From<lash::EmbedError> for TurnRefusal {
+    fn from(error: lash::EmbedError) -> Self {
+        Self {
+            retryable: error.is_retryable(),
+            message: error.to_string(),
+        }
+    }
+}
+
+impl TurnRefusal {
+    pub(crate) fn into_stream_item(self) -> StreamItem {
+        StreamItem::Error {
+            message: self.message,
+            retryable: self.retryable,
+        }
+    }
+}
+
+/// An answered root's output, or why the turn has none: a failed root, a
+/// cancelled or withdrawn input, or a root parked until an operator resolves
+/// its park.
+pub(crate) fn answered_output(outcome: lash::SendOutcome) -> Result<TurnOutput, TurnRefusal> {
+    let refusal = |message: String| TurnRefusal {
+        message,
+        retryable: false,
+    };
+    match outcome.status {
+        lash::TurnStatus::Answered => outcome
+            .output
+            .ok_or_else(|| refusal("the answered turn has no report".to_string())),
+        lash::TurnStatus::Failed => Err(refusal(match outcome.output {
+            Some(output) => format!("the turn failed: {:?}", output.result.outcome),
+            None => "the turn failed".to_string(),
+        })),
+        lash::TurnStatus::Cancelled => Err(refusal("the turn was cancelled".to_string())),
+        lash::TurnStatus::Parked(parked) => Err(refusal(format!(
+            "the turn is parked ({:?}); it resumes once an operator resolves the park",
+            parked.reason
+        ))),
+        status => Err(refusal(format!("the turn ended as {status:?}"))),
+    }
 }
 
 pub(crate) async fn index() -> Html<&'static str> {
@@ -398,27 +454,18 @@ pub(crate) async fn send_message(
                         Arc::clone(&turn_state),
                         Some(tx.clone()),
                     );
-                    let turn = session
+                    let turn = match session
                         .send(TurnInput::text(turn_input))
                         .id(turn_id)
-                        .require_finish();
-                    // A root that parked or was withdrawn answers `NotSettled`,
-                    // reported below like any other turn error.
-                    let turn = match turn {
-                        Ok(turn) => turn.output_into(&ui_events).await.map(|result| TurnOutput {
-                            result,
-                            activities: Vec::new(),
-                        }),
+                        .require_finish()
+                    {
+                        Ok(turn) => turn.outcome_into(&ui_events).await,
                         Err(err) => Err(err),
                     };
-                    let output = match turn {
+                    let output = match turn.map_err(TurnRefusal::from).and_then(answered_output) {
                         Ok(output) => output,
-                        Err(err) => {
-                            let _ = tx
-                                .send(StreamItem::Error {
-                                    message: err.to_string(),
-                                })
-                                .await;
+                        Err(refusal) => {
+                            let _ = tx.send(refusal.into_stream_item()).await;
                             return Ok(TurnAttempt::Failed);
                         }
                     };
@@ -440,6 +487,7 @@ pub(crate) async fn send_message(
                             let _ = tx
                                 .send(StreamItem::Error {
                                     message: err.message,
+                                    retryable: false,
                                 })
                                 .await;
                         }
@@ -563,7 +611,12 @@ impl ChannelTurnEvents {
 
     async fn emit_error(&self, message: String) {
         if let Some(errors) = &self.errors {
-            let _ = errors.send(StreamItem::Error { message }).await;
+            let _ = errors
+                .send(StreamItem::Error {
+                    message,
+                    retryable: false,
+                })
+                .await;
         }
     }
 
@@ -761,6 +814,7 @@ async fn forward_live_replay_until_commit(
             let _ = tx
                 .send(StreamItem::Error {
                     message: err.to_string(),
+                    retryable: false,
                 })
                 .await;
             return;
@@ -773,6 +827,7 @@ async fn forward_live_replay_until_commit(
                 let _ = tx
                     .send(StreamItem::Error {
                         message: err.to_string(),
+                        retryable: false,
                     })
                     .await;
                 break;
@@ -973,6 +1028,7 @@ where
         Err(err) => {
             emit(StreamItem::Error {
                 message: err.message,
+                retryable: false,
             })
             .await;
             return;
@@ -992,6 +1048,7 @@ where
         Err(err) => {
             emit(StreamItem::Error {
                 message: err.message,
+                retryable: false,
             })
             .await;
         }

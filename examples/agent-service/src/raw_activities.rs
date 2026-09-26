@@ -11,7 +11,7 @@ use axum::http::{StatusCode, header};
 use axum::response::Response;
 use bytes::Bytes;
 use lash::rlm::RlmSendBuilderExt as _;
-use lash::{TurnActivityFanout, TurnActivitySink, TurnInput, TurnOutput};
+use lash::{TurnActivityFanout, TurnActivitySink, TurnInput};
 use lash_remote_protocol::RemoteTurnActivitySink;
 use serde::Deserialize;
 use serde_json::json;
@@ -19,8 +19,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::routes::{
-    ChannelTurnEvents, TurnPersistenceState, assistant_text_for_persistence,
-    model_spec_for_chat_selection,
+    ChannelTurnEvents, TurnPersistenceState, TurnRefusal, answered_output,
+    assistant_text_for_persistence, model_spec_for_chat_selection,
 };
 use crate::state::{AppError, AppResult, AppStateData};
 
@@ -67,10 +67,13 @@ pub(crate) async fn stream_raw_activities(
     let turn_model = model_spec_for_chat_selection(&model_selection)?;
     let session = state.open_session(&chat_id, turn_model).await?;
     let turn_id = TurnId::from(format!("agent-service-raw-turn:{}", uuid::Uuid::new_v4()));
+    // Accepted before the response starts, so a refused acceptance is the
+    // response's status: a retryable refusal answers 503.
     let turn = session
         .send(TurnInput::text(text))
         .id(turn_id.clone())
-        .require_finish()?;
+        .require_finish()?
+        .await?;
     let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
     let remote_events = Arc::new(RemoteTurnActivitySink::new(NdjsonChannelWriter::new(tx), 0));
     let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
@@ -86,12 +89,13 @@ pub(crate) async fn stream_raw_activities(
     ]);
 
     tokio::spawn(async move {
-        match turn.output_into(&events).await {
-            Ok(result) => {
-                let output = TurnOutput {
-                    result,
-                    activities: Vec::new(),
-                };
+        match turn
+            .outcome_into(&events)
+            .await
+            .map_err(TurnRefusal::from)
+            .and_then(answered_output)
+        {
+            Ok(output) => {
                 let assistant_text = assistant_text_for_persistence(
                     &output,
                     turn_state.lock_recover().assistant_prose(),
@@ -103,7 +107,10 @@ pub(crate) async fn stream_raw_activities(
                     eprintln!("agent-service raw activity persistence failed: {error}");
                 }
             }
-            Err(error) => eprintln!("agent-service raw activity turn failed: {error}"),
+            Err(refusal) => eprintln!(
+                "agent-service raw activity turn has no answer (retryable: {}): {}",
+                refusal.retryable, refusal.message
+            ),
         }
         let errors = remote_events.take_errors();
         if !errors.is_empty() {
