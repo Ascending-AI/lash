@@ -15,7 +15,7 @@ use crate::engine::{
     ParkRef, SealVerdict,
 };
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
-use crate::store::{DriveEpochSeal, SessionHeadRef};
+use crate::store::DriveEpochSeal;
 use crate::{
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectOutcome, RuntimeErrorCode, SessionId, StoreError, TurnId,
@@ -58,11 +58,6 @@ pub(in crate::runtime) struct AdmitDriveRunner {
     pub(in crate::runtime) store: Arc<dyn crate::store::RuntimePersistence>,
     pub(in crate::runtime) request: AdmitRequest,
     pub(in crate::runtime) ordinal: u32,
-    /// The head the root would be admitted on, as the drive refreshed it
-    /// right before the step. Its generation is read in the body.
-    pub(in crate::runtime) base: SessionHeadRef,
-    /// The root's turn index: the next one after `base`.
-    pub(in crate::runtime) turn_index: u64,
     /// Decides which queued work is due: a batch made available later is
     /// not work yet.
     pub(in crate::runtime) clock: Arc<dyn crate::Clock>,
@@ -95,8 +90,7 @@ impl AdmitDriveRunner {
         let session_id = &self.request.session;
         // FIG-3619: the session-state generation gate. A generation this
         // build cannot run is refused before anything is admitted.
-        let generation = self
-            .store
+        self.store
             .read_session_state_version()
             .await
             .map_err(|error| store_fault("session-state generation gate", error))?;
@@ -134,11 +128,6 @@ impl AdmitDriveRunner {
                 self.request.request.clone(),
                 admission_id(&self.request.request, self.ordinal),
                 epoch.epoch,
-                SessionHeadRef {
-                    generation,
-                    ..self.base
-                },
-                self.turn_index,
                 work,
             ),
         ))

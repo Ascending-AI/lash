@@ -1332,6 +1332,7 @@ impl LashCoreBuilder {
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         queued_work_execution_concurrency: usize,
     ) -> (QueuedPortSetup, Arc<dyn lash_core::SessionDriver>) {
+        let owner = session_execution_owner.clone();
         let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
             NativeQueuedWorkRunConfig {
                 session_execution_owner,
@@ -1347,7 +1348,7 @@ impl LashCoreBuilder {
         match (queued_work_source, backend_engine) {
             (QueuedWorkSource::Disabled, _) => (QueuedPortSetup::Disabled, driver),
             (QueuedWorkSource::Backend, Some(port)) => {
-                let installed = port.install_session_driver(driver);
+                let installed = install_session_driver(&port, driver, &owner);
                 (QueuedPortSetup::External { port }, installed)
             }
             (QueuedWorkSource::Backend, None) => (
@@ -1509,4 +1510,29 @@ pub struct ForkRequest {
     pub node_id: lash_core::NodeId,
     pub relation: lash_core::SessionRelation,
     pub observed_processes: Vec<lash_core::ProcessRef>,
+}
+
+/// Install `driver` on `port` for the core that `owner` names, and return the
+/// driver the engine serves.
+///
+/// One engine serves one driver (get-or-init), so a second core over the same
+/// backend does not drive its own sessions: its plugins, protocol and policy
+/// are not the ones that run them. That is reported, naming the core whose
+/// driver is ignored (#2290 review, LOW-14).
+fn install_session_driver(
+    port: &Arc<dyn lash_core::SessionWorkEngine>,
+    driver: Arc<dyn lash_core::SessionDriver>,
+    owner: &lash_core::LeaseOwnerIdentity,
+) -> Arc<dyn lash_core::SessionDriver> {
+    let installed = port.install_session_driver(Arc::clone(&driver));
+    if !Arc::ptr_eq(&installed, &driver) {
+        tracing::warn!(
+            event = "session_driver.install_ignored",
+            owner_id = %owner.owner_id,
+            incarnation_id = %owner.incarnation_id,
+            "the backend's session-work engine already serves another core's session driver; \
+             this core's sessions are driven by that core's plugins, protocol and policy"
+        );
+    }
+    installed
 }

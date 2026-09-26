@@ -31,5 +31,6 @@ crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.s
 crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.state.session_id)  |  1  # FIG-3824
 crates/lash-core/src/runtime/drive/root.rs  |  .reclaim_turn_bound_inputs(&self.session_id, &self.fence, &self.owner, &self.root)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  generation: self.store.read_session_state_version().await?,  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  if let Err(release) = self.store.abandon_turn_input_claim(&claim).await {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  self.store.abandon_turn_input_claim(&claim).await?;  |  2  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED

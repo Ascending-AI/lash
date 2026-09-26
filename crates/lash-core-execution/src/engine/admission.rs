@@ -222,6 +222,10 @@ pub enum InheritVerdict {
 ///
 /// It has no public constructor: it is decoded only from a recorded
 /// [`AdmitVerdict::Admit`].
+///
+/// It records no head. The head a root runs on, and its turn index, are
+/// recorded once, by the root's claim step, which a redrive replays (ADR 0105
+/// §2, FIG-3682): the claim is the one source of truth for the base.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Admitted {
     session: SessionId,
@@ -229,11 +233,6 @@ pub struct Admitted {
     request: DriveRequestId,
     admission: AdmissionId,
     observed_epoch: u64,
-    /// The head the root was admitted on. A replay rebuilds the root's input
-    /// state from it, never from the live head (FIG-3682).
-    base: crate::store::SessionHeadRef,
-    /// The root's turn index, fixed at admission.
-    turn_index: u64,
     /// What the root drives.
     work: AdmittedWork,
 }
@@ -258,15 +257,12 @@ pub enum AdmittedWork {
 impl Admitted {
     /// Only the `AdmitDrive` body mints an admission, through
     /// [`admission_body::admitted`](super::drive::admission_body::admitted).
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn minted(
         session: SessionId,
         root: TurnId,
         request: DriveRequestId,
         admission: AdmissionId,
         observed_epoch: u64,
-        base: crate::store::SessionHeadRef,
-        turn_index: u64,
         work: AdmittedWork,
     ) -> Self {
         Self {
@@ -275,8 +271,6 @@ impl Admitted {
             request,
             admission,
             observed_epoch,
-            base,
-            turn_index,
             work,
         }
     }
@@ -301,17 +295,6 @@ impl Admitted {
     /// The drive epoch admission read; the seal advances it by one.
     pub fn observed_epoch(&self) -> u64 {
         self.observed_epoch
-    }
-
-    /// The head the root was admitted on.
-    pub fn base(&self) -> &crate::store::SessionHeadRef {
-        &self.base
-    }
-
-    /// The root's turn index, fixed at admission and identical on every
-    /// replay.
-    pub fn turn_index(&self) -> u64 {
-        self.turn_index
     }
 
     /// What the root drives.

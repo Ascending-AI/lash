@@ -117,16 +117,20 @@ pub trait DriveAdmission: EngineContext {
   child or child execution **never mints an epoch**; it answers `Valid`,
   `Stale` or `GenerationRefused`.
 
-- **Implemented ahead of S5 (FIG-3682): the admission records its base.**
-  `Admitted` carries `base: SessionHeadRef` (generation, revision, leaf and
-  checkpoint) and `turn_index`. Until `AdmitDrive` exists, a direct turn's
-  journaled `ClaimAcceptedTurnInput` outcome (`AcceptedTurnInputDrive::Claimed`)
-  carries the same pair. A replay rebuilds the turn from
-  `SessionCommitStore::load_session_at(base)` and addresses it under the recorded
-  index, never re-reading the live head, which the turn's own commit may have
-  advanced. The store keeps the base checkpoint as a GC root until the
-  session's next admission; a base it no longer holds refuses
-  `TurnBaseNotRetained`, which parks.
+- **Implemented (FIG-3682, FIG-3600 S5a): the root's claim records its base.**
+  `Admitted` records no head. The root's recorded claim step
+  (`ClaimAcceptedTurnInput`, keyed by the root as `drive-claim:{root}`) takes
+  the rows and records, in its `AcceptedTurnInputDrive::Claimed` outcome, the
+  head the root runs on (`base: SessionHeadRef`: generation, revision, leaf
+  and checkpoint) and its `turn_index`. The claim is the one source of truth
+  for the base: a replay reads that outcome back, rebuilds the turn from
+  `SessionCommitStore::load_session_at(base)` and addresses it under the
+  recorded index, never re-reading the live head, which the turn's own commit
+  may have advanced. The store keeps the base checkpoint as a GC root until
+  the session's next admission; a base it no longer holds refuses
+  `TurnBaseNotRetained`, which parks. The claim's identity is the root, not
+  the admission nonce: a later admission of the same root replays the same
+  claim step.
 
 Every other durable operation is reachable only through `Fenced`, which is
 built only from a recorded `SealVerdict::Sealed` or `InheritVerdict::Valid`:
@@ -709,6 +713,9 @@ The seam proof's per-session laws stand, amended:
   transition in the store's epoch history, whatever the number of
   seal-body invocations. Lost replies cause retries, so counting body
   invocations proves nothing.
+  L-S3's claim half is keyed by the root, not by an admission-derived
+  identity: a redrive of the root, under this admission or a later one,
+  replays the one recorded claim and runs on the base it recorded (§2).
 - **L-S6: a later epoch adopts an already-committed root.** After a lost
   commit reply and a takeover, the committed root is preserved, never replaced
   with newer content. `admit` reads the root-addressed terminal evidence

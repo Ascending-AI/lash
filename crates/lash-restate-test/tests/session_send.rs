@@ -51,6 +51,28 @@ fn text(text: impl Into<String>) -> LlmResponse {
     }
 }
 
+fn build_core(
+    backend: &RestateTestBackend,
+    provider: lash_core::facade_support::ProviderHandle,
+    owner: &str,
+) -> lash::LashCore {
+    lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .provider(provider)
+        .model(
+            lash_core::ModelSpec::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        )
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            owner,
+        ))
+        .expect("build the lash core")
+}
+
 async fn world(seed: u64) -> World {
     let backend = lash_restate_test::backend(seed, ServerConfig::default())
         .await
@@ -76,22 +98,7 @@ async fn world(seed: u64) -> World {
             .build()
             .into_handle()
     };
-    let core =
-        lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(provider)
-            .model(
-                lash_core::ModelSpec::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model spec"),
-            )
-            .build(lash_core::LeaseOwnerIdentity::opaque(
-                "lash-restate-test",
-                "session-send",
-            ))
-            .expect("build the lash core");
+    let core = build_core(&backend, provider, "session-send");
     World {
         backend,
         core,
@@ -445,4 +452,26 @@ async fn dropped_schedule_is_reconciled() {
     .await
     .expect("sweep again");
     assert!(again.scheduled.is_empty());
+}
+
+/// LOW-14 (#2290 review): one engine serves one session driver, so a second
+/// core built over the same backend does not drive its own sessions. The
+/// build says so, naming the core whose driver is ignored.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_second_core_over_one_engine_reports_its_ignored_driver() {
+    let world = world(0x5a14).await;
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("second-core")
+        .complete(|_request: LlmRequest| async { Ok::<_, LlmTransportError>(text("second")) })
+        .build()
+        .into_handle();
+    let (second, capture) = lash_core::testing::trace_capture::capturing(|| async {
+        build_core(&world.backend, provider, "second-core")
+    })
+    .await;
+    let ignored = capture.exactly_one("session_driver.install_ignored");
+    assert_eq!(ignored.level, "WARN");
+    assert_eq!(ignored.field("incarnation_id"), "second-core");
+    drop(second);
+    drop(world);
 }
