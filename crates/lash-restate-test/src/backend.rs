@@ -14,11 +14,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core::testing::TestClock;
-use lash_core::{AdmittedScope, ScopedEffectController, StoreSet};
+use lash_core::{
+    AdmittedScope, ScopedEffectController, SessionDriver, SessionWorkEngine, StoreSet,
+};
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
     RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateHttpError,
-    RestateIngressClient, RestateProcessServing, RestateProcessWorkerSlot, turn_workflow_key,
+    RestateIngressClient, RestateProcessServing, RestateProcessWorkerSlot, RestateSessionWork,
+    turn_workflow_key,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -275,6 +278,20 @@ impl RestateTestBackend {
         lash_core::Backend::new(self.restate.clone())
     }
 
+    /// The engine's session work with its own sweep schedule off: every
+    /// answer is `RestateSessionWork`'s, but installing a driver fills the
+    /// slot without starting the wall-clock reconcile interval. A
+    /// scenario that pins one interleaving per seed reconciles explicitly
+    /// through [`SessionDriver::reconcile`] (or
+    /// [`lash_core::drive::reconcile_once`]) when it wants a pass, so a
+    /// seed's grant order never turns on when wall time happens to run
+    /// the sweep's store reads.
+    pub fn explicit_reconcile_session_work(&self) -> Arc<dyn SessionWorkEngine> {
+        Arc::new(ExplicitlyReconciledSessionWork {
+            inner: Arc::clone(self.restate.session_work_engine()),
+        })
+    }
+
     /// lash-restate's own backend value, for APIs that name it.
     pub fn restate(&self) -> &Arc<RestateEngine> {
         &self.restate
@@ -475,6 +492,65 @@ impl RestateTestBackend {
                 ))
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session work without the deployment's sweep schedule
+// ---------------------------------------------------------------------------
+
+/// [`RestateSessionWork`] minus the wall-clock reconcile interval a real
+/// deployment starts when a driver is installed (ADR 0104 O2). Every other
+/// answer is the engine's — sends, attaches, control and live-work reads
+/// included — but an installed driver only fills the
+/// [`lash_restate::RestateSessionDriverSlot`]: nothing ticks until the
+/// scenario reconciles through [`SessionDriver::reconcile`] itself, so a
+/// seeded run never meets a drive ask whose request id and landing point
+/// wall time picked.
+struct ExplicitlyReconciledSessionWork {
+    inner: Arc<RestateSessionWork>,
+}
+
+impl std::fmt::Debug for ExplicitlyReconciledSessionWork {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExplicitlyReconciledSessionWork")
+            .finish_non_exhaustive()
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionWorkEngine for ExplicitlyReconciledSessionWork {
+    fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
+        self.inner.control()
+    }
+
+    fn schedule_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) {
+        self.inner.schedule_drive(session, request);
+    }
+
+    /// The same get-or-init [`RestateSessionWork::install_session_driver`]
+    /// answers, without its spawned interval: the driver a core installs
+    /// serves every drive and answers [`SessionDriver::reconcile`] when a
+    /// scenario calls it, but no sweep runs on wall time.
+    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        self.inner.driver_slot().install(driver)
+    }
+
+    async fn await_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: &lash_core::engine::DriveRequestId,
+    ) -> Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+        self.inner.await_drive(session, request).await
+    }
+
+    async fn session_work_in_flight(&self, session: &lash_core::SessionId) -> bool {
+        self.inner.session_work_in_flight(session).await
     }
 }
 
