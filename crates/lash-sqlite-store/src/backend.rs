@@ -90,7 +90,7 @@ impl SqliteBackendOptions {
 /// the backend and every handle taken from it have dropped.
 #[derive(Clone)]
 pub struct SqliteBackend {
-    stores: SqliteStoreSet,
+    stores: Arc<SqliteStoreSet>,
     effect_host: Arc<SqliteEffectHost>,
 }
 
@@ -252,7 +252,7 @@ impl SqliteBackend {
                 .clone(),
         );
         Ok(Self {
-            stores,
+            stores: Arc::new(stores),
             effect_host,
         })
     }
@@ -548,7 +548,7 @@ impl SqliteStoreSet {
 /// until FIG-3668 deletes it (ADR 0104).
 impl lash_core_execution::EffectEngine for SqliteBackend {
     fn stores(&self) -> Arc<dyn lash_core_execution::StoreSet> {
-        Arc::new(self.stores.clone())
+        self.stores.clone()
     }
 
     fn effect_host(&self) -> Arc<dyn lash_core_execution::EffectHost> {

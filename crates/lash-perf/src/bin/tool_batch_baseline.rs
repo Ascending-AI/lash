@@ -585,8 +585,8 @@ async fn run_restate(
         .endpoint_builder(process_worker)
         .bind(
             ToolBatchProbeImpl {
-                host: backend.effect_host(),
-                stores: Arc::clone(backend.stores()),
+                host: backend.restate_effect_host(),
+                stores: Arc::clone(backend.store_set()),
                 authority: authority.clone(),
                 producers: producers.to_vec(),
             }

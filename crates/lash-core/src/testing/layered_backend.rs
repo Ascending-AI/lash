@@ -79,10 +79,25 @@ impl LayeredBackend {
     }
 
     /// Replace the process registry with `layer` over it.
+    ///
+    /// Refuses when the engine runs its own processes: the backend then
+    /// answers [`Backend::process_registry`] with the process-work wiring's
+    /// registry rather than the store set's, and the layer would be dropped
+    /// without a word. Decorate the store set before the engine is built, or
+    /// build the wiring over the decorated registry with
+    /// [`Self::wire_process_work`].
     pub fn map_process_registry(
         mut self,
         layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
     ) -> Self {
+        assert!(
+            self.process_work.is_none(),
+            "map_process_registry cannot decorate this backend's process \
+             registry: its engine runs its own processes, so the backend \
+             answers with the process-work wiring's registry and the layer \
+             would be dropped — decorate the store set before the engine is \
+             built, or use wire_process_work"
+        );
         self.process_registry = layer(self.process_registry);
         self
     }
@@ -259,5 +274,27 @@ impl StoreSet for LayeredStoreSet {
 
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
         Arc::clone(&self.module_artifacts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A backend whose engine runs its own processes answers
+    /// [`Backend::process_registry`] with the process-work wiring's registry,
+    /// not the store set's, so a layer over the store-set registry would be
+    /// silently dropped. `map_process_registry` refuses that combination.
+    #[tokio::test]
+    #[should_panic(expected = "map_process_registry cannot decorate")]
+    async fn map_process_registry_refuses_an_engine_with_its_own_process_work() {
+        let engine_driven = LayeredBackend::over(crate::testing::memory_backend().await)
+            .wire_process_work(crate::testing::process_work_wiring_for_registry)
+            .into_backend();
+        assert!(
+            engine_driven.process_work().is_some(),
+            "the fixture's engine runs its own processes"
+        );
+        let _ = LayeredBackend::over(engine_driven).map_process_registry(|registry| registry);
     }
 }

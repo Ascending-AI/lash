@@ -951,7 +951,7 @@ finish("done via Restate E2E");
         // one answer, so no tool-child host is installed here — the same shape
         // the conformance suites use.
         backend
-            .effect_host()
+            .restate_effect_host()
             .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
             .expect("register worked effect-group resolver");
         let lash_backend = lash::Backend::new(backend.clone());

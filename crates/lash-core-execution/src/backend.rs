@@ -60,9 +60,9 @@ pub trait EffectEngine: Send + Sync {
     fn build_generation(&self) -> &BuildGeneration;
 
     /// The engine that executes the store set's background processes, when
-    /// the engine runs them itself (the Restate process workflow). `None`
-    /// means the runtime's in-process worker drives the store set's
-    /// registry: the SQLite engine, until FIG-3668 deletes it.
+    /// the engine runs them itself. `None` means the runtime's in-process
+    /// worker drives the store set's registry: the interim in-process
+    /// engine, until FIG-3668 deletes it.
     ///
     /// Required, with no default: a wrapper that forgot to forward it would
     /// silently hand an engine-driven registry to the in-process worker too.
@@ -100,6 +100,11 @@ impl Backend {
     }
 
     /// The store set the engine was built over.
+    ///
+    /// Prefer [`Backend`]'s own port accessors: an engine that runs its own
+    /// processes answers [`Self::process_registry`] with its process-work
+    /// wiring's registry, so `stores().process_registry()` reaches a second,
+    /// undecorated handle.
     pub fn stores(&self) -> Arc<dyn StoreSet> {
         self.engine.stores()
     }
@@ -204,9 +209,10 @@ impl std::fmt::Debug for Backend {
 #[derive(Clone)]
 pub enum BackendQueuedWork {
     /// The runtime's in-process driver claims and runs the work the
-    /// store set holds: the SQLite engine.
+    /// store set holds: the interim in-process engine.
     InProcess,
-    /// The engine's own driver, such as a Restate workflow submitter.
+    /// The engine's own driver, when the engine submits the queued work
+    /// itself.
     Engine(Arc<dyn QueuedWorkSubstrate>),
     /// No driver runs the queued work: the host drains it itself, such as
     /// from its own engine handlers.

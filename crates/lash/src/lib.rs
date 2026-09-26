@@ -135,7 +135,11 @@ pub use lash_core::{
     facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
     facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
-pub use lash_core::{Backend, BackendQueuedWork, EffectEngine, StoreBindingId};
+/// The one substrate a [`LashCore`] takes every persistence port and its
+/// effect host from: one [`EffectEngine`] over one [`StoreSet`] (ADR 0104).
+/// [`LashCore::builder`] requires one; the engine crates behind the
+/// feature-gated modules (`restate`, `sqlite`, `postgres`) build one.
+pub use lash_core::{Backend, BackendQueuedWork, EffectEngine, StoreBindingId, StoreSet};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -855,7 +859,7 @@ pub mod durability {
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
-        EffectHost, StoreSet, TurnCancellationAuthority, facade_support::LeaseTimings,
+        EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
         facade_support::LeaseTimingsError, facade_support::ProcessDrainReport,
         facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
         facade_support::TerminationPolicy,
@@ -1008,7 +1012,11 @@ pub mod s3 {
     pub use lash_s3_store::*;
 }
 
-/// Restate durable-execution substrate.
+/// Restate durable-execution substrate: [`RestateEngine`] over a SQLite or
+/// PostgreSQL store set is the backend a [`LashCore::builder`](crate::LashCore::builder)
+/// takes (ADR 0104).
+///
+/// [`RestateEngine`]: lash_restate::RestateEngine
 #[cfg(feature = "restate")]
 pub mod restate {
     pub use lash_restate::*;

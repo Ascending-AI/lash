@@ -315,7 +315,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                 // the host's one answer, so no tool-child host is installed —
                 // the same shape the conformance suites use.
                 backend
-                    .effect_host()
+                    .restate_effect_host()
                     .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
                     .map_err(|err| err.to_string())?;
                 restate_backend = Some(Arc::clone(&backend));

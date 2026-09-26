@@ -261,11 +261,11 @@ impl lash::persistence::RuntimePersistenceDecorator for GatedRuntimePersistence 
 /// `inner` with its session catalog replaced by `catalog`, so a backend
 /// over it opens sessions through the admission gate.
 pub(crate) struct GatedStoreSet {
-    pub(super) inner: Arc<dyn lash::durability::StoreSet>,
+    pub(super) inner: Arc<dyn lash::StoreSet>,
     pub(super) catalog: Arc<dyn lash::persistence::SessionStoreFactory>,
 }
 
-impl lash::durability::StoreSet for GatedStoreSet {
+impl lash::StoreSet for GatedStoreSet {
     fn binding_identity(&self) -> &lash::StoreBindingId {
         self.inner.binding_identity()
     }

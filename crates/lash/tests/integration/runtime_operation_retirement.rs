@@ -408,7 +408,7 @@ struct WithHost {
 }
 
 impl lash::EffectEngine for WithHost {
-    fn stores(&self) -> Arc<dyn lash::durability::StoreSet> {
+    fn stores(&self) -> Arc<dyn lash::StoreSet> {
         self.inner.stores()
     }
 

@@ -434,7 +434,7 @@ mod tests {
                 .expect("effect invocation has identity"),
         );
         lash_core::testing::code_execution_context_with_invocation(
-            &crate::lib_tests::memory_backend().await,
+            &lash_core::Backend::from(crate::lib_tests::memory_backend().await),
             invocation,
         )
     }

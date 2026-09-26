@@ -1364,8 +1364,8 @@ impl LashCoreBuilder {
     /// append is also emitted. See [`ProcessEventSink`] for the full contract.
     ///
     /// Event emission applies to the in-process registry path; a backend
-    /// that supplies its own process work (the Restate backend) installs
-    /// the sink through its own constructor.
+    /// whose engine runs its own processes installs the sink through its
+    /// own constructor.
     ///
     /// Worker faults are not registry events and do not follow that split: the
     /// durable process worker this core configures reports every
