@@ -36,11 +36,22 @@ pub struct EffectGroupShape {
     /// records that no production caller of `open_effect_group` exists, so no
     /// deployment can be holding a group whose state predates this field.
     pub membership: Vec<String>,
+    /// The admitted scope of the controller that opened the group: the
+    /// authority every child runs under (ADR 0099 §1). A child invocation
+    /// mints its controller from its own context, and a timer or durable-wait
+    /// child has no request of its own that names an admission, so its
+    /// controller is admitted from this record, pinned to the opener's process
+    /// incarnation when the opener is a process, before it is routed through
+    /// the host's stack (FIG-3780).
+    #[serde(with = "lash_core::admitted_scope_wire")]
+    pub opener: lash_core::AdmittedScope,
 }
 
 impl EffectGroupShape {
+    /// The shape `opener` opens `group` with.
     pub(crate) fn from_group(
         group: &RuntimeEffectGroup,
+        opener: &lash_core::AdmittedScope,
     ) -> Result<Self, RuntimeEffectControllerError> {
         let replay_keys = group
             .children()
@@ -69,6 +80,7 @@ impl EffectGroupShape {
             replay_keys,
             wait_scope,
             membership,
+            opener: opener.clone(),
         })
     }
 

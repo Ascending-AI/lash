@@ -198,6 +198,24 @@ impl ConformanceExecutors {
 }
 
 impl GroupExecutors for ConformanceExecutors {
+    /// The installed resolver's routing: a law that installs one which
+    /// routes through a layer sees the endpoint's wait children cross it.
+    fn route_handler_child_controller<'run>(
+        &self,
+        controller: lash_core::ScopedEffectController<'run>,
+    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        let current = self
+            .current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .cloned();
+        match current {
+            Some(executors) => executors.route_handler_child_controller(controller),
+            None => Ok(controller),
+        }
+    }
+
     fn executor_for(
         &self,
         envelope: &RuntimeEffectEnvelope,
@@ -703,6 +721,11 @@ impl LiveConformanceHarness {
     /// endpoint's dispatch invocations route tool children through.
     pub(super) fn endpoint_host(&self) -> Arc<dyn lash_core::EffectHost> {
         Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>
+    }
+
+    /// Makes `executors` the endpoint's current group-child resolver.
+    pub(super) fn install_executors(&self, executors: Arc<dyn GroupExecutors>) {
+        self.executors.install(executors);
     }
 
     /// A per-run discriminator for law identities: the Restate server's
@@ -2208,6 +2231,7 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
             .iter()
             .map(|child| serde_json::to_string(child).expect("witness child serializes"))
             .collect(),
+        opener: lash_core::AdmittedScope::turn("session", "turn"),
     }
 }
 

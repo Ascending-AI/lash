@@ -27,6 +27,10 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
 {
+    // One layered host for the whole law: a runtime installs its tool-child
+    // host get-or-init, so a host layered afresh per execution would strand
+    // every later execution's group children (see `LawSeamHost`).
+    let host = LawSeamHost::over(host);
     let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
     for action in cold_process::ColdProcessTurnAction::CANCEL_CRASH_ACTIONS {
         let point = action
@@ -38,7 +42,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
         seed_reference_ingress(&store, &identity, &scenario).await;
         let address = crate::TurnAddress::new(&identity.session_id, &identity.turn_id);
         let receipt = crate::TurnWorkDriver::for_session(
-            Arc::clone(&host),
+            host.host(),
             identity.session_id.to_string(),
             Arc::clone(&store),
         )
@@ -71,7 +75,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
          -> crate::ConformanceTurnAttempt {
             let stores = Arc::clone(&stores);
             let store = Arc::clone(&store);
-            let host = Arc::clone(&host);
+            let host = host.clone();
             let identity = identity.clone();
             let seam = SeamLayer {
                 control,
@@ -82,7 +86,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
             Arc::new(move |scoped| {
                 let stores = Arc::clone(&stores);
                 let store = SeamStore::wrap(Arc::clone(&store), seam.control.clone());
-                let host = Arc::clone(&host);
+                let host = host.clone();
                 let identity = identity.clone();
                 let seam = seam.clone();
                 let ends = ends.clone();

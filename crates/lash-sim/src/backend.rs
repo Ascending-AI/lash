@@ -120,6 +120,16 @@ impl SimEngine {
                 let build = Arc::clone(&build);
                 let slot = Arc::clone(&slot);
                 Box::pin(async move {
+                    // The handler minted the drain's controller from its own
+                    // context, so it crosses the host's stack here, once.
+                    let scoped = match session.effect_host().route_handler_child_controller(scoped)
+                    {
+                        Ok(scoped) => scoped,
+                        Err(err) => {
+                            *slot.lock_recover() = Some(Err(err.into()));
+                            return;
+                        }
+                    };
                     let collected = CollectedTurnActivity::default();
                     let drained = build(&session)
                         .drain_id(drain_id)
@@ -188,6 +198,16 @@ impl SimEngine {
                 let build = Arc::clone(&build);
                 let slot = Arc::clone(&slot);
                 Box::pin(async move {
+                    // The handler minted the turn's controller from its own
+                    // context, so it crosses the host's stack here, once.
+                    let scoped = match session.effect_host().route_handler_child_controller(scoped)
+                    {
+                        Ok(scoped) => scoped,
+                        Err(err) => {
+                            *slot.lock_recover() = Some(Err(err.into()));
+                            return;
+                        }
+                    };
                     let result = async {
                         build(&session)?
                             .turn_id(turn_id)
@@ -262,6 +282,18 @@ impl DecoratedBackend {
         Self {
             layered: self.layered.map_session_store_factory(|factory| {
                 Arc::new(ObservedSessionStoreFactory::new(factory, collector))
+            }),
+        }
+    }
+
+    /// Wrap the effect host in `layer`, once: every controller this
+    /// backend's host lends or routes then crosses the layer. One wrapper for
+    /// the backend's lifetime, since a runtime installs its tool-child host
+    /// get-or-init and holds the installing host weakly.
+    pub fn with_effect_layer(self, layer: Arc<dyn lash_core::testing::EffectLayer>) -> Self {
+        Self {
+            layered: self.layered.map_effect_host(|host| {
+                Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer))
             }),
         }
     }

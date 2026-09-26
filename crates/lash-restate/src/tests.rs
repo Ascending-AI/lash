@@ -156,6 +156,7 @@ mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;
 mod effect_group_shape;
+mod effect_layer_wait_children;
 mod endpoint_protocol;
 mod journal_cut_runner;
 mod live_turn_probe;

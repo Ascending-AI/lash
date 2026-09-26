@@ -212,6 +212,62 @@ impl From<AdmittedScopeError> for RuntimeError {
     }
 }
 
+/// The wire shape of an admitted scope, for `#[serde(with = ...)]`: the bare
+/// pair, re-checked at decode.
+///
+/// [`AdmittedScope`] does not implement `Deserialize` on purpose: its only
+/// construction is [`AdmittedScope::new`], which refuses a process scope with
+/// no incarnation, a pin naming another process, or a pin on a non-process
+/// scope. A durable shape that carries one (a tool child's request, a Restate
+/// effect group's opener) carries the two halves plainly so it stays legible,
+/// and decoding runs the check again rather than trusting the bytes: a
+/// hand-edited or cross-version entry cannot smuggle in the half-admitted pair
+/// the type exists to make unrepresentable.
+pub mod wire {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::AdmittedScope;
+    use crate::ExecutionScope;
+    use crate::process_identity::ProcessRef;
+
+    /// The serialized pair: the claim address and, for a process claim, the
+    /// incarnation the admission authority bound.
+    #[derive(Serialize, Deserialize)]
+    struct AdmittedScopeWire {
+        scope: ExecutionScope,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        process: Option<ProcessRef>,
+    }
+
+    /// Serializes `admitted` as its two halves.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `serializer` reports.
+    pub fn serialize<S: Serializer>(
+        admitted: &AdmittedScope,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        AdmittedScopeWire {
+            scope: admitted.scope().clone(),
+            process: admitted.process_ref().cloned(),
+        }
+        .serialize(serializer)
+    }
+
+    /// Decodes the two halves and admits them through [`AdmittedScope::new`].
+    ///
+    /// # Errors
+    ///
+    /// A malformed pair, or one [`AdmittedScope::new`] refuses.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<AdmittedScope, D::Error> {
+        let wire = AdmittedScopeWire::deserialize(deserializer)?;
+        AdmittedScope::new(wire.scope, wire.process).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

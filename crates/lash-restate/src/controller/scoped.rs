@@ -74,7 +74,7 @@ where
         ScopedEffectController::owned(
             Arc::new(scope_recording::ScopeRecordingController {
                 inner: self,
-                scope: admitted.scope().clone(),
+                admitted: admitted.clone(),
                 binding: None,
             }),
             admitted,
@@ -97,7 +97,7 @@ where
         ScopedEffectController::owned(
             Arc::new(scope_recording::ScopeRecordingController {
                 inner: self,
-                scope: admitted.scope().clone(),
+                admitted: admitted.clone(),
                 binding: Some(binding),
             }),
             admitted,

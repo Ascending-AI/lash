@@ -318,6 +318,7 @@ mod admission_tests {
                 replay_keys: vec!["child-0".to_owned()],
                 wait_scope: ExecutionScope::runtime_operation("group"),
                 membership: vec!["{}".to_owned()],
+                opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             next_rank: 1,
             next_commit_seq: 1,
