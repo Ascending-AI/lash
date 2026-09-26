@@ -49,6 +49,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
                     ordinal: 1,
                 },
             },
+            Vec::new(),
             &authority,
         )
         .await

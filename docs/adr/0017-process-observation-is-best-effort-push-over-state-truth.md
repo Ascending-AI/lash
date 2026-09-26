@@ -13,7 +13,10 @@ must not confuse them:
   is the complete, ordered, crash-durable record of a process's events.
 - A `ProcessEventSink` is **best-effort freshness**, never truth. When a host
   installs a sink, the `WatchedProcessRegistry` decorator calls `sink.emit(...)`
-  after each successful `append_event`, in that pod's per-process append order.
+  after each successful write, for every event it committed, in that pod's
+  per-process append order. A batch (`append_events`, or a boundary write with
+  its prelude; ADR 0100 R4) is one write: its events reach the sink after its
+  one commit, in batch order.
   There is no buffering, no retry, and no delivery guarantee across pod crashes
   or restarts: an event written durably may never reach the sink. Consumers that
   need completeness reconcile from the event log — typically at terminal time.

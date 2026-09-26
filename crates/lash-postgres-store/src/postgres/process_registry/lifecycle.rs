@@ -2,14 +2,16 @@ use super::*;
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
-    async fn complete_process(
+    async fn complete_process_with_prelude(
         &self,
         process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: lash_core_execution::ProcessCompletionAuthority,
     ) -> Result<lash_core_execution::ProcessCompletionOutcome, PluginError> {
         // Load (FOR UPDATE), validate the authority against the row's declared
-        // disposition, and append the terminal event as one transaction. The
+        // disposition, and append the run's terminal batch (`prelude`, then the
+        // terminal event, one process save; FIG-3571) as one transaction. The
         // `FOR UPDATE` row lock held from the load through the commit is the
         // guard: under READ COMMITTED a concurrent complete→prune→re-register
         // would otherwise change the disposition between a separate read and the
@@ -32,18 +34,32 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             ));
         }
         authority.validate(&record, &await_output)?;
+        let occurred_at_ms = self.clock.timestamp_ms();
+        let mut batch = ProcessEventBatch::default();
+        for request in prelude {
+            batch
+                .stage(
+                    &mut tx,
+                    &mut record,
+                    request,
+                    occurred_at_ms,
+                    self.wake_delivery_config,
+                )
+                .await?;
+        }
         let request =
             facade_support::terminal_append_request(process_id, &await_output, Some(&authority));
-        let occurred_at_ms = self.clock.timestamp_ms();
-        let (_, arm) = apply_process_event_append_tx(
-            &mut tx,
-            &mut record,
-            request,
-            occurred_at_ms,
-            self.wake_delivery_config,
-            ProcessEventWriteAuthorization::Preauthorized,
-        )
-        .await?;
+        let (_, arm) = batch
+            .stage_arm(
+                &mut tx,
+                &mut record,
+                request,
+                occurred_at_ms,
+                self.wake_delivery_config,
+                ProcessEventWriteAuthorization::Preauthorized,
+            )
+            .await?;
+        batch.commit(&mut tx, &record).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(match arm {
             ProcessEventAppendArm::Replayed => {
@@ -344,6 +360,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         &self,
         process_id: &ProcessId,
         wait: lash_core_execution::WaitState,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
@@ -353,24 +370,38 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             &mut tx, process_id, &record, authority, None, lease_now,
         )
         .await?;
-        let request = match lash_core_execution::runtime::prepare_process_transition(
-            &record,
-            ProcessTransition::EnterWait(wait),
-        )? {
-            ProcessTransitionPlan::Unchanged => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(record);
-            }
-            ProcessTransitionPlan::Append(request) => *request,
-        };
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            request,
-            self.clock.timestamp_ms(),
-            self.wake_delivery_config,
-        )
-        .await?;
+        let occurred_at_ms = self.clock.timestamp_ms();
+        // The run's pending prelude commits ahead of the transition, in its
+        // transaction (FIG-3571).
+        let mut batch = ProcessEventBatch::default();
+        for request in prelude {
+            batch
+                .stage(
+                    &mut tx,
+                    &mut record,
+                    request,
+                    occurred_at_ms,
+                    self.wake_delivery_config,
+                )
+                .await?;
+        }
+        if let ProcessTransitionPlan::Append(request) =
+            lash_core_execution::runtime::prepare_process_transition(
+                &record,
+                ProcessTransition::EnterWait(wait),
+            )?
+        {
+            batch
+                .stage(
+                    &mut tx,
+                    &mut record,
+                    *request,
+                    occurred_at_ms,
+                    self.wake_delivery_config,
+                )
+                .await?;
+        }
+        batch.commit(&mut tx, &record).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
@@ -378,6 +409,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     async fn clear_process_wait_with_authority(
         &self,
         process_id: &ProcessId,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
@@ -385,24 +417,37 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
             .await?;
-        let request = match lash_core_execution::runtime::prepare_process_transition(
-            &record,
-            ProcessTransition::ClearWait,
-        )? {
-            ProcessTransitionPlan::Unchanged => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(record);
-            }
-            ProcessTransitionPlan::Append(request) => *request,
-        };
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            request,
-            now,
-            self.wake_delivery_config,
-        )
-        .await?;
+        // The run's pending prelude commits ahead of the transition, in its
+        // transaction (FIG-3571).
+        let mut batch = ProcessEventBatch::default();
+        for request in prelude {
+            batch
+                .stage(
+                    &mut tx,
+                    &mut record,
+                    request,
+                    now,
+                    self.wake_delivery_config,
+                )
+                .await?;
+        }
+        if let ProcessTransitionPlan::Append(request) =
+            lash_core_execution::runtime::prepare_process_transition(
+                &record,
+                ProcessTransition::ClearWait,
+            )?
+        {
+            batch
+                .stage(
+                    &mut tx,
+                    &mut record,
+                    *request,
+                    now,
+                    self.wake_delivery_config,
+                )
+                .await?;
+        }
+        batch.commit(&mut tx, &record).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }

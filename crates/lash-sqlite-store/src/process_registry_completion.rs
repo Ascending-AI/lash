@@ -1,10 +1,14 @@
 //! Atomic, lease-fenced terminal process completion.
 
-use super::process_registry::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
+use super::process_registry::{
+    ProcessEventAppendArm, ProcessEventBatch, ProcessEventWriteAuthorization, tx_outcome,
+};
 use super::*;
 use lash_sansio::ProcessId;
 
-/// Unleased terminal completion, validated and appended as one atomic unit.
+/// Unleased terminal completion, validated and appended as one atomic unit,
+/// with the run's terminal batch (`prelude`) ahead of the terminal event and
+/// one process save (FIG-3571).
 ///
 /// The load, the authority-vs-disposition validation, and the terminal append
 /// all run inside a single `write_flow` transaction. Splitting validation
@@ -17,6 +21,7 @@ pub(super) async fn complete_process(
     registry: &SqliteProcessRegistry,
     process_id: &ProcessId,
     await_output: ProcessAwaitOutput,
+    prelude: Vec<ProcessEventAppendRequest>,
     authority: lash_core_execution::ProcessCompletionAuthority,
 ) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError> {
     let process_id = process_id.clone();
@@ -44,12 +49,16 @@ pub(super) async fn complete_process(
                 // complete→prune→re-register with a different disposition cannot
                 // slip between the check and the append.
                 authority.validate(&record, &await_output)?;
+                let mut batch = ProcessEventBatch::default();
+                for request in prelude {
+                    batch.stage(tx, &mut record, request, now, wake_delivery_config)?;
+                }
                 let request = lash_core_execution::facade_support::terminal_append_request(
                     &process_id,
                     &await_output,
                     Some(&authority),
                 );
-                let (_, arm) = SqliteProcessRegistry::apply_process_event_append_conn(
+                let (_, arm) = batch.stage_arm(
                     tx,
                     &mut record,
                     request,
@@ -57,6 +66,7 @@ pub(super) async fn complete_process(
                     wake_delivery_config,
                     ProcessEventWriteAuthorization::Preauthorized,
                 )?;
+                batch.commit(tx, &record)?;
                 Ok(match arm {
                     ProcessEventAppendArm::Replayed { .. } => {
                         lash_core_execution::ProcessCompletionOutcome::AlreadyApplied {

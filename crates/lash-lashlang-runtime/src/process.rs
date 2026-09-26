@@ -102,9 +102,13 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// v22 (FIG-3707) embeds VM continuation v25, whose heap may hold a binding
 /// cell. A v21 segment holds v24 continuations, so it is refused rather than
 /// decoded.
+/// v23 (FIG-3571) carries the run's pending effect-summary occurrences, which
+/// the successor commits at its first boundary. A v22 segment committed each
+/// occurrence as it was recorded and carries none, so it is refused rather
+/// than decoded.
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 22;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 23;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -196,6 +200,13 @@ struct LashlangSegmentState {
     /// segment incorporates against the same set so a redrive cannot
     /// re-apply a settlement or re-charge a usage delta.
     incorporation_ledger: lash_core::session::IncorporationLedger,
+    /// Effect occurrences within the durable summary's per-node cap that no
+    /// boundary has committed yet (FIG-3571). The successor segment commits
+    /// them with its first boundary write; re-committing one a crashed
+    /// successor already wrote is a replay-key no-op. Bounded by construction:
+    /// at most [`lash_core::PROCESS_EFFECT_OCCURRENCE_CAP`] per execution site
+    /// of the compiled program.
+    pending_summary: Vec<lash_core::ProcessEffectSummaryOccurrence>,
     /// Effect occurrences past the durable summary's per-node cap, counted by
     /// outcome class (FIG-3464). A successor segment keeps counting from here
     /// and the run's terminal omission record carries the total.
@@ -599,12 +610,14 @@ pub async fn run_lashlang_process(
         ordinals,
         child_max_attempts,
         cancellation: cancellation.clone(),
-        effect_summary: EffectSummaryWriter::restore(
-            segment_state
-                .as_ref()
-                .map(|state| state.effect_omissions.clone())
-                .unwrap_or_default(),
-        ),
+        effect_summary: segment_state
+            .as_ref()
+            .map_or_else(EffectSummaryWriter::default, |state| {
+                EffectSummaryWriter::restore(
+                    state.pending_summary.clone(),
+                    state.effect_omissions.clone(),
+                )
+            }),
     };
     let env = lashlang::ExecutionEnvironment::new(&host)
         .process()
@@ -622,22 +635,29 @@ pub async fn run_lashlang_process(
         )
         .await
     };
-    // The omission record precedes the terminal event the runner appends
-    // next; a run that failed an incorporation writes nothing more.
-    let mut incorporation_fault = host.effect_summary.take_incorporation_fault();
     // A body refused at its journal (FIG-3586) stopped where it diverged: it
-    // writes nothing more — no omission record, no group finalization — and
-    // its refusal surfaces from the run guard below as infrastructure, so the
+    // writes nothing more — no summary, no group finalization — and its
+    // refusal surfaces from the run guard below as infrastructure, so the
     // process stays non-terminal and every redrive refuses again with nothing
     // dispatched until an operator acts.
     let refused = host.ctx.nested_replay_mismatch().is_some();
+    // A run whose summary failed to commit at a boundary stopped there: it
+    // writes nothing more, and reports the failure as infrastructure below.
+    let incorporation_fault = host.effect_summary.take_incorporation_fault();
+    let mut output = output;
     if !refused && incorporation_fault.is_none() && output.is_terminal() {
         // A body that ends must end where the run that wrote its journal
         // ended (FIG-3586). Its terminal is the registry's to record, so it
         // journals no seal of its own.
         host.commands().close_unsealed().await;
-        host.record_effect_omissions().await;
-        incorporation_fault = host.effect_summary.take_incorporation_fault();
+        // The run's terminal batch (FIG-3571): its pending occurrences, then
+        // its omission record, ahead of the terminal event the runner commits
+        // in the same transaction.
+        if let lash_core::ProcessRunOutcome::Terminal { prelude, .. } = &mut output {
+            *prelude = host
+                .effect_summary
+                .terminal_prelude(host.identities.effect_omissions());
+        }
     }
     drop(env);
     // A process terminal is the process opener's end (ADR 0099 §7): every
@@ -762,6 +782,7 @@ async fn execute_lashlang(
                             started_process_ids: host.ctx.started_process_ids(),
                             child_max_attempts: host.child_max_attempts,
                             incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
+                            pending_summary: host.effect_summary.pending(),
                             effect_omissions: host.effect_summary.omissions(),
                             outstanding_groups: host.ctx.outstanding_groups_snapshot(),
                         };
@@ -843,9 +864,16 @@ trait SignalWaitProcesses: Send + Sync {
         lash_core::PluginError,
     >;
 
-    async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError>;
+    async fn set_wait(
+        &self,
+        wait: lash_core::WaitState,
+        prelude: Vec<lash_core::ProcessEventAppendRequest>,
+    ) -> Result<(), lash_core::PluginError>;
 
-    async fn clear_wait(&self) -> Result<(), lash_core::PluginError>;
+    async fn clear_wait(
+        &self,
+        prelude: Vec<lash_core::ProcessEventAppendRequest>,
+    ) -> Result<(), lash_core::PluginError>;
 
     async fn is_terminal(&self) -> Result<bool, lash_core::PluginError>;
 }
@@ -872,12 +900,19 @@ impl SignalWaitProcesses for lash_core::facade_support::ProcessEngineProcessCont
         .await
     }
 
-    async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError> {
-        self.set_wait(wait).await.map(|_| ())
+    async fn set_wait(
+        &self,
+        wait: lash_core::WaitState,
+        prelude: Vec<lash_core::ProcessEventAppendRequest>,
+    ) -> Result<(), lash_core::PluginError> {
+        self.set_wait(wait, prelude).await.map(|_| ())
     }
 
-    async fn clear_wait(&self) -> Result<(), lash_core::PluginError> {
-        self.clear_wait().await.map(|_| ())
+    async fn clear_wait(
+        &self,
+        prelude: Vec<lash_core::ProcessEventAppendRequest>,
+    ) -> Result<(), lash_core::PluginError> {
+        self.clear_wait(prelude).await.map(|_| ())
     }
 
     async fn is_terminal(&self) -> Result<bool, lash_core::PluginError> {
@@ -917,6 +952,7 @@ async fn establish_signal_wait(
     event_type: String,
     key: String,
     ordinal: u64,
+    prelude: Vec<lash_core::ProcessEventAppendRequest>,
 ) -> Result<(), SignalWaitSetupError> {
     let since_ms = wait_since_ms(processes, &key)
         .await
@@ -930,7 +966,7 @@ async fn establish_signal_wait(
             ordinal,
         },
     };
-    let written = processes.set_wait(wait).await;
+    let written = processes.set_wait(wait, prelude).await;
     settle_wait_write(processes, written)
         .await
         .map_err(SignalWaitSetupError::Set)?;
@@ -1112,8 +1148,7 @@ impl LashlangProcessHost<'_> {
                 .await;
                 commands.finish(&in_flight)?;
                 if let Some(call_site) = &call_site {
-                    self.record_tool_reply(call_site, &host_operation, &replay_key, &reply)
-                        .await;
+                    self.record_tool_reply(call_site, &host_operation, &replay_key, &reply);
                 }
                 protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
             }
@@ -1161,17 +1196,20 @@ impl LashlangProcessHost<'_> {
         let command = commands.issue()?;
         let in_flight = commands.enter(command, crate::CommandShape::Silent).await?;
         let ordinal = self.ordinals.event_sequence.fetch_add(1, Ordering::Relaxed);
-        let appended = self
-            .ctx
-            .append_process_event(
-                lash_core::ProcessEventAppendRequest::new(
-                    event_type,
-                    process_event_payload(&event.value)?,
-                )
-                .with_replay_key(format!("process:{}:event:{ordinal}", self.process_id)),
+        // The body's event is a run boundary: the run's pending summary
+        // commits ahead of it in the same batch (FIG-3571).
+        let summary = self.effect_summary.prelude();
+        let mut batch = summary.requests.clone();
+        batch.push(
+            lash_core::ProcessEventAppendRequest::new(
+                event_type,
+                process_event_payload(&event.value)?,
             )
-            .await;
+            .with_replay_key(format!("process:{}:event:{ordinal}", self.process_id)),
+        );
+        let appended = self.ctx.append_process_events(batch).await.map(|_| ());
         commands.finish(&in_flight)?;
+        self.settle_boundary(&summary, &appended);
         appended.map_err(|error| LashlangHostError::AppendProcessEvent {
             message: error.to_string(),
         })?;
@@ -1229,8 +1267,7 @@ impl LashlangProcessHost<'_> {
                 outcome_class,
                 None,
                 &in_flight.command.key.sleep(),
-            )
-            .await;
+            );
         }
         slept.map_err(|error| {
             commands.journal_error(&in_flight, error, |error| {
@@ -1282,33 +1319,39 @@ impl LashlangProcessHost<'_> {
         );
         // The wait-state write is a step the engine records: a redrive after
         // the terminal is stored replays its answer instead of meeting a
-        // registry that refuses a terminal process's wait (FIG-3673).
+        // registry that refuses a terminal process's wait (FIG-3673). It is a
+        // run boundary, so the run's pending summary commits with it
+        // (FIG-3571).
         let processes = self.processes.clone();
         let step_key = key.clone();
         let step_name = name.clone();
-        self.ctx
-            .record_process_drive_step(
-                format!("lash.process.wait.enter:{key}"),
-                Box::pin(async move {
-                    establish_signal_wait(
-                        &processes,
-                        step_name,
-                        event_type,
-                        step_key,
-                        event_ordinal,
-                    )
-                    .await
-                    .map_err(|error| match error {
-                        SignalWaitSetupError::Read(error) | SignalWaitSetupError::Set(error) => {
-                            error
-                        }
-                    })
-                }),
-            )
-            .await
-            .map_err(|error| LashlangHostError::SetSignalWait {
-                message: error.to_string(),
-            })?;
+        let summary = self.effect_summary.prelude();
+        let prelude = summary.requests.clone();
+        let entered =
+            self.ctx
+                .record_process_drive_step(
+                    format!("lash.process.wait.enter:{key}"),
+                    Box::pin(async move {
+                        establish_signal_wait(
+                            &processes,
+                            step_name,
+                            event_type,
+                            step_key,
+                            event_ordinal,
+                            prelude,
+                        )
+                        .await
+                        .map_err(|error| match error {
+                            SignalWaitSetupError::Read(error)
+                            | SignalWaitSetupError::Set(error) => error,
+                        })
+                    }),
+                )
+                .await;
+        self.settle_boundary(&summary, &entered);
+        entered.map_err(|error| LashlangHostError::SetSignalWait {
+            message: error.to_string(),
+        })?;
         if let Some(call_site) = &call_site {
             self.lashlang_execution_trace.emit_waiting(
                 call_site,
@@ -1344,18 +1387,22 @@ impl LashlangProcessHost<'_> {
             })
         })?;
         let processes = self.processes.clone();
-        self.ctx
+        let summary = self.effect_summary.prelude();
+        let prelude = summary.requests.clone();
+        let cleared = self
+            .ctx
             .record_process_drive_step(
                 format!("lash.process.wait.clear:{key}"),
                 Box::pin(async move {
-                    let cleared = SignalWaitProcesses::clear_wait(&processes).await;
+                    let cleared = SignalWaitProcesses::clear_wait(&processes, prelude).await;
                     settle_wait_write(&processes, cleared).await
                 }),
             )
-            .await
-            .map_err(|error| LashlangHostError::ClearSignalWait {
-                message: error.to_string(),
-            })?;
+            .await;
+        self.settle_boundary(&summary, &cleared);
+        cleared.map_err(|error| LashlangHostError::ClearSignalWait {
+            message: error.to_string(),
+        })?;
         if let Some(call_site) = &call_site
             && !self.cancellation.is_cancelled()
         {

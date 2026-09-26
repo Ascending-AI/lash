@@ -355,6 +355,8 @@ macro_rules! process_registry_tests {
                 (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
                 (generic_append_rejects_reserved_edge_audit_events, "reserved-edge-events"),
                 (canonical_process_event_payload_replay, "canonical-event-replay"),
+                (a_process_event_batch_is_one_commit, "process-event-batch"),
+                (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (count_events_through_counts_every_event_at_any_top_bound, "count-events-through-top-bound"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (wake_subscription_is_indexed_and_retargetable, "wake-subscription"),

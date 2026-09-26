@@ -19,7 +19,9 @@ The governing invariant is:
 
 Registration supplies the immutable base of the fold. Every subsequent process
 transition is an event. The store inserts that event and saves its projected
-record in the same transaction. Reads continue to use the stored projection;
+record in the same transaction. A batch of events (a run boundary's summary
+prelude and its transition; ADR 0100 R4) folds each event in order exactly as
+appending it alone would and saves the projected record once. Reads continue to use the stored projection;
 they do not refold the log.
 
 The former `wake_target` exception is closed. Wake subscription is queryable

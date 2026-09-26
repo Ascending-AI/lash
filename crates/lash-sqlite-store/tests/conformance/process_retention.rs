@@ -43,6 +43,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
                     ordinal: 1,
                 },
             },
+            Vec::new(),
             &authority,
         )
         .await

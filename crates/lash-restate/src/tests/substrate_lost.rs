@@ -161,6 +161,7 @@ impl RestateProcessRunner for EffectRunner {
         }
         Ok(lash_core::ProcessRunOutcome::Terminal {
             output: Box::new(process_success(serde_json::json!("ran"))),
+            prelude: Vec::new(),
         })
     }
 }

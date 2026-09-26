@@ -41,6 +41,8 @@ use serde::Serialize;
 use crate::durable_wait::restate_await_event_key_for_authority;
 use crate::ingress::{RestateConnection, RestateIngressClient};
 
+#[cfg(test)]
+pub(crate) use workflow::complete_process_outcome;
 pub(crate) use workflow::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
 };

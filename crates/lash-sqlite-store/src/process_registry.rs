@@ -28,7 +28,9 @@ pub(crate) mod worklist;
 use sql::process_sql;
 use support::cancel_requested_at_ms;
 use support::process_status_label;
-pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
+pub(crate) use support::{
+    ProcessEventAppendArm, ProcessEventBatch, ProcessEventWriteAuthorization, tx_outcome,
+};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
 #[async_trait::async_trait]
@@ -488,18 +490,20 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
         Ok(result)
     }
 
-    async fn append_event_with_authority(
+    async fn append_events(
         &self,
         process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
+        requests: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendReceipt, lash_core_execution::PluginError> {
+    ) -> Result<Vec<ProcessEventAppendReceipt>, lash_core_execution::PluginError> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
         let process_id = process_id.clone();
         let authority = authority.clone();
         let occurred_at_ms = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
-        let (result, _appended) = self
-            .conn
+        self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
@@ -511,18 +515,17 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                         None,
                         occurred_at_ms,
                     )?;
-                    Self::append_event_conn(
+                    Self::append_event_batch_conn(
                         tx,
                         &mut record,
-                        request,
+                        requests,
                         occurred_at_ms,
                         wake_delivery_config,
                     )
                 })()))
             })
             .await
-            .map_err(process_sqlite_error)??;
-        Ok(result)
+            .map_err(process_sqlite_error)?
     }
 
     async fn event_page_after(
@@ -675,21 +678,23 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
-    async fn complete_process(
+    async fn complete_process_with_prelude(
         &self,
         process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: lash_core_execution::ProcessCompletionAuthority,
     ) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError>
     {
         // Load, validate the authority against the row's declared disposition,
-        // and append the terminal event as one atomic transaction, so a
-        // concurrent complete→prune→re-register cannot slip a different
-        // disposition between the validation and the append.
+        // and append the prelude and the terminal event as one atomic
+        // transaction, so a concurrent complete→prune→re-register cannot slip
+        // a different disposition between the validation and the append.
         super::process_registry_completion::complete_process(
             self,
             process_id,
             await_output,
+            prelude,
             authority,
         )
         .await
@@ -946,6 +951,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         wait: lash_core_execution::WaitState,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
         let process_id = process_id.clone();
@@ -964,21 +970,21 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         None,
                         now,
                     )?;
-                    match lash_core_execution::runtime::prepare_process_transition(
-                        &record,
-                        ProcessTransition::EnterWait(wait),
-                    )? {
-                        ProcessTransitionPlan::Unchanged => return Ok(record),
-                        ProcessTransitionPlan::Append(request) => {
-                            Self::append_event_conn(
-                                tx,
-                                &mut record,
-                                *request,
-                                now,
-                                wake_delivery_config,
-                            )?;
-                        }
+                    // The run's pending prelude commits ahead of the
+                    // transition, in its transaction (FIG-3571).
+                    let mut batch = ProcessEventBatch::default();
+                    for request in prelude {
+                        batch.stage(tx, &mut record, request, now, wake_delivery_config)?;
                     }
+                    if let ProcessTransitionPlan::Append(request) =
+                        lash_core_execution::runtime::prepare_process_transition(
+                            &record,
+                            ProcessTransition::EnterWait(wait),
+                        )?
+                    {
+                        batch.stage(tx, &mut record, *request, now, wake_delivery_config)?;
+                    }
+                    batch.commit(tx, &record)?;
                     Ok(record)
                 })()))
             })
@@ -989,6 +995,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
     async fn clear_process_wait_with_authority(
         &self,
         process_id: &ProcessId,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
         let process_id = process_id.clone();
@@ -1007,21 +1014,21 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         None,
                         now,
                     )?;
-                    match lash_core_execution::runtime::prepare_process_transition(
-                        &record,
-                        ProcessTransition::ClearWait,
-                    )? {
-                        ProcessTransitionPlan::Unchanged => return Ok(record),
-                        ProcessTransitionPlan::Append(request) => {
-                            Self::append_event_conn(
-                                tx,
-                                &mut record,
-                                *request,
-                                now,
-                                wake_delivery_config,
-                            )?;
-                        }
+                    // The run's pending prelude commits ahead of the
+                    // transition, in its transaction (FIG-3571).
+                    let mut batch = ProcessEventBatch::default();
+                    for request in prelude {
+                        batch.stage(tx, &mut record, request, now, wake_delivery_config)?;
                     }
+                    if let ProcessTransitionPlan::Append(request) =
+                        lash_core_execution::runtime::prepare_process_transition(
+                            &record,
+                            ProcessTransition::ClearWait,
+                        )?
+                    {
+                        batch.stage(tx, &mut record, *request, now, wake_delivery_config)?;
+                    }
+                    batch.commit(tx, &record)?;
                     Ok(record)
                 })()))
             })

@@ -51,9 +51,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     }),
                 )
                 .await;
-                Ok(crate::ProcessRunOutcome::Terminal {
-                    output: Box::new(output),
-                })
+                Ok(crate::ProcessRunOutcome::from(output))
             }
             crate::ProcessInput::SessionTurn {
                 create_request,
@@ -72,9 +70,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     cancellation,
                 ))
                 .await?;
-                Ok(crate::ProcessRunOutcome::Terminal {
-                    output: Box::new(output),
-                })
+                Ok(crate::ProcessRunOutcome::from(output))
             }
             crate::ProcessInput::Engine { kind, payload } => {
                 let engine = match self.current.host.core.process_engines.require(kind) {

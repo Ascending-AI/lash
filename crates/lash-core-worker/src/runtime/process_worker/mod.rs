@@ -1038,6 +1038,7 @@ impl DurableProcessWorker {
                 evidence: Box::new(evidence),
                 control: None,
             },
+            Vec::new(),
         )
         .await
     }
@@ -1109,6 +1110,7 @@ impl DurableProcessWorker {
                         }),
                         control: None,
                     },
+                    Vec::new(),
                 )
                 .await,
             );
@@ -1147,6 +1149,7 @@ impl DurableProcessWorker {
                                 evidence: Box::new(evidence),
                                 control: None,
                             },
+                            Vec::new(),
                         )
                         .await,
                     ),
@@ -1198,6 +1201,7 @@ impl DurableProcessWorker {
                     evidence: Box::new(evidence),
                     control: None,
                 },
+                Vec::new(),
             )
             .await,
         )
@@ -1226,8 +1230,10 @@ impl DurableProcessWorker {
             {
                 // Ran to a terminal outcome (success or a process-level failure) while
                 // holding the lease: this owner is the single writer of the terminal.
-                Ok(crate::ProcessRunOutcome::Terminal { output }) => {
-                    return self.finish_terminal_run(&lease, &process_id, output).await;
+                Ok(crate::ProcessRunOutcome::Terminal { output, prelude }) => {
+                    return self
+                        .finish_terminal_run(&lease, &process_id, output, prelude)
+                        .await;
                 }
                 Ok(crate::ProcessRunOutcome::SegmentBoundary(next)) => {
                     tracing::debug!(
@@ -1400,15 +1406,15 @@ impl DurableProcessWorker {
                         && self.cancellation_was_already_requested(&process_id).await?
                         && runner_outcome_requires_cancel_fence(&outcome)
                     {
-                        Ok(crate::ProcessRunOutcome::Terminal {
-                            output: Box::new(crate::ProcessAwaitOutput::from_tool_output(
+                        Ok(crate::ProcessRunOutcome::from(
+                            crate::ProcessAwaitOutput::from_tool_output(
                                 crate::ToolCallOutput::cancelled(
                                     crate::ToolCancellation::runtime(format!(
                                         "process `{process_id}` was cancelled"
                                     )),
                                 ),
-                            )),
-                        })
+                            ),
+                        ))
                     } else {
                         outcome
                     };

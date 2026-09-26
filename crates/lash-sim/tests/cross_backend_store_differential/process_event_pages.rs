@@ -240,6 +240,7 @@ pub(super) async fn compare_bounded_process_event_pages(
     // `PROCESS_EFFECT_OCCURRENCE_CAP` one by one and counts the rest, by
     // class, in one omission record.
     let mut omitted = lash_core::ProcessEffectOmittedCounts::default();
+    let mut recorded = Vec::new();
     for occurrence in 1..=10 {
         let replay_key = format!("fixture-effect:{occurrence}");
         let is_failure = occurrence == 7 || occurrence == 9;
@@ -252,53 +253,47 @@ pub(super) async fn compare_bounded_process_event_pages(
             omitted.record(class);
             continue;
         }
-        let outcome = lash_core::ProcessEffectSummaryOccurrence::new(
-            "repeated-node",
-            occurrence,
-            if is_failure {
-                "triggers.fixture"
-            } else {
-                "now"
-            },
-            class,
-            is_failure.then(|| {
-                lash_core::TriggerOperationError::Invalid {
-                    message: "fixture refusal".to_string(),
-                }
-                .failure_code()
-            }),
-            replay_key,
+        recorded.push(
+            lash_core::ProcessEffectSummaryOccurrence::new(
+                "repeated-node",
+                occurrence,
+                if is_failure {
+                    "triggers.fixture"
+                } else {
+                    "now"
+                },
+                class,
+                is_failure.then(|| {
+                    lash_core::TriggerOperationError::Invalid {
+                        message: "fixture refusal".to_string(),
+                    }
+                    .failure_code()
+                }),
+                replay_key,
+            )
+            .append_request(),
         );
-        for (registry, lease) in [
-            (&sqlite as &dyn lash_core::ProcessRegistry, &sqlite_lease),
-            (
-                &postgres_registry as &dyn lash_core::ProcessRegistry,
-                &postgres_lease,
-            ),
-        ] {
-            let inserted = registry
-                .append_event_with_authority(
-                    &effect_id,
-                    outcome.append_request(),
-                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
-                )
-                .await
-                .expect("append the effect outcome under execution authority");
-            let replayed = registry
-                .append_event_with_authority(
-                    &effect_id,
-                    outcome.append_request(),
-                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
-                )
-                .await
-                .expect("recover lost append acknowledgement");
-            assert_eq!(inserted.event.sequence, replayed.event.sequence);
-        }
     }
     let omissions = lash_core::ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
         "repeated-node".to_string(),
         omitted,
     )]));
+    // The run commits its summary at its boundaries (FIG-3571): a bare
+    // batch, a wait's enter and its clear, each with a prelude, and the
+    // terminal batch closing with the omission record. Each boundary is
+    // written twice, as a redrive after a lost acknowledgement writes it.
+    let wait = lash_core::WaitState {
+        since_ms: 1,
+        kind: lash_core::WaitKind::Signal {
+            name: "fixture".to_string(),
+            event_type: "signal.fixture".to_string(),
+            key: format!("{effect_id}:signal.fixture:1"),
+            ordinal: 1,
+        },
+    };
+    let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(serde_json::json!({ "summary": "committed" })),
+    );
     for (registry, lease) in [
         (&sqlite as &dyn lash_core::ProcessRegistry, &sqlite_lease),
         (
@@ -306,17 +301,62 @@ pub(super) async fn compare_bounded_process_event_pages(
             &postgres_lease,
         ),
     ] {
+        let authority = lash_core::ProcessExecutionWriteAuthority::lease(lease.clone());
+        for _ in 0..2 {
+            let receipts = registry
+                .append_events(&effect_id, recorded[..4].to_vec(), &authority)
+                .await
+                .expect("append a summary batch under execution authority");
+            assert_eq!(receipts.len(), 4);
+        }
         for _ in 0..2 {
             registry
-                .append_event_with_authority(
+                .set_process_wait_with_authority(
                     &effect_id,
-                    omissions.append_request("fixture-effect:omissions"),
-                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
+                    wait.clone(),
+                    recorded[4..6].to_vec(),
+                    &authority,
                 )
                 .await
-                .expect("append the omission record, then recover it");
+                .expect("enter a wait with its summary prelude");
+        }
+        for _ in 0..2 {
+            registry
+                .clear_process_wait_with_authority(&effect_id, recorded[6..].to_vec(), &authority)
+                .await
+                .expect("clear the wait with its summary prelude");
+        }
+        for _ in 0..2 {
+            registry
+                .complete_process_with_prelude(
+                    &effect_id,
+                    terminal.clone(),
+                    vec![omissions.append_request("fixture-effect:omissions")],
+                    lash_core::ProcessCompletionAuthority::workflow_key(effect_id.to_string()),
+                )
+                .await
+                .expect("complete with the terminal batch, then recover it");
         }
     }
+    let logs = {
+        let mut logs = Vec::new();
+        for registry in [
+            &sqlite as &dyn lash_core::ProcessRegistry,
+            &postgres_registry as &dyn lash_core::ProcessRegistry,
+        ] {
+            logs.push(
+                registry
+                    .full_event_window(&effect_id, 0)
+                    .await
+                    .expect("read the boundary log")
+                    .into_iter()
+                    .map(|event| (event.event_type, event.sequence, event.payload))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        logs
+    };
+    assert_eq!(logs[0], logs[1], "the boundary batches diverged");
     let mut summaries = Vec::new();
     for registry in [
         &sqlite as &dyn lash_core::ProcessRegistry,

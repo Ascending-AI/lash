@@ -1,44 +1,147 @@
 use super::*;
 
-/// What one run's effect-summary writer carries between incorporations: the
-/// occurrences it counted past the cap (restored from and snapshotted into
-/// segment state, so a redrive re-derives the same counts) and the first
-/// incorporation that failed.
+/// What one run's effect-summary writer carries between run boundaries
+/// (FIG-3571): the occurrences it recorded that no boundary has committed yet,
+/// and the occurrences it counted past the cap. Both are restored from and
+/// snapshotted into segment state, so a successor segment commits its
+/// predecessor's pending occurrences with its own first boundary and a
+/// redrive re-derives the same counts.
+///
+/// Recording is in memory: the summary reaches the log only as the prelude of
+/// the run's next boundary write (a wait's enter or clear, an event the body
+/// appends, or the terminal completion), in that write's own transaction. A
+/// boundary write that carried a summary and failed is an incorporation
+/// failure, never a program error: the run's scope is cancelled so the guest
+/// stops at its next step, and the run reports the failure as infrastructure
+/// so a redrive re-derives and re-commits the same summary.
 #[derive(Default)]
 pub(super) struct EffectSummaryWriter {
+    pending: std::sync::Mutex<Vec<lash_core::ProcessEffectSummaryOccurrence>>,
     omissions: std::sync::Mutex<BTreeMap<String, lash_core::ProcessEffectOmittedCounts>>,
     incorporation_fault: std::sync::Mutex<Option<lash_core::PluginError>>,
 }
 
+/// The pending occurrences one boundary write carries: `requests` in the
+/// order they were recorded, and how many of the writer's pending entries
+/// they are, so the writer drops exactly those once the write settles.
+pub(super) struct SummaryPrelude {
+    pub(super) requests: Vec<lash_core::ProcessEventAppendRequest>,
+    flushed: usize,
+}
+
 impl EffectSummaryWriter {
     pub(super) fn restore(
+        pending: Vec<lash_core::ProcessEffectSummaryOccurrence>,
         omissions: BTreeMap<String, lash_core::ProcessEffectOmittedCounts>,
     ) -> Self {
         Self {
+            pending: std::sync::Mutex::new(pending),
             omissions: std::sync::Mutex::new(omissions),
             incorporation_fault: std::sync::Mutex::new(None),
         }
+    }
+
+    pub(super) fn take_incorporation_fault(&self) -> Option<lash_core::PluginError> {
+        self.incorporation_fault.lock_recover().take()
+    }
+
+    pub(super) fn pending(&self) -> Vec<lash_core::ProcessEffectSummaryOccurrence> {
+        self.pending.lock_recover().clone()
     }
 
     pub(super) fn omissions(&self) -> BTreeMap<String, lash_core::ProcessEffectOmittedCounts> {
         self.omissions.lock_recover().clone()
     }
 
-    pub(super) fn take_incorporation_fault(&self) -> Option<lash_core::PluginError> {
-        self.incorporation_fault.lock_recover().take()
+    /// Record one effect occurrence: within the cap it joins the pending
+    /// summary, past it it is counted for the run's omission record. Pending
+    /// entries are therefore bounded by construction: at most
+    /// [`lash_core::PROCESS_EFFECT_OCCURRENCE_CAP`] per effect node, whose
+    /// ids are the compiled program's execution sites, each entry spelling
+    /// only runtime-minted values (the node id, the program's host operation,
+    /// the run's replay key).
+    pub(super) fn record(&self, occurrence: lash_core::ProcessEffectSummaryOccurrence) {
+        if lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence.occurrence) {
+            self.pending.lock_recover().push(occurrence);
+        } else {
+            self.omissions
+                .lock_recover()
+                .entry(occurrence.node_id)
+                .or_default()
+                .record(occurrence.outcome_class);
+        }
+    }
+
+    /// The pending occurrences, oldest first, as the prelude of the next
+    /// boundary write. Nothing is dropped until [`Self::settle`].
+    pub(super) fn prelude(&self) -> SummaryPrelude {
+        let pending = self.pending.lock_recover();
+        SummaryPrelude {
+            requests: pending
+                .iter()
+                .map(lash_core::ProcessEffectSummaryOccurrence::append_request)
+                .collect(),
+            flushed: pending.len(),
+        }
+    }
+
+    /// Drop the occurrences a committed boundary write carried. A write that
+    /// failed leaves them pending for the next boundary.
+    pub(super) fn settle(&self, prelude: &SummaryPrelude) {
+        let mut pending = self.pending.lock_recover();
+        let flushed = prelude.flushed.min(pending.len());
+        pending.drain(..flushed);
+    }
+
+    /// The run's terminal batch: every pending occurrence, then the omission
+    /// record when any occurrence went uncounted one by one.
+    pub(super) fn terminal_prelude(
+        &self,
+        omissions_key: String,
+    ) -> Vec<lash_core::ProcessEventAppendRequest> {
+        let mut prelude = self.prelude().requests;
+        let omissions = self.omissions();
+        if !omissions.is_empty() {
+            prelude.push(
+                lash_core::ProcessEffectOmissions::new(omissions).append_request(omissions_key),
+            );
+        }
+        prelude
     }
 }
 
 impl LashlangProcessHost<'_> {
+    /// Settle the boundary write that carried `prelude`: a committed write
+    /// drops the occurrences it carried; a failed one that carried any is an
+    /// incorporation failure (see [`EffectSummaryWriter`]).
+    pub(super) fn settle_boundary<E: std::fmt::Display>(
+        &self,
+        prelude: &SummaryPrelude,
+        written: &Result<(), E>,
+    ) {
+        match written {
+            Ok(()) => self.effect_summary.settle(prelude),
+            Err(error) if !prelude.requests.is_empty() => {
+                self.effect_summary
+                    .incorporation_fault
+                    .lock_recover()
+                    .get_or_insert_with(|| {
+                        lash_core::PluginError::Session(format!(
+                            "a boundary write carrying the process's effect summary failed: {error}"
+                        ))
+                    });
+                self.cancellation.cancel();
+            }
+            Err(_) => {}
+        }
+    }
+
     /// Incorporates one recorded effect outcome into the durable summary.
     ///
-    /// An occurrence within the cap is appended under the effect's replay
-    /// key; a later one is counted for the run's omission record. A failed
-    /// append is an incorporation failure, never an effect result: the run's
-    /// scope is cancelled so the guest stops at its next step, and the run
-    /// reports the failure as retryable infrastructure so a redrive
-    /// re-incorporates the recorded result.
-    pub(super) async fn record_effect_outcome(
+    /// An occurrence within the cap joins the run's pending summary under the
+    /// effect's replay key, and commits with the run's next boundary; a later
+    /// one is counted for the run's omission record.
+    pub(super) fn record_effect_outcome(
         &self,
         call_site: &lashlang::LashlangExecutionCallSite,
         operation: &str,
@@ -46,51 +149,18 @@ impl LashlangProcessHost<'_> {
         code: Option<lash_core::FailureCode>,
         replay_key: &str,
     ) {
-        if !lash_core::ProcessEffectSummaryOccurrence::is_within_cap(call_site.occurrence) {
-            self.effect_summary
-                .omissions
-                .lock_recover()
-                .entry(call_site.site.node_id.clone())
-                .or_default()
-                .record(outcome_class);
-            return;
-        }
-        let request = lash_core::ProcessEffectSummaryOccurrence::new(
-            call_site.site.node_id.clone(),
-            call_site.occurrence,
-            operation,
-            outcome_class,
-            code,
-            replay_key,
-        )
-        .append_request();
-        if let Err(error) = self.ctx.append_process_event(request).await {
-            self.fail_incorporation(error);
-        }
-    }
-
-    /// Appends the run's omission record, once, before its terminal output.
-    pub(super) async fn record_effect_omissions(&self) {
-        let omissions = self.effect_summary.omissions();
-        if omissions.is_empty() {
-            return;
-        }
-        let request = lash_core::ProcessEffectOmissions::new(omissions)
-            .append_request(self.identities.effect_omissions());
-        if let Err(error) = self.ctx.append_process_event(request).await {
-            self.fail_incorporation(error);
-        }
-    }
-
-    fn fail_incorporation(&self, error: lash_core::PluginError) {
         self.effect_summary
-            .incorporation_fault
-            .lock_recover()
-            .get_or_insert(error);
-        self.cancellation.cancel();
+            .record(lash_core::ProcessEffectSummaryOccurrence::new(
+                call_site.site.node_id.clone(),
+                call_site.occurrence,
+                operation,
+                outcome_class,
+                code,
+                replay_key,
+            ));
     }
 
-    pub(super) async fn record_tool_reply(
+    pub(super) fn record_tool_reply(
         &self,
         call_site: &lashlang::LashlangExecutionCallSite,
         host_operation: &str,
@@ -112,8 +182,7 @@ impl LashlangProcessHost<'_> {
                 (lash_core::ProcessEffectOutcomeClass::Cancelled, None)
             }
         };
-        self.record_effect_outcome(call_site, host_operation, outcome_class, code, replay_key)
-            .await;
+        self.record_effect_outcome(call_site, host_operation, outcome_class, code, replay_key);
     }
 
     /// Journals one checked TypeScript runtime value at `key` under the
@@ -138,8 +207,7 @@ impl LashlangProcessHost<'_> {
                         lash_core::ProcessEffectOutcomeClass::Success,
                         None,
                         &key,
-                    )
-                    .await;
+                    );
                 }
                 value
             }
@@ -169,8 +237,7 @@ impl LashlangProcessHost<'_> {
         )
         .await;
         if let (Some((outcome_class, code)), Some(call_site)) = (recorded, call_site) {
-            self.record_effect_outcome(call_site, host_operation, outcome_class, code, &effect_id)
-                .await;
+            self.record_effect_outcome(call_site, host_operation, outcome_class, code, &effect_id);
         }
         result
     }
@@ -326,8 +393,7 @@ impl LashlangProcessHost<'_> {
         commands.finish(&in_flight)?;
         for (leaf, tool_reply) in &read {
             if let Some((host_operation, Some(call_site), replay_key)) = &outcome_metadata[*leaf] {
-                self.record_tool_reply(call_site, host_operation, replay_key, tool_reply)
-                    .await;
+                self.record_tool_reply(call_site, host_operation, replay_key, tool_reply);
             }
         }
         if !self.cancellation.is_cancelled() && dispatched.len() > 1 {

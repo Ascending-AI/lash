@@ -39,6 +39,7 @@ pub trait TestProcessRegistryWriteExt: ProcessRegistry {
             .set_process_wait_with_authority(
                 process_id,
                 wait,
+                Vec::new(),
                 &ProcessExecutionWriteAuthority::lease(lease.clone()),
             )
             .await;
@@ -53,6 +54,7 @@ pub trait TestProcessRegistryWriteExt: ProcessRegistry {
         let result = self
             .clear_process_wait_with_authority(
                 process_id,
+                Vec::new(),
                 &ProcessExecutionWriteAuthority::lease(lease.clone()),
             )
             .await;

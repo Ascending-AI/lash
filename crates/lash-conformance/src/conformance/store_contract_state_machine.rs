@@ -704,7 +704,7 @@ async fn apply_operation(
             let before = registry_snapshot(&handles.registry, &id).await;
             let result = handles
                 .registry
-                .set_process_wait_with_authority(&id, wait_state(&id), &authority)
+                .set_process_wait_with_authority(&id, wait_state(&id), Vec::new(), &authority)
                 .await;
             assert_typed_stale_authority_rejection(&result, must_reject, &id, "enter wait")?;
             assert_rejected_write_is_noop(
@@ -732,7 +732,7 @@ async fn apply_operation(
             let before = registry_snapshot(&handles.registry, &id).await;
             let result = handles
                 .registry
-                .clear_process_wait_with_authority(&id, &authority)
+                .clear_process_wait_with_authority(&id, Vec::new(), &authority)
                 .await;
             assert_typed_stale_authority_rejection(&result, must_reject, &id, "clear wait")?;
             assert_rejected_write_is_noop(

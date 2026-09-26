@@ -242,7 +242,7 @@ fn assert_resume_refused_before_any_effect(
     run: &RefusedRun,
     reason: lash_core::ProcessResumeRefusal,
 ) {
-    let lash_core::ProcessRunOutcome::Terminal { output } = &run.outcome else {
+    let lash_core::ProcessRunOutcome::Terminal { output, .. } = &run.outcome else {
         panic!("expected a terminal, got {:?}", run.outcome);
     };
     let lash_core::ProcessAwaitOutput::Abandoned { evidence, control } = output.as_ref() else {

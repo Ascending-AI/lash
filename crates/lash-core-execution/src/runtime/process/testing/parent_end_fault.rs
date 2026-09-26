@@ -100,6 +100,18 @@ impl ProcessLifecycle for ParentEndFault {
             .await
     }
 
+    async fn complete_process_with_prelude(
+        &self,
+        process_id: &ProcessId,
+        await_output: ProcessAwaitOutput,
+        prelude: Vec<crate::ProcessEventAppendRequest>,
+        authority: ProcessCompletionAuthority,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        self.inner
+            .complete_process_with_prelude(process_id, await_output, prelude, authority)
+            .await
+    }
+
     async fn complete_process_with_lease(
         &self,
         lease: &ProcessLease,
@@ -219,20 +231,22 @@ impl ProcessLifecycle for ParentEndFault {
         &self,
         process_id: &ProcessId,
         wait: WaitState,
+        prelude: Vec<crate::ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         self.inner
-            .set_process_wait_with_authority(process_id, wait, authority)
+            .set_process_wait_with_authority(process_id, wait, prelude, authority)
             .await
     }
 
     async fn clear_process_wait_with_authority(
         &self,
         process_id: &ProcessId,
+        prelude: Vec<crate::ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         self.inner
-            .clear_process_wait_with_authority(process_id, authority)
+            .clear_process_wait_with_authority(process_id, prelude, authority)
             .await
     }
 

@@ -191,8 +191,9 @@ async fn drive_scalar_lashlang_tool_attempt(
 
 /// FIG-3464: a Lashlang process whose tool call is journaled in the Restate
 /// invocation. Replaying the committed journal answers the call without
-/// running the tool, and the durable effect summary is written from the
-/// journaled outcome — the record a redrive after an interruption rebuilds.
+/// running the tool, and the durable effect summary the terminal batch
+/// carries (FIG-3571) is derived from the journaled outcome — the record a
+/// redrive after an interruption rebuilds.
 async fn drive_lashlang_effect_summary(context: Arc<ReplayableRecordingContext>, replaying: bool) {
     // The journal keys its effects by the process id, so the recording and
     // every replay register under the same sequential test id.
@@ -213,7 +214,7 @@ async fn drive_lashlang_effect_summary(context: Arc<ReplayableRecordingContext>,
     )
     .await
     .expect("the effect-summary invocation must match the committed recording");
-    let lash_core::ProcessRunOutcome::Terminal { output } = outcome else {
+    let lash_core::ProcessRunOutcome::Terminal { output, prelude } = outcome else {
         panic!("the effect-summary invocation terminates");
     };
     assert!(matches!(
@@ -225,7 +226,16 @@ async fn drive_lashlang_effect_summary(context: Arc<ReplayableRecordingContext>,
         usize::from(!replaying),
         "replay answers the tool call from the journal"
     );
-    let outcomes = super::process_effect_summary::effect_outcomes(&registry, &process_id).await;
+    assert!(
+        super::process_effect_summary::effect_outcomes(&registry, &process_id)
+            .await
+            .is_empty(),
+        "the run commits its summary with its terminal, not as it goes"
+    );
+    let outcomes = prelude
+        .into_iter()
+        .filter(|request| request.event_type == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
+        .collect::<Vec<_>>();
     assert_eq!(outcomes.len(), 1, "one summary record per journaled effect");
     let summary = lash_core::ProcessEffectSummaryOccurrence::decode(outcomes[0].payload.clone())
         .expect("decode the summary record");

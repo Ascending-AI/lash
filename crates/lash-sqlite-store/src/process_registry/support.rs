@@ -27,6 +27,71 @@ impl ProcessEventAppendArm {
     }
 }
 
+/// A batch of process-event appends staged against one in-memory projection
+/// inside one transaction (FIG-3571), saved once by [`Self::commit`].
+#[derive(Default)]
+pub(crate) struct ProcessEventBatch {
+    record_changed: bool,
+}
+
+impl ProcessEventBatch {
+    /// Stage one preauthorized append of the batch.
+    pub(crate) fn stage(
+        &mut self,
+        conn: &Connection,
+        record: &mut ProcessRecord,
+        request: ProcessEventAppendRequest,
+        occurred_at_ms: u64,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    ) -> Result<ProcessEventAppendReceipt, lash_core_execution::PluginError> {
+        self.stage_arm(
+            conn,
+            record,
+            request,
+            occurred_at_ms,
+            wake_delivery_config,
+            ProcessEventWriteAuthorization::Preauthorized,
+        )
+        .map(|(receipt, _)| receipt)
+    }
+
+    /// Stage one append of the batch under `authorization`, answering its
+    /// arm.
+    pub(crate) fn stage_arm(
+        &mut self,
+        conn: &Connection,
+        record: &mut ProcessRecord,
+        request: ProcessEventAppendRequest,
+        occurred_at_ms: u64,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+        authorization: ProcessEventWriteAuthorization<'_>,
+    ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
+    {
+        let (receipt, arm) = SqliteProcessRegistry::stage_process_event_append_conn(
+            conn,
+            record,
+            request,
+            occurred_at_ms,
+            wake_delivery_config,
+            authorization,
+        )?;
+        self.record_changed |= arm.record_changed();
+        Ok((receipt, arm))
+    }
+
+    /// Save the process once if any staged append moved its projection.
+    pub(crate) fn commit(
+        self,
+        conn: &Connection,
+        record: &ProcessRecord,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        if self.record_changed {
+            SqliteProcessRegistry::save_process_conn(conn, record)?;
+        }
+        Ok(())
+    }
+}
+
 /// Where the write authority for one process-event append is settled.
 pub(crate) enum ProcessEventWriteAuthorization<'a> {
     /// The entry point authorized the write before the append sequence began.
@@ -471,20 +536,70 @@ impl SqliteProcessRegistry {
             .transpose()
     }
 
-    /// The one process-event append sequence for the SQLite store.
+    /// One process-event append for the SQLite store: the append sequence
+    /// ([`Self::stage_process_event_append_conn`]) followed by the process
+    /// save when the append moved the projection.
+    pub(crate) fn apply_process_event_append_conn(
+        conn: &Connection,
+        record: &mut ProcessRecord,
+        request: ProcessEventAppendRequest,
+        occurred_at_ms: u64,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+        authorization: ProcessEventWriteAuthorization<'_>,
+    ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
+    {
+        let (receipt, arm) = Self::stage_process_event_append_conn(
+            conn,
+            record,
+            request,
+            occurred_at_ms,
+            wake_delivery_config,
+            authorization,
+        )?;
+        if arm.record_changed() {
+            Self::save_process_conn(conn, record)?;
+        }
+        Ok((receipt, arm))
+    }
+
+    /// Stage `requests` in order as one batch (FIG-3571): each goes through
+    /// the append sequence against the in-memory projection, and the process
+    /// is saved once, advancing the change clock once, when any of them moved
+    /// it. The caller owns the transaction, so a refusal of any request
+    /// commits none.
+    pub(crate) fn append_event_batch_conn(
+        conn: &Connection,
+        record: &mut ProcessRecord,
+        requests: Vec<ProcessEventAppendRequest>,
+        occurred_at_ms: u64,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    ) -> Result<Vec<ProcessEventAppendReceipt>, lash_core_execution::PluginError> {
+        let mut batch = ProcessEventBatch::default();
+        let receipts = requests
+            .into_iter()
+            .map(|request| batch.stage(conn, record, request, occurred_at_ms, wake_delivery_config))
+            .collect::<Result<Vec<_>, _>>()?;
+        batch.commit(conn, record)?;
+        Ok(receipts)
+    }
+
+    /// The one process-event append sequence for the SQLite store, short of
+    /// the process save.
     ///
     /// Every entry point runs these steps, in this order: replay-key lookup,
     /// wake session id, next sequence number, prepare, the replay-or-insert
-    /// decision, the five-bind event insert, the process save, the parent-end
-    /// retention, the wake-delivery insert, and the wake allocation floor.
-    /// Entry points keep their own prologue, transaction lifetime and outcome
-    /// mapping.
+    /// decision, the five-bind event insert, the projection update, the
+    /// parent-end retention, the wake-delivery insert, and the wake
+    /// allocation floor. The caller saves the process once the projection
+    /// has moved ([`ProcessEventAppendArm::record_changed`]): after this one
+    /// append, or after the batch it belongs to. Entry points keep their own
+    /// prologue, transaction lifetime and outcome mapping.
     ///
     /// `occurred_at_ms` is the caller's clock and the only clock this function
     /// sees; it never reads one itself. The `Lease` authorization compares that
     /// same value against the stored lease, exactly as the leased entry point
     /// did inline.
-    pub(crate) fn apply_process_event_append_conn(
+    pub(crate) fn stage_process_event_append_conn(
         conn: &Connection,
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
@@ -526,7 +641,6 @@ impl SqliteProcessRegistry {
                 )?;
                 let repaired = if let Some(repaired) = repair_record {
                     *record = repaired;
-                    Self::save_process_conn(conn, record)?;
                     true
                 } else {
                     false
@@ -588,7 +702,6 @@ impl SqliteProcessRegistry {
                     &projected_record,
                 );
                 *record = projected_record;
-                Self::save_process_conn(conn, record)?;
                 // The park feed rides the event's own transaction (FIG-3659
                 // NOW-B): a park that opened or closed here is durable in the
                 // feed exactly when the fact that moved it is.

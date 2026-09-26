@@ -667,8 +667,8 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::plugins::ProtocolBeforeLlmCallContext| {
         let _ = &value.processes;
     });
-    // W0533: lash::plugins::RuntimeExecutionContext::append_process_event [function]
-    let _ = lash::plugins::RuntimeExecutionContext::append_process_event;
+    // W0533: lash::plugins::RuntimeExecutionContext::append_process_events [function]
+    let _ = lash::plugins::RuntimeExecutionContext::append_process_events;
     // W0534: lash::plugins::RuntimeExecutionContext::await_process_signal_event [function]
     let _ = lash::plugins::RuntimeExecutionContext::await_process_signal_event;
     // W0535: lash::plugins::RuntimeExecutionContext::captured_process_execution_env_ref [function]

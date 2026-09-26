@@ -80,6 +80,7 @@ impl RestateProcessRunner for ToolChildProcessRunner {
                     "runner": "tool-child-conformance"
                 })),
             )),
+            prelude: Vec::new(),
         })
     }
 }

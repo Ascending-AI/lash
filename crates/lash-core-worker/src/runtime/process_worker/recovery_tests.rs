@@ -662,6 +662,7 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
                 output: Box::new(ProcessAwaitOutput::from_tool_output(
                     crate::ToolCallOutput::success(serde_json::json!({ "segments": 2 })),
                 )),
+                prelude: Vec::new(),
             })
         }
     }
@@ -707,6 +708,7 @@ impl crate::ProcessEngine for SnapshotRecordingEngine {
             output: Box::new(ProcessAwaitOutput::from_tool_output(
                 crate::ToolCallOutput::success(serde_json::json!({ "recorded": true })),
             )),
+            prelude: Vec::new(),
         })
     }
 }
@@ -727,6 +729,7 @@ impl crate::ProcessEngine for NestedProcessEngine {
             output: Box::new(ProcessAwaitOutput::from_tool_output(
                 crate::ToolCallOutput::success(serde_json::json!({ "nested": "done" })),
             )),
+            prelude: Vec::new(),
         })
     }
 }

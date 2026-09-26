@@ -51,7 +51,16 @@ impl PersistedSegmentHandover {
 /// Result of one process invocation. A segment boundary is never terminal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessRunOutcome {
-    Terminal { output: Box<ProcessAwaitOutput> },
+    /// The run ended. `prelude` is its terminal batch (FIG-3571): the
+    /// execution-owned events the run still owes the log (its pending
+    /// effect-summary occurrences, then its `process.effect_omissions`
+    /// record), which the runner commits ahead of the terminal event in the
+    /// completion's own transaction
+    /// ([`ProcessLifecycle::complete_process_with_prelude`](super::registry_concerns::ProcessLifecycle::complete_process_with_prelude)).
+    Terminal {
+        output: Box<ProcessAwaitOutput>,
+        prelude: Vec<super::events::ProcessEventAppendRequest>,
+    },
     SegmentBoundary(SegmentHandover),
 }
 
@@ -112,6 +121,7 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
     fn from(output: ProcessAwaitOutput) -> Self {
         Self::Terminal {
             output: Box::new(output),
+            prelude: Vec::new(),
         }
     }
 }
@@ -269,24 +279,37 @@ impl ProcessEngineProcessContext {
         Ok(result.event)
     }
 
+    /// Enter `wait` as a run boundary, committing the run's pending
+    /// `prelude` in the same transaction (FIG-3571).
     pub async fn set_wait(
         &self,
         wait: super::model::WaitState,
+        prelude: Vec<super::events::ProcessEventAppendRequest>,
     ) -> Result<super::model::ProcessRecord, crate::PluginError> {
         self.process_work
             .registry()
             .set_process_wait_with_authority(
                 &self.process_id,
                 wait,
+                prelude,
                 &self.execution_write_authority,
             )
             .await
     }
 
-    pub async fn clear_wait(&self) -> Result<super::model::ProcessRecord, crate::PluginError> {
+    /// Leave the current wait as a run boundary, committing the run's
+    /// pending `prelude` in the same transaction (FIG-3571).
+    pub async fn clear_wait(
+        &self,
+        prelude: Vec<super::events::ProcessEventAppendRequest>,
+    ) -> Result<super::model::ProcessRecord, crate::PluginError> {
         self.process_work
             .registry()
-            .clear_process_wait_with_authority(&self.process_id, &self.execution_write_authority)
+            .clear_process_wait_with_authority(
+                &self.process_id,
+                prelude,
+                &self.execution_write_authority,
+            )
             .await
     }
 
