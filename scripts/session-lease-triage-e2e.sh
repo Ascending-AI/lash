@@ -302,9 +302,13 @@ direct_turn_records = checkpoints("direct_turn_recovery", "08-direct-turn-recove
 for backend, record in direct_turn_records.items():
     if not record["seed_acceptance_input_id"]:
         fail(f"{backend}: a direct turn must report the acceptance it was admitted under: {record}")
-    if record["seed_acceptance_source_key"] is not None:
+    # A direct turn's accepted row is keyed by its own turn id (FIG-3600): a
+    # redrive of the turn names the same row, and direct ingress mints no key
+    # of its own.
+    if record["seed_acceptance_source_key"] != record["seed_turn_id"]:
         fail(
-            f"{backend}: direct ingress must not mint an idempotency key of its own: {record}"
+            f"{backend}: direct ingress keys its acceptance by its turn id, never a key of "
+            f"its own: {record}"
         )
     if not record["seed_acceptance_settled"]:
         fail(f"{backend}: the reported acceptance is not the input that settled: {record}")

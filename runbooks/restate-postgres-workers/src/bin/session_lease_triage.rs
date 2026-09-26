@@ -60,6 +60,9 @@ use tracing_subscriber::layer::{Context as LayerContext, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
 
 const TURN_PROMPT: &str = "commit one turn";
+/// The direct-turn phase's seed turn: its accepted row is keyed by this id
+/// (a direct turn's source key is its turn id, FIG-3600).
+const SEED_TURN_ID: &str = "lease-triage-direct-turn-seed";
 /// The scripted cell this harness replies with.
 ///
 /// This harness commits real turns, so its reply has to be a cell the session
@@ -933,7 +936,7 @@ async fn direct_turn_recovery(
     let seed_session = seed.open(&session_id).await?;
     let seeded = seed_session
         .turn(lash::TurnInput::text(TURN_PROMPT))
-        .turn_id("lease-triage-direct-turn-seed".to_string())
+        .turn_id(SEED_TURN_ID.to_string())
         .run()
         .await
         .map_err(anyhow::Error::msg)?;
@@ -1089,6 +1092,7 @@ async fn direct_turn_recovery(
         "seed_acceptance_input_id": seed_acceptance
             .as_ref()
             .map(|acceptance| acceptance.input_id.clone()),
+        "seed_turn_id": SEED_TURN_ID,
         "seed_acceptance_source_key": seed_acceptance
             .as_ref()
             .and_then(|acceptance| acceptance.source_key.clone()),
