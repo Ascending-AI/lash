@@ -1,6 +1,8 @@
 use super::*;
 use crate::TurnId;
 
+const SEED: u64 = 0xf6_0001;
+
 struct SemaphoreSlotSupplier(Arc<Semaphore>);
 
 #[async_trait::async_trait]
@@ -100,7 +102,7 @@ async fn resuming_after_a_dropped_permit_release_reacquires_the_slot() {
 #[tokio::test]
 async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
     use lash_core::testing::runtime_helpers::{
-        MockCall, host_turn_scope, mock_provider, runtime_with_plugins_and_tools,
+        MockCall, mock_provider, runtime_with_plugins_and_tools,
     };
 
     struct PermitParkingTool {
@@ -174,7 +176,12 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
                 let tools: Arc<dyn crate::ToolProvider> = Arc::new(PermitParkingTool {
                     started: started_tx,
                 });
-                let backend = super::test_backend::memory_backend().await;
+                let double = super::test_backend::kernel_double(
+                    SEED,
+                    lash_restate_test::ServerConfig::default(),
+                )
+                .await;
+                let backend = double.lash_backend();
                 let mut runtime =
                     runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
 
@@ -186,20 +193,24 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
                     cancel_trigger.cancel();
                 });
 
+                let handler = double
+                    .open_handler(lash_core::AdmittedScope::turn(
+                        crate::SessionId::from("root"),
+                        TurnId::from("permit-cancel-grace-turn"),
+                    ))
+                    .await
+                    .expect("open the turn's handler");
                 let turn = tokio::time::timeout(
                     std::time::Duration::from_secs(10),
                     runtime.run_turn_assembled(
                         crate::TurnInput::text("park the run's permit"),
                         cancel,
-                        host_turn_scope(
-                            &runtime.host.core,
-                            &SessionId::from("root"),
-                            &TurnId::from("permit-cancel-grace-turn"),
-                        ),
+                        handler.scoped(),
                     ),
                 )
                 .await
                 .expect("cancelled turn must finish");
+                handler.close().await.expect("close the turn's handler");
                 assert!(turn.is_ok(), "cancelled turn: {turn:?}");
 
                 assert_eq!(

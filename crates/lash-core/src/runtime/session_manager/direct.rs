@@ -434,7 +434,7 @@ mod tests {
     /// production rebind, not a fixture's idea of it.
     async fn session_services() -> (Arc<RuntimeSessionServices>, crate::SessionPolicy) {
         let env = crate::RuntimeEnvironment::builder(crate::RuntimeHostConfig::new(
-            crate::testing::memory_backend().await,
+            crate::testing::memory_store_backend().await,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         ))

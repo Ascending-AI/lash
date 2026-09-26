@@ -920,10 +920,11 @@ mod process_visibility_tests {
     use crate::SessionId;
     use crate::TurnId;
 
-    use crate::runtime::tests::helpers::{host_turn_scope, standard_test_policy};
+    use crate::runtime::tests::helpers::standard_test_policy;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    const SEED: u64 = 0xf6_0005;
     const SESSION_ID: &str = "process-visibility-table-session";
     const VISIBLE_PROCESS_ID: &str = "visible-process";
     const HIDDEN_PROCESS_ID: &str = "hidden-process";
@@ -967,11 +968,17 @@ mod process_visibility_tests {
 
     async fn test_service(
         visibility: ProcessVisibility,
-    ) -> (RuntimeSessionProcessService, Arc<CountingFilter>) {
+    ) -> (
+        RuntimeSessionProcessService,
+        Arc<CountingFilter>,
+        lash_restate_test::RestateTestBackend,
+    ) {
         let filter = Arc::new(CountingFilter {
             invocations: AtomicUsize::new(0),
         });
-        let backend = crate::testing::memory_backend().await;
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
         let registry = backend.process_registry();
         let core = crate::RuntimeHostConfig::new(
             backend,
@@ -1040,15 +1047,23 @@ mod process_visibility_tests {
                 visibility,
             },
             filter,
+            double,
         )
     }
 
-    fn scope(service: &RuntimeSessionProcessService) -> crate::ProcessOpScope<'static> {
-        crate::ProcessOpScope::new(host_turn_scope(
-            &service.services.current.host.core,
-            &SessionId::from(SESSION_ID),
-            &TurnId::from(uuid::Uuid::new_v4().to_string()),
-        ))
+    /// One opened turn handler lends each operation its scope: `signal`
+    /// executes its command in-handler, and the read operations share the
+    /// same shape so the filter observation is identical.
+    async fn operation_scope(
+        double: &lash_restate_test::RestateTestBackend,
+    ) -> lash_restate_test::OpenHandler {
+        double
+            .open_handler(crate::AdmittedScope::turn(
+                SessionId::from(SESSION_ID),
+                TurnId::from(uuid::Uuid::new_v4().to_string()),
+            ))
+            .await
+            .expect("open the turn's handler")
     }
 
     fn contains_hidden(records: &[crate::ProcessRecord]) -> bool {
@@ -1070,7 +1085,7 @@ mod process_visibility_tests {
 
         for (visibility, hidden_is_visible) in cases {
             for operation in operations {
-                let (service, filter) = Box::pin(test_service(visibility)).await;
+                let (service, filter, double) = Box::pin(test_service(visibility)).await;
                 filter.reset();
                 let expected_invocations = match (visibility, operation) {
                     (ProcessVisibility::ModelTool, Operation::ListVisible)
@@ -1081,14 +1096,16 @@ mod process_visibility_tests {
 
                 match operation {
                     Operation::ListVisible => {
+                        let handler = operation_scope(&double).await;
                         let records = crate::ProcessService::list_visible(
                             &service,
                             &SessionId::from(SESSION_ID),
                             crate::ProcessListMode::Live,
-                            scope(&service),
+                            crate::ProcessOpScope::new(handler.scoped()),
                         )
                         .await
                         .expect("list visible process records");
+                        handler.close().await.expect("close the turn's handler");
                         assert_eq!(contains_hidden(&records), hidden_is_visible);
                     }
                     Operation::ListVisibleForAttempt => {
@@ -1102,18 +1119,21 @@ mod process_visibility_tests {
                         assert_eq!(contains_hidden(&records), hidden_is_visible);
                     }
                     Operation::ValidateVisible => {
+                        let handler = operation_scope(&double).await;
                         let result = crate::ProcessService::validate_visible(
                             &service,
                             &SessionId::from(SESSION_ID),
                             &[ProcessId::from(HIDDEN_PROCESS_ID.to_string())],
-                            scope(&service),
+                            crate::ProcessOpScope::new(handler.scoped()),
                         )
                         .await;
+                        handler.close().await.expect("close the turn's handler");
                         assert_eq!(result.is_ok(), hidden_is_visible);
                     }
                     Operation::SignalPossessed => {
                         // Callers own the visibility boundary through validate_visible;
                         // signal_possessed must not evaluate the filter a second time.
+                        let handler = operation_scope(&double).await;
                         crate::ProcessService::signal_possessed(
                             &service,
                             &SessionId::from(SESSION_ID),
@@ -1121,10 +1141,11 @@ mod process_visibility_tests {
                             "ready".to_string(),
                             uuid::Uuid::new_v4().to_string(),
                             serde_json::Value::Null,
-                            scope(&service),
+                            crate::ProcessOpScope::new(handler.scoped()),
                         )
                         .await
                         .expect("signal an already-validated possessed process");
+                        handler.close().await.expect("close the turn's handler");
                     }
                 }
 
@@ -1139,17 +1160,19 @@ mod process_visibility_tests {
 
     #[tokio::test]
     async fn process_read_service_honors_model_tool_visibility_if_wired_that_way() {
-        let (service, filter) = Box::pin(test_service(ProcessVisibility::ModelTool)).await;
+        let (service, filter, double) = Box::pin(test_service(ProcessVisibility::ModelTool)).await;
         filter.reset();
 
+        let handler = operation_scope(&double).await;
         let records = crate::plugin::ProcessReadService::list_visible(
             &service,
             &SessionId::from(SESSION_ID),
             crate::ProcessListMode::Live,
-            scope(&service),
+            crate::ProcessOpScope::new(handler.scoped()),
         )
         .await
         .expect("list process read records");
+        handler.close().await.expect("close the turn's handler");
 
         assert!(!contains_hidden(&records));
         assert_eq!(filter.invocations(), 2);

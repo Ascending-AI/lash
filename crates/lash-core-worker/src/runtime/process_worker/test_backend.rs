@@ -22,6 +22,20 @@ pub(super) async fn memory_backend() -> crate::Backend {
     Arc::new(backend).into()
 }
 
+/// A fresh Restate server double under `seed` with `config`: lash-restate's
+/// engine over a SQLite memory store set, the twin of [`memory_backend`] for
+/// a worker test whose effects run on an engine. Hold the double to the end
+/// of the test and never build a core over the handle itself (FIG-3723); a
+/// turn runs on `double.open_handler(scope)`'s scoped controller.
+pub(super) async fn kernel_double(
+    seed: u64,
+    config: lash_restate_test::ServerConfig,
+) -> lash_restate_test::RestateTestBackend {
+    lash_restate_test::backend(seed, config)
+        .await
+        .expect("build the Restate server double")
+}
+
 /// [`memory_backend`] with its process registry under a fault layer: the
 /// layer is the backend's registry, so the worker and the test both read
 /// through it.

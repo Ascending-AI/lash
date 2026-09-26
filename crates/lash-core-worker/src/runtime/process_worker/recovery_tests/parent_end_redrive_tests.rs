@@ -10,6 +10,7 @@
 
 use super::*;
 
+const SEED: u64 = 0xf6_0002;
 const SESSION: &str = "parent-end-redrive-session";
 
 /// Never actually runs here: these laws drive only the parent-end passes, and
@@ -114,7 +115,8 @@ async fn cancel_origins(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_once() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let (worker, registry, env_ref) =
         worker_on_backend(Arc::new(NeverDrivenEngine), &backend).await;
 
@@ -208,7 +210,8 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() {
     const STUCK: usize = 300;
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let (worker, registry, env_ref) =
         worker_on_backend(Arc::new(NeverDrivenEngine), &backend).await;
 
