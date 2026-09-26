@@ -504,6 +504,51 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::store::ControlIntentStore for CreateOnlyFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
+        self.inner.begin_session_close(session_id, at_ms).await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: crate::store::ControlIntentId,
+    ) -> std::result::Result<crate::store::IntentApplication, crate::StoreError> {
+        self.inner.claim_intent_application(id).await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: crate::store::ControlIntentId,
+        at_ms: u64,
+    ) -> std::result::Result<(), crate::StoreError> {
+        self.inner.acknowledge_intent(id, at_ms).await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: crate::store::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> std::result::Result<crate::store::ControlIntent, crate::StoreError> {
+        self.inner
+            .record_intent_failure(id, error, retryable, at_ms)
+            .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: crate::store::ControlIntentId,
+    ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
+        self.inner.load_intent(id).await
+    }
+}
+
 #[tokio::test]
 async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
     let factory = CreateOnlyFactory {

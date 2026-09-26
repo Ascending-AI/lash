@@ -107,6 +107,51 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::store::ControlIntentStore for ParentBoundSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
+        self.inner.begin_session_close(session_id, at_ms).await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: crate::store::ControlIntentId,
+    ) -> std::result::Result<crate::store::IntentApplication, crate::StoreError> {
+        self.inner.claim_intent_application(id).await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: crate::store::ControlIntentId,
+        at_ms: u64,
+    ) -> std::result::Result<(), crate::StoreError> {
+        self.inner.acknowledge_intent(id, at_ms).await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: crate::store::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> std::result::Result<crate::store::ControlIntent, crate::StoreError> {
+        self.inner
+            .record_intent_failure(id, error, retryable, at_ms)
+            .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: crate::store::ControlIntentId,
+    ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
+        self.inner.load_intent(id).await
+    }
+}
+
 /// The parent session's store on `backend`, bound and committed.
 async fn parent_bound_session_store(
     backend: &crate::Backend,

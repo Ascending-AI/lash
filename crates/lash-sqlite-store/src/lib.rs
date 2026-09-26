@@ -182,6 +182,7 @@ pub use preflight::{SqliteStorePreflight, verify_schema_at};
 pub use required_constraints::inspect_required_constraints_at;
 pub use schema::SqliteDatabase;
 
+mod control_intent_ledger;
 use forks::*;
 use pending_turn_inputs::*;
 use queued_work::*;

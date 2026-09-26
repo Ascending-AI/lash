@@ -502,6 +502,17 @@ pub enum StoreError {
         root: crate::TurnId,
         by: Box<super::RootTerminalCause>,
     },
+    /// The session is closing: its `CloseSession` intent committed, so it
+    /// accepts no input and admits no root. Deletion only retries from here
+    /// (FIG-3600 S7).
+    #[error("session `{session_id}` is closing under control intent {intent}")]
+    SessionClosing {
+        session_id: SessionId,
+        intent: super::ControlIntentId,
+    },
+    /// No control intent has this id.
+    #[error("control intent {intent} is unknown")]
+    ControlIntentUnknown { intent: super::ControlIntentId },
     /// A drive-fenced storage operation found no `session_meta` row for its
     /// session, so the session has no drive epoch to fence against (ADR 0105
     /// §2). Nothing was written.
@@ -912,6 +923,8 @@ impl StoreError {
             Self::IngressTurnAddressUnknown { .. } => "IngressTurnAddressUnknown",
             Self::StaleDriveFence { .. } => "StaleDriveFence",
             Self::RootAlreadyTerminal { .. } => "RootAlreadyTerminal",
+            Self::SessionClosing { .. } => "SessionClosing",
+            Self::ControlIntentUnknown { .. } => "ControlIntentUnknown",
             Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",
             Self::DriveFenceSessionMismatch { .. } => "DriveFenceSessionMismatch",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",

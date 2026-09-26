@@ -38,10 +38,12 @@
 
 mod admission;
 mod close;
+mod control;
 mod reconcile;
 mod root;
 mod turn_config;
 
+pub use control::apply_control_intent;
 pub use reconcile::{ReconcileReport, reconcile_drive_request, reconcile_session_work};
 pub(crate) use turn_config::provider_binding_unavailable;
 pub use turn_config::{validate_route, validate_route_with};

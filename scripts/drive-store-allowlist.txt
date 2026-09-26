@@ -13,7 +13,6 @@
 # and fails. The occurrences not tagged RECORDED may only shrink
 # (scripts/drive-store-allowlist.count caps them).
 crates/lash-core/src/runtime/drive.rs  |  store.read_session_state_version().await.map_err(|error| {  |  1  # FIG-3824
-crates/lash-core/src/runtime/drive/admission.rs  |  .drive_epoch(session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .list_pending_queued_work(session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .list_pending_turn_inputs(session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .load_pending_follow_on()  |  1  # RECORDED
@@ -22,6 +21,7 @@ crates/lash-core/src/runtime/drive/admission.rs  |  .pending_session_work_orderi
 crates/lash-core/src/runtime/drive/admission.rs  |  .read_session_state_version()  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .seal_drive_epoch(  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  let park = match self.store.load_turn_park(session_id).await {  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  let stored_epoch = match self.store.drive_epoch(session_id).await {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/reconcile.rs  |  let Some(store) = sessions.open_existing_store_by_id(session).await? else {  |  1  # RECONCILE
 crates/lash-core/src/runtime/drive/reconcile.rs  |  let batches = store.list_pending_queued_work(session).await?;  |  1  # RECONCILE
 crates/lash-core/src/runtime/drive/reconcile.rs  |  let inputs = store.list_pending_turn_inputs(session).await?;  |  1  # RECONCILE

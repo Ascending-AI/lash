@@ -11,6 +11,12 @@ pub const TABLE: &str = "control_intents";
 pub const ROW_COLUMNS: &str =
     "intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref";
 
+/// What recording an intent writes: [`ROW_COLUMNS`] minus the allocated
+/// `intent_id`, plus the `kind`/`state` tags beside their JSON bodies so a
+/// reader filters on the tag without decoding.
+pub const INSERT_COLUMNS: &str =
+    "session_id, format, kind, kind_json, state, state_json, attempts, created_at_ms, engine_ref";
+
 crate::statements! {
     /// `control_intents` statements both backends issue verbatim.
     pub struct ControlIntentStatements @ "control_intent" {
@@ -28,6 +34,34 @@ crate::statements! {
              WHERE session_id = ?1 AND kind = 'close_session'
              ORDER BY intent_id
              LIMIT 1";
+
+        /// Intent `?1`.
+        select_by_id = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+             FROM control_intents
+             WHERE intent_id = ?1";
+
+        /// Session `?1`'s open verbs (pending, or failed and retryable), in
+        /// id order: what its close supersedes.
+        select_open_verbs_by_session = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+             FROM control_intents
+             WHERE session_id = ?1 AND kind <> 'close_session'
+               AND state IN ('pending', 'failed_retryable')
+             ORDER BY intent_id";
+
+        /// Record a new intent of session `?1` (format `?2`, kind `?3` with
+        /// JSON `?4`, state `?5` with JSON `?6`, instant `?7`, engine handle
+        /// `?8`), answering its allocated id.
+        insert = "INSERT INTO control_intents
+                 (session_id, format, kind, kind_json, state, state_json, attempts, created_at_ms, engine_ref)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)
+             RETURNING intent_id";
+
+        /// Move intent `?1` to state `?2` (JSON `?3`) at attempt count `?4`,
+        /// if it is still at state JSON `?5` and attempt count `?6`: a
+        /// compare-and-set, so zero rows means another writer moved it first.
+        update_state = "UPDATE control_intents
+             SET state = ?2, state_json = ?3, attempts = ?4
+             WHERE intent_id = ?1 AND state_json = ?5 AND attempts = ?6";
 
         /// Every intent of session `?1` but its `close_session` tombstone:
         /// the part of its deletion that forgets the verbs.

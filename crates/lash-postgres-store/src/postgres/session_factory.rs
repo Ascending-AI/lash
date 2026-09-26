@@ -3,6 +3,8 @@ use crate::*;
 
 #[path = "session_factory/artifact_retirement.rs"]
 mod artifact_retirement;
+#[path = "session_factory/control_intent_ledger.rs"]
+mod control_intent_ledger;
 #[path = "session_factory/store.rs"]
 mod store;
 

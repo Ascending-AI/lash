@@ -38,6 +38,10 @@ pub(super) struct SurfaceScratch {
     pub(super) queued_work_claim: Option<QueuedWorkClaim>,
     pub(super) turn_input_claim: Option<TurnInputClaim>,
     pub(super) queued_run: Option<lash_core::store::QueuedRunAdmission>,
+    /// The `CloseSession` intent this backend's ledger minted for the case's
+    /// session: ids are the backend's own clock, so answers compare it by
+    /// identity, never by value.
+    pub(super) close_intent: Option<lash_core::store::ControlIntentId>,
 }
 
 /// One fallible store-trait method, driven as a compared differential step.
@@ -108,6 +112,31 @@ pub(super) enum SurfaceMethod {
     BindRootInputs {
         conflicting: bool,
     },
+    /// [`ControlIntentStore::begin_session_close`](lash_core::store::ControlIntentStore::begin_session_close)
+    /// of the case's session, or of a session no backend holds
+    /// (`known_session: false`), which closes nothing (FIG-3600 S7).
+    BeginSessionClose {
+        known_session: bool,
+    },
+    /// [`ControlIntentStore::load_intent`](lash_core::store::ControlIntentStore::load_intent)
+    /// of the case's close intent, or of an id no ledger minted.
+    LoadIntent {
+        known: bool,
+    },
+    /// [`ControlIntentStore::claim_intent_application`](lash_core::store::ControlIntentStore::claim_intent_application)
+    /// of the case's close intent, or of an id no ledger minted, which every
+    /// backend refuses without residue.
+    ClaimIntentApplication {
+        known: bool,
+    },
+    /// [`ControlIntentStore::record_intent_failure`](lash_core::store::ControlIntentStore::record_intent_failure)
+    /// of the case's close intent, retryable.
+    RecordIntentFailure,
+    /// [`ControlIntentStore::acknowledge_intent`](lash_core::store::ControlIntentStore::acknowledge_intent)
+    /// of the case's close intent, or of an id no ledger minted.
+    AcknowledgeIntent {
+        known: bool,
+    },
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
     ForgetUnknownAttachment,
@@ -171,6 +200,21 @@ impl SurfaceMethod {
             Self::RootOfInput => "surface:root_of_input",
             Self::BindRootInputs { conflicting: false } => "surface:bind_root_inputs",
             Self::BindRootInputs { conflicting: true } => "surface:bind_root_inputs_conflicting",
+            Self::BeginSessionClose {
+                known_session: true,
+            } => "surface:begin_session_close",
+            Self::BeginSessionClose {
+                known_session: false,
+            } => "surface:begin_session_close_unknown_session",
+            Self::LoadIntent { known: true } => "surface:load_intent",
+            Self::LoadIntent { known: false } => "surface:load_intent_unknown",
+            Self::ClaimIntentApplication { known: true } => "surface:claim_intent_application",
+            Self::ClaimIntentApplication { known: false } => {
+                "surface:claim_intent_application_unknown"
+            }
+            Self::RecordIntentFailure => "surface:record_intent_failure",
+            Self::AcknowledgeIntent { known: true } => "surface:acknowledge_intent",
+            Self::AcknowledgeIntent { known: false } => "surface:acknowledge_intent_unknown",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
@@ -244,6 +288,16 @@ const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
 /// second binding names.
 const SURFACE_ROOT_ID: &str = "fig-3600-root";
 const SURFACE_OTHER_ROOT_ID: &str = "fig-3600-other-root";
+/// A session no case ever creates: closing it closes nothing.
+const UNKNOWN_CLOSE_SESSION_ID: &str = "fig-3600-never-created-session";
+/// An intent id no ledger mints within this run: the unknown-intent refusal
+/// driver. Every backend's intent clock stays far below it.
+const UNKNOWN_INTENT_SEQUENCE: u64 = 9_000_000_000_000_000_000;
+/// The instants the close case hands the ledger: its store half, a retained
+/// failure, and the acknowledgement.
+const CLOSE_AT_MS: u64 = 5_000;
+const CLOSE_FAILED_AT_MS: u64 = 6_000;
+const CLOSE_ACKNOWLEDGED_AT_MS: u64 = 7_000;
 /// The aborted direct turn the sweep binds its drive claim to (FIG-3589).
 const SURFACE_ABORTED_TURN_ID: &str = "fig-3589-surface-aborted-turn";
 /// The queue drain the sweep admits, selects, settles and ends. Its scope is
@@ -299,6 +353,32 @@ fn queued_run_summary(
         admission.initial_members.as_ref().map(Vec::len),
         admission.withheld_members.len(),
         admission.assigned_members.len(),
+    )
+}
+
+/// A backend-neutral summary of a control intent: its id and session are
+/// compared as "the case's own", never by value.
+fn control_intent_summary(
+    intent: &lash_core::store::ControlIntent,
+    session_id: &SessionId,
+    own: Option<lash_core::store::ControlIntentId>,
+) -> String {
+    let state = match &intent.state {
+        lash_core::store::ControlIntentState::Superseded { by } => {
+            format!("superseded(by_own={})", Some(*by) == own)
+        }
+        other => format!("{other:?}"),
+    };
+    format!(
+        "own={} own_session={} format={} kind={:?} state={state} attempts={} created_at_ms={} \
+         engine={:?}",
+        Some(intent.id) == own,
+        intent.session_id == *session_id,
+        intent.format,
+        intent.kind,
+        intent.attempts,
+        intent.created_at_ms,
+        intent.engine,
     )
 }
 
@@ -545,6 +625,66 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::CommitUnknownAttachmentRefs),
             surface(SurfaceMethod::ForgetUnknownAttachment),
             surface(SurfaceMethod::Vacuum),
+        ],
+    }
+}
+
+/// A session's close through the factory's control-intent ledger (FIG-3600
+/// S7): the store half ends the session's open roots — an input's bound
+/// root and a pending queue drain — `Cancelled` by the close, a retry
+/// answers the kept intent, and the engine half's lifecycle is claimed,
+/// failed retryably, claimed again, acknowledged and then done. An unknown
+/// session closes nothing, and an unknown intent is refused without residue.
+pub(super) fn session_close_ledger_case() -> GeneratedCase {
+    GeneratedCase {
+        name: CaseName::SessionCloseLedger,
+        operations: vec![
+            commit(
+                "seed_session_close_graph",
+                0,
+                append(
+                    vec![
+                        NodeSpec::new("root", None, "root"),
+                        NodeSpec::new("active-frame", Some("root"), "active"),
+                    ],
+                    Some("active-frame"),
+                ),
+            ),
+            StoreOperation::EnqueueNextTurnInput,
+            StoreOperation::EnqueueClaimableQueuedWork,
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::First,
+                owner: "session-close-owner",
+            },
+            surface(SurfaceMethod::BindRootInputs { conflicting: false }),
+            surface(SurfaceMethod::BeginOrResumeQueuedRun),
+            surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::BeginSessionClose {
+                known_session: false,
+            }),
+            surface(SurfaceMethod::LoadIntent { known: false }),
+            surface(SurfaceMethod::ClaimIntentApplication { known: false }),
+            surface(SurfaceMethod::AcknowledgeIntent { known: false }),
+            surface(SurfaceMethod::BeginSessionClose {
+                known_session: true,
+            }),
+            // A retried store half answers the kept intent and writes nothing.
+            surface(SurfaceMethod::BeginSessionClose {
+                known_session: true,
+            }),
+            // The close ended the drain root by the session's deletion.
+            surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::PendingQueuedRun),
+            surface(SurfaceMethod::LoadIntent { known: true }),
+            surface(SurfaceMethod::ClaimIntentApplication { known: true }),
+            surface(SurfaceMethod::RecordIntentFailure),
+            surface(SurfaceMethod::ClaimIntentApplication { known: true }),
+            surface(SurfaceMethod::AcknowledgeIntent { known: true }),
+            surface(SurfaceMethod::ClaimIntentApplication { known: true }),
+            // A late failure never reopens an acknowledged intent.
+            surface(SurfaceMethod::RecordIntentFailure),
+            surface(SurfaceMethod::AcknowledgeIntent { known: true }),
+            surface(SurfaceMethod::LoadIntent { known: true }),
         ],
     }
 }
@@ -1065,7 +1205,16 @@ impl BackendRunner {
                 let root = lash_core::TurnId::from(surface_drain_scope(&session_id).id());
                 match store.root_terminal(&session_id, &root).await? {
                     Some(terminal) => {
-                        format!("kind={:?} cause={:?}", terminal.kind, terminal.cause)
+                        let cause = match &terminal.cause {
+                            lash_core::store::RootTerminalCause::SessionDeleted { intent } => {
+                                format!(
+                                    "SessionDeleted(by_own_close={})",
+                                    Some(*intent) == self.surface.close_intent
+                                )
+                            }
+                            other => format!("{other:?}"),
+                        };
+                        format!("kind={:?} cause={cause}", terminal.kind)
                     }
                     None => "terminal=none".to_string(),
                 }
@@ -1093,6 +1242,71 @@ impl BackendRunner {
                 let input = lash_core::InputId::from(format!("{session_id}:input"));
                 store.bind_root_inputs(&session_id, &root, &[input]).await?;
                 "bound".to_string()
+            }
+            SurfaceMethod::BeginSessionClose { known_session } => {
+                let closing = if known_session {
+                    session_id.clone()
+                } else {
+                    SessionId::from(UNKNOWN_CLOSE_SESSION_ID)
+                };
+                match self
+                    .factory()
+                    .begin_session_close(&closing, CLOSE_AT_MS)
+                    .await?
+                {
+                    Some(intent) => {
+                        if known_session {
+                            self.surface.close_intent.get_or_insert(intent.id);
+                        }
+                        control_intent_summary(&intent, &closing, self.surface.close_intent)
+                    }
+                    None => "closed=none".to_string(),
+                }
+            }
+            SurfaceMethod::LoadIntent { known } => {
+                match self.factory().load_intent(self.case_intent(known)).await? {
+                    Some(intent) => {
+                        control_intent_summary(&intent, &session_id, self.surface.close_intent)
+                    }
+                    None => "intent=none".to_string(),
+                }
+            }
+            SurfaceMethod::ClaimIntentApplication { known } => {
+                let application = self
+                    .factory()
+                    .claim_intent_application(self.case_intent(known))
+                    .await?;
+                let verdict = match &application {
+                    lash_core::store::IntentApplication::Apply(_) => "apply",
+                    lash_core::store::IntentApplication::Superseded(_) => "superseded",
+                    lash_core::store::IntentApplication::Done(_) => "done",
+                };
+                format!(
+                    "{verdict} {}",
+                    control_intent_summary(
+                        application.intent(),
+                        &session_id,
+                        self.surface.close_intent
+                    )
+                )
+            }
+            SurfaceMethod::RecordIntentFailure => {
+                let intent = self
+                    .factory()
+                    .record_intent_failure(
+                        self.case_intent(true),
+                        "fig-3600 engine half refused",
+                        true,
+                        CLOSE_FAILED_AT_MS,
+                    )
+                    .await?;
+                control_intent_summary(&intent, &session_id, self.surface.close_intent)
+            }
+            SurfaceMethod::AcknowledgeIntent { known } => {
+                self.factory()
+                    .acknowledge_intent(self.case_intent(known), CLOSE_ACKNOWLEDGED_AT_MS)
+                    .await?;
+                "acknowledged".to_string()
             }
             SurfaceMethod::AbortUnknownAttachmentWrite => {
                 let intent = unknown_attachment_intent(&session_id);
@@ -1128,5 +1342,20 @@ impl BackendRunner {
         };
         self.surface.answer = Some(answer);
         Ok(None)
+    }
+
+    /// The case's close intent, or an id no ledger minted.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the case drives its close before any known-intent step; a missing intent panics the harness with its case name by design"
+    )]
+    fn case_intent(&self, known: bool) -> lash_core::store::ControlIntentId {
+        if known {
+            self.surface
+                .close_intent
+                .expect("the case began its session's close before this step")
+        } else {
+            lash_core::store::ControlIntentId::from_sequence(UNKNOWN_INTENT_SEQUENCE)
+        }
     }
 }

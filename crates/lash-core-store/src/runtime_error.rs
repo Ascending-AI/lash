@@ -461,6 +461,15 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
                 },
             )
         }
+        // A closing session is being deleted: its CloseSession intent is the
+        // point of no return, so to a caller it is already gone.
+        ref err @ crate::store::StoreError::SessionClosing { ref session_id, .. } => {
+            RuntimeError::new(RuntimeErrorCode::SessionDeleted, err.to_string()).with_cause(
+                RuntimeErrorCause::SessionDeleted {
+                    session_id: session_id.clone(),
+                },
+            )
+        }
         err @ crate::store::StoreError::CommitNodeBudgetExceeded { .. } => RuntimeError::new(
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
             err.to_string(),
@@ -1643,6 +1652,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::ClaimAcceptedTurnInput
                 | RuntimeEffectKind::CloseRootScope
+                | RuntimeEffectKind::BeginSessionClose
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
         {
             self.journal_disposition
