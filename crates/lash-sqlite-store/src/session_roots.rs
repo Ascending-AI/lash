@@ -35,7 +35,10 @@ pub(crate) struct SessionRootsSql {
 }
 
 static SESSION_ROOTS_SQL: LazyLock<SessionRootsSql> = LazyLock::new(|| {
-    let dialect = Schema::Main.dialect();
+    // The claim-result read names the head input's lifecycle (FIG-3840).
+    let dialect = Schema::Main
+        .dialect()
+        .with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE);
     SessionRootsSql {
         roots: SessionRootStatements::render(dialect),
         verbs: RootVerbStatements::render(
@@ -550,6 +553,13 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
 
 #[async_trait::async_trait]
 impl RootStore for crate::Store {
+    async fn claim_root_inputs(
+        &self,
+        request: &lash_core_execution::store::RootInputClaimRequest,
+    ) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+        self.bind_session(&request.session_id)?;
+        crate::persistence::claim_root_inputs_sqlite(self, request).await
+    }
     async fn root_terminal(
         &self,
         session_id: &SessionId,

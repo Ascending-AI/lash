@@ -61,6 +61,8 @@ mod process_event_pages;
 mod raw_durable_reader;
 #[path = "cross_backend_store_differential/residue.rs"]
 mod residue;
+#[path = "cross_backend_store_differential/session_lifecycle_cases.rs"]
+mod session_lifecycle_cases;
 #[path = "cross_backend_store_differential/session_meta_layout.rs"]
 mod session_meta_layout;
 #[path = "cross_backend_store_differential/surface_sweep.rs"]
@@ -105,6 +107,7 @@ enum CaseName {
     StoreSurfaceSweep,
     PendingFollowOnRaise,
     TurnBoundClaimBindAndReclaim,
+    RootClaimReplay,
     RefusedSurfaceOnDeletedSession,
     SessionCloseLedger,
     RootCancelLedger,
@@ -162,6 +165,7 @@ impl CaseName {
             Self::TurnBoundClaimBindAndReclaim => {
                 "turn_bound_claim_binds_defers_and_reclaims_across_generations"
             }
+            Self::RootClaimReplay => "root_claim_replays_exact_result_after_lease_handoff",
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
             }
@@ -623,68 +627,21 @@ fn generated_cases() -> Vec<GeneratedCase> {
         fork_cases::pin_fork_unpin(),
         fork_cases::foreign_lineage_case(),
         fork_cases::rewind_case(),
-        GeneratedCase {
-            name: CaseName::AttachmentAdoption,
-            operations: vec![
-                StoreOperation::RecordAttachmentIntent,
-                StoreOperation::Commit {
-                    label: "adopt_attachment_in_runtime_commit",
-                    expected_head_revision: 0,
-                    graph: append(
-                        vec![NodeSpec::new("active-frame", None, "attachment-prefix")],
-                        Some("active-frame"),
-                    ),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "attachment-adoption",
-                    }),
-                    checkpoint: CheckpointSpec::Empty,
-                    usage: true,
-                    adopt_attachment: true,
-                },
-                StoreOperation::PinLeaf,
-                StoreOperation::Rewind,
-                StoreOperation::ReclaimRetainedEvidence,
-                StoreOperation::UnpinLeaf,
-            ],
-        },
+        session_lifecycle_cases::attachment_adoption_case(),
         claim_cases::queued_work_claim_and_abandon(),
         claim_cases::same_generation_exact_claim_deferral(),
         claim_cases::queued_work_claim_superseded_after_reclaim(),
         claim_cases::turn_input_claim_superseded_after_reclaim(),
-        GeneratedCase {
-            name: CaseName::DeleteThenAttemptAdmission,
-            operations: vec![
-                StoreOperation::DeleteSession,
-                StoreOperation::AttemptAdmission,
-            ],
-        },
+        session_lifecycle_cases::delete_then_attempt_admission_case(),
         surface_sweep::surface_sweep_case(),
         surface_sweep::pending_follow_on_raise_case(),
         surface_sweep::turn_bound_claim_case(),
+        surface_sweep::root_claim_replay_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         surface_sweep::session_close_ledger_case(),
         surface_sweep::root_control_case(false),
         surface_sweep::root_control_case(true),
-        GeneratedCase {
-            name: CaseName::StaleHandleAfterDelete,
-            operations: vec![
-                StoreOperation::EnqueueQueuedWork,
-                StoreOperation::CreateHandle {
-                    handle_alias: "handle-1",
-                },
-                StoreOperation::DeleteSessionThroughFactory,
-                StoreOperation::AdmitOnHandle {
-                    handle_alias: "handle-1",
-                },
-                StoreOperation::SaveMetaOnHandle {
-                    handle_alias: "handle-1",
-                },
-                StoreOperation::CommitOnHandle {
-                    handle_alias: "handle-1",
-                },
-                StoreOperation::ObserveSessionAbsent,
-            ],
-        },
+        session_lifecycle_cases::stale_handle_after_delete_case(),
     ]
     .into_iter()
     // Last: these are the only cases that leave the shared PostgreSQL
@@ -2361,7 +2318,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 32);
+    assert_eq!(cases.len(), 33);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2392,6 +2349,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "store_surface_sweep",
             "pending_follow_on_raise_and_clear",
             "turn_bound_claim_binds_defers_and_reclaims_across_generations",
+            "root_claim_replays_exact_result_after_lease_handoff",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "session_close_ledger_closes_roots_and_tracks_its_intent",
             "root_cancel_ledger",

@@ -11,24 +11,14 @@ impl lash_core::store::RuntimePersistenceDecorator for OneHeldClaimStore {
         self.inner.as_ref()
     }
 
-    async fn claim_next_turn_inputs(
+    async fn claim_root_inputs(
         &self,
-        session_id: &SessionId,
-        lease: &lash_core::SessionExecutionLeaseAuthority,
-        owner: &lash_core::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<lash_core::TurnInputClaim>, lash_core::StoreError> {
+        request: &lash_core::store::RootInputClaimRequest,
+    ) -> Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
         if !self.held_once.swap(true, Ordering::SeqCst) {
             return Ok(None);
         }
-        lash_core::store::TurnInputStore::claim_next_turn_inputs(
-            self.inner.as_ref(),
-            session_id,
-            lease,
-            owner,
-            max_inputs,
-        )
-        .await
+        lash_core::store::RootStore::claim_root_inputs(self.inner.as_ref(), request).await
     }
 }
 

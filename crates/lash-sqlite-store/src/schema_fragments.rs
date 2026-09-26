@@ -130,8 +130,9 @@ CREATE INDEX IF NOT EXISTS idx_session_ingress_claim
 /// The logical-root family (FIG-3600 S7), carried by the durable core alone.
 ///
 /// `session_roots` holds one row per `(session, root)` a drive admitted work
-/// under, with the root's terminal evidence once it has one: all four
-/// `terminal_*` columns are set together, exactly once. `session_root_inputs`
+/// under, with the exact result of an input root's claim, committed in the
+/// claim's own transaction (FIG-3840), and the root's terminal evidence once
+/// it has one: all four `terminal_*` columns are set together, exactly once. `session_root_inputs`
 /// binds each accepted input to the root that drives it. `control_intents`
 /// records an operator's verb or a session's close; a `close_session` row
 /// outlives its session as the deletion tombstone.
@@ -139,6 +140,7 @@ pub(crate) const SESSION_ROOTS_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS session_roots (
     session_id              TEXT NOT NULL,
     root                    TEXT NOT NULL,
+    claim_result_json       TEXT,
     terminal_kind           TEXT,
     terminal_cause_json     TEXT,
     terminal_head_revision  INTEGER,

@@ -157,6 +157,12 @@ impl lash_core::store::DriveEpochStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::store::RootStore for CommitRetryStore {
+    async fn claim_root_inputs(
+        &self,
+        request: &lash_core::store::RootInputClaimRequest,
+    ) -> Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
+        self.inner.claim_root_inputs(request).await
+    }
     async fn root_terminal(
         &self,
         session_id: &SessionId,

@@ -384,6 +384,7 @@ async fn read_session_state_version_tx(
 }
 
 mod claim_support;
+pub(crate) use claim_support::claim_root_inputs_postgres;
 mod commit_claims;
 mod maintenance;
 pub(crate) mod queued_run;
