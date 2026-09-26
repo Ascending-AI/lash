@@ -240,6 +240,27 @@ lash_gate_network_is_idle() {
   [ -z "$members" ]
 }
 
+# Every host file a Compose service bind-mounts must be a regular executable
+# before the first `docker compose` invocation that interpolates the mount:
+# the daemon silently creates a missing bind source as an empty root-owned
+# directory, which then blocks later builds and worktree removal.
+lash_gate_require_mounted_bins() {
+  local bin_dir="$1" name path failed=0
+  shift
+  for name in "$@"; do
+    path="$bin_dir/$name"
+    if [ -d "$path" ]; then
+      echo "Mounted binary path is a directory, not an executable: $path" >&2
+      echo "Docker created it as a root-owned bind-mount source placeholder; remove the directory and retry." >&2
+      failed=1
+    elif [ ! -f "$path" ] || [ ! -x "$path" ]; then
+      echo "Missing executable mounted binary: $path" >&2
+      failed=1
+    fi
+  done
+  return "$failed"
+}
+
 lash_gate_cleanup() {
   if ! command -v docker >/dev/null 2>&1; then
     return 0

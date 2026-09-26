@@ -3,21 +3,28 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
-if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
-  LASH_E2E_BIN_DIR="$(cd "$LASH_E2E_PREBUILT_BIN_DIR" && pwd)"
-  export LASH_E2E_BIN_DIR
-  for binary in lash-e2e-worker lash-e2e-mock-provider lash-e2e-runner lash-e2e-await-event-helper; do
-    if [ ! -x "$LASH_E2E_BIN_DIR/$binary" ]; then
-      echo "Missing executable prebuilt worker: $LASH_E2E_BIN_DIR/$binary" >&2
-      exit 1
-    fi
-  done
-else
-  export LASH_E2E_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
-fi
 
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$repo/scripts/worktree-gate-env.sh"
+
+# The compose file bind-mounts each of these host binaries into its services.
+e2e_bin_names=(lash-e2e-worker lash-e2e-mock-provider lash-e2e-runner lash-e2e-await-event-helper)
+if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
+  LASH_E2E_BIN_DIR="$(cd "$LASH_E2E_PREBUILT_BIN_DIR" && pwd)"
+  export LASH_E2E_BIN_DIR
+  lash_gate_require_mounted_bins "$LASH_E2E_BIN_DIR" "${e2e_bin_names[@]}"
+else
+  export LASH_E2E_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
+  # The build supplies the binaries, so a missing file here is not yet a
+  # failure — but a daemon-created directory at a mount path is, and it also
+  # breaks the build's own outputs. Refuse it before anything else runs.
+  stale_bin_dirs=()
+  for name in "${e2e_bin_names[@]}"; do
+    [ -d "$LASH_E2E_BIN_DIR/$name" ] && stale_bin_dirs+=("$name")
+  done
+  ((${#stale_bin_dirs[@]} == 0)) \
+    || lash_gate_require_mounted_bins "$LASH_E2E_BIN_DIR" "${stale_bin_dirs[@]}"
+fi
 
 compose_project="${LASH_RESTATE_WORKERS_COMPOSE_PROJECT:-lash-restate-workers-${LASH_GATE_WORKTREE_SLUG}}"
 export RESTATE_AUTHORITY_ID="${RESTATE_AUTHORITY_ID:-restate-workers:${compose_project}}"
@@ -93,6 +100,9 @@ test_output="$(mktemp "${TMPDIR:-/tmp}/lash-restate-postgres-workers-e2e-${LASH_
 if [ -z "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
   cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
 fi
+# Re-check before the first compose call that could create a missing bind
+# source (config --images, up, run); the earlier `down` creates nothing.
+lash_gate_require_mounted_bins "$LASH_E2E_BIN_DIR" "${e2e_bin_names[@]}"
 if [ -n "$manifest_name" ]; then
   "$LASH_E2E_BIN_DIR/lash-e2e-runner" --workflow-inventory \
     > "$manifest_dir/workflow-inventory.tsv"
