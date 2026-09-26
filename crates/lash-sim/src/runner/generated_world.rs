@@ -991,6 +991,28 @@ impl GeneratedRuntimeWorld {
                 .map(|output| output.result)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
         });
+        // The spawned turn asks its handler `run` on its first poll, over the
+        // same wall-clock accept every outside request crosses. Two turns
+        // opened by near boundaries land that request in whichever outside
+        // pass their connect happened to reach, so one seed's grant order
+        // moved with TCP timing (FIG-3600). Waiting until the server
+        // registered this turn's `run` pins its arrival to the boundary's
+        // own order — the same pinning the provider turn's first-gate wait
+        // gives a provider task.
+        let run_target = format!(":{session_alias}job-");
+        let server = self.engine.restate().server();
+        let mut polls = 0_u32;
+        while !server.invocations().iter().any(|view| {
+            view.target.starts_with("LashTestHandlerHost/") && view.target.contains(&run_target)
+        }) {
+            polls += 1;
+            if polls > 100_000 {
+                return Err(FixedScriptRunnerError::Assertion(format!(
+                    "suspend ingress `{session_alias}`: the spawned turn's `run` invocation never reached the server"
+                )));
+            }
+            tokio::task::yield_now().await;
+        }
         let resolution_at = SUSPEND_RESOLUTION_BASE_AT + self.suspends_spawned;
         self.suspends_spawned += 1;
         self.suspending_turns.insert(

@@ -71,3 +71,34 @@ async fn pending_tool_completion_proof_runs_on_the_restate_server_double() {
         started.elapsed()
     );
 }
+
+/// The sim's engine installs no wall-clock reconcile sweep: a deployment's
+/// own interval would land a `reconcile:` drive ask wherever its store
+/// reads happened to finish, carrying a per-process nonce a seed cannot
+/// reproduce. A scenario reconciles through `SessionDriver::reconcile`
+/// when it wants a pass; one that never asks sees no sweep ask.
+#[tokio::test]
+async fn the_server_double_runs_no_wall_clock_reconcile_sweep() {
+    let engine = crate::backend::SimEngine::new(0x5eed_70f1)
+        .await
+        .expect("Restate test backend");
+    super::runtime_proofs::prove_pending_tool_completion_on(&engine, 0x5eed_70f1)
+        .await
+        .expect("pending tool proof");
+    let server = engine.restate().server();
+    for invocation in server.invocations() {
+        let Some(journal) = server.journal(&invocation.id) else {
+            continue;
+        };
+        for entry in journal {
+            assert!(
+                !entry
+                    .payload
+                    .windows(b"reconcile:".len())
+                    .any(|window| window == b"reconcile:"),
+                "a wall-clock reconcile sweep's ask reached the server double: {}",
+                invocation.target
+            );
+        }
+    }
+}

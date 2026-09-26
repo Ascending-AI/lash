@@ -270,8 +270,20 @@ impl DecoratedBackend {
     /// `engine`'s backend, undecorated: it reaches the server double only
     /// through its connection, so a core over it never keeps the server
     /// alive.
+    ///
+    /// The session-work port is the engine's minus its wall-clock
+    /// reconcile interval: the sim's serial scheduling pins one grant
+    /// order per seed, and a sweep that ticks on wall time would land its
+    /// drive asks — each named for a per-process nonce — wherever its
+    /// store reads happened to finish. A scenario reconciles explicitly
+    /// through `SessionDriver::reconcile` when it wants a pass.
     pub fn over_engine(engine: &SimEngine) -> Self {
-        Self::over(engine.restate.lash_backend())
+        Self {
+            layered: lash_core::testing::runtime_helpers::LayeredBackend::over(
+                engine.restate.lash_backend(),
+            )
+            .with_session_work(Some(engine.restate.explicit_reconcile_session_work())),
+        }
     }
 
     /// Observe the commits made through the session factory into
