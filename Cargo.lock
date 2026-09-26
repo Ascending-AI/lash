@@ -2555,7 +2555,6 @@ dependencies = [
  "lash-internal-provider-google",
  "lash-internal-restate-test",
  "lash-internal-sansio",
- "lash-internal-sqlite-store",
  "lash-runtime",
  "proptest",
  "reqwest 0.13.4",
