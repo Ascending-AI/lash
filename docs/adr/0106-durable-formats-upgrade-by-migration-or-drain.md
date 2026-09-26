@@ -313,6 +313,24 @@ build must already honour, because 1.0 is the N-1 of the first upgrade:
 7. **FIG-3816:** the `lash migrate` command (expand phase) and the
    `lash_migrations` ledger in the 1.0 schema.
 
+**At the 1.0 cut** the pre-1.0 version freeze (FIG-3846) lifts in one change:
+
+1. Remove the freeze switch — delete `freeze = "pre-1.0"` (and the `[policy]`
+   table it sits in) from `scripts/versioned-surfaces.toml` — so every bump
+   gate turns strict again: the findings it printed now fail.
+2. Reset every guarded constant the registry names to its 1.0 baseline.
+3. Start the migrate catalog (`EXPAND_MIGRATIONS` and the `lash_migrations`
+   ledger) empty at the baseline.
+4. Regenerate the fixtures that pin a generation: the recreation E2E's
+   constants, the `COMPONENT_VERSION_PINS` literals, and the committed
+   durable-read catalogs.
+5. Prove strictness returned: a guarded-shape change without a bump fails
+   `check_version_bumps.py` again. Gates whose derivations went stale while
+   the freeze let shapes move under them — `check_version_bump_fixtures.py`
+   still derives from the `SCHEMA_MIGRATIONS` catalog the expand-migrate
+   model replaced — are repaired or retired in the same change; a gate that
+   cannot evaluate fails strict mode.
+
 **After 1.0**, under the operations arc FIG-3794, each before its first use:
 FIG-3817 (backfill at finalize, the contract gate, tested rollback), FIG-3800
 (`lash finalize`, the hold flag and writer fencing), FIG-3801 (the full

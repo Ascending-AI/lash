@@ -478,7 +478,7 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
   guard is one recorded step (`process-await-guard`). It records `Ok` or
   the typed refusal. A redrive after the child finished and was pruned
   serves the recorded answer. The effect journal generation is not bumped
-  (paused pre-1.0, FIG-3660).
+  (frozen pre-1.0, FIG-3846).
 - **The pre-run record read (W1) is replay-invariant.** The read decides
   nothing a later mutation could change. A terminal record carries no park:
   the terminal fold clears the wait. So clearing a park on a terminal record
