@@ -9,23 +9,7 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only PostgreSQL issues.
     pub(crate) struct PendingInputPostgresStatements @ "pending_turn_input" {
-        /// The next `enqueue_seq` for this table, drawn from the column's own
-        /// sequence before the insert.
-        ///
-        /// `pg_get_serial_sequence` takes its relation as *text*, so this is
-        /// the one statement in the family whose table name is spelled with
-        /// the `lash_` prefix rather than rendered: the renderer rewrites
-        /// table *tokens*, and a name inside a string literal is not one. It
-        /// is still a named statement with one owner, which is what the
-        /// alternative — a literal at the call site — was not.
-        select_next_enqueue_seq = "SELECT nextval(pg_get_serial_sequence(
-                 'lash_pending_turn_inputs',
-                 'enqueue_seq'
-             ))";
-
-        /// PostgreSQL draws `enqueue_seq` from the column's sequence before the
-        /// insert so the source-key path knows the value it is about to write;
-        /// SQLite lets the row allocate its own.
+        /// `?1` is allocated from the shared session counter under the session lock.
         ///
         /// `?5` is written to both `ingress_json` (the mutable current scope)
         /// and `submitted_ingress_json` (immutable); `?9` is the submission
@@ -147,7 +131,7 @@ lash_store_sql::statements! {
              FOR UPDATE";
 
         /// Session `?1`'s next-turn claim candidates at generation `?2`, up to
-        /// `?3` of them, locked and skipping rows another claimant holds.
+        /// `?3` of them, waiting for locked rows so the head cannot be skipped.
         ///
         /// The generation half of the predicate is the read side of the claim
         /// fence and cannot move into shared code: it is also the `ORDER BY …
@@ -164,9 +148,13 @@ lash_store_sql::statements! {
                     OR claim_session_lease_generation <> ?2
                )
                AND claim_bound_turn_id IS NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS commands
+                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+               )
              ORDER BY enqueue_seq ASC
              LIMIT ?3
-             FOR UPDATE SKIP LOCKED";
+             FOR UPDATE";
 
         /// Session `?1`'s claim candidates for active turn `?4` at generation
         /// `?2`, up to `?3` of them, at the `after_work` checkpoint.

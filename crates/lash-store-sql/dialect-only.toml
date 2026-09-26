@@ -145,6 +145,7 @@ touches = [
     "queued_work_items",
     "session_execution_leases",
     "session_ingress",
+    "session_ingress_sequence",
     "turn_cancel_closure_authorizations",
     "turn_cancel_requests",
     "turn_cancellation_bindings",
@@ -637,7 +638,7 @@ sqlite = ["crates/lash-sqlite-store/src/session_sql.rs"]
 postgres = ["crates/lash-postgres-store/src/postgres/session_sql.rs"]
 # Provisioning, not persistence.
 [families.session_ingress]
-tables = ["session_ingress"]
+tables = ["session_ingress", "session_ingress_sequence"]
 statement_prefixes = ["session_ingress"]
 shared = ["crates/lash-store-sql/src/session_ingress.rs"]
 sqlite = ["crates/lash-sqlite-store/src/session_ingress.rs"]
@@ -682,6 +683,7 @@ control_intents = "crates/lash-store-sql/src/session_roots/control_intents.rs"
 
 [families.session_ingress.table_modules]
 session_ingress = "crates/lash-store-sql/src/session_ingress.rs"
+session_ingress_sequence = "crates/lash-store-sql/src/session_ingress/sequence.rs"
 
 [families.turn_ingress]
 tables = [
@@ -3264,36 +3266,16 @@ than read first: the caller already holds the cancel-request row's lock, so
 deriving it in one statement costs one round trip instead of two.
 """
 
-[[dialect_only]]
-statement = "pending_turn_input.select_next_enqueue_seq"
-backends = ["postgres"]
-kind = "generated key"
-reason = """
-PostgreSQL draws `enqueue_seq` from the column's own sequence before the insert
-so the source-key path knows the value it is about to write; SQLite lets the
-row allocate its own. `pg_get_serial_sequence` takes its relation as *text*, so
-this is one of the two statements in the family whose table name is spelled
-with the `lash_` prefix rather than rendered — the renderer rewrites table
-tokens, and a name inside a string literal is not one.
-"""
 
-[[dialect_only]]
-statement = "queued_work_batch.select_next_enqueue_seq"
-backends = ["postgres"]
-kind = "generated key"
-reason = """
-The batch half of the same fork, for the same two reasons.
-"""
 
 [[dialect_only]]
 statement = "pending_turn_input.insert_new"
 backends = ["sqlite", "postgres"]
-kind = "generated key"
+kind = "parameter order"
 reason = """
-enqueue_seq is an INTEGER PRIMARY KEY AUTOINCREMENT on SQLite and is never
-bound; PostgreSQL draws it from the column's sequence with an explicit nextval
-first, because its source-key path has to know the value it is about to write.
-The durable column is the same column either way.
+Both stores bind the shared session allocation explicitly. PostgreSQL binds
+it first to share the parameter order of its adoption statements; SQLite
+binds it last after the input payload and admission metadata.
 """
 
 [[dialect_only]]
@@ -3473,10 +3455,11 @@ joins unnest.
 [[dialect_only]]
 statement = "queued_work_batch.insert_new"
 backends = ["sqlite", "postgres"]
-kind = "generated key; RETURNING"
+kind = "RETURNING; parameter order"
 reason = """
-Same generated-key fork as pending_turn_input.insert_new, and PostgreSQL
-returns the inserted id rather than reading the row back.
+Both stores bind the shared session allocation explicitly. PostgreSQL
+returns the inserted batch id; SQLite uses the affected-row count and reads
+the batch back. Their insert call sites bind the allocation in different slots.
 """
 
 [[dialect_only]]
@@ -3981,24 +3964,9 @@ The statement leaves with SQLite's effect engine (FIG-3668).
 [[dialect_only]]
 statement = "session_ingress.insert"
 backends = ["sqlite", "postgres"]
-kind = "generated key"
+kind = "RETURNING; parameter order"
 reason = """
-enqueue_seq is an INTEGER PRIMARY KEY AUTOINCREMENT on SQLite, drawn inside the
-BEGIN IMMEDIATE transaction whose database write lock is the session lock, and
-is never bound; PostgreSQL draws it from the column's sequence with an explicit
-nextval after the session history lock, because the item id of an input
-without a provisioned id is minted from it. The durable column is the same
-column either way.
-"""
-
-[[dialect_only]]
-statement = "session_ingress.select_next_enqueue_seq"
-backends = ["postgres"]
-kind = "generated key"
-reason = """
-PostgreSQL draws `enqueue_seq` from the column's own sequence before the insert
-so admission knows the value it is about to write; SQLite lets the row allocate
-its own. `pg_get_serial_sequence` takes its relation as *text*, so the table
-name is spelled with the `lash_` prefix inside a string literal the renderer
-leaves alone.
+Both stores bind the shared session allocation explicitly. SQLite returns
+the stored enqueue sequence; PostgreSQL already retains that value for item-id
+construction. Their insert call sites bind the allocation in different slots.
 """

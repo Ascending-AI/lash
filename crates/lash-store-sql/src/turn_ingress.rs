@@ -115,9 +115,8 @@ crate::statements! {
         /// turn input of session `?1`, as of `?2`, with `?3` naming the
         /// control work kind.
         ///
-        /// Both halves are read in one statement because the answer is their
-        /// *relative* order: two statements could observe the queue either
-        /// side of an enqueue and report an ordering that never held.
+        /// Both lanes are projected from one snapshot, so the command-first
+        /// decision and the input position describe the same boundary.
         /// "Unclaimed" is a join against the lease row, because a claim
         /// pinned to a superseded lease generation is not a live claim
         /// (ADR 0029). An input bound to an aborted turn is never unclaimed
@@ -135,7 +134,7 @@ crate::statements! {
                          AND lease.lease_fencing_token
                              = queued.claim_session_lease_generation
                   ))
-                ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
+                ORDER BY enqueue_seq ASC
                 LIMIT 1
              ), earliest_input AS (
                 SELECT enqueued_at_ms, enqueue_seq
@@ -151,7 +150,7 @@ crate::statements! {
                          AND lease.lease_fencing_token
                              = input.claim_session_lease_generation
                   ))
-                ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
+                ORDER BY enqueue_seq ASC
                 LIMIT 1
              )
              SELECT command.enqueued_at_ms, command.enqueue_seq,

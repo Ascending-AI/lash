@@ -211,7 +211,7 @@ async fn an_identity_always_column_lash_writes_explicitly_is_rejected() {
              ALTER COLUMN enqueue_seq ADD GENERATED ALWAYS AS IDENTITY",
         &[
             "COLUMN DRIFT",
-            "lash_queued_work_batches.enqueue_seq: expected bigint not-null default, found \
+            "lash_queued_work_batches.enqueue_seq: expected bigint not-null, found \
              bigint not-null identity-always",
         ],
         |finding| {
@@ -1849,11 +1849,11 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
                  ADD CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
                      CHECK ((\"CLAIM_ID\" IS NULL AND claim_token IS NULL)
                          OR (\"CLAIM_ID\" IS NOT NULL AND claim_token IS NOT NULL));
-             INSERT INTO lash_pending_turn_inputs (
+             INSERT INTO lash_pending_turn_inputs (enqueue_seq,
                  input_id, session_id, ingress_json, state, input_json,
                  submitted_ingress_json, submission_digest,
                  enqueued_at_ms, claim_id, \"STATE\"
-             ) VALUES (
+             ) VALUES (1,
                  'quoted-identity-witness', 'session',
                  '{\"scope\":\"active_turn\"}', 'invalid', '{}',
                  '{\"scope\":\"active_turn\"}', 'digest',

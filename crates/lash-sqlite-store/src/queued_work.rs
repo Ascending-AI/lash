@@ -282,6 +282,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
                 batch.merge_key.as_deref(),
                 sql_available_at_ms,
                 now as i64,
+                crate::session_ingress::allocate_sequence(conn, &batch.session_id)?,
             ],
         )
         .map_err(sqlite_error)?;

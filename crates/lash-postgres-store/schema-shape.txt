@@ -144,7 +144,7 @@ table lash_pending_turn_inputs
   column claim_owner_incarnation_id text nullable
   column claim_session_lease_generation bigint not-null default
   column claim_token text nullable
-  column enqueue_seq bigint not-null default
+  column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null
   column ingress_json text not-null
   column input_id text not-null
@@ -156,7 +156,7 @@ table lash_pending_turn_inputs
   column submitted_ingress_json text not-null
   unique (input_id)
   unique (session_id, source_key)
-  primary-key (enqueue_seq)
+  primary-key (session_id, enqueue_seq)
 table lash_process_artifact_cleanup
   column cleanup_json text not-null
   column process_id text not-null
@@ -361,7 +361,7 @@ table lash_queued_work_batches
   column claim_session_lease_generation bigint not-null default
   column claim_token text nullable
   column delivery_policy text not-null
-  column enqueue_seq bigint not-null default
+  column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null
   column merge_key text nullable
   column session_id text not-null
@@ -369,7 +369,7 @@ table lash_queued_work_batches
   column work_kind text not-null
   unique (batch_id)
   unique (session_id, source_key)
-  primary-key (enqueue_seq)
+  primary-key (session_id, enqueue_seq)
 table lash_queued_work_items
   column batch_id text not-null
   column item_id text not-null
@@ -1085,7 +1085,7 @@ table lash_session_ingress
   column delivery_min_boundary text nullable
   column delivery_scope text not-null
   column delivery_turn_id text nullable
-  column enqueue_seq bigint not-null default
+  column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null
   column item_id text not-null
   column kind text not-null
@@ -1102,7 +1102,11 @@ table lash_session_ingress
   column wake_sequence bigint nullable
   unique (item_id)
   unique (session_id, source_key)
-  primary-key (enqueue_seq)
+  primary-key (session_id, enqueue_seq)
+table lash_session_ingress_sequence
+  column enqueue_seq bigint not-null
+  column session_id text not-null
+  primary-key (session_id)
 table lash_session_meta
   column admission_base_checkpoint_ref text nullable
   column caused_by_call_id text nullable

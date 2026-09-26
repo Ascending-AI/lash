@@ -16,20 +16,6 @@
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only PostgreSQL issues.
     pub(crate) struct QueuedBatchPostgresStatements @ "queued_work_batch" {
-        /// The next `enqueue_seq` for this table, drawn from the column's own
-        /// sequence before the insert.
-        ///
-        /// `pg_get_serial_sequence` takes its relation as *text*, so this is
-        /// the one statement in the family whose table name is spelled with
-        /// the `lash_` prefix rather than rendered: the renderer rewrites
-        /// table *tokens*, and a name inside a string literal is not one. It
-        /// is still a named statement with one owner, which is what the
-        /// alternative — a literal at the call site — was not.
-        select_next_enqueue_seq = "SELECT nextval(pg_get_serial_sequence(
-                 'lash_queued_work_batches',
-                 'enqueue_seq'
-             ))";
-
         insert_new = "INSERT INTO queued_work_batches (
                  enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
                  authority_json, merge_key, available_at_ms, enqueued_at_ms
@@ -117,7 +103,7 @@ lash_store_sql::statements! {
                             claim_token IS NULL
                             OR claim_session_lease_generation <> ?3
                        )
-                     ORDER BY enqueue_seq ASC
+                     ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
                      LIMIT 1
                  ) AS unfiltered_head
              )
@@ -132,14 +118,19 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?3
                )
+               AND (work_kind = 'control' OR NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS commands
+                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+               ))
                AND enqueue_seq >= head_enqueue_seq
+               AND work_kind = (SELECT work_kind FROM queued_work_batches WHERE session_id = ?1 AND enqueue_seq = head_enqueue_seq)
                AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
-             ORDER BY enqueue_seq ASC
+             ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
              LIMIT COALESCE((
                  SELECT CASE WHEN head_claim_id IS NULL THEN ?4 ELSE 9223372036854775807 END
                  FROM queued_work_head_candidate
              ), 0)
-             FOR UPDATE OF queued_work_batches SKIP LOCKED";
+             FOR UPDATE OF queued_work_batches";
 
         /// [`claim_candidates_idle`](Self::claim_candidates_idle) at a turn
         /// checkpoint, where only work whose delivery policy admits the
@@ -150,7 +141,7 @@ lash_store_sql::statements! {
                         delivery_policy AS head_delivery_policy,
                         claim_id AS head_claim_id
                  FROM queued_work_batches
-                 WHERE session_id = ?1
+                 WHERE session_id = ?1 AND work_kind = 'turn'
                    AND available_at_ms <= ?2
                    AND (
                         claim_token IS NULL
@@ -168,7 +159,7 @@ lash_store_sql::statements! {
                             candidate.claim_id AS head_claim_id
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
-                     WHERE candidate.session_id = ?1
+                     WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
                        AND candidate.available_at_ms <= ?2
                        AND (
                             candidate.claim_token IS NULL
@@ -195,7 +186,7 @@ lash_store_sql::statements! {
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
-             WHERE session_id = ?1
+             WHERE session_id = ?1 AND work_kind = 'turn'
                AND available_at_ms <= ?2
                AND (
                     claim_token IS NULL

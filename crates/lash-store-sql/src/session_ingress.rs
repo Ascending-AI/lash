@@ -12,6 +12,9 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_ingress";
 
+/// Column ownership for the session allocation counter.
+pub mod sequence;
+
 /// Every column a row decoder reads, in the order both backends index.
 ///
 /// `lane` and the wake-source columns are absent: both are derived from the
@@ -39,6 +42,20 @@ pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq,
 crate::statements! {
     /// `session_ingress` statements both backends issue verbatim.
     pub struct SessionIngressStatements @ "session_ingress" {
+        /// Allocate under the caller's session lock, retained until deletion.
+        allocate_sequence = "INSERT INTO session_ingress_sequence (session_id, enqueue_seq)
+             VALUES (?1, 1)
+             ON CONFLICT (session_id) DO UPDATE
+                 SET enqueue_seq = session_ingress_sequence.enqueue_seq + 1
+             RETURNING enqueue_seq";
+
+        /// Retire the counter only when its session is deleted.
+        delete_sequence = "DELETE FROM session_ingress_sequence WHERE session_id = ?1";
+
+        /// Boundary turn claims wait for every command to settle.
+        has_commands = "SELECT EXISTS (SELECT 1 FROM session_ingress
+             WHERE session_id = ?1 AND lane = 'command' AND state IN ('open', 'accepted'))";
+
         /// The row session `?1` admitted under source key `?2`, open or
         /// tombstoned: the source-key namespace covers both.
         select_by_source_key = "SELECT enqueue_seq, item_id, session_id, kind, source_key,

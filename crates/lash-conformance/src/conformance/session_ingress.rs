@@ -589,16 +589,99 @@ pub async fn turn_claim_stops_and_never_skips(handles: SessionIngressHandles) {
     assert_eq!(seqs(rest.as_ref()), vec![input_four.enqueue_seq]);
 }
 
-/// Law 4 (command lane), as a store claim law: the command lane drains in
-/// `enqueue_seq` order whatever the turn lane holds, the turn lane is claimed
-/// whatever the command lane holds, and a checkpoint never takes a command.
-pub async fn command_lane_never_blocks_or_waits_for_the_turn_lane(handles: SessionIngressHandles) {
+/// Inputs, commands, wakes and ingress rows share the session's allocation counter.
+pub async fn every_ingress_producer_shares_the_session_sequence(handles: SessionIngressHandles) {
+    let first = handles
+        .runtime
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            session(),
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("legacy input"),
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("enqueue input: {error}"));
+    let command = handles
+        .runtime
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            session(),
+            crate::DeliveryPolicy::AfterCurrentTurnCommit,
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "legacy command".into(),
+            },
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("enqueue command: {error}"));
+    let wake = handles
+        .runtime
+        .enqueue_queued_work(crate::runtime::process_wake_batch_draft(wake_delivery(
+            "legacy-process",
+            1,
+            "legacy wake",
+        )))
+        .await
+        .unwrap_or_else(|error| panic!("enqueue wake: {error}"));
+    let input = admit(&handles, input("ingress input")).await;
+    let next = admit(&handles, refresh("ingress command")).await;
+    assert_eq!(
+        [
+            first.enqueue_seq,
+            command.enqueue_seq,
+            wake.enqueue_seq,
+            input.enqueue_seq,
+            next.enqueue_seq
+        ],
+        [1, 2, 3, 4, 5]
+    );
+    let unrelated = handles
+        .runtime
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            SessionId::from("another-session"),
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("unrelated"),
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("enqueue unrelated input: {error}"));
+    assert_eq!(unrelated.enqueue_seq, 1, "sessions allocate independently");
+}
+
+/// At an idle boundary every command settles before any turn-lane claim.
+pub async fn command_lane_drains_before_idle_turn_claims(handles: SessionIngressHandles) {
     let early_input = admit(&handles, input("early input")).await;
     let first_command = admit(&handles, refresh("first")).await;
     let late_input = admit(&handles, input("late input")).await;
     let second_command = admit(&handles, refresh("second")).await;
     let fence = seal(&handles, "lanes").await;
-
+    for command in [&first_command, &second_command] {
+        assert!(
+            claim(
+                &handles,
+                &fence,
+                ClaimMode::Idle,
+                IngressClaimPolicy::bounded(8)
+            )
+            .await
+            .is_none(),
+            "every pending command must apply before the idle turn claim"
+        );
+        let held = claim_commands(&handles, &fence)
+            .await
+            .unwrap_or_else(|| panic!("a command claim"));
+        assert_eq!(seqs(Some(&held)), vec![command.enqueue_seq]);
+        settle(
+            &handles,
+            &fence,
+            &[&held],
+            IngressSettlementIntent::Commands {
+                outcomes: vec![IngressCommandOutcome {
+                    item_id: command.item_id.clone(),
+                    result: IngressCommandResult::Applied,
+                }],
+                refused_windows: Vec::new(),
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("apply the command: {error}"));
+    }
     let turn = claim(
         &handles,
         &fence,
@@ -608,56 +691,23 @@ pub async fn command_lane_never_blocks_or_waits_for_the_turn_lane(handles: Sessi
     .await;
     assert_eq!(
         seqs(turn.as_ref()),
-        vec![early_input.enqueue_seq, late_input.enqueue_seq],
-        "an open command never delays a turn-lane claim"
+        vec![early_input.enqueue_seq, late_input.enqueue_seq]
     );
-    let commands = claim_commands(&handles, &fence).await;
-    assert_eq!(
-        seqs(commands.as_ref()),
-        vec![first_command.enqueue_seq],
-        "a held input never delays the command lane, and a refresh is claimed alone"
-    );
-    let commands = commands.unwrap_or_else(|| panic!("a command claim"));
-    settle(
-        &handles,
-        &fence,
-        &[&commands],
-        IngressSettlementIntent::Commands {
-            outcomes: vec![IngressCommandOutcome {
-                item_id: first_command.item_id.clone(),
-                result: IngressCommandResult::Applied,
-            }],
-            refused_windows: Vec::new(),
-        },
-    )
-    .await
-    .unwrap_or_else(|error| panic!("apply the command: {error}"));
-    let next = claim_commands(&handles, &fence).await;
-    assert_eq!(seqs(next.as_ref()), vec![second_command.enqueue_seq]);
-    let next = next.unwrap_or_else(|| panic!("a command claim"));
     let turn = turn.unwrap_or_else(|| panic!("a turn claim"));
     deliver(&handles, &fence, &turn, &[&early_input, &late_input]).await;
-    settle(
+    admit(&handles, refresh("checkpoint command")).await;
+    let wake = admit(&handles, wake("checkpoint wake", 1)).await;
+    let checkpoint_claim = claim(
         &handles,
         &fence,
-        &[&next],
-        IngressSettlementIntent::Commands {
-            outcomes: Vec::new(),
-            refused_windows: Vec::new(),
-        },
+        checkpoint(&TurnId::from("t"), crate::CheckpointKind::BeforeCompletion),
+        IngressClaimPolicy::bounded(8),
     )
-    .await
-    .unwrap_or_else(|error| panic!("release the command: {error}"));
-    assert!(
-        claim(
-            &handles,
-            &fence,
-            checkpoint(&TurnId::from("t"), crate::CheckpointKind::BeforeCompletion),
-            IngressClaimPolicy::bounded(8),
-        )
-        .await
-        .is_none(),
-        "a checkpoint never looks at the command lane"
+    .await;
+    assert_eq!(
+        seqs(checkpoint_claim.as_ref()),
+        vec![wake.enqueue_seq],
+        "a checkpoint ignores pending commands"
     );
 }
 
@@ -923,6 +973,23 @@ pub async fn replay_compares_the_immutable_digest_for_every_kind(handles: Sessio
         "an identical retry after its addressed turn ended is Existing"
     );
 
+    let command_claim = claim_commands(&handles, &fence)
+        .await
+        .unwrap_or_else(|| panic!("the command claim"));
+    settle(
+        &handles,
+        &fence,
+        &[&command_claim],
+        IngressSettlementIntent::Commands {
+            outcomes: vec![IngressCommandOutcome {
+                item_id: command.item_id.clone(),
+                result: IngressCommandResult::Applied,
+            }],
+            refused_windows: Vec::new(),
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("settle before the turn claim: {error}"));
     let claimed = claim(
         &handles,
         &fence,

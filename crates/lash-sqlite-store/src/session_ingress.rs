@@ -13,16 +13,13 @@ use crate::schema_layout::Schema;
 lash_store_sql::statements! {
     /// `session_ingress` statements only SQLite issues.
     pub(crate) struct SessionIngressSqliteStatements @ "session_ingress" {
-        /// Admit one row, taking the next `enqueue_seq` from the table's
-        /// never-reused `AUTOINCREMENT` counter inside the caller's
-        /// `BEGIN IMMEDIATE` transaction: the database write lock is the
-        /// session lock, so the sequence is commit order.
-        insert = "INSERT INTO session_ingress (
+        /// Admit at the sequence allocated under the database write lock.
+        insert = "INSERT INTO session_ingress (enqueue_seq,
                  item_id, session_id, lane, kind, source_key,
                  delivery_scope, delivery_turn_id, delivery_min_boundary, submission_digest,
                  payload_json, authority_json, merge_key, wake_process_id, wake_sequence,
                  state, enqueued_at_ms
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'open', ?15)
+             ) VALUES (?16, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'open', ?15)
              RETURNING enqueue_seq";
     }
 }
@@ -47,6 +44,19 @@ static SESSION_INGRESS_SQL: LazyLock<SessionIngressSql> = LazyLock::new(|| {
 /// use.
 pub(crate) fn session_ingress_sql() -> &'static SessionIngressSql {
     &SESSION_INGRESS_SQL
+}
+
+/// Every caller holds the database write lock for the entire allocation.
+pub(crate) fn allocate_sequence(
+    conn: &rusqlite::Connection,
+    session_id: &lash_sansio::SessionId,
+) -> Result<i64, crate::StoreError> {
+    conn.query_row(
+        session_ingress_sql().shared.allocate_sequence.sql(),
+        rusqlite::params![session_id.as_str()],
+        |row| row.get(0),
+    )
+    .map_err(crate::sqlite_error)
 }
 
 #[cfg(test)]

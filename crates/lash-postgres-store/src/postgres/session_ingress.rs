@@ -1,7 +1,7 @@
 //! The PostgreSQL half of the session-ingress family (ADR 0101).
 //!
 //! `lash-store-sql`'s `session_ingress` module owns the column lists and every
-//! statement both backends issue verbatim; this module owns the two that fork
+//! statement both backends issue verbatim; this module owns the insert that forks
 //! and renders both sets once, at startup.
 
 use std::sync::LazyLock;
@@ -12,19 +12,6 @@ use lash_store_sql::session_ingress::SessionIngressStatements;
 lash_store_sql::statements! {
     /// `session_ingress` statements only PostgreSQL issues.
     pub(crate) struct SessionIngressPostgresStatements @ "session_ingress" {
-        /// The next `enqueue_seq`, drawn from the column's own sequence after
-        /// the caller took the session history lock, so the value is
-        /// per-session commit order: a later admission of the same session
-        /// waits for the lock and draws a later value.
-        ///
-        /// `pg_get_serial_sequence` takes its relation as *text*, so the table
-        /// name is spelled with the `lash_` prefix inside a string literal,
-        /// which the renderer leaves alone.
-        select_next_enqueue_seq = "SELECT nextval(pg_get_serial_sequence(
-                 'lash_session_ingress',
-                 'enqueue_seq'
-             ))";
-
         /// Admit one row at the sequence value `?1` drew.
         insert = "INSERT INTO session_ingress (
                  enqueue_seq,

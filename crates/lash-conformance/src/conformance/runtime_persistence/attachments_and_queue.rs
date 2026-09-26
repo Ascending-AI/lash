@@ -291,15 +291,8 @@ pub async fn decorated_queued_work_source_key_replay_reports_absorbed(
     );
 }
 
-/// The projection reports each family's earliest pending row verbatim, and a
-/// timestamp tie between the families resolves to the turn input.
-///
-/// The tie direction is the portable part. The two families number themselves
-/// from independent counters — a PostgreSQL sequence, a SQLite rowid, an
-/// in-memory integer — so their `enqueue_seq` values are not comparable across
-/// the boundary and nothing here may assert a relationship between them. Only
-/// `enqueued_at_ms` may reorder the families; equal timestamps leave the
-/// previous winner in place.
+/// Commands precede turn inputs at a boundary, including timestamp ties.
+/// Both producers draw from the same session sequence.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -353,10 +346,11 @@ pub async fn pending_session_work_ordering_agrees_across_ingress_families(
         "the tie this case exists to pin must actually be a tie"
     );
     assert!(
-        !ordering.session_command_precedes_turn_input(),
-        "a timestamp tie must leave the turn input ahead rather than be broken by two \
-         independently numbered enqueue sequences"
+        ordering.session_command_precedes_turn_input(),
+        "commands drain before turn inputs even when their timestamps tie"
     );
+
+    assert!(command.enqueue_seq < input.enqueue_seq);
 
     let session_id = "pending-work-ordering-command-only";
     let command = store
@@ -994,35 +988,35 @@ pub async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Run
         "command-owner",
     )
     .await;
-    assert!(
-        store
-            .claim_leading_ready_session_command(
-                &SessionId::from("turn-first"),
-                &rejected_command_lease.fence(),
-                &lease_owner("command-owner"),
-            )
-            .await
-            .expect("claim command behind turn")
-            .is_none(),
-        "session commands must not jump ahead of earlier turn work"
-    );
-    let turn_claim = store
-        .claim_ready_queued_work(
+    let command_claim = store
+        .claim_leading_ready_session_command(
             &SessionId::from("turn-first"),
             &rejected_command_lease.fence(),
             &lease_owner("command-owner"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
         )
         .await
-        .expect("claim turn before later command")
-        .claim()
-        .expect("turn claim exists");
-    assert_eq!(turn_claim.batches[0].batch_id, first_turn.batch_id);
+        .expect("claim command behind turn")
+        .expect("command lane goes first");
+    assert_eq!(command_claim.batches[0].batch_id, second_command.batch_id);
+    assert!(
+        store
+            .claim_ready_queued_work(
+                &SessionId::from("turn-first"),
+                &rejected_command_lease.fence(),
+                &lease_owner("command-owner"),
+                QueuedWorkClaimBoundary::Idle,
+                crate::testing::queued_work_claim_policy(10),
+            )
+            .await
+            .expect("try turn claim while command is held")
+            .claim()
+            .is_none(),
+        "a held command must settle before turn work is claimed"
+    );
     store
-        .abandon_queued_work_claim(&turn_claim)
+        .abandon_queued_work_claim(&command_claim)
         .await
-        .expect("abandon turn claim");
+        .expect("release command claim");
     release_session_execution_lease_for_test(&store, &rejected_command_lease).await;
     assert_eq!(
         store

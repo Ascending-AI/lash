@@ -173,6 +173,7 @@ pub const TABLES: &[&str] = &[
     session_roots::root_inputs::TABLE,
     session_roots::roots::TABLE,
     session_ingress::TABLE,
+    session_ingress::sequence::TABLE,
 ];
 
 /// Every shared statement this crate owns, across every family.

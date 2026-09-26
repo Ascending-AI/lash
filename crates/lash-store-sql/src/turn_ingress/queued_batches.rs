@@ -12,14 +12,12 @@ pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delive
      work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
      claim_fencing_token, claim_token, claim_session_lease_generation, claim_id";
 
-/// The columns an enqueue writes on SQLite, where `enqueue_seq` is the table's
-/// `INTEGER PRIMARY KEY AUTOINCREMENT` and is never bound.
-pub const INSERT_COLUMNS: &str = "batch_id, session_id, source_key, delivery_policy, work_kind,
+/// The columns written after allocation under the session lock.
+pub const INSERT_COLUMNS: &str =
+    "enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
      authority_json, merge_key, available_at_ms, enqueued_at_ms";
 
-/// The columns an enqueue writes on PostgreSQL, which draws `enqueue_seq` from
-/// the column's sequence before the insert so the conflict path can report the
-/// value it tried to write.
+/// The columns written by the PostgreSQL insert.
 pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, batch_id, session_id, source_key,
      delivery_policy, work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms";
 

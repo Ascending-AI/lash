@@ -402,7 +402,7 @@ CREATE TABLE IF NOT EXISTS session_execution_leases (
 );
 
 CREATE TABLE IF NOT EXISTS queued_work_batches (
-    enqueue_seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    enqueue_seq       INTEGER NOT NULL,
     batch_id          TEXT NOT NULL UNIQUE,
     session_id        TEXT NOT NULL,
     source_key        TEXT,
@@ -420,7 +420,8 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
     UNIQUE (session_id, source_key)
-        ON CONFLICT IGNORE
+        ON CONFLICT IGNORE,
+    PRIMARY KEY (session_id, enqueue_seq)
 );
 
 CREATE TABLE IF NOT EXISTS queued_work_items (
@@ -449,7 +450,7 @@ CREATE INDEX IF NOT EXISTS idx_queued_work_claim
     ON queued_work_batches(session_id, claim_id, claim_token);
 
 CREATE TABLE IF NOT EXISTS pending_turn_inputs (
-    enqueue_seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    enqueue_seq       INTEGER NOT NULL,
     input_id          TEXT NOT NULL UNIQUE,
     session_id        TEXT NOT NULL,
     source_key        TEXT,
@@ -472,7 +473,8 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
     CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL) OR (claim_bound_turn_id IS NOT NULL AND claim_bound_receipt_input_id IS NOT NULL AND claim_token IS NOT NULL AND state = 'deferred_next_turn')),
     UNIQUE (session_id, source_key)
-        ON CONFLICT IGNORE
+        ON CONFLICT IGNORE,
+    PRIMARY KEY (session_id, enqueue_seq)
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_session

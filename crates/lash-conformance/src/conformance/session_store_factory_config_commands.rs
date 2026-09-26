@@ -424,20 +424,17 @@ async fn runtime_for_config_settlement(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn enqueue_config_settlement_blocker(
+async fn hold_config_settlement_lease(
     store: &dyn crate::RuntimePersistence,
     session_id: &SessionId,
 ) {
+    let owner = crate::LeaseOwnerIdentity::opaque("config-blocker", "config-blocker:incarnation");
     store
-        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
-            session_id,
-            "config-settlement-blocker",
-            1,
-            "block the FIFO head",
-            crate::DeliveryPolicy::AfterCurrentTurnCommit,
-        ))
+        .try_claim_session_execution_lease(session_id, &owner, "config-blocker", 600_000)
         .await
-        .expect("enqueue config-settlement blocker");
+        .expect("claim the competing writer lease")
+        .acquired()
+        .expect("competing writer lease");
 }
 
 #[expect(
@@ -472,7 +469,7 @@ where
         crate::SessionRelation::Root,
     );
     let (backend, store) = config_settlement_store(&make, &request).await;
-    enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
+    hold_config_settlement_lease(store.as_ref(), &request.session_id).await;
     let mut runtime = runtime_for_config_settlement(
         backend.clone(),
         Arc::clone(&store),
@@ -517,7 +514,7 @@ where
         crate::SessionRelation::Root,
     );
     let (backend, store) = config_settlement_store(&make, &request).await;
-    enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
+    hold_config_settlement_lease(store.as_ref(), &request.session_id).await;
     let runtime = runtime_for_config_settlement(
         backend.clone(),
         Arc::clone(&store),

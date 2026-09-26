@@ -452,11 +452,11 @@ async fn sqlite_v76_pending_input_database_is_refused_before_replay() {
         .execute_batch(
             "ALTER TABLE pending_turn_inputs DROP COLUMN submitted_ingress_json;
              ALTER TABLE pending_turn_inputs DROP COLUMN submission_digest;
-             INSERT INTO pending_turn_inputs (
+             INSERT INTO pending_turn_inputs (enqueue_seq,
                  input_id, session_id, source_key, ingress_json, state, input_json,
                  enqueued_at_ms
              )
-             VALUES (
+             VALUES (1,
                  'ti:pre-77', 'pre-77-session', 'host:pre-77', '{\"scope\":\"next_turn\"}',
                  'deferred_next_turn', '{\"items\":[]}', 0
              );",

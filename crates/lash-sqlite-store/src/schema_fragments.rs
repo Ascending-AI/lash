@@ -72,8 +72,14 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 /// tombstone carries its closed cause and no claim. The partial indexes keep
 /// tombstones off the claim path.
 pub(crate) const SESSION_INGRESS_TABLE: &str = "
+CREATE TABLE IF NOT EXISTS session_ingress_sequence (
+    session_id TEXT NOT NULL PRIMARY KEY,
+    enqueue_seq INTEGER NOT NULL,
+    CONSTRAINT ck_session_ingress_sequence_positive CHECK (enqueue_seq > 0)
+);
+
 CREATE TABLE IF NOT EXISTS session_ingress (
-    enqueue_seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    enqueue_seq       INTEGER NOT NULL,
     item_id           TEXT NOT NULL UNIQUE,
     session_id        TEXT NOT NULL,
     lane              TEXT NOT NULL,
@@ -106,7 +112,8 @@ CREATE TABLE IF NOT EXISTS session_ingress (
     CONSTRAINT ck_session_ingress_wake_source CHECK ((kind = 'process_wake' AND wake_process_id IS NOT NULL AND wake_sequence IS NOT NULL) OR (kind <> 'process_wake' AND wake_process_id IS NULL AND wake_sequence IS NULL)),
     CONSTRAINT ck_session_ingress_claim CHECK ((state = 'accepted' AND claim_id IS NOT NULL AND claim_token IS NOT NULL AND claim_admission_id IS NOT NULL AND claim_drive_epoch IS NOT NULL) OR (state <> 'accepted' AND claim_id IS NULL AND claim_token IS NULL AND claim_admission_id IS NULL AND claim_drive_epoch IS NULL AND claim_turn_id IS NULL)),
     CONSTRAINT ck_session_ingress_terminal CHECK ((state IN ('completed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL) OR (state IN ('open', 'accepted') AND terminal_cause_json IS NULL AND terminal_at_ms IS NULL)),
-    UNIQUE (session_id, source_key)
+    UNIQUE (session_id, source_key),
+    PRIMARY KEY (session_id, enqueue_seq)
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_ingress_open

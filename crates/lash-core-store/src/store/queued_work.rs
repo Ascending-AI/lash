@@ -250,14 +250,8 @@ pub enum QueuedWorkClass {
 
 /// The payload-free fields that establish one pending work item's position.
 ///
-/// `enqueue_seq` totally orders *one* ingress family: each family draws it from
-/// its own counter (a PostgreSQL sequence, a SQLite rowid, an in-memory
-/// mutex-guarded integer), so the two families' sequences are not comparable —
-/// their relative values are decided by unrelated enqueue traffic elsewhere in
-/// the store. That is why [`Ord`] is deliberately not derived: within-family
-/// ordering happens in each store's own `ORDER BY enqueued_at_ms, enqueue_seq`,
-/// and the only cross-family comparison — [`PendingSessionWorkOrdering::
-/// session_command_precedes_turn_input`] — reads the timestamp alone.
+/// Every ingress producer shares one per-session sequence. Timestamps are
+/// informational; commands take priority at a turn boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingWorkOrderingKey {
     pub enqueued_at_ms: u64,
@@ -282,20 +276,9 @@ pub struct PendingSessionWorkOrdering {
 }
 
 impl PendingSessionWorkOrdering {
-    /// Whether the earliest pending session command sorts before the earliest
-    /// pending next-turn input.
-    ///
-    /// The comparison is on `enqueued_at_ms` alone, and a tie resolves to the
-    /// turn input. `enqueue_seq` is *not* a tiebreak here: the two families
-    /// number themselves from independent counters, so a cross-family sequence
-    /// comparison would hand the decision to unrelated enqueue traffic in other
-    /// sessions. Only a real timestamp ordering may reorder the families.
+    /// Whether the command lane must drain before a boundary turn claim.
     pub fn session_command_precedes_turn_input(self) -> bool {
-        match (self.session_command, self.turn_input) {
-            (Some(command), Some(input)) => command.enqueued_at_ms < input.enqueued_at_ms,
-            (Some(_), None) => true,
-            _ => false,
-        }
+        self.session_command.is_some()
     }
 }
 

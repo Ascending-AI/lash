@@ -10,14 +10,12 @@
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only SQLite issues.
     pub(crate) struct QueuedBatchSqliteStatements @ "queued_work_batch" {
-        /// `enqueue_seq` is this table's `INTEGER PRIMARY KEY AUTOINCREMENT`
-        /// and is never bound; PostgreSQL draws it from the column's sequence
-        /// first, and returns the inserted id rather than reading it back.
-        insert_new = "INSERT INTO queued_work_batches (
+        /// `?10` is allocated from the shared session counter under the write lock.
+        insert_new = "INSERT INTO queued_work_batches (enqueue_seq,
                  batch_id, session_id, source_key, delivery_policy, work_kind,
                  authority_json, merge_key, available_at_ms, enqueued_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             VALUES (?10, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT (session_id, source_key) DO NOTHING";
 
         /// The facts the settlement verdict consults about batch `?2` of
@@ -118,7 +116,7 @@ lash_store_sql::statements! {
                             claim_token IS NULL
                             OR claim_session_lease_generation <> ?3
                        )
-                     ORDER BY enqueue_seq ASC
+                     ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
                      LIMIT 1
                  ) AS unfiltered_head
              )
@@ -133,9 +131,14 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?3
                )
+               AND (work_kind = 'control' OR NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS commands
+                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+               ))
                AND enqueue_seq >= head_enqueue_seq
+               AND work_kind = (SELECT work_kind FROM queued_work_batches WHERE session_id = ?1 AND enqueue_seq = head_enqueue_seq)
                AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
-             ORDER BY enqueue_seq ASC
+             ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
              LIMIT COALESCE((
                  SELECT CASE WHEN head_claim_id IS NULL THEN ?4 ELSE 9223372036854775807 END
                  FROM queued_work_head_candidate
@@ -156,7 +159,7 @@ lash_store_sql::statements! {
                         delivery_policy AS head_delivery_policy,
                         claim_id AS head_claim_id
                  FROM queued_work_batches
-                 WHERE session_id = ?1
+                 WHERE session_id = ?1 AND work_kind = 'turn'
                    AND available_at_ms <= ?2
                    AND (
                         claim_token IS NULL
@@ -174,7 +177,7 @@ lash_store_sql::statements! {
                             candidate.claim_id AS head_claim_id
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
-                     WHERE candidate.session_id = ?1
+                     WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
                        AND candidate.available_at_ms <= ?2
                        AND (
                             candidate.claim_token IS NULL
@@ -204,7 +207,7 @@ lash_store_sql::statements! {
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
-             WHERE session_id = ?1
+             WHERE session_id = ?1 AND work_kind = 'turn'
                AND available_at_ms <= ?2
                AND (
                     claim_token IS NULL

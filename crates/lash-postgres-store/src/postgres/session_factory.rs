@@ -1141,6 +1141,10 @@ pub(crate) async fn delete_session_tx(
             .shared
             .delete_by_session
             .sql(),
+        crate::session_ingress::session_ingress_sql()
+            .shared
+            .delete_sequence
+            .sql(),
         turn_ingress.cancel_requests.delete_by_session.sql(),
         // Administration revokes the session's effect authority before store
         // deletion, after which the pinned closure obligation may be retired.

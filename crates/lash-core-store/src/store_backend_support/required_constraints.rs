@@ -233,6 +233,19 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(
+            "session_ingress_sequence",
+            "ck_session_ingress_sequence_positive",
+            "enqueue_seq > 0",
+        ),
+        rendered(
+            "lash_session_ingress_sequence",
+            "ck_session_ingress_sequence_positive",
+            "enqueue_seq > 0",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
             "session_ingress",
             "ck_session_ingress_kind",
             "kind IN ('input', 'process_wake', 'session_command')",

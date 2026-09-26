@@ -332,7 +332,7 @@ CREATE TABLE IF NOT EXISTS lash_session_execution_leases (
 );
 
 CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
-    enqueue_seq BIGSERIAL PRIMARY KEY,
+    enqueue_seq BIGINT NOT NULL,
     batch_id TEXT NOT NULL UNIQUE,
     session_id TEXT NOT NULL,
     source_key TEXT,
@@ -349,7 +349,8 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
-    UNIQUE (session_id, source_key)
+    UNIQUE (session_id, source_key),
+    PRIMARY KEY (session_id, enqueue_seq)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_ready
     ON lash_queued_work_batches(session_id, available_at_ms, enqueue_seq);
@@ -374,7 +375,7 @@ CREATE TABLE IF NOT EXISTS lash_wake_redelivery_fences (
 );
 
 CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
-    enqueue_seq BIGSERIAL PRIMARY KEY,
+    enqueue_seq BIGINT NOT NULL,
     input_id TEXT NOT NULL UNIQUE,
     session_id TEXT NOT NULL,
     source_key TEXT,
@@ -396,7 +397,8 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
     CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL) OR (claim_bound_turn_id IS NOT NULL AND claim_bound_receipt_input_id IS NOT NULL AND claim_token IS NOT NULL AND state = 'deferred_next_turn')),
-    UNIQUE (session_id, source_key)
+    UNIQUE (session_id, source_key),
+    PRIMARY KEY (session_id, enqueue_seq)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_session
     ON lash_pending_turn_inputs(session_id, state, enqueue_seq);
@@ -410,8 +412,14 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_claim
 -- lanes. `delivery_*` is the submitted delivery, written once and never
 -- rewritten; `submission_digest` likewise. A claim's columns are set exactly
 -- on an `accepted` row, and a tombstone carries its closed cause and no claim.
+CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
+    session_id TEXT NOT NULL PRIMARY KEY,
+    enqueue_seq BIGINT NOT NULL,
+    CONSTRAINT ck_session_ingress_sequence_positive CHECK (enqueue_seq > 0)
+);
+
 CREATE TABLE IF NOT EXISTS lash_session_ingress (
-    enqueue_seq BIGSERIAL PRIMARY KEY,
+    enqueue_seq BIGINT NOT NULL,
     item_id TEXT NOT NULL UNIQUE,
     session_id TEXT NOT NULL,
     lane TEXT NOT NULL,
@@ -444,7 +452,8 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress (
     CONSTRAINT ck_session_ingress_wake_source CHECK ((kind = 'process_wake' AND wake_process_id IS NOT NULL AND wake_sequence IS NOT NULL) OR (kind <> 'process_wake' AND wake_process_id IS NULL AND wake_sequence IS NULL)),
     CONSTRAINT ck_session_ingress_claim CHECK ((state = 'accepted' AND claim_id IS NOT NULL AND claim_token IS NOT NULL AND claim_admission_id IS NOT NULL AND claim_drive_epoch IS NOT NULL) OR (state <> 'accepted' AND claim_id IS NULL AND claim_token IS NULL AND claim_admission_id IS NULL AND claim_drive_epoch IS NULL AND claim_turn_id IS NULL)),
     CONSTRAINT ck_session_ingress_terminal CHECK ((state IN ('completed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL) OR (state IN ('open', 'accepted') AND terminal_cause_json IS NULL AND terminal_at_ms IS NULL)),
-    UNIQUE (session_id, source_key)
+    UNIQUE (session_id, source_key),
+    PRIMARY KEY (session_id, enqueue_seq)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_open
     ON lash_session_ingress(session_id, lane, enqueue_seq) WHERE state IN ('open', 'accepted');

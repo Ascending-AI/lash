@@ -424,6 +424,30 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
             .await
             .unwrap_or_else(|error| panic!("create {table} from authoritative DDL: {error}"));
     }
+    for table in [
+        "lash_queued_work_items",
+        "lash_queued_work_batches",
+        "lash_pending_turn_inputs",
+        "lash_session_ingress",
+        "lash_session_ingress_sequence",
+    ] {
+        sqlx::query(&format!("DROP TABLE IF EXISTS {table}"))
+            .execute(&pool)
+            .await
+            .expect("discard pre-cutover ingress rows");
+    }
+    for table in [
+        "lash_queued_work_batches",
+        "lash_queued_work_items",
+        "lash_pending_turn_inputs",
+        "lash_session_ingress_sequence",
+        "lash_session_ingress",
+    ] {
+        sqlx::raw_sql(schema_table_ddl(table))
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|error| panic!("create {table} from authoritative DDL: {error}"));
+    }
     sqlx::raw_sql(
         "UPDATE lash_process_events
             SET event_json = jsonb_set(
