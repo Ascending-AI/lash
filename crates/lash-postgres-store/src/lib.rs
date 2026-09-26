@@ -539,7 +539,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // adds the projected, indexed `lash_turn_parks.park_executable_generation` column the
 // drain counts retired parks by. Component-132 catalogs are rejected and
 // recreated.
-const SCHEMA_VERSION: i32 = 133;
+// Version 134 (FIG-3816) adds `lash_migrations`, the ledger `lash migrate`
+// writes each applied step to. It is the first generation reachable by an
+// expand-phase migration instead of recreation: `lash migrate` carries a
+// component-133 catalog forward by creating the ledger and restamping,
+// and provisions an empty database outright. Older catalogs are still
+// rejected and recreated.
+const SCHEMA_VERSION: i32 = 134;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -743,6 +749,39 @@ impl PostgresStorage {
             pool,
             catalog_id: catalog_id.into(),
         })
+    }
+
+    /// Provision or advance the schema for `database_url`: `lash migrate`'s
+    /// engine (FIG-3816).
+    ///
+    /// This is the separate operational step the open path deliberately is
+    /// not: it takes the schema advisory lock exclusively, applies the pending
+    /// expand-phase migrations this build declares — or provisions an
+    /// unprovisioned database outright — and records each applied step in the
+    /// `lash_migrations` ledger. Rerunning it is a no-op. `phase` selects the
+    /// operations-arc phase; [`MigrationPhase::Backfill`] and
+    /// [`MigrationPhase::Contract`] are refused until FIG-3817.
+    ///
+    /// Workers must not call it: an open verifies the schema and never runs
+    /// DDL, so a database that needs this is one that has not been provisioned
+    /// or migrated yet.
+    pub async fn migrate(
+        database_url: &str,
+        phase: MigrationPhase,
+    ) -> Result<MigrationReport, StoreError> {
+        migrate::migrate(database_url, phase).await
+    }
+
+    /// Plan what [`Self::migrate`] would apply without changing the database.
+    ///
+    /// The dry-run reads the installation under the shared advisory lock with
+    /// the same snapshot discipline an open's verification uses, so its answer
+    /// cannot describe a half-applied state.
+    pub async fn plan_migrations(
+        database_url: &str,
+        phase: MigrationPhase,
+    ) -> Result<MigrationReport, StoreError> {
+        migrate::plan_migrations(database_url, phase).await
     }
 
     /// Build storage over an already-constructed pool.
@@ -1065,7 +1104,7 @@ impl PostgresStorage {
     /// Consequently, a mistyped id produces a valid absent handle that can subsequently create
     /// the mistyped session.
     /// Call
-    /// [`SessionStoreFactory::open_existing_store`](lash_core_execution::SessionStoreFactory::open_existing_store)
+    /// [`SessionStoreFactory::open_existing_store`]
     /// through [`Self::session_store_factory`] when existence must be checked.
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
@@ -1228,6 +1267,8 @@ mod blobs;
 mod connection_sql;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
+#[path = "postgres/migrate.rs"]
+mod migrate;
 #[path = "postgres/pending_turn_inputs.rs"]
 mod pending_turn_inputs;
 mod preflight;
@@ -1291,6 +1332,7 @@ pub use backend::PostgresStoreSet;
 pub use lash_core_execution::store_backend_support::required_constraints::{
     RequiredConstraintFinding, RequiredConstraintReport,
 };
+pub use migrate::{MigrationPhase, MigrationReport, MigrationStep};
 pub use preflight::PostgresStorePreflight;
 pub use process_definitions::PostgresProcessDefinitionRegistry;
 use schema_shape::verify_schema_shape;

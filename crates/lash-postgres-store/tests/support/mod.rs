@@ -23,9 +23,10 @@ const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
 /// The truncate set derives from the live catalog rather than a
 /// hand-maintained table list: a new `lash_*` table can no longer silently
 /// bleed state between cases. `lash_schema_versions` is excluded — it holds
-/// the component schema version gate, not per-case fixture rows — and
-/// `lash_catalog_identity` holds the install's identity, likewise not fixture
-/// state.
+/// the component schema version gate, not per-case fixture rows —
+/// `lash_migrations` is the migrate ledger (FIG-3816), likewise not fixture
+/// rows — and `lash_catalog_identity` holds the install's identity, likewise
+/// not fixture state.
 // Not every target that compiles this module calls it; the includers'
 // `#[allow(dead_code)]` on `mod support` predates it.
 #[allow(dead_code)]
@@ -34,7 +35,8 @@ pub async fn reset(pool: &PgPool) {
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity')
+           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity',
+                                 'lash_migrations')
          ORDER BY tablename",
     )
     .fetch_all(pool)

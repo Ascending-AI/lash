@@ -2370,6 +2370,11 @@ constant_path = "crates/lash-core-store/src/store/state_version.rs"
 reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"
 
 [[unregistered]]
+constant = "MIN_SUPPORTED_SCHEMA_VERSION"
+constant_path = "crates/lash-postgres-store/src/lib.rs"
+reason = "lower bound of the admission window for the registered SCHEMA_VERSION, not a format of its own"
+
+[[unregistered]]
 constant = "PROCESS_CURSOR_VERSION"
 constant_path = "crates/lash-sansio/src/process_cursor.rs"
 reason = "stamps the opaque live process cursor a host holds between reads; lash persists no cursor, a retired stamp is refused by name at parse, and its wire carriers are guarded by REMOTE_PROTOCOL_VERSION"

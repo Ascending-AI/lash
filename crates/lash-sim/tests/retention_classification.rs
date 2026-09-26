@@ -411,6 +411,12 @@ const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "lash_migrations",
+        PermanentlyExempt {
+            reason: "the `lash migrate` ledger is the audit record of applied schema steps; history is its contents",
+        },
+    ),
+    (
         "turn_cancel_affected_inputs",
         LifecycleOwned {
             scope: "session vacuum and deletion; cascade of its lash_turn_cancel_requests parent",
@@ -481,7 +487,7 @@ fn assert_classified(source: &str, postgres: bool) {
             !detail.trim().is_empty(),
             "{table} must name its lever, owner, reason or known issue"
         );
-        let name = if postgres && *table != "lash_schema_versions" {
+        let name = if postgres && !table.starts_with("lash_") {
             postgres_name(table)
         } else {
             (*table).to_string()

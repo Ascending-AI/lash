@@ -1390,13 +1390,14 @@ impl fmt::Display for SchemaReport {
 #[path = "schema_shape/introspect.rs"]
 mod introspect;
 
+pub(crate) use introspect::{
+    ComponentVersion, Installation, read_component_version, read_search_path, resolve_installation,
+    resolve_tables, verify_schema_shape,
+};
 /// Reached only by the artifact-generation and catalog tests, which drive the
 /// introspection directly rather than through a full verification.
 #[cfg(test)]
 pub(crate) use introspect::{normalize_predicate, read_live_shape};
-pub(crate) use introspect::{
-    read_search_path, resolve_installation, resolve_tables, verify_schema_shape,
-};
 
 #[path = "schema_shape/tests.rs"]
 #[cfg(test)]

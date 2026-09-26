@@ -207,7 +207,7 @@ impl StorePreflight for PostgresStorePreflight {
     /// constructed to serve the walk — building a `PostgresStorage` to read its
     /// tables would perform the open the whole surface exists to precede. The
     /// enumeration itself, and every argument for why each statement is shaped
-    /// the way it is, lives in [`walk`].
+    /// the way it is, lives in the `walk` submodule.
     async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {
         walk::scan_durable(&self.pool, scan).await
     }

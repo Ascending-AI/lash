@@ -73,6 +73,62 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "lash-migrate__bin",
+    crate_features = [
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "lash_migrate",
+    crate_root = "src/bin/lash_migrate.rs",
+    declared_features = [
+        "perf-witness",
+        "testing",
+    ],
+    compile_data_patterns = [
+        "schema.sql",
+        "teardown.sql",
+        "schema-shape.txt",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "lash_migrate"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-postgres-store",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    rustc_env = {},
+    tags = [
+        "cargo-service-gate",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_unit_test(
+    name = "lash-migrate__bin__unit_test",
+    crate_features = [
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "lash_migrate",
+    crate_root = "src/bin/lash_migrate.rs",
+    declared_features = [
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "lash_migrate", "//crates/lash-postgres-store:lash-migrate__bin__unit_test"),
+    library = ":lash-postgres-store",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    tags = [
+        "cargo-service-gate",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "integration__test",
     crate_features = [
@@ -268,6 +324,32 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "migrate__test",
+    crate_features = [
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "migrate",
+    crate_root = "tests/migrate.rs",
+    declared_features = [
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "migrate", "//crates/lash-postgres-store:migrate__test"),
+    extra_compile_data = [],
+    library = ":lash-postgres-store",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    rustc_env = {},
+    tags = [
+        "cargo-service-gate",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "schema_constraints__test",
     crate_features = [
         "perf-witness",
@@ -308,6 +390,7 @@ filegroup(
 # tools/bazel/feature_variants.py.
 load(
     "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_binary",
     "lash_rust_feature_library",
     "lash_rust_feature_test",
 )
@@ -424,6 +507,63 @@ lash_rust_feature_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_feature_binary(
+    name = "lash-migrate__bin__fv_03307499",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_migrate",
+    crate_root = "src/bin/lash_migrate.rs",
+    declared_features = [
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "lash_migrate"),
+    compile_data_patterns = [
+        "schema.sql",
+        "teardown.sql",
+        "schema-shape.txt",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_160abc92", "//crates/lash-core": "//crates/lash-core:lash-core__fv_103e7fe9", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_8d1fb13a", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f5d29280", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_fde97683", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_c32ff4f6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_8fd1fd09", "//crates/lashlang": "//crates/lashlang:lashlang__fv_a24902c0"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-migrate__bin__unit_test__fv_03307499",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_migrate",
+    crate_root = "src/bin/lash_migrate.rs",
+    declared_features = [
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "lash_migrate", "//crates/lash-postgres-store:lash-migrate__bin__unit_test__fv_03307499"),
+    extra_compile_data = [],
+    library = "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_160abc92", "//crates/lash-core": "//crates/lash-core:lash-core__fv_103e7fe9", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_8d1fb13a", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f5d29280", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_fde97683", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_c32ff4f6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_8fd1fd09", "//crates/lashlang": "//crates/lashlang:lashlang__fv_a24902c0"},
+    version = "0.0.0-dev",
+)
+
 lash_rust_feature_library(
     name = "lash-postgres-store__fv_21aba84c",
     build_script = None,
@@ -522,6 +662,32 @@ lash_rust_feature_test(
     extra_compile_data = [],
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_160abc92", "//crates/lash-core": "//crates/lash-core:lash-core__fv_103e7fe9", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_8d1fb13a", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f5d29280", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_fde97683", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_c32ff4f6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_8fd1fd09", "//crates/lashlang": "//crates/lashlang:lashlang__fv_a24902c0"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "migrate__test__fv_03307499",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "migrate",
+    crate_root = "tests/migrate.rs",
+    declared_features = [
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "migrate", "//crates/lash-postgres-store:migrate__test__fv_03307499"),
+    extra_compile_data = [],
+    library = "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     tags = [
         "feature-lane",
         "manual",

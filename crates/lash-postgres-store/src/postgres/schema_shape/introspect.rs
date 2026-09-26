@@ -57,6 +57,24 @@ pub(crate) struct Installation {
     anchor_oid: i64,
 }
 
+impl Installation {
+    /// OID of the namespace the installation anchors to, for OID-keyed catalog
+    /// probes that must not name-resolve outside the transaction's snapshot.
+    pub(crate) fn namespace_oid(&self) -> i64 {
+        self.namespace_oid
+    }
+
+    /// The namespace name as the catalog reports it, for messages.
+    pub(crate) fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    /// The namespace name already quoted for interpolation into a statement.
+    pub(crate) fn quoted_namespace(&self) -> &str {
+        &self.quoted_namespace
+    }
+}
+
 /// Picks the first namespace on the search path that carries the anchoring table,
 /// which is the same relation an unqualified statement would resolve — but read
 /// from `pg_class` directly, so the answer belongs to the transaction's snapshot

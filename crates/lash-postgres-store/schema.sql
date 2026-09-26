@@ -1,11 +1,12 @@
--- lash-postgres-store schema, component version 133.
+-- lash-postgres-store schema, component version 134.
 --
--- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
--- executes at open; `PostgresStorage::schema_ddl()` returns this file
--- verbatim. A host that provisions the database itself must copy this file
--- byte-for-byte into its own migration tooling rather than transcribe it: lash
--- verifies the resulting structure at open and rejects a mismatch with a
--- per-object diff.
+-- Generated artifact. These bytes are exactly the DDL `lash migrate`
+-- executes to provision a database; `PostgresStorage::schema_ddl()` returns
+-- this file verbatim. A host that provisions the database itself must copy
+-- this file byte-for-byte into its own migration tooling rather than
+-- transcribe it: lash verifies the resulting structure at open and rejects a
+-- mismatch with a per-object diff. Workers never execute it: an open runs no
+-- DDL at all.
 --
 -- The component schema is a reject-and-recreate boundary except for explicit
 -- migrations implemented by the owning build. Every statement in this artifact
@@ -16,6 +17,29 @@
 CREATE TABLE IF NOT EXISTS lash_schema_versions (
     component TEXT PRIMARY KEY,
     version INTEGER NOT NULL
+);
+
+-- The migration ledger (FIG-3816): `lash migrate` records each applied step
+-- here so a rerun is a no-op and an interrupted run resumes from the rows
+-- that committed. Runtime code never reads or writes it — it is the
+-- operational record, and the migrate runner is its only writer. An expand
+-- step commits atomically, so `applied` is the only state a committed row can
+-- carry today; `running` is admitted for the operations arc's multi-transaction
+-- phases (FIG-3817).
+CREATE TABLE IF NOT EXISTS lash_migrations (
+    phase TEXT NOT NULL
+        CONSTRAINT ck_lash_migrations_phase
+        CHECK (phase IN ('expand', 'backfill', 'contract')),
+    migration TEXT NOT NULL,
+    release TEXT NOT NULL,
+    state TEXT NOT NULL
+        CONSTRAINT ck_lash_migrations_state
+        CHECK (state IN ('running', 'applied')),
+    from_version INTEGER,
+    to_version INTEGER NOT NULL,
+    started_at_ms BIGINT NOT NULL,
+    finished_at_ms BIGINT,
+    PRIMARY KEY (phase, migration)
 );
 
 CREATE TABLE IF NOT EXISTS lash_blobs (
@@ -821,11 +845,11 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
     CONSTRAINT ck_catalog_identity_singleton CHECK (singleton)
 );
 
--- Seed rows. Every open mode requires them: the component version stamp, the
+-- Seed rows. Every opened catalog requires them: the component version stamp, the
 -- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
 -- core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 133)
+VALUES ('lash-postgres-store', 134)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

@@ -25,7 +25,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 133
+version 134
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -98,6 +98,16 @@ table lash_lashlang_artifacts
   column artifact_ref text not-null
   column namespace text not-null
   primary-key (namespace, artifact_ref)
+table lash_migrations
+  column finished_at_ms bigint nullable
+  column from_version integer nullable
+  column migration text not-null
+  column phase text not-null
+  column release text not-null
+  column started_at_ms bigint not-null
+  column state text not-null
+  column to_version integer not-null
+  primary-key (phase, migration)
 table lash_node_anchors
   column checkpoint_ref text not-null
   column node_id text not-null

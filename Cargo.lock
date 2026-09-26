@@ -2428,6 +2428,7 @@ dependencies = [
 name = "lash-internal-postgres-store"
 version = "0.0.0-dev"
 dependencies = [
+ "anyhow",
  "async-trait",
  "fastrand",
  "lash-internal-conformance",

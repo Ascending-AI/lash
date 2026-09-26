@@ -361,6 +361,7 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
 
@@ -393,6 +394,7 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
 
@@ -444,6 +446,7 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
 
@@ -523,6 +526,7 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
 
@@ -639,6 +643,7 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
 
@@ -730,6 +735,7 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
 
@@ -797,6 +803,7 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
 
