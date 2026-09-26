@@ -1,97 +1,109 @@
 {
   "seed": 86,
   "probe": [
-    "beta",
+    "alpha",
     "count",
-    "delta",
     "entry",
-    "field",
+    "gamma",
     "index",
     "iota",
     "item",
     "j",
-    "kappa",
+    "left",
+    "n",
     "omega",
     "phi",
+    "problem",
     "psi",
     "rest",
     "rho",
+    "right",
+    "scaled",
     "sigma",
     "slot",
     "tau",
-    "theta"
+    "theta",
+    "zeta"
   ],
   "cells": [
     {
-      "source": "function psi(count) {\n  const iota = (item, ...rest) => item + rest.length;\n  return (typeof count).length;\n}\nconsole.log(psi(9));\nfor (let j = 0; j < 1; j++) {\n  const [omega, ...theta] = [(1 % Array.from({ length: 1 }, (slot, index) => index * 2).length), 2, 7];\n  for (const entry of theta) {\n    theta.pop();\n    let tau = [j];\n  }\n}\nfunction beta(count) {\n  return count <= 1 ? 1 : count + beta(count - 1);\n}\nconsole.log(beta(1));\nconsole.warn(true);\nconst { a: rho, b: kappa = 0 } = { a: 'b.c', b: 10 };\n",
+      "source": "function psi(count) {\n  const iota = (item, ...rest) => item + rest.length;\n  return (typeof count).length;\n}\nconsole.log(psi(9));\nfor (let j = 0; j < 1; j++) {\n  const [omega, ...theta] = [(1 % Array.from({ length: 1 }, (slot, index) => index * 2).length), 2, 7];\n  for (const entry of theta) {\n    theta.pop();\n    let sigma = [(j).toFixed(1).split(',').reverse().join('|'), 'b.c'.slice(0, 2).trimStart()];\n    sigma.pop();\n  }\n}\ntry {\n  let omega = Math.max(4, (false ? 10 : 4));\n  try {\n    const tau = (item, ...rest) => Array.from({ length: 3 }, (slot, index) => index * 2).length + rest.length;\n    console.log(tau('x'.indexOf('b')));\n    throw new TypeError('Lash');\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  } finally {\n    console.log((omega === (true ? 'x'.indexOf('b') : omega)), omega);\n  }\n  throw new SyntaxError('hi');\n} catch {\n  console.log('caught');\n}\nvar alpha = ['x'.replaceAll('b', 'B')];\nalpha.unshift('b.c');\n",
       "node": {
         "outcome": "normal",
         "prints": [
           "6",
-          "1",
-          "true"
+          "3",
+          "TypeError Lash false",
+          "false 4",
+          "caught"
         ],
         "probes": {
-          "beta": "function undefined",
+          "alpha": "object [\"b.c\",\"x\"]",
           "count": "unbound",
-          "delta": "unbound",
           "entry": "unbound",
-          "field": "unbound",
+          "gamma": "unbound",
           "index": "unbound",
           "iota": "unbound",
           "item": "unbound",
           "j": "unbound",
-          "kappa": "number 10",
+          "left": "unbound",
+          "n": "unbound",
           "omega": "unbound",
           "phi": "unbound",
+          "problem": "unbound",
           "psi": "function undefined",
           "rest": "unbound",
-          "rho": "string \"b.c\"",
+          "rho": "unbound",
+          "right": "unbound",
+          "scaled": "unbound",
           "sigma": "unbound",
           "slot": "unbound",
           "tau": "unbound",
-          "theta": "unbound"
+          "theta": "unbound",
+          "zeta": "unbound"
         },
         "closures": [
-          "beta",
           "psi"
         ]
       }
     },
     {
-      "source": "let sigma = { b: 'ab', a: 7.5, h: ('  pad '.trim() === rho) };\nfor (const field in sigma) {\n  console.log(field);\n  const delta = new Set([1, 11, 1]);\n}\nconsole.log((kappa === kappa));\nsigma = { b: rho, a: (kappa ** 2), h: (kappa instanceof Array) };\nlet phi = [Math.round(kappa), Number.parseInt(rho + '7', 10)];\n",
+      "source": "const zeta = (n) => { const scaled = alpha.indexOf(String(n)); return 11; };\nconsole.log(zeta((5 + 5)));\nfunction gamma(count) {\n  alpha.sort();\n  {\n    const gamma = new Map([['b', 6], ['a', 11]]);\n  }\n  return count;\n}\nconsole.log(gamma(((alpha instanceof Object) ? 7 : 'ab'.indexOf('b'))));\nswitch (12 % 3) {\n  case 0: {\n    let phi = { b: !true };\n    switch (9 % 3) {\n      case 0: {\n        let omega = false;\n        let rho = ['a,b'.indexOf('b'), Math.min(Math.abs(1), 2.5)];\n        break;\n      }\n      default: {\n        alpha.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n      }\n    }\n    break;\n  }\n  case 1: {\n    let omega = { f: zeta(Math.min(5, 1.5)), a: ('Lash' + 'b.c'), b: `${Math.min(7.5, 0)}:${(3).toFixed(1)}` };\n    alpha.reverse();\n    break;\n  }\n  default: {\n    alpha.pop();\n  }\n}\n",
       "node": {
         "outcome": "normal",
         "prints": [
-          "b",
-          "a",
-          "h",
-          "true"
+          "11",
+          "7"
         ],
         "probes": {
-          "beta": "function undefined",
+          "alpha": "object [\"b.c\",\"x\"]",
           "count": "unbound",
-          "delta": "unbound",
           "entry": "unbound",
-          "field": "unbound",
+          "gamma": "function undefined",
           "index": "unbound",
           "iota": "unbound",
           "item": "unbound",
           "j": "unbound",
-          "kappa": "number 10",
+          "left": "unbound",
+          "n": "unbound",
           "omega": "unbound",
-          "phi": "object [10,null]",
+          "phi": "unbound",
+          "problem": "unbound",
           "psi": "function undefined",
           "rest": "unbound",
-          "rho": "string \"b.c\"",
-          "sigma": "object {\"b\":\"b.c\",\"a\":100,\"h\":false}",
+          "rho": "unbound",
+          "right": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
           "slot": "unbound",
           "tau": "unbound",
-          "theta": "unbound"
+          "theta": "unbound",
+          "zeta": "function undefined"
         },
         "closures": [
-          "beta",
-          "psi"
+          "gamma",
+          "psi",
+          "zeta"
         ]
       }
     }

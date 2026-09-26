@@ -3,6 +3,7 @@
   "probe": [
     "alpha",
     "chi",
+    "delta",
     "entry",
     "field",
     "gamma",
@@ -20,7 +21,6 @@
     "sigma",
     "slot",
     "step",
-    "tau",
     "theta",
     "turn1",
     "value",
@@ -39,6 +39,7 @@
         "probes": {
           "alpha": "unbound",
           "chi": "unbound",
+          "delta": "unbound",
           "entry": "unbound",
           "field": "unbound",
           "gamma": "unbound",
@@ -56,7 +57,6 @@
           "sigma": "unbound",
           "slot": "unbound",
           "step": "unbound",
-          "tau": "unbound",
           "theta": "unbound",
           "turn1": "unbound",
           "value": "unbound",
@@ -79,6 +79,7 @@
         "probes": {
           "alpha": "unbound",
           "chi": "unbound",
+          "delta": "unbound",
           "entry": "unbound",
           "field": "unbound",
           "gamma": "unbound",
@@ -96,7 +97,6 @@
           "sigma": "unbound",
           "slot": "unbound",
           "step": "unbound",
-          "tau": "unbound",
           "theta": "unbound",
           "turn1": "number 3",
           "value": "unbound",
@@ -114,6 +114,7 @@
         "probes": {
           "alpha": "object {\"b\":\"b.c\",\"e\":[],\"a\":[]}",
           "chi": "unbound",
+          "delta": "unbound",
           "entry": "unbound",
           "field": "unbound",
           "gamma": "unbound",
@@ -131,7 +132,6 @@
           "sigma": "unbound",
           "slot": "unbound",
           "step": "unbound",
-          "tau": "unbound",
           "theta": "object []",
           "turn1": "number 3",
           "value": "unbound",
@@ -140,7 +140,7 @@
       }
     },
     {
-      "source": "const chi = (value) => { const scaled = kappa.length; return (0 ** 2); };\nconsole.log(chi(([[6], [2]].flat().includes(2) ? 5 : chi(11))));\nfor (const entry of [turn1]) {\n  {\n    phi.lastIndex = 0;\n    alpha.b = '  pad ';\n    const psi = false;\n  }\n  globalThis.rho = ('  pad ' === kappa);\n}\nfor (let step = 0; step < 2; step++) {\n  psi.pathname = '/p' + 'a,b'.length;\n}\nif ((theta.findLastIndex((value) => value < turn1) >= 0)) {\n  let psi = alpha;\n  psi.b = 'a,b';\n}\nif (Object.hasOwn(alpha, 'f')) {\n  if (Object.hasOwn(alpha, 'd')) {\n    psi.hash = 'h';\n  }\n  {\n    let iota = Array.from({ length: 3 }, (slot, index) => index * 2).length;\n    let chi = psi;\n    const theta = new TypeError('ab');\n    console.log(theta.name, theta.message, String(theta), theta instanceof Error);\n  }\n} else {\n  for (const field in alpha) {\n    console.log(field);\n    const tau = new Date(2078270006000);\n    console.log(tau.toISOString(), tau.getUTCDay(), tau.getTime() > 0, tau instanceof Date);\n  }\n  for (const entry of theta) {\n    let kappa = /(?<first>[a-z])(b)?/.exec('Lash');\n    const psi = { e: (4 !== 12), g: String(1) };\n    if (rho) { continue; }\n  }\n}\n{\n  const sigma = new Date(Date.UTC(2024, 2, 27));\n  console.log(sigma.toISOString(), sigma.getUTCDay(), sigma.getTime() > 0, sigma instanceof Date);\n  const phi = new TypeError('a,b');\n  console.log(phi.name, phi.message, String(phi), phi instanceof Error);\n}\n",
+      "source": "const chi = (value) => { const scaled = kappa.length; return (0 ** 2); };\nconsole.log(chi(([[6], [2]].flat().includes(2) ? 5 : chi(11))));\nfor (const entry of [turn1]) {\n  {\n    phi.lastIndex = 0;\n    alpha.b = '  pad ';\n    const psi = false;\n  }\n  globalThis.rho = ('  pad ' === kappa);\n}\nfor (let step = 0; step < 2; step++) {\n  psi.pathname = '/p' + 'a,b'.length;\n}\nif ((theta.findLastIndex((value) => value < turn1) >= 0)) {\n  let psi = alpha;\n  psi.b = 'a,b';\n}\nif (Object.hasOwn(alpha, 'f')) {\n  if (Object.hasOwn(alpha, 'd')) {\n    psi.hash = 'h';\n  }\n  {\n    let iota = Array.from({ length: 3 }, (slot, index) => index * 2).length;\n    let chi = psi;\n    const theta = new TypeError('ab');\n    console.log(theta.name, theta.message, String(theta), theta instanceof Error);\n  }\n} else {\n  for (const field in alpha) {\n    console.log(field);\n    const kappa = new Date(2078270006000);\n    console.log(kappa.toISOString(), kappa.getUTCDay(), kappa.getTime() > 0, kappa instanceof Date);\n  }\n  for (const entry of theta) {\n    let delta = /(?<first>[a-z])(b)?/.exec('Lash');\n    const lambda = { e: (4 !== 12), g: String(1) };\n    if (rho) { continue; }\n  }\n}\n{\n  const sigma = new Date(Date.UTC(2024, 2, 27));\n  console.log(sigma.toISOString(), sigma.getUTCDay(), sigma.getTime() > 0, sigma instanceof Date);\n  const phi = new TypeError('a,b');\n  console.log(phi.name, phi.message, String(phi), phi instanceof Error);\n}\n",
       "node": {
         "outcome": "normal",
         "prints": [
@@ -157,6 +157,7 @@
         "probes": {
           "alpha": "object {\"b\":\"  pad \",\"e\":[],\"a\":[]}",
           "chi": "function undefined",
+          "delta": "unbound",
           "entry": "unbound",
           "field": "unbound",
           "gamma": "unbound",
@@ -174,7 +175,6 @@
           "sigma": "unbound",
           "slot": "unbound",
           "step": "unbound",
-          "tau": "unbound",
           "theta": "object []",
           "turn1": "number 3",
           "value": "unbound",

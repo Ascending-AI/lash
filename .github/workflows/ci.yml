@@ -1825,7 +1825,10 @@ jobs:
         with:
           node-version: 25.2.1
 
+      # The test bounds each session itself (a hung session fails naming its
+      # seed); this step budget bounds the compile plus the ~3-minute run.
       - name: Run generated TypeScript sessions against Node
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           start=$(( 1000000 + (GITHUB_RUN_ID % 1000000) * 1000 ))

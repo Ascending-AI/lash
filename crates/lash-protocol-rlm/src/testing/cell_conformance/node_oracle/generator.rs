@@ -533,6 +533,34 @@ impl Generator {
         self.visible().into_iter().filter(|b| keep(b)).collect()
     }
 
+    /// The names of every function a call here could reach. A session
+    /// function's body may mutate a session global by name, which a loop's
+    /// hidden iterable names cannot stop — only hiding the callers does.
+    fn fun_names(&self) -> Vec<String> {
+        self.visible_where(|b| matches!(b.ty, Ty::Fun { .. }))
+            .into_iter()
+            .map(|binding| binding.name)
+            .collect()
+    }
+
+    /// Marks `names` unreadable for the rest of the current scope: the
+    /// `for...of` and `for...in` bodies mask what they must not reach —
+    /// their iterable's every name, and the functions that could mutate it
+    /// for them — behind hidden bindings until the scope pops.
+    fn hide_names(&mut self, names: impl IntoIterator<Item = String>) {
+        let scope = self.scopes.last_mut().expect("a scope");
+        for name in names {
+            scope.bindings.push(Binding {
+                name,
+                ty: Ty::Num,
+                decl: Decl::Local,
+                frozen: true,
+                hidden: true,
+                identity: 0,
+            });
+        }
+    }
+
     fn binding_mut(&mut self, name: &str) -> Option<&mut Binding> {
         for scope in self.scopes.iter_mut().rev() {
             if let Some(binding) = scope.bindings.iter_mut().rev().find(|b| b.name == name) {
@@ -1351,10 +1379,22 @@ impl Generator {
         self.emit(format!("{head} {{"));
         self.indent += 1;
         self.push_scope(ScopeKind::Block);
-        // The loop follows its iterable live (FIG-3625). The body changes it
+        // The loop follows its iterable live (FIG-3625). Its body changes it
         // only through the bounded mutation below, so no draw grows it on
-        // every pass and leaves Node looping forever; it may still declare a
-        // binding of the iterable's name.
+        // every pass and leaves Node looping forever: every name of the
+        // iterable's object is hidden from the draws inside, and when the
+        // iterable is mutable so is every function — a call could reach it
+        // under another name and grow it as freely (FIG-3608's fuzz run
+        // found `for (const x of a)` calling a function that unshifted `a`).
+        let funs = if matches!(
+            iterable_ty,
+            Some(Ty::Arr(_) | Ty::Map(_) | Ty::Set | Ty::Params)
+        ) {
+            self.fun_names()
+        } else {
+            Vec::new()
+        };
+        self.hide_names(hidden.iter().cloned().chain(funs));
         let live = iterable_ty
             .as_ref()
             .filter(|_| !hidden.is_empty() && self.prng.chance(40))
@@ -1362,20 +1402,6 @@ impl Generator {
                 let name = self.prng.pick(&hidden).clone();
                 self.live_iterable_mutation(&name, ty)
             });
-        for name in &hidden {
-            self.scopes
-                .last_mut()
-                .expect("a scope")
-                .bindings
-                .push(Binding {
-                    name: name.clone(),
-                    ty: Ty::Num,
-                    decl: Decl::Local,
-                    frozen: true,
-                    hidden: true,
-                    identity: 0,
-                });
-        }
         for (name, ty) in names.into_iter().zip(element) {
             self.binders.insert(name.to_string());
             self.declare(name, ty, Decl::Local);
@@ -1453,23 +1479,16 @@ impl Generator {
         self.emit(format!("for (const {field} in {object}) {{"));
         self.indent += 1;
         self.push_scope(ScopeKind::Block);
-        for name in hidden {
-            // A key added while its object is being enumerated may or may
-            // not be visited (ECMA-262 leaves it to the implementation), so
-            // the body does not touch the object by any of its names.
-            self.scopes
-                .last_mut()
-                .expect("a scope")
-                .bindings
-                .push(Binding {
-                    name,
-                    ty: Ty::Num,
-                    decl: Decl::Local,
-                    frozen: true,
-                    hidden: true,
-                    identity: 0,
-                });
-        }
+        // A key added while its object is being enumerated may or may not
+        // be visited (ECMA-262 leaves it to the implementation), so the
+        // body does not touch the object by any of its names — nor call any
+        // function, which could reach it under another name and grow it.
+        let funs = if hidden.is_empty() {
+            Vec::new()
+        } else {
+            self.fun_names()
+        };
+        self.hide_names(hidden.into_iter().chain(funs));
         self.declare(field, Ty::Str, Decl::Local);
         if self.callbacks == 0 {
             self.emit(format!("console.log({field});"));

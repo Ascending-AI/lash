@@ -25,24 +25,23 @@
     "slot",
     "tau",
     "theta",
-    "total",
     "turn1",
     "value"
   ],
   "cells": [
     {
-      "source": "switch (12 % 3) {\n  case 0: {\n    const theta = (item, step = 2) => 'x'.indexOf('b') + step;\n    console.log(theta(theta(1)));\n    break;\n  }\n  case 1: {\n    let gamma = [];\n    console.warn(gamma, '  pad ', gamma);\n    break;\n  }\n  default: {\n    const beta = { d: false };\n  }\n}\nvar iota = [1];\niota.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n{\n  for (const entry of iota) {\n    if (iota.length < 6) iota.push(iota.reduce((total, item) => total + item, 0));\n    console.log(entry, `${7}:${'  pad '}`, (typeof (-1.5)));\n    let gamma = [6, 1];\n  }\n  console.log(true, iota, false);\n}\nlet omega = { ['g']: 'Lash'.toUpperCase(), ['d']: 4.5, ['h']: 'hi' };\n",
+      "source": "switch (12 % 3) {\n  case 0: {\n    const theta = (item, step = 2) => 'x'.indexOf('b') + step;\n    console.log(theta(theta(1)));\n    break;\n  }\n  case 1: {\n    let gamma = [];\n    console.warn(gamma, '  pad ', gamma);\n    break;\n  }\n  default: {\n    const beta = { d: false };\n  }\n}\nvar iota = [1];\niota.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n{\n  for (const entry of iota) {\n    if (iota.length < 6) iota.push(4.5);\n    console.log(entry, `${7}:${'  pad '}`, (typeof (-1.5)));\n    let gamma = [6, 1];\n  }\n  console.log(true, iota, false);\n}\nlet omega = { ['g']: 'Lash'.toUpperCase(), ['d']: 4.5, ['h']: 'hi' };\n",
       "node": {
         "outcome": "normal",
         "prints": [
           "1",
           "1 7:  pad  number",
-          "1 7:  pad  number",
-          "2 7:  pad  number",
-          "4 7:  pad  number",
-          "8 7:  pad  number",
-          "16 7:  pad  number",
-          "true [1,1,2,4,8,16] false"
+          "4.5 7:  pad  number",
+          "4.5 7:  pad  number",
+          "4.5 7:  pad  number",
+          "4.5 7:  pad  number",
+          "4.5 7:  pad  number",
+          "true [1,4.5,4.5,4.5,4.5,4.5] false"
         ],
         "probes": {
           "alpha": "unbound",
@@ -53,7 +52,7 @@
           "field": "unbound",
           "gamma": "unbound",
           "index": "unbound",
-          "iota": "object [1,1,2,4,8,16]",
+          "iota": "object [1,4.5,4.5,4.5,4.5,4.5]",
           "item": "unbound",
           "lambda": "unbound",
           "left": "unbound",
@@ -69,7 +68,6 @@
           "slot": "unbound",
           "tau": "unbound",
           "theta": "unbound",
-          "total": "unbound",
           "turn1": "unbound",
           "value": "unbound"
         }
@@ -93,7 +91,7 @@
           "field": "unbound",
           "gamma": "unbound",
           "index": "unbound",
-          "iota": "object [16,8,4,2,1,1,11]",
+          "iota": "object [4.5,4.5,4.5,4.5,4.5,1,11]",
           "item": "unbound",
           "lambda": "unbound",
           "left": "unbound",
@@ -109,7 +107,6 @@
           "slot": "unbound",
           "tau": "unbound",
           "theta": "unbound",
-          "total": "unbound",
           "turn1": "unbound",
           "value": "unbound"
         }
@@ -130,7 +127,7 @@
           "field": "unbound",
           "gamma": "unbound",
           "index": "unbound",
-          "iota": "object [16,8,4,2,1,1,11]",
+          "iota": "object [4.5,4.5,4.5,4.5,4.5,1,11]",
           "item": "unbound",
           "lambda": "unbound",
           "left": "unbound",
@@ -146,7 +143,6 @@
           "slot": "unbound",
           "tau": "unbound",
           "theta": "unbound",
-          "total": "unbound",
           "turn1": "unbound",
           "value": "unbound"
         }
@@ -188,7 +184,6 @@
           "slot": "unbound",
           "tau": "unbound",
           "theta": "unbound",
-          "total": "unbound",
           "turn1": "unbound",
           "value": "unbound"
         }
