@@ -88,6 +88,10 @@ pub(super) enum SurfaceMethod {
     RaisePendingFollowOnAttempts {
         owed: bool,
     },
+    /// [`SessionCommitStore::load_pending_follow_on`]: the head's owed
+    /// follow-on as committed, read on an unowed head, beside a live fact,
+    /// and after the fact's clearing commit.
+    LoadPendingFollowOn,
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
     ForgetUnknownAttachment,
@@ -145,6 +149,7 @@ impl SurfaceMethod {
             Self::RaisePendingFollowOnAttempts { owed: false } => {
                 "surface:raise_pending_follow_on_attempts_unowed"
             }
+            Self::LoadPendingFollowOn => "surface:load_pending_follow_on",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
@@ -351,6 +356,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             // With no pending follow-on on the head the raise meets its
             // `FollowOnNotPending` refusal.
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
+            surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::Vacuum),
         ],
     }
@@ -361,6 +367,8 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
 /// lease raises its attempts count twice without moving the head revision,
 /// a raise for a turn the fact does not name refuses, and the follow-on's
 /// own terminal commit clears it — after which the raise refuses again.
+/// `load_pending_follow_on` reads the fact the same commits leave: on the
+/// unowed head, beside the live fact, after a raise, and after the clear.
 pub(super) fn pending_follow_on_raise_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::PendingFollowOnRaise,
@@ -376,17 +384,23 @@ pub(super) fn pending_follow_on_raise_case() -> GeneratedCase {
                     Some("active-frame"),
                 ),
             ),
+            // The seeded head owes no follow-on.
+            surface(SurfaceMethod::LoadPendingFollowOn),
             StoreOperation::CommitFollowOn {
                 label: "frame_switch_leaves_pending_follow_on",
                 expected_head_revision: 1,
                 turn_id: SURFACE_FOLLOW_ON_SWITCH_TURN_ID,
                 owed_turn_id: Some(SURFACE_FOLLOW_ON_TURN_ID),
             },
+            // The switch left the fact on the head, still at zero attempts.
+            surface(SurfaceMethod::LoadPendingFollowOn),
             StoreOperation::AcquireSessionLease {
                 slot: LeaseSlot::First,
                 owner: "follow-on-raise-owner",
             },
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
+            // The raise is a committed head fact: the read sees attempts=1.
+            surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: false }),
             StoreOperation::CommitFollowOn {
@@ -395,6 +409,8 @@ pub(super) fn pending_follow_on_raise_case() -> GeneratedCase {
                 turn_id: SURFACE_FOLLOW_ON_TURN_ID,
                 owed_turn_id: None,
             },
+            // The follow-on's own terminal commit cleared the fact.
+            surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
         ],
     }
@@ -487,6 +503,7 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::BeginOrResumeQueuedRun),
             surface(SurfaceMethod::DrainEndExists),
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
+            surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
             surface(SurfaceMethod::CommitUnknownAttachmentRefs),
             surface(SurfaceMethod::ForgetUnknownAttachment),
@@ -991,6 +1008,19 @@ impl BackendRunner {
                     )
                     .await?;
                 format!("attempts={}", raised.attempts)
+            }
+            SurfaceMethod::LoadPendingFollowOn => {
+                // Presence, the turn the fact names, and the recovery count
+                // are all caller-supplied facts, so they compare across
+                // backends where a backend-minted id would not.
+                match store.load_pending_follow_on().await? {
+                    Some(fact) => format!(
+                        "owed={} attempts={}",
+                        fact.follow_on_turn_id == SURFACE_FOLLOW_ON_TURN_ID,
+                        fact.attempts
+                    ),
+                    None => "owed=none".to_string(),
+                }
             }
             SurfaceMethod::AbortUnknownAttachmentWrite => {
                 let intent = unknown_attachment_intent(&session_id);
