@@ -85,6 +85,14 @@ pub(crate) const SELECT_PROCESS_REGISTRY_IS_PROVISIONED: &str =
 pub(crate) const SELECT_RELEASE_STAMP_TABLE_EXISTS: &str =
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'release_stamp'";
 
+/// Whether the durable-core database carries the fleet-format table at all.
+///
+/// A pre-fleet-format database does not, and that is an absence rather than a
+/// read failure: it records no fleet format because no build that writes one
+/// has opened it.
+pub(crate) const SELECT_FLEET_FORMAT_TABLE_EXISTS: &str =
+    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'fleet_format'";
+
 /// Every table's declared DDL, which the constraint inspector parses its named
 /// `CHECK`s out of. SQLite has no `pg_constraint`; the text is the catalog.
 pub(crate) const SELECT_TABLE_DDL: &str = "SELECT name, sql

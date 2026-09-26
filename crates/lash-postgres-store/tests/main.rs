@@ -7,10 +7,16 @@
 #[path = "support/mod.rs"]
 mod support;
 
+#[allow(dead_code)]
+#[path = "schema_drift/harness.rs"]
+mod harness;
+
 #[path = "checkpoint_commit_delete_race.rs"]
 mod checkpoint_commit_delete_race;
 #[path = "commit_size_benchmark.rs"]
 mod commit_size_benchmark;
+#[path = "fleet_format.rs"]
+mod fleet_format;
 #[path = "orphaned_tombstone_reclaim.rs"]
 mod orphaned_tombstone_reclaim;
 #[path = "parent_end_payload.rs"]

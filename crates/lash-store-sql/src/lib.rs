@@ -157,6 +157,7 @@ pub const TABLES: &[&str] = &[
     wait::revoked_sessions::TABLE,
     session::checkpoint_blob_refs::TABLE,
     session::deleted_sessions::TABLE,
+    session::fleet_format::TABLE,
     session::fork_lineage::TABLE,
     session::graph_nodes::TABLE,
     session::head::TABLE,

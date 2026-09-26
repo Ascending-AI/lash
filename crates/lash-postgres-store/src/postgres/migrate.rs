@@ -46,6 +46,15 @@ const MIGRATIONS_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_migrations (
     PRIMARY KEY (phase, migration)
 );";
 
+/// The DDL that creates `lash_fleet_format`, byte-for-byte the block
+/// `schema.sql` carries: the bootstrap and the 135→136 expand step provision
+/// the identical table, and a test asserts the bytes agree.
+const FLEET_FORMAT_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_fleet_format (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    format_version INTEGER NOT NULL,
+    CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
+);";
+
 /// One expand-phase step this build's migrate runner can apply.
 ///
 /// `from_version`/`to_version` chain steps together so planning can walk the
@@ -66,9 +75,10 @@ struct ExpandMigration {
 /// The expand catalog this build carries. Pre-1.0 the first step let
 /// component 133 gain the ledger itself and become 134 (FIG-3816); the second
 /// adds `lash_sessions.pending_follow_on_json`, the frame-handoff follow-on a
-/// session head carries, and becomes 135 (FIG-3542). Newer schema generations
-/// append to this list; steps are never removed or edited — the ledger names
-/// them permanently.
+/// session head carries, and becomes 135 (FIG-3542); the third adds
+/// `lash_fleet_format`, the deployment's fleet-format row, and becomes 136
+/// (FIG-3796). Newer schema generations append to this list; steps are never
+/// removed or edited — the ledger names them permanently.
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
         id: "0134-migrations-ledger",
@@ -81,6 +91,12 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         from_version: 134,
         to_version: 135,
         statements: "ALTER TABLE lash_sessions ADD COLUMN IF NOT EXISTS pending_follow_on_json TEXT",
+    },
+    ExpandMigration {
+        id: "0136-fleet-format",
+        from_version: 135,
+        to_version: 136,
+        statements: FLEET_FORMAT_TABLE_DDL,
     },
 ];
 

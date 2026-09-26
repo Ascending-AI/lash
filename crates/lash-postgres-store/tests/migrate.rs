@@ -112,9 +112,9 @@ async fn stamped_version(url: &str) -> i32 {
 }
 
 /// Provisions a scratch schema from the committed artifact, then rewinds it
-/// to look like the previous component: the ledger table drops and the stamp
-/// steps back one — exactly what a component-(N-1) catalog is once an
-/// expand-only bump ships.
+/// to look like the previous component: the table the newest expand step adds
+/// drops and the stamp steps back one — exactly what a component-(N-1) catalog
+/// is once an expand-only bump ships.
 async fn rewind_to_previous_component(database_url: &str, schema: &str) {
     let mut admin = PgConnection::connect(database_url)
         .await
@@ -127,10 +127,10 @@ async fn rewind_to_previous_component(database_url: &str, schema: &str) {
         .execute(&mut admin)
         .await
         .expect("provision the scratch schema from schema.sql");
-    sqlx::query("DROP TABLE lash_migrations")
+    sqlx::query("DROP TABLE lash_fleet_format")
         .execute(&mut admin)
         .await
-        .expect("drop the ledger to model the predecessor catalog");
+        .expect("drop the fleet-format table to model the predecessor catalog");
     sqlx::query("UPDATE lash_schema_versions SET version = $1 WHERE component = $2")
         .bind(PostgresStorage::schema_version() - 1)
         .bind("lash-postgres-store")
@@ -286,27 +286,27 @@ async fn migrate_advances_a_stamped_predecessor_component() {
         .expect("plan the predecessor upgrade");
     assert_eq!(plan.found_version, Some(predecessor));
     assert_eq!(plan.planned.len(), 1);
-    assert_eq!(plan.planned[0].migration, "0134-migrations-ledger");
+    assert_eq!(plan.planned[0].migration, "0136-fleet-format");
     // Planning changed nothing: the stamp is still the predecessor's and the
-    // ledger does not exist yet.
+    // fleet-format table does not exist yet.
     assert_eq!(stamped_version(&url).await, predecessor);
-    let has_ledger = sqlx::query_scalar::<_, bool>(
+    let has_fleet_format = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class AS relation
                         JOIN pg_catalog.pg_namespace AS namespace
                           ON namespace.oid = relation.relnamespace
                         WHERE namespace.nspname = $1
-                          AND relation.relname = 'lash_migrations')",
+                          AND relation.relname = 'lash_fleet_format')",
     )
     .bind(&schema);
     let mut probe = PgConnection::connect(&database_url)
         .await
         .expect("connect ledger probe");
     assert!(
-        !has_ledger
+        !has_fleet_format
             .fetch_one(&mut probe)
             .await
-            .expect("probe the ledger"),
-        "a dry run must not create the ledger"
+            .expect("probe the fleet-format table"),
+        "a dry run must not create the fleet-format table"
     );
     probe.close().await.expect("close ledger probe");
 
@@ -315,14 +315,14 @@ async fn migrate_advances_a_stamped_predecessor_component() {
         .expect("migrate the predecessor forward");
     assert_eq!(report.executed.len(), 1);
     assert_eq!(
-        report.executed[0].migration, "0134-migrations-ledger",
-        "the expand step creates the ledger and restamps"
+        report.executed[0].migration, "0136-fleet-format",
+        "the expand step creates the fleet-format table and restamps"
     );
     assert_eq!(
         ledger_rows(&url).await,
         vec![(
             "expand".to_string(),
-            "0134-migrations-ledger".to_string(),
+            "0136-fleet-format".to_string(),
             Some(predecessor),
             PostgresStorage::schema_version()
         )]

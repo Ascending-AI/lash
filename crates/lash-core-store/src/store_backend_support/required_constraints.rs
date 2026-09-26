@@ -846,6 +846,15 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered("fleet_format", "ck_fleet_format_singleton", "singleton = 1"),
+        rendered(
+            "lash_fleet_format",
+            "ck_fleet_format_singleton",
+            "singleton",
+        ),
+    ),
+    expected_constraint(
         &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "process_change_clock",

@@ -75,7 +75,10 @@ mod tests {
         ) -> Result<RuntimeCommitReceipt, StoreError> {
             self.commit_attempts.fetch_add(1, Ordering::SeqCst);
             if self.planner_validates_budget {
-                super::super::RuntimeCommitPlanner::prepare(commit.clone())?;
+                super::super::RuntimeCommitPlanner::prepare(
+                    commit.clone(),
+                    super::super::FleetFormat::current(),
+                )?;
             }
             let realized_node_timestamps = commit
                 .graph

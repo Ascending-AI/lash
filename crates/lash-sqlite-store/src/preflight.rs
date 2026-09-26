@@ -37,8 +37,8 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use lash_core_execution::{
-    DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreReleaseState,
-    StoreSchemaDatabase, StoreSchemaStatus, StoreSchemaVerdict,
+    DurableScan, DurableScanPage, FleetFormatState, StoreBackend, StoreError, StorePreflight,
+    StoreReleaseState, StoreSchemaDatabase, StoreSchemaStatus, StoreSchemaVerdict,
 };
 
 pub(crate) mod walk;
@@ -147,6 +147,42 @@ async fn read_release_state(path: &Path) -> StoreReleaseState {
     }
 }
 
+/// Read the fleet-format row the durable core carries, read-only.
+///
+/// Same discipline as [`read_release_state`]: an absent database or an absent
+/// row is [`FleetFormatState::Unrecorded`] — the deployment records no fleet
+/// format — and a database that exists but cannot be read is
+/// [`FleetFormatState::Unreadable`], never silently absent.
+async fn read_fleet_format_state(path: &Path) -> FleetFormatState {
+    if !path.exists() {
+        return FleetFormatState::Unrecorded;
+    }
+    let conn = match SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(
+        path.to_path_buf(),
+    ))
+    .await
+    {
+        Ok(conn) => conn,
+        Err(err) => {
+            return FleetFormatState::Unreadable {
+                reason: err.to_string(),
+            };
+        }
+    };
+    let read = conn
+        .call(|c| {
+            c.pragma_update(None, "query_only", true)?;
+            crate::fleet_format::read(c)
+        })
+        .await;
+    match read {
+        Ok(state) => state,
+        Err(err) => FleetFormatState::Unreadable {
+            reason: err.to_string(),
+        },
+    }
+}
+
 /// A read-only handle over a SQLite deployment, built from the same paths a
 /// host hands its factories.
 ///
@@ -234,7 +270,12 @@ impl StorePreflight for SqliteStorePreflight {
             databases.push(verify_schema_at(path, database).await);
         }
         let release = read_release_state(self.durable_core.as_path()).await;
-        Ok(StoreSchemaStatus { databases, release })
+        let fleet_format = read_fleet_format_state(self.durable_core.as_path()).await;
+        Ok(StoreSchemaStatus {
+            databases,
+            release,
+            fleet_format,
+        })
     }
 
     /// Walk one page of one durable surface. See [`walk`] for the read-only

@@ -636,6 +636,27 @@ lash_store_sql::statements! {
     }
 }
 
+lash_store_sql::statements! {
+    /// `fleet_format` statements. All of them fork: SQLite's singleton flag is
+    /// the integer `1` and PostgreSQL's is `TRUE`, and this side *upserts* the
+    /// row where PostgreSQL inserts only — a single-process SQLite deployment
+    /// finalizes the fleet format on open, while the shared backend leaves the
+    /// recorded value alone until `finalize-upgrade` moves it (ADR 0106 §1,
+    /// FIG-3796/FIG-3800).
+    pub(crate) struct FleetFormatStatements @ "fleet_format" {
+        /// The recorded fleet format.
+        select_fleet_format = "SELECT format_version FROM fleet_format WHERE singleton = 1";
+
+        /// Finalizes on open: the row always records this build's own fleet
+        /// format once the open transaction commits.
+        upsert = "INSERT INTO fleet_format (
+             singleton, format_version
+         ) VALUES (1, ?1)
+         ON CONFLICT(singleton) DO UPDATE SET
+             format_version = excluded.format_version";
+    }
+}
+
 /// Every session-core statement this store issues, rendered once.
 pub(crate) struct SessionSql {
     /// `session_meta` statements both backends issue verbatim.
@@ -668,6 +689,8 @@ pub(crate) struct SessionSql {
     pub(crate) checkpoint_edges: CheckpointBlobRefSqliteStatements,
     /// `release_stamp` statements only SQLite issues.
     pub(crate) release_stamp: ReleaseStampStatements,
+    /// `fleet_format` statements only SQLite issues.
+    pub(crate) fleet_format: FleetFormatStatements,
 }
 
 static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
@@ -688,6 +711,7 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         deleted_sqlite: DeletedSessionSqliteStatements::render(dialect),
         checkpoint_edges: CheckpointBlobRefSqliteStatements::render(dialect),
         release_stamp: ReleaseStampStatements::render(dialect),
+        fleet_format: FleetFormatStatements::render(dialect),
     }
 });
 

@@ -4,6 +4,8 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
+#[path = "fleet_format.rs"]
+mod fleet_format;
 #[path = "graph_sequence_cutover.rs"]
 mod graph_sequence_cutover;
 #[path = "layered_effect_host.rs"]

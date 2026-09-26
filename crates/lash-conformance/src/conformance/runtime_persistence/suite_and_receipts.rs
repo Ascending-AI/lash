@@ -865,8 +865,11 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
         .current_frame_node_id
         .clone()
         .expect("seed frame");
-    let same_leaf_planner = crate::store::RuntimeCommitPlanner::prepare(same_leaf_commit.clone())
-        .expect("prepare same-leaf commit");
+    let same_leaf_planner = crate::store::RuntimeCommitPlanner::prepare(
+        same_leaf_commit.clone(),
+        lash_core::FleetFormat::current(),
+    )
+    .expect("prepare same-leaf commit");
     let same_leaf_plan = same_leaf_planner
         .plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: same_leaf_commit.expected_head_revision,
@@ -904,8 +907,11 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     )];
     let (changed_commit, _) =
         append_request_commit(&mut changed_state, "retirement-gate-change", &nodes, None);
-    let changed_planner = crate::store::RuntimeCommitPlanner::prepare(changed_commit.clone())
-        .expect("prepare leaf-changing commit");
+    let changed_planner = crate::store::RuntimeCommitPlanner::prepare(
+        changed_commit.clone(),
+        lash_core::FleetFormat::current(),
+    )
+    .expect("prepare leaf-changing commit");
     let changed_plan = changed_planner
         .plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: changed_commit.expected_head_revision,

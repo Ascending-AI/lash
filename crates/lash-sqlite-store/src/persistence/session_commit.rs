@@ -497,10 +497,12 @@ impl SessionCommitStore for Store {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(commit)?;
+        let planner =
+            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, self.fleet_format())?;
         self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
+        let planner_fleet_format = self.fleet_format();
         let result = self
             .conn
             .write_flow(move |tx| {
@@ -528,6 +530,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         },
                         crate::session_meta::SessionMetaWrite::Insert,
                         now,
+                        planner_fleet_format,
                     )?;
                     planner.validate_node_derivation()?;
                     // A turn's commit settles its park (FIG-3586), in the
@@ -1316,6 +1319,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
         // crosses the closure's 'static bound as a shared `Arc`.
         let bound = Arc::clone(&self.session_id);
         let created_at_ms = self.clock.timestamp_ms();
+        let fleet_format = self.fleet_format();
         let meta = SessionMeta {
             session_id: session_id.clone(),
             relation: binding.relation.clone(),
@@ -1332,6 +1336,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         &meta,
                         crate::session_meta::SessionMetaWrite::Insert,
                         created_at_ms,
+                        fleet_format,
                     )?;
                     if inserted {
                         return Ok(lash_core_execution::SessionAdmission::Created);

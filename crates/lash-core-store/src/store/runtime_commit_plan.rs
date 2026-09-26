@@ -133,6 +133,10 @@ pub struct RuntimeCommitReceiptWrite<'a> {
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
 pub struct RuntimeCommitPlanner {
     commit: RuntimeCommit,
+    /// The fleet format this store's writers emit (ADR 0106 §1 `F`), read from
+    /// the deployment's fleet-format row at open. Every version a commit
+    /// stamps is mapped through it rather than bound to a build constant.
+    fleet_format: super::FleetFormat,
     turn_commit_hash: String,
     operation_key: String,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
@@ -142,7 +146,15 @@ pub struct RuntimeCommitPlanner {
 
 impl RuntimeCommitPlanner {
     /// Validate request-only invariants and compute stable commit projections.
-    pub fn prepare(commit: RuntimeCommit) -> Result<Self, StoreError> {
+    ///
+    /// `fleet_format` is the store's fleet-format row as the backend read it at
+    /// open: the planner stamps every durable version it prescribes through
+    /// [`super::FleetFormat::writer_version`], so a finalized fleet move needs
+    /// no planner change.
+    pub fn prepare(
+        commit: RuntimeCommit,
+        fleet_format: super::FleetFormat,
+    ) -> Result<Self, StoreError> {
         commit.validate_budget()?;
         validate_session_execution_lease_plan(&commit)?;
         commit.validate_operation_session()?;
@@ -166,6 +178,7 @@ impl RuntimeCommitPlanner {
 
         Ok(Self {
             commit,
+            fleet_format,
             turn_commit_hash,
             operation_key,
             realized_node_timestamps,
@@ -385,6 +398,7 @@ impl RuntimeCommitPlanner {
         )?;
         Ok(RuntimeCommitPlan {
             commit: &self.commit,
+            fleet_format: self.fleet_format,
             turn_commit_hash: self.turn_commit_hash.clone(),
             operation_key: self.operation_key.clone(),
             actual_head_revision: facts.actual_head_revision,
@@ -408,6 +422,7 @@ impl RuntimeCommitPlanner {
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
 pub struct RuntimeCommitPlan<'a> {
     commit: &'a RuntimeCommit,
+    fleet_format: super::FleetFormat,
     turn_commit_hash: String,
     operation_key: String,
     actual_head_revision: u64,
@@ -452,7 +467,9 @@ impl<'a> RuntimeCommitPlan<'a> {
     )]
     pub fn head_meta(&self, checkpoint_ref: BlobRef) -> SessionHeadMeta {
         SessionHeadMeta {
-            schema_version: super::SESSION_HEAD_META_SCHEMA_VERSION,
+            schema_version: self
+                .fleet_format
+                .writer_version(super::SESSION_HEAD_META_SCHEMA_VERSION),
             session_id: self.commit.session_id.clone(),
             head_revision: self.next_head_revision,
             config: self.commit.config.clone(),
@@ -473,7 +490,9 @@ impl<'a> RuntimeCommitPlan<'a> {
         manifest: SessionCheckpoint,
     ) -> RuntimeCommitReceipt {
         RuntimeCommitReceipt {
-            schema_version: super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
+            schema_version: self
+                .fleet_format
+                .writer_version(super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
             head_revision: self.next_head_revision,
             checkpoint_ref,
             manifest,
@@ -597,10 +616,11 @@ mod tests {
             .borrowing_session_execution_lease(authority.clone())
             .releasing_session_execution_lease(authority);
 
-        let error = match RuntimeCommitPlanner::prepare(commit) {
-            Ok(_) => panic!("one commit must not borrow and release the lane"),
-            Err(error) => error,
-        };
+        let error =
+            match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
+                Ok(_) => panic!("one commit must not borrow and release the lane"),
+                Err(error) => error,
+            };
         assert!(matches!(
             error,
             StoreError::RuntimeCommitLeaseAuthorityConflict { session_id }
@@ -626,10 +646,11 @@ mod tests {
             honoured_after_step: None,
         });
 
-        let error = match RuntimeCommitPlanner::prepare(commit) {
-            Ok(_) => panic!("cancellation evidence must name its interrupted turn"),
-            Err(error) => error,
-        };
+        let error =
+            match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
+                Ok(_) => panic!("cancellation evidence must name its interrupted turn"),
+                Err(error) => error,
+            };
         assert!(matches!(
             error,
             StoreError::Backend(message)
@@ -647,7 +668,8 @@ mod tests {
             ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-        let planner = RuntimeCommitPlanner::prepare(commit).expect("prepare commit");
+        let planner = RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current())
+            .expect("prepare commit");
         let error = match planner.plan(FreshRuntimeCommitFacts {
             actual_head_revision: i64::MAX as u64,
             published_leaf: PublishedLeafFacts::Absent,
@@ -675,7 +697,8 @@ mod tests {
             ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-        let planner = RuntimeCommitPlanner::prepare(commit).expect("prepare empty commit");
+        let planner = RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current())
+            .expect("prepare empty commit");
         let result = planner.plan(FreshRuntimeCommitFacts {
             actual_head_revision: 0,
             published_leaf: PublishedLeafFacts::Retired {

@@ -175,6 +175,13 @@ pub enum StoreError {
         "session state version {found} has no conversion chain to {current}; drain sessions and recreate the store with this version"
     )]
     SessionStateVersionUnsupported { found: u32, current: u32 },
+    /// The store's fleet-format row records a generation this build's writable
+    /// range does not admit (ADR 0106 §1): a worker that opened anyway would
+    /// emit a format the fleet has retired.
+    #[error(
+        "store records fleet format {recorded}, outside this build's writable range ending at {current}; run `lash admin finalize-upgrade` from a build whose range contains {recorded}, or upgrade this build"
+    )]
+    FleetFormatOutsideWritableRange { recorded: u32, current: u32 },
     #[error("invalid session id: {reason}")]
     InvalidSessionId { reason: &'static str },
     #[error(
@@ -829,6 +836,7 @@ impl StoreError {
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
             Self::SessionStateVersionUnsupported { .. } => "SessionStateVersionUnsupported",
+            Self::FleetFormatOutsideWritableRange { .. } => "FleetFormatOutsideWritableRange",
             Self::SessionStateVersionNewerThanRuntime { .. } => {
                 "SessionStateVersionNewerThanRuntime"
             }

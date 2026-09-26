@@ -37,6 +37,7 @@ use crate::formats::{
 struct FakeStore {
     databases: Vec<StoreSchemaDatabase>,
     release: StoreReleaseState,
+    fleet_format: lash_core::FleetFormatState,
     surfaces: BTreeMap<DurableSurface, Vec<DurableItem>>,
     /// Surfaces described as the rows a backend *reads* rather than the items it
     /// emits.
@@ -111,6 +112,7 @@ impl StorePreflight for FakeStore {
         Ok(StoreSchemaStatus {
             databases: self.databases.clone(),
             release: self.release.clone(),
+            fleet_format: self.fleet_format.clone(),
         })
     }
 

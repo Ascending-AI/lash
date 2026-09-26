@@ -38,14 +38,19 @@ pub(crate) fn supported_version(version: Option<i32>) -> bool {
 }
 
 /// Verifies the database is in the state this build admits and returns the
-/// catalog's identity.
+/// catalog's identity beside the fleet-format row the open recorded or read
+/// (ADR 0106 §1 `F`).
 ///
 /// Open is read-only about the schema itself: workers never run DDL on
 /// PostgreSQL (FIG-3797), so this gate verifies rather than provisions. The
-/// only write is the release stamp, recorded by the transaction that admitted
-/// the database. A database that opens is a database whose shape lash has read
-/// — never one whose version stamp merely claimed the right number.
-pub(crate) async fn ensure_schema(pool: &PgPool, check: SchemaCheck) -> Result<String, StoreError> {
+/// only writes are the release stamp and the fleet-format provisioning row,
+/// both recorded by the transaction that admitted the database. A database
+/// that opens is a database whose shape lash has read — never one whose
+/// version stamp merely claimed the right number.
+pub(crate) async fn ensure_schema(
+    pool: &PgPool,
+    check: SchemaCheck,
+) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     // Serializes lash's own openers with each other and with a `lash migrate`
     // run holding the same key exclusively, so a verifying open cannot read a
@@ -107,8 +112,14 @@ pub(crate) async fn ensure_schema(pool: &PgPool, check: SchemaCheck) -> Result<S
     crate::release_stamp::write(&mut tx)
         .await
         .map_err(store_sqlx_error)?;
+    // The same admitted open reads the fleet-format row — provisioning it on
+    // the first open ever — so the storage handle carries the value durable
+    // writers consult rather than a build constant. A recorded generation this
+    // build cannot write is refused here, inside the transaction, so nothing
+    // half-opens.
+    let fleet_format = crate::fleet_format::admit(&mut tx).await?;
     tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(catalog_id)
+    Ok((catalog_id, fleet_format))
 }
 
 /// The catalog's identity row, the random id the seed statements wrote at

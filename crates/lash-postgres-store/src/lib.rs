@@ -551,7 +551,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // §3); a frame handoff is no longer a queued-work row, and runtime-commit
 // receipts carry schema 2. `lash migrate` carries a component-134 catalog
 // forward by adding the nullable column and restamping.
-const SCHEMA_VERSION: i32 = 135;
+//
+// Version 136 (FIG-3796) adds `lash_fleet_format`, the deployment's
+// fleet-format row of ADR 0106 §1: the durable-format generation every writer
+// in the fleet emits. `lash migrate` carries a component-135 catalog forward
+// by creating the table; the first open provisions the row, and durable
+// writers consult it until `finalize-upgrade` (FIG-3800) moves it.
+const SCHEMA_VERSION: i32 = 136;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -569,6 +575,10 @@ pub struct PostgresStorage {
     /// `lash_catalog_identity`: what a session catalog registers under with
     /// its turn-cancel-closure owner.
     catalog_id: Arc<str>,
+    /// The durable-format generation this store's writers emit — the
+    /// fleet-format row (ADR 0106 §1 `F`) as the open transaction recorded or
+    /// read it.
+    fleet_format: lash_core_execution::FleetFormat,
 }
 
 type BoundArtifactStores = (
@@ -585,6 +595,7 @@ pub struct PostgresSessionStoreFactory {
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     catalog_id: Arc<str>,
+    fleet_format: lash_core_execution::FleetFormat,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core_execution::Clock>,
     turn_cancel_closure_owner:
@@ -601,6 +612,9 @@ pub struct PostgresSessionStore {
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     clock: Arc<dyn lash_core_execution::Clock>,
+    /// The durable-format generation this store's writers emit — the
+    /// fleet-format row (ADR 0106 §1 `F`) the opening `PostgresStorage` read.
+    fleet_format: lash_core_execution::FleetFormat,
     session_id: SessionId,
     turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
     #[cfg(test)]
@@ -750,10 +764,11 @@ impl PostgresStorage {
             .connect(database_url)
             .await
             .map_err(store_sqlx_error)?;
-        let catalog_id = ensure_schema(&pool, config.schema_check).await?;
+        let (catalog_id, fleet_format) = ensure_schema(&pool, config.schema_check).await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
+            fleet_format,
         })
     }
 
@@ -816,10 +831,11 @@ impl PostgresStorage {
         pool: PgPool,
         config: PostgresStoreConfig,
     ) -> Result<Self, StoreError> {
-        let catalog_id = ensure_schema(&pool, config.schema_check).await?;
+        let (catalog_id, fleet_format) = ensure_schema(&pool, config.schema_check).await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
+            fleet_format,
         })
     }
 
@@ -845,9 +861,14 @@ impl PostgresStorage {
             .await
             .map_err(store_sqlx_error)?
             .ok_or_else(crate::schema::missing_catalog_identity_error)?;
+        let fleet_format = match crate::fleet_format::read(&pool).await {
+            lash_core_execution::FleetFormatState::Recorded(format) => format,
+            _ => lash_core_execution::FleetFormat::current(),
+        };
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
+            fleet_format,
         })
     }
 
@@ -1066,11 +1087,23 @@ impl PostgresStorage {
         self.unwired_session_store_factory("PostgresStorage::session_store_factory")
     }
 
+    /// The fleet format this storage's durable writers emit — the `F` of ADR
+    /// 0106 §1 as the fleet-format row recorded it at open.
+    ///
+    /// This is the hook durable writers consult for their writer version:
+    /// `fleet_format.writer_version(CURRENT_…)` maps a format's build-newest
+    /// version onto the generation the fleet agreed to write, which is the
+    /// identity map until `finalize-upgrade` (FIG-3800) exists.
+    pub fn fleet_format(&self) -> lash_core_execution::FleetFormat {
+        self.fleet_format
+    }
+
     fn unwired_session_store_factory(&self, path: &'static str) -> PostgresSessionStoreFactory {
         warn_postgres_process_registry_not_wired(path);
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
+            fleet_format: self.fleet_format,
             process_registry_shared: false,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -1091,6 +1124,7 @@ impl PostgresStorage {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
+            fleet_format: self.fleet_format,
             process_registry_shared: true,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -1116,6 +1150,7 @@ impl PostgresStorage {
         PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            fleet_format: self.fleet_format,
             session_id: session_id.into(),
             turn_cancel_closure_owner: None,
             #[cfg(any(test, feature = "testing"))]
@@ -1273,6 +1308,8 @@ mod blobs;
 mod connection_sql;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
+#[path = "postgres/fleet_format.rs"]
+mod fleet_format;
 #[path = "postgres/migrate.rs"]
 mod migrate;
 #[path = "postgres/pending_turn_inputs.rs"]

@@ -419,7 +419,9 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let head = lash_core_execution::store::SessionHeadMeta::assemble(
             &request.session_id,
             lash_core_execution::store::SessionHeadPayload {
-                schema_version: lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                schema_version: self
+                    .fleet_format
+                    .writer_version(lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION),
                 session_id: request.session_id.clone(),
                 config,
                 current_frame_node_id: Some({
@@ -470,6 +472,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
             created_at_ms,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;

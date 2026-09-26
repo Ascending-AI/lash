@@ -58,9 +58,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use flate2::Compression;
-use flate2::read::ZlibDecoder;
-use flate2::write::ZlibEncoder;
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use lash_core_execution::runtime::{
     QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
@@ -120,6 +118,7 @@ fn commit_count_entropy_seed() -> u64 {
 }
 mod backend;
 mod effect_replay;
+mod fleet_format;
 mod forks;
 mod graph;
 mod lifecycle;
@@ -205,6 +204,12 @@ pub use triggers::SqliteTriggerStore;
 /// tokio-rusqlite handle to one database thread).
 pub struct Store {
     conn: SqliteConnection,
+    /// The durable-format generation this store's writers emit — the
+    /// fleet-format row (ADR 0106 §1 `F`) as the open transaction recorded it.
+    /// Writers consult it through
+    /// [`lash_core_execution::FleetFormat::writer_version`] instead of binding
+    /// the build's constants directly.
+    pub(crate) fleet_format: lash_core_execution::FleetFormat,
     /// The durable-core database this store is open on. Held so a store
     /// opened on a memory backend keeps its database alive.
     location: DatabaseLocation,
@@ -862,6 +867,7 @@ impl SqliteSessionStoreFactory {
             pending_observer_intents: request.pending_observer_intents.clone(),
         };
         let created_at_ms = self.clock.timestamp_ms();
+        let fleet_format = store.fleet_format();
         store
             .conn
             .write_flow(move |tx| {
@@ -888,6 +894,7 @@ impl SqliteSessionStoreFactory {
                     &meta,
                     session_meta::SessionMetaWrite::Insert,
                     created_at_ms,
+                    fleet_format,
                 )
                 .map_err(sqlite_conversion_error)?;
                 Ok(TxOutcome::Commit(Ok(())))

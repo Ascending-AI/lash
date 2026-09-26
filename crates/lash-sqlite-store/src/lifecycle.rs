@@ -142,6 +142,9 @@ impl Store {
         let conn =
             SqliteConnection::open_with_policy(core.target(), options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
+        let fleet_format = conn
+            .call(|conn| crate::fleet_format::read_recorded(conn))
+            .await?;
         let process_registry_attached = if let Some(process_registry) = process_registry {
             attach_process_registry(&conn, process_registry, options.connection_policy).await?;
             true
@@ -150,6 +153,7 @@ impl Store {
         };
         Ok(Self {
             conn,
+            fleet_format,
             location: core.clone(),
             turn_cancel_closure_owner,
             session_id: Arc::new(OnceLock::new()),
@@ -168,8 +172,12 @@ impl Store {
     pub(crate) async fn open_readonly(core: &DatabaseLocation) -> tokio_rusqlite::Result<Self> {
         // Read-only projections cannot reconcile intents or run a reclamation sweep.
         let conn = SqliteConnection::open_readonly(core.target()).await?;
+        let fleet_format = conn
+            .call(|conn| crate::fleet_format::recorded_or_current(conn))
+            .await?;
         Ok(Self {
             conn,
+            fleet_format,
             location: core.clone(),
             turn_cancel_closure_owner: None,
             session_id: Arc::new(OnceLock::new()),
@@ -227,6 +235,7 @@ impl Store {
     pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session(&meta.session_id)?;
         let created_at_ms = self.clock.timestamp_ms();
+        let fleet_format = self.fleet_format();
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
@@ -248,6 +257,7 @@ impl Store {
                         &meta,
                         crate::session_meta::SessionMetaWrite::Replace,
                         created_at_ms,
+                        fleet_format,
                     )?;
                     Ok(())
                 })();
