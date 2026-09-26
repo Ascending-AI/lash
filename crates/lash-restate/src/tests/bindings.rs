@@ -16,7 +16,7 @@ use restate_sdk::endpoint::Endpoint;
 use restate_sdk::prelude::{HandlerResult, WorkflowContext};
 
 use crate::services::LASH_SERVICES;
-use crate::{RestateAuthorityId, RestateConfig, RestateEngine, RestateQueuedWork};
+use crate::{RestateAuthorityId, RestateConfig, RestateEngine};
 
 /// A host's own turn workflow, bound beside lash's services.
 #[restate_sdk::workflow]
@@ -93,7 +93,6 @@ async fn backend_and_process_worker() -> (Arc<RestateEngine>, lash_core_worker::
             "http://127.0.0.1:9",
             RestateAuthorityId::new("lash-restate-endpoint-builder").expect("valid authority"),
             lash_core::engine::BuildGeneration::for_test("bindings"),
-            RestateQueuedWork::Disabled,
         ),
     ));
     let core = lash::LashCore::standard_builder(

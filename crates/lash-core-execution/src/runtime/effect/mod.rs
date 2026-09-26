@@ -43,6 +43,7 @@ pub use tool_settlement::{
     TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
     ToolUsageDelta, ToolUsageLedger,
 };
+mod drive_outcome;
 mod outcome;
 pub use lash_core_effect::promise_semantics;
 mod validation;

@@ -139,6 +139,40 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "session_driver__test",
+    crate_features = [],
+    crate_name = "session_driver",
+    crate_root = "tests/session_driver.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "session_driver", "//crates/lash-restate-test:session_driver__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "session_send__test",
+    crate_features = [],
+    crate_name = "session_send",
+    crate_root = "tests/session_send.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "session_send", "//crates/lash-restate-test:session_send__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "start_gate_peek__test",
     crate_features = [],
     crate_name = "start_gate_peek",
@@ -236,6 +270,8 @@ lash_batch_test(
         ":lash-restate-test__unit_test",
         ":process_crash_replay__test",
         ":server_semantics__test",
+        ":session_driver__test",
+        ":session_send__test",
         ":start_gate_peek__test",
         ":substrate_lost_zombie__test",
         ":suspended_turn__test",

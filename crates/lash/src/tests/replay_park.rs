@@ -282,12 +282,14 @@ async fn assert_parked(
         .await
         .expect("read the pending inputs");
     assert_eq!(pending.len(), 1, "the parked turn's input stays accepted");
+    // The park blocks the session's admission, so its input stays pending
+    // and no other root drives it (FIG-3600).
     assert!(
         matches!(
             &pending[0].status,
-            lash_core::PendingTurnInputReadStatus::TurnBound { turn_id, .. } if turn_id.as_str() == TURN
+            lash_core::PendingTurnInputReadStatus::Pending
         ),
-        "the parked turn holds its input: {:?}",
+        "the parked turn's input stays pending: {:?}",
         pending[0].status
     );
     assert!(
@@ -496,14 +498,18 @@ async fn a_turn_admitted_under_another_generation_parks_before_any_effect() -> R
         let dispatched = backend.executions.load(Ordering::SeqCst);
         let asked = backend.provider_calls.load(Ordering::SeqCst);
 
+        // The admission's stamp rides the drive root's recorded input claim,
+        // keyed `drive-claim:{root}` in the root's scope: the session is
+        // named by the claim it recorded, not by its replay key.
         let restamped = backend
             .journal()
             .execute(
                 "UPDATE runtime_effect_replay
                     SET outcome_json = replace(outcome_json, ?2, ?3)
-                  WHERE replay_key LIKE ?1 AND outcome_json LIKE ?4",
+                  WHERE replay_key LIKE 'drive-claim:%'
+                    AND outcome_json LIKE ?1 AND outcome_json LIKE ?4",
                 [
-                    format!("%{session_id}%"),
+                    format!("%\"session_id\":\"{session_id}\"%"),
                     format!("\"generation\":\"{current}\""),
                     format!(
                         "\"generation\":{}",

@@ -495,7 +495,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&store_factory),
-            Arc::new(lash::runtime::NoQueuedWork::new()),
+            Arc::new(lash::runtime::NoSessionWork::new()),
             Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -508,7 +508,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             lash::process::WakeDeliveryDriver::drive_pending_once(
                 Arc::clone(&registry),
                 Arc::clone(&store_factory),
-                Arc::new(lash::runtime::NoQueuedWork::new()),
+                Arc::new(lash::runtime::NoSessionWork::new()),
                 Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
                 32,
             )
@@ -590,7 +590,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let first_expiry_attempt = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&expiry_registry),
             Arc::clone(&store_factory),
-            Arc::new(lash::runtime::NoQueuedWork::new()),
+            Arc::new(lash::runtime::NoSessionWork::new()),
             Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -603,7 +603,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let before_expiry_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&expiry_registry),
             Arc::clone(&store_factory),
-            Arc::new(lash::runtime::NoQueuedWork::new()),
+            Arc::new(lash::runtime::NoSessionWork::new()),
             Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -614,7 +614,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let at_expiry_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             expiry_registry,
             Arc::clone(&store_factory),
-            Arc::new(lash::runtime::NoQueuedWork::new()),
+            Arc::new(lash::runtime::NoSessionWork::new()),
             expiry_clock as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -690,7 +690,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let target_gone = lash::process::WakeDeliveryDriver::drive_pending_once(
             target_gone_registry,
             Arc::clone(&store_factory),
-            Arc::new(lash::runtime::NoQueuedWork::new()),
+            Arc::new(lash::runtime::NoSessionWork::new()),
             Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )

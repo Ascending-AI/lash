@@ -5,7 +5,7 @@ use lash_core::facade_support::{
     empty_trigger_source_key, watch_process_registry,
 };
 use lash_core::{
-    ArtifactOwner, CommitBudget, LashSchema, NativeProcessWork, NoQueuedWork, PluginError,
+    ArtifactOwner, CommitBudget, LashSchema, NativeProcessWork, NoSessionWork, PluginError,
     PluginOptions, ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessOriginator,
     QueuedWorkBatchingConfig, SessionPolicy, TriggerCommand, TriggerCommandOutcome,
     TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
@@ -246,7 +246,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
             ])),
             runtime_host,
             WorkerProcessWork::SelfNative(watched),
-            Arc::new(NoQueuedWork::new()),
+            Arc::new(NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy()),

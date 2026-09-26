@@ -32,7 +32,7 @@ pub(crate) type CoreWorkPorts = Arc<
             'static,
             (
                 Option<lash_core::ProcessWorkWiring>,
-                Arc<dyn lash_core::QueuedWorkSubstrate>,
+                Arc<dyn lash_core::SessionWorkEngine>,
             ),
         > + Send
         + Sync,

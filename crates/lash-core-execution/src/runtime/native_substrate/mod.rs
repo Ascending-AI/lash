@@ -16,20 +16,69 @@ pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 use super::process::{ProcessAdmissionReport, ProcessRegistry, WatchedRegistry};
 use crate::{PluginError, ProcessAwaitOutput, SessionId};
 
-/// Deployment port for durable **queued session work**: work already committed
-/// to a session's durable queue that something must be told about and drain.
-#[async_trait::async_trait]
-pub trait QueuedWorkSubstrate: Send + Sync {
-    /// Signal, fire-and-forget, that durable queued work may be claimable.
-    /// Contentless and coalesced by the implementation.
-    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str);
+/// Deployment port for **session work** (ADR 0104 O1/O2, FIG-3600): the
+/// engine that runs each session's drive.
+///
+/// Acceptance is the store's: an item is durable before anyone is told about
+/// it. The engine is then asked to drive the session, fire-and-forget; it
+/// serializes drives per session (one authorized drive at a time) and dedupes
+/// a request id across its runs, so a repeated ask for the same request never
+/// drives twice. A lost ask is healed by the session's next ask (a drive
+/// admits whatever is pending, not only the item that asked) or by the
+/// reconcile sweep, `drive::reconcile_session_work`; its production caller is
+/// the engine-neutral reconcile pass (S7), not yet wired.
+///
+/// The engine runs the kernel's drive through the [`SessionDriver`] the core
+/// installs; it never decides what a drive admits.
+pub trait SessionWorkEngine: Send + Sync {
+    /// Ask the engine to drive `session` for `request`. Returns once the ask
+    /// is handed to the engine, not once the drive ran.
+    fn schedule_drive(&self, session: &SessionId, request: crate::engine::DriveRequestId);
 
-    /// Idempotency belongs to the store scheduler, not to a same-process memory guard.
-    async fn drain_session_work(
+    /// Install the core's drive: get-or-init. One engine can back several
+    /// cores, and exactly one driver serves it, so a caller hands in a
+    /// candidate and uses whatever comes back (the precedent is
+    /// [`EffectHost::install_tool_child_host`](crate::EffectHost::install_tool_child_host)).
+    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver>;
+}
+
+/// The kernel's drive of one session, as the core installs it on its
+/// [`SessionWorkEngine`].
+///
+/// An engine that drives in process calls [`drive`](Self::drive). An engine
+/// that splits the drive over its own handlers calls
+/// [`admit`](Self::admit) from its per-session handler and
+/// [`run_root`](Self::run_root) from its per-root handler, each on a
+/// controller over that handler's own journal; the kernel bodies are the
+/// same either way.
+#[async_trait::async_trait]
+pub trait SessionDriver: Send + Sync {
+    /// Drive `request` to a stop on the driver's own effect host: admit,
+    /// seal and run roots until admission answers something other than an
+    /// admitted root.
+    async fn drive(
         &self,
-        target: SessionWorkTarget,
-        reason: &str,
-    ) -> Result<SessionDrainOutcome, PluginError>;
+        request: crate::engine::DriveRequest,
+    ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort>;
+
+    /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step
+    /// through `controller`, which serves
+    /// [`drive_admission_scope`](crate::engine::drive_admission_scope).
+    async fn admit(
+        &self,
+        controller: crate::ScopedEffectController<'_>,
+        request: &crate::engine::DriveRequest,
+        ordinal: u32,
+    ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort>;
+
+    /// Run `admitted`'s root to its terminal through `controller`, which
+    /// serves [`drive_root_scope`](crate::engine::drive_root_scope): the
+    /// recorded `SealDriveAdmission` step, then the root's turns and commits.
+    async fn run_root(
+        &self,
+        controller: crate::ScopedEffectController<'_>,
+        admitted: crate::engine::Admitted,
+    ) -> Result<crate::engine::RootOutcome, crate::engine::DriveAbort>;
 }
 
 /// Deployment port for durable **process work**: admission of pending process
@@ -52,34 +101,6 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         &self,
         process_ref: &crate::ProcessRef,
     ) -> Result<ProcessTerminalWait, PluginError>;
-}
-
-/// Which sessions a queued-work operation addresses.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SessionWorkTarget {
-    /// All sessions with claimable queued work.
-    Any,
-    /// One identified session.
-    Session(SessionId),
-}
-
-impl SessionWorkTarget {
-    pub fn as_session_id(&self) -> Option<&SessionId> {
-        match self {
-            Self::Any => None,
-            Self::Session(session_id) => Some(session_id),
-        }
-    }
-}
-
-/// Whether a drain pass actually claimed and ran durable work.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SessionDrainOutcome {
-    /// The pass ran: an authoritative head may have moved.
-    Ran,
-    /// This deployment has no queued lane; the durable row stays pending and
-    /// nothing was read or written.
-    Deferred,
 }
 
 /// Outcome of one bounded terminal wait.
@@ -157,37 +178,37 @@ impl ProcessWorkWiring {
     }
 }
 
-/// Explicit queued-work port for deployments with no queued lane.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoQueuedWork;
+/// Explicit session-work engine for deployments that run no drives: an ask
+/// is dropped (the rows stay pending for a host that drives them itself), and
+/// the driver a core installs is kept only so the get-or-init answer holds.
+#[derive(Default)]
+pub struct NoSessionWork {
+    driver: std::sync::OnceLock<Arc<dyn SessionDriver>>,
+}
 
-impl NoQueuedWork {
+impl NoSessionWork {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 }
 
-#[async_trait::async_trait]
-impl QueuedWorkSubstrate for NoQueuedWork {
-    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str) {
+impl std::fmt::Debug for NoSessionWork {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("NoSessionWork")
+    }
+}
+
+impl SessionWorkEngine for NoSessionWork {
+    fn schedule_drive(&self, session: &SessionId, request: crate::engine::DriveRequestId) {
         tracing::trace!(
-            ?target,
-            reason,
-            "queued work deferred: deployment has no queued lane"
+            session_id = session.as_str(),
+            request = request.as_str(),
+            "session drive not scheduled: deployment runs no session work"
         );
     }
 
-    async fn drain_session_work(
-        &self,
-        target: SessionWorkTarget,
-        reason: &str,
-    ) -> Result<SessionDrainOutcome, PluginError> {
-        tracing::trace!(
-            ?target,
-            reason,
-            "queued work deferred: deployment has no queued lane"
-        );
-        Ok(SessionDrainOutcome::Deferred)
+    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        Arc::clone(self.driver.get_or_init(|| driver))
     }
 }
 
@@ -195,22 +216,50 @@ impl QueuedWorkSubstrate for NoQueuedWork {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn no_queued_work_defers_without_running_a_queue() {
-        let port = NoQueuedWork::new();
+    struct Probe;
 
-        port.notify_session_work(
-            SessionWorkTarget::Session(SessionId::from("deferred-session")),
-            "test-notify",
+    #[async_trait::async_trait]
+    impl SessionDriver for Probe {
+        async fn drive(
+            &self,
+            _request: crate::engine::DriveRequest,
+        ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
+            unreachable!("the probe never drives")
+        }
+
+        async fn admit(
+            &self,
+            _controller: crate::ScopedEffectController<'_>,
+            _request: &crate::engine::DriveRequest,
+            _ordinal: u32,
+        ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort> {
+            unreachable!("the probe never admits")
+        }
+
+        async fn run_root(
+            &self,
+            _controller: crate::ScopedEffectController<'_>,
+            _admitted: crate::engine::Admitted,
+        ) -> Result<crate::engine::RootOutcome, crate::engine::DriveAbort> {
+            unreachable!("the probe never runs a root")
+        }
+    }
+
+    #[test]
+    fn no_session_work_drops_asks_and_keeps_the_first_installed_driver() {
+        let engine = NoSessionWork::new();
+        engine.schedule_drive(
+            &SessionId::from("deferred-session"),
+            crate::engine::DriveRequestId::new("ask"),
         );
-        let outcome = port
-            .drain_session_work(
-                SessionWorkTarget::Session(SessionId::from("deferred-session")),
-                "session_command",
-            )
-            .await
-            .expect("disabled queued lane cannot add a failure path");
-
-        assert_eq!(outcome, SessionDrainOutcome::Deferred);
+        let first: Arc<dyn SessionDriver> = Arc::new(Probe);
+        let second: Arc<dyn SessionDriver> = Arc::new(Probe);
+        let installed = engine.install_session_driver(Arc::clone(&first));
+        assert!(Arc::ptr_eq(&installed, &first));
+        let again = engine.install_session_driver(second);
+        assert!(
+            Arc::ptr_eq(&again, &first),
+            "install is get-or-init: the first driver stays"
+        );
     }
 }

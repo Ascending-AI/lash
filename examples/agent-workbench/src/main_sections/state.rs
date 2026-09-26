@@ -1259,7 +1259,7 @@ pub(crate) fn inert_queued_work() -> lash::runtime::NativeQueuedWork {
 }
 
 #[cfg(test)]
-pub(crate) fn inert_queued_work_port() -> Arc<dyn lash::runtime::QueuedWorkSubstrate> {
+pub(crate) fn inert_queued_work_port() -> Arc<dyn lash::runtime::SessionWorkEngine> {
     Arc::new(lash::runtime::NativeQueuedWork::new(Arc::new(
         NoopQueuedWorkRunHandle,
     )))

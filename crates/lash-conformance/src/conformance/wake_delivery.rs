@@ -30,9 +30,17 @@ impl RecordingWakeTurnHandle {
     async fn wait_for_process_wake(&self, session_id: &SessionId, prior_runs: usize) {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                if self.runs.lock().await.iter().skip(prior_runs).any(|run| {
-                    run.session_id.as_deref() == Some(session_id) && run.reason == "process_wake"
-                }) {
+                // A wake asks the engine to drive its session (FIG-3600); the
+                // run names the session, and the ask's request id is the
+                // wake's batch, not a reason label.
+                if self
+                    .runs
+                    .lock()
+                    .await
+                    .iter()
+                    .skip(prior_runs)
+                    .any(|run| run.session_id.as_deref() == Some(session_id))
+                {
                     return;
                 }
                 self.notify.notified().await;
@@ -357,7 +365,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let first = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
@@ -381,7 +389,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let second = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
@@ -465,7 +473,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let authority_report = crate::WakeDeliveryDriver::drive_pending_once_with_delivery_policy(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         crate::DeliveryPolicy::AfterCurrentTurnCommit,
         32,
@@ -626,7 +634,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         coalesced_enqueued += crate::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&factory),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             Arc::clone(&clock) as Arc<dyn crate::Clock>,
             32,
         )
@@ -881,7 +889,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let settled_crash_report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
@@ -943,7 +951,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let deferred_report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
@@ -1121,7 +1129,7 @@ async fn missing_target_is_deferred_and_rearmed(
     let first = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         1,
     )
@@ -1160,7 +1168,7 @@ async fn missing_target_is_deferred_and_rearmed(
     let second = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         factory,
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         clock as Arc<dyn crate::Clock>,
         1,
     )
@@ -1229,7 +1237,7 @@ async fn sender_floor_lifetime(
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&production_registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         clock as Arc<dyn crate::Clock>,
         32,
     )
@@ -1434,7 +1442,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
     let old_report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
@@ -1758,7 +1766,7 @@ async fn mixed_era_floor_and_ordering(
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         registry,
         factory,
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         clock as Arc<dyn crate::Clock>,
         32,
     )
@@ -1874,7 +1882,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
     let poison_report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::clone(&factory),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
@@ -1908,7 +1916,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
     let healthy_report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         factory,
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         clock as Arc<dyn crate::Clock>,
         32,
     )
@@ -1983,7 +1991,7 @@ async fn target_gone_is_a_typed_discard(
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         factory,
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         clock as Arc<dyn crate::Clock>,
         32,
     )
@@ -2065,7 +2073,7 @@ async fn expired_is_a_typed_discard(
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         factory,
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         clock as Arc<dyn crate::Clock>,
         32,
     )

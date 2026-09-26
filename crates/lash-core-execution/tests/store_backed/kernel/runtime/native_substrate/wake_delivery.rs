@@ -83,7 +83,7 @@ mod tests {
         let result = WakeDeliveryDriver::drive_pending_once(
             registry,
             backend.session_store_factory(),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             Arc::new(crate::SystemClock),
             1,
         )
@@ -109,7 +109,7 @@ mod tests {
         let Err(error) = WakeDeliveryDriver::with_work_cadence(
             backend.process_registry(),
             backend.session_store_factory(),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             Arc::new(crate::SystemClock),
             crate::DeliveryPolicy::EarliestSafeBoundary,
             work_cadence,

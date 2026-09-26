@@ -35,7 +35,7 @@ fn recovery_process_worker(
             lash_core::QueuedWorkBatchingConfig::new(1),
         ),
         lash_core_worker::WorkerProcessWork::SelfNative(watched),
-        Arc::new(lash_core::NoQueuedWork::new()),
+        Arc::new(lash_core::NoSessionWork::new()),
         owner,
     ))
     .expect("valid test native substrate config")

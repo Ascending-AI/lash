@@ -45,8 +45,8 @@ pub mod protocol;
 pub mod server;
 
 pub use backend::{
-    BackendError, HandlerAttempt, RestateTestBackend, backend, backend_with_build,
-    backend_with_segment_budget,
+    BackendError, HandlerAttempt, RestateTestBackend, SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE,
+    backend, backend_with_build, backend_with_segment_budget,
 };
 pub use protocol::ProtocolVersion;
 pub use server::{

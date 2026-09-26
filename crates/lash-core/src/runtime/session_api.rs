@@ -1017,7 +1017,7 @@ impl LashRuntime {
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     session_id: SessionId,
     store: Arc<dyn crate::RuntimePersistence>,
-    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
     input: crate::TurnInput,
     ingress: crate::TurnInputIngress,
     source_key: Option<String>,
@@ -1035,11 +1035,12 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         .await
         .map_err(super::error::runtime_error_from_turn_input_admission)?;
     if is_next_turn {
-        queued_work.notify_session_work(
-            crate::SessionWorkTarget::Session(SessionId::from(
-                enqueued.session_id.clone().to_string(),
-            )),
-            "queued_turn_input",
+        // One drive request per accepted row (FIG-3600): an engine dedupes a
+        // repeated ask for the same row, and a drive admits whatever else is
+        // pending too.
+        queued_work.schedule_drive(
+            &enqueued.session_id,
+            crate::engine::DriveRequestId::new(enqueued.input_id.to_string()),
         );
     }
     Ok(enqueued)
@@ -1243,11 +1244,9 @@ impl LashRuntime {
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
             } else {
-                self.host.queued_work().notify_session_work(
-                    crate::SessionWorkTarget::Session(SessionId::from(
-                        handle.receipt.session_id.clone().to_string(),
-                    )),
-                    "config_settlement",
+                self.host.queued_work().schedule_drive(
+                    &handle.receipt.session_id,
+                    crate::engine::DriveRequestId::new(handle.receipt.batch_id.to_string()),
                 );
             }
             let remaining = settlement_timeout.saturating_sub(
@@ -1277,30 +1276,12 @@ impl LashRuntime {
             AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
             AcceptedSessionCommand::Queued(handle) => handle.receipt,
         };
-        let outcome = self
-            .host
-            .queued_work()
-            .drain_session_work(
-                crate::SessionWorkTarget::Session(SessionId::from(
-                    receipt.session_id.clone().to_string(),
-                )),
-                "session_command",
-            )
-            .await
-            .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?;
-        match outcome {
-            crate::SessionDrainOutcome::Ran => {
-                // A native or external driver may have committed the command
-                // before returning. Reconcile that authoritative head before this
-                // resident runtime reaches another commit boundary; its lease is
-                // advisory, so retaining the pre-drive head would manufacture a
-                // stale CAS conflict on close.
-                self.refresh_session_graph_from_store()
-                    .await
-                    .map_err(runtime_error_from_session_command_refresh)?;
-            }
-            crate::SessionDrainOutcome::Deferred => {}
-        }
+        // The command is durable; the session's drive applies it in order
+        // (FIG-3600). Its settlement is observed through the receipt.
+        self.host.queued_work().schedule_drive(
+            &receipt.session_id,
+            crate::engine::DriveRequestId::new(receipt.batch_id.to_string()),
+        );
         Ok(receipt)
     }
 

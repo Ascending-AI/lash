@@ -163,6 +163,13 @@ REGISTRATION_BASELINES = {
     "crates/lash-restate/src/controller/effect_journal.rs:EFFECT_JOURNAL_VERSION": (
         "sha256:8b4c2577687f74745c963232314f93ea521212275a72e2a89a7b46e6ffc5c1ec"
     ),
+    # FIG-3600 (S5): the Restate session driver's handlers (LashSession,
+    # LashTurn) are new; their requests carry the generation of the commands
+    # their journals lead with (ADR 0105 section 12). A new surface, not a
+    # rename.
+    "crates/lash-restate/src/session_driver.rs:LASH_SESSION_DRIVE_VERSION": (
+        "sha256:2542171f2751b0fd3309cb3ce10fb91cea589529d0c0cb98ea226f044a454173"
+    ),
     # FIG-3588: the Restate process handler's leading journaled commands (the
     # segment admission verdict and start steps) are a new versioned surface,
     # registered once with the lead's approval (2026-09-24).
@@ -1813,7 +1820,7 @@ def normalize_rust_derive_lists(text: str) -> str:
 
 
 RUST_DECLARATION = re.compile(
-    r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
+    r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:async[ \t]+)?"
     r"(?:const|static|fn|struct|enum|type)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 RUST_SERDE_SHAPE = re.compile(

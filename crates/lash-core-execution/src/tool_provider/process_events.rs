@@ -9,7 +9,7 @@ pub async fn enqueue_wake_delivery(
     session_store_factory: Option<&std::sync::Arc<dyn crate::SessionStoreFactory>>,
     wake_delivery: Option<crate::ProcessWakeDelivery>,
     trace_host: Option<&dyn crate::plugin::SessionGraphService>,
-    queued_work: std::sync::Arc<dyn crate::QueuedWorkSubstrate>,
+    queued_work: std::sync::Arc<dyn crate::SessionWorkEngine>,
     process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: std::sync::Arc<dyn crate::Clock>,
 ) -> Result<(), PluginError> {

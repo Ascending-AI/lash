@@ -39,6 +39,7 @@ use lash_core_execution::runtime::host;
 pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
+pub mod drive;
 mod durable_queue;
 mod lifecycle;
 use claim_settlement::TurnClaimSettlement;
@@ -255,9 +256,9 @@ pub use native_substrate::{
 };
 pub use native_substrate::{
     NativeProcessAdmissionDriver, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
-    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome,
-    SessionWorkTarget, WorkCadencePolicy, WorkerSweepPolicy,
+    NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork, ProcessTerminalWait,
+    ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine, WorkCadencePolicy,
+    WorkerSweepPolicy,
 };
 pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{

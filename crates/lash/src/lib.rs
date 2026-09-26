@@ -139,7 +139,7 @@ pub use lash_core::{
 /// effect host from: one [`EffectEngine`] over one [`StoreSet`] (ADR 0104).
 /// [`LashCore::builder`] requires one; the engine crates behind the
 /// feature-gated modules (`restate`, `sqlite`, `postgres`) build one.
-pub use lash_core::{Backend, BackendQueuedWork, EffectEngine, StoreBindingId, StoreSet};
+pub use lash_core::{Backend, EffectEngine, StoreBindingId, StoreSet};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -362,6 +362,9 @@ pub mod persistence {
             select_turn_work_claim_prefix,
         };
     }
+    /// The drive epoch a session drive's seal raises (FIG-3600): one segment
+    /// of [`RuntimePersistence`], implemented by every store a runtime drives.
+    pub use lash_core::store::{AdmissionId, DriveEpochSeal, DriveEpochStore, StoredDriveEpoch};
     pub use lash_core::store::{
         AppendRequestIdentity, BeginQueuedRun, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
@@ -894,23 +897,22 @@ pub mod runtime {
         DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
         EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
         GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord, LoserPolicy,
-        NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork,
+        NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork,
         NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
         QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
         QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
         QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,
-        QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure,
-        QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
-        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
-        RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkTarget, SleepSpec,
-        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelWait,
-        TurnContext, TurnControlBinding, WorkCadencePolicy, WorkerSweepPolicy,
-        effect_groups_unsupported,
+        QueuedWorkSlowWake, QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
+        RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+        RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
+        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
+        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        SessionWorkEngine, SleepSpec, ToolIntentOutcomeSink, ToolIntentPreparation,
+        ToolIntentSubmissionGuard, TurnCancelWait, TurnContext, TurnControlBinding,
+        WorkCadencePolicy, WorkerSweepPolicy, effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
@@ -1032,14 +1034,8 @@ pub mod restate {
     pub fn config(
         connection: impl Into<RestateConnection>,
         authority: RestateAuthorityId,
-        queued_work: RestateQueuedWork,
     ) -> RestateConfig {
-        RestateConfig::new(
-            connection,
-            authority,
-            crate::formats::build_generation(),
-            queued_work,
-        )
+        RestateConfig::new(connection, authority, crate::formats::build_generation())
     }
 
     /// The durable-format rows this engine registers with the facade's

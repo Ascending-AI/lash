@@ -108,7 +108,7 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
             )),
             test_host_config(&backend),
             crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             local_owner("cancel-replay-worker", "host-a", "fresh-incarnation"),
         )
         .with_session_policy(policy),
@@ -174,7 +174,7 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
         )),
         runtime_host,
         crate::WorkerProcessWork::External(process_work),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         local_owner("terminal-fence-worker", "host-a", "terminal-fence-start"),
     )
     .with_session_policy(policy);
@@ -1188,7 +1188,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
             Arc::new(PluginHost::new(plugin_factories)),
             runtime_host,
             crate::WorkerProcessWork::External(process_work),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             local_owner("session-turn-worker", "host-a", "session-turn-start"),
         )
         .with_session_policy(policy.clone())
@@ -1281,7 +1281,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
             )),
             runtime_host,
             crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             local_owner("segment-worker", "host-a", "start-a"),
         )
         .with_session_policy(policy)
@@ -1481,7 +1481,7 @@ async fn snapshot_recovery_fixture(
             )),
             runtime_host,
             crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             local_owner(
                 "snapshot-recovery-worker",
                 "host-a",

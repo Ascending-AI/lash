@@ -515,7 +515,7 @@ finish(await handle);
             )),
             host.clone(),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ))
         .expect("valid test native substrate config");

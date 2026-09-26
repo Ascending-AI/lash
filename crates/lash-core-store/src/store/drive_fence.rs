@@ -200,6 +200,63 @@ pub trait DriveEpochStore: Send + Sync {
     async fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
 }
 
+/// A drive-epoch ledger held in memory, for store doubles that keep no
+/// `session_meta` row. It decides every seal with
+/// [`decide_drive_epoch_seal`], exactly as a SQL backend does inside its
+/// transaction.
+#[derive(Debug, Default)]
+pub struct InMemoryDriveEpochs {
+    epochs: std::sync::Mutex<std::collections::BTreeMap<SessionId, StoredDriveEpoch>>,
+}
+
+impl InMemoryDriveEpochs {
+    /// [`DriveEpochStore::seal_drive_epoch`] over this ledger.
+    pub fn seal(
+        &self,
+        session_id: &SessionId,
+        admission: &AdmissionId,
+        observed_epoch: u64,
+    ) -> DriveEpochSeal {
+        let mut epochs = self
+            .epochs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let stored = epochs
+            .entry(session_id.clone())
+            .or_insert(StoredDriveEpoch {
+                epoch: 0,
+                admission: None,
+            });
+        match decide_drive_epoch_seal(session_id, stored, admission, observed_epoch) {
+            DriveEpochSealDecision::Answer(seal) => seal,
+            DriveEpochSealDecision::Raise { next } => {
+                *stored = StoredDriveEpoch {
+                    epoch: next,
+                    admission: Some(admission.clone()),
+                };
+                DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
+                    session_id.clone(),
+                    next,
+                    admission.clone(),
+                ))
+            }
+        }
+    }
+
+    /// [`DriveEpochStore::drive_epoch`] over this ledger.
+    pub fn epoch(&self, session_id: &SessionId) -> StoredDriveEpoch {
+        self.epochs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session_id)
+            .cloned()
+            .unwrap_or(StoredDriveEpoch {
+                epoch: 0,
+                admission: None,
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

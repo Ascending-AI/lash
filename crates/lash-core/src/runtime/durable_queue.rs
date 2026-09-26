@@ -41,7 +41,7 @@ fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
 #[derive(Clone)]
 pub struct DurableSessionOps {
     session_id: SessionId,
-    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
     live_replay_store: Arc<dyn LiveReplayStore>,
 }
 
@@ -50,7 +50,7 @@ impl DurableSessionOps {
     /// wakes, and the Live Replay publisher queue events are published through.
     pub fn new(
         session_id: SessionId,
-        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
         Self {

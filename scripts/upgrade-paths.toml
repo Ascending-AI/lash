@@ -42,6 +42,11 @@ constant_path = "crates/lash-restate/src/process/admission.rs"
 note = "journal logic epoch: hashed into generation G so a handler change that moves no format version still drains by G (FIG-3795)"
 
 [[surface]]
+constant = "LASH_SESSION_DRIVE_VERSION"
+constant_path = "crates/lash-restate/src/session_driver.rs"
+note = "Restate journal: LashSession and LashTurn replay only under the code that wrote them; drains by generation G"
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 note = "expand-only pre-deploy migration; contract one release later; stamp carries oldest_reader"

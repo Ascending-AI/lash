@@ -7,7 +7,7 @@ use crate::engine::BuildGeneration;
 use crate::{
     AttachmentStore, Clock, EffectHost, ModuleArtifactStore, ProcessContinuationStore,
     ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
-    QueuedWorkSubstrate, SessionStoreFactory, TriggerStore,
+    SessionStoreFactory, SessionWorkEngine, TriggerStore,
 };
 
 /// The identity of one store set: the storage it names, such as a SQLite
@@ -68,12 +68,15 @@ pub trait EffectEngine: Send + Sync {
     /// silently hand an engine-driven registry to the in-process worker too.
     fn process_work(&self) -> Option<ProcessWorkWiring>;
 
-    /// The driver that runs the store set's queued session work.
+    /// The engine that runs the store set's session drives (FIG-3600), when
+    /// the engine supplies one of its own (Restate's session driver). `None`
+    /// means the runtime drives sessions in process: the SQLite engine, until
+    /// FIG-3668 deletes it, and with it this `Option`.
     ///
     /// Required, with no default, for the same reason as
-    /// [`Self::process_work`]: a forgotten forward would drive one
-    /// store set's queued work twice.
-    fn queued_work(&self) -> BackendQueuedWork;
+    /// [`Self::process_work`]: a forgotten forward would drive one store
+    /// set's sessions in process as well.
+    fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>>;
 }
 
 /// The one value a runtime takes every port from: one effect engine, and
@@ -178,9 +181,9 @@ impl Backend {
         self.engine.process_work()
     }
 
-    /// See [`EffectEngine::queued_work`].
-    pub fn queued_work(&self) -> BackendQueuedWork {
-        self.engine.queued_work()
+    /// See [`EffectEngine::session_work`].
+    pub fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>> {
+        self.engine.session_work()
     }
 }
 
@@ -202,30 +205,6 @@ impl std::fmt::Debug for Backend {
             .debug_struct("Backend")
             .field("stores", &self.binding_identity())
             .finish_non_exhaustive()
-    }
-}
-
-/// Which driver runs a backend's queued session work.
-#[derive(Clone)]
-pub enum BackendQueuedWork {
-    /// The runtime's in-process driver claims and runs the work the
-    /// store set holds: the interim in-process engine.
-    InProcess,
-    /// The engine's own driver, when the engine submits the queued work
-    /// itself.
-    Engine(Arc<dyn QueuedWorkSubstrate>),
-    /// No driver runs the queued work: the host drains it itself, such as
-    /// from its own engine handlers.
-    Disabled,
-}
-
-impl std::fmt::Debug for BackendQueuedWork {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::InProcess => "InProcess",
-            Self::Engine(_) => "Engine",
-            Self::Disabled => "Disabled",
-        })
     }
 }
 

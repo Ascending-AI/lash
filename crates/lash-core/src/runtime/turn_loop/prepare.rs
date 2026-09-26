@@ -24,7 +24,7 @@ impl LashRuntime {
     /// Bring the resident session up to the durable head under `lease`: reload
     /// invalidated resident state, then the graph unless this lease already
     /// holds it current.
-    pub(super) async fn refresh_resident_head_under_lease(
+    pub(in crate::runtime) async fn refresh_resident_head_under_lease(
         &mut self,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<(), RuntimeError> {

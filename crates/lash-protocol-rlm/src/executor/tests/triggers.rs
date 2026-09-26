@@ -1075,7 +1075,7 @@ async fn execute_trigger_process_with_originator(
             )),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy.clone()),

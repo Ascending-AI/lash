@@ -1644,7 +1644,12 @@ pub(crate) fn restate_effect_execution(
         // A model call whose body lost its watch on the turn's cancellation
         // gate ends the attempt the same way (FIG-3672 P9): the watch fault is
         // never the call's recorded outcome, and never a cancellation.
+        // A drive's admission and its seal read and write the session's
+        // store: a store that did not answer is this attempt's fault, so the
+        // step runs again, and only a verdict is ever recorded (FIG-3600).
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
+        | RuntimeEffectCommand::AdmitDrive { .. }
+        | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {

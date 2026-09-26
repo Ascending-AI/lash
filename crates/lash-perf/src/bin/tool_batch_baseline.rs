@@ -441,7 +441,6 @@ async fn restate_deployment(
             ingress_url,
             authority.clone(),
             lash::formats::build_generation(),
-            lash_restate::RestateQueuedWork::Disabled,
         ),
     ));
     let core = lash::LashCore::standard_builder(

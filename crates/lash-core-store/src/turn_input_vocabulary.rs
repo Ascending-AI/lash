@@ -905,8 +905,9 @@ pub(crate) fn source_key_display_id(source: &str) -> String {
 /// `ClaimAcceptedTurnInput` runtime effect journals it (ADR 0069 §6).
 ///
 /// It is a self-contained authority snapshot: a claimed drive carries the rows
-/// with their content and claim token, a queued drive records how far back in
-/// the queue the accepted row waits, and a refusal names why the turn cedes.
+/// with their content and claim token, and a refusal names why the root cedes.
+/// A drive admits the head of the queue, so the claim always reaches its row
+/// or refuses it (FIG-3600).
 /// Replay returns this value and never reconstructs it from pending rows, so
 /// `vacuum()` pruning terminal rows cannot change what a replayed turn does.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -920,8 +921,8 @@ pub enum AcceptedTurnInputDrive {
     /// rebuilds the turn's input state from `base` and addresses its effects
     /// under `turn_index`, never re-reading either from the live head, which
     /// the turn's own commit may already have advanced (FIG-3682). It also
-    /// records the executable generation the turn runs under (FIG-3571). S5's
-    /// `AdmitDrive` absorbs all three onto `Admitted`.
+    /// records the executable generation the turn runs under (FIG-3571). The
+    /// session drive runs this claim as its root's recorded claim step.
     Claimed {
         claim: Box<TurnInputClaim>,
         base: crate::store::SessionHeadRef,
@@ -929,13 +930,6 @@ pub enum AcceptedTurnInputDrive {
         /// The executable generation the turn was admitted under (FIG-3571):
         /// a redrive under another one is refused before any effect.
         generation: Option<crate::executable_generation::ExecutableGeneration>,
-    },
-    /// The accepted row is open but sits behind more earlier admissions than
-    /// one claim absorbs. Nothing is driven and nothing is dropped: the row
-    /// stays queued in arrival order and the next drains answer it.
-    Queued {
-        /// Open next-turn rows admitted before the accepted one.
-        ahead: u64,
     },
     /// The accepted row cannot be driven by this turn.
     Refused { refusal: AcceptedTurnInputRefusal },

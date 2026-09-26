@@ -719,7 +719,6 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
         lash::restate::config(
             lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
             lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
-            lash_restate::RestateQueuedWork::Disabled,
         ),
     ));
     let durable_host: Arc<dyn lash::durability::EffectHost> = restate.restate_effect_host();
@@ -969,12 +968,6 @@ impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
         session_id: &SessionId,
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError> {
-        lash::runtime::QueuedWorkSubstrate::drain_session_work(
-            self,
-            lash::runtime::SessionWorkTarget::Session(SessionId::from(session_id.to_string())),
-            reason,
-        )
-        .await
-        .map(|_| ())
+        self.drive_now(session_id, reason).await
     }
 }

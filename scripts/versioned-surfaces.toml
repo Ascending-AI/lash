@@ -102,6 +102,39 @@ paths = ["crates/lash-restate/src/process/workflow.rs"]
 symbols = ["COMPLETE_STEP", "BOUNDARY_STEP", "HANDOVER_STEP", "CANCEL_FORWARD_STEP", "CANCEL_RECORD_STEP", "CANCEL_ROUTE_STEP", "CANCEL_CHILD_TURN_STEP", "RETIRE_STEP"]
 
 [[surface]]
+constant = "LASH_SESSION_DRIVE_VERSION"
+constant_path = "crates/lash-restate/src/session_driver.rs"
+upgrade = "drain"
+description = "leading journaled commands of the Restate session driver: both handlers' generation sentinel, LashSession's admission steps and LashTurn calls, and LashTurn's seal (the input stamp of both handlers' requests)"
+manifest = "engine:restate.session_drive"
+
+# ADR 0105 section 12 (FIG-3600 S5). Both handlers' requests carry the
+# generation of the commands their journals lead with, and each handler
+# refuses any other generation, terminally, before it journals anything. Any
+# change to the request shapes, the handlers' leading commands or their order,
+# or the keys they address bumps this constant. The kernel's recorded bodies
+# are guarded by EFFECT_JOURNAL_VERSION. The generation sentinel's name and
+# output are guarded; the drain generation's value is not (the engine's
+# RestateConfig hands it in from formats::build_generation, and the sentinel's
+# journal shape does not depend on it).
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-restate/src/session_driver.rs"]
+must_cover = ["RestateSessionDriveRequest", "RestateTurnDriveRequest"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/session_driver.rs"]
+symbols = [
+  "DRIVE_HANDLER",
+  "unstamped_drive_version",
+  "GENERATION_SENTINEL",
+  "turn_workflow_key",
+  "drive_session_journal",
+  "run_root_journal",
+]
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 upgrade = "migrate"

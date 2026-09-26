@@ -17,14 +17,25 @@ use lash_core::testing::TestClock;
 use lash_core::{AdmittedScope, ScopedEffectController, StoreSet};
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
-    RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateIngressClient,
-    RestateProcessServing, RestateProcessWorkerSlot, RestateQueuedWork,
+    RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateHttpError,
+    RestateIngressClient, RestateProcessServing, RestateProcessWorkerSlot,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 
-use crate::server::{DeploymentHooks, DeploymentId, RestateTestServer, ServerConfig, StartError};
+use crate::server::{
+    CrashPoint, CrashRule, DeploymentHooks, DeploymentId, RestateTestServer, ServerConfig,
+    StartError,
+};
+
+/// The Restate service that drives a session: lash-restate's `LashSession`
+/// object. A crash rule on it cuts the admission journal.
+pub const SESSION_DRIVER_SERVICE: &str = "LashSession";
+
+/// The Restate service that runs one admitted root: lash-restate's `LashTurn`
+/// workflow. A crash rule on it cuts the root's journal.
+pub const TURN_DRIVER_SERVICE: &str = "LashTurn";
 
 /// One handler execution's run of an attempt.
 type HandlerJob = Box<
@@ -155,7 +166,6 @@ impl RestateTestBackend {
                 connection.clone(),
                 authority.clone(),
                 server.config().build_generation.clone(),
-                RestateQueuedWork::Disabled,
             ),
         ));
         // The endpoint exists before any core over this backend does, so it
@@ -246,6 +256,46 @@ impl RestateTestBackend {
     /// The ingress client over [`connection`](Self::connection).
     pub fn ingress(&self) -> RestateIngressClient {
         RestateIngressClient::new(self.connection.clone())
+    }
+
+    /// Drop the next execution of a session's drive handler (`LashSession`)
+    /// at `point`, on its first attempt, and let the server replay it: the
+    /// crash cuts the drive's admission journal.
+    pub fn crash_session_drive(&self, point: CrashPoint) {
+        self.server.crash_on(
+            CrashRule::new(point)
+                .service(SESSION_DRIVER_SERVICE)
+                .within_attempts(1),
+        );
+    }
+
+    /// Drop the next execution of an admitted root's handler (`LashTurn`) at
+    /// `point`, on its first attempt, and let the server replay it: the crash
+    /// cuts the root's journal.
+    pub fn crash_turn_drive(&self, point: CrashPoint) {
+        self.server.crash_on(
+            CrashRule::new(point)
+                .service(TURN_DRIVER_SERVICE)
+                .within_attempts(1),
+        );
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "the ingress client's RestateHttpError is unboxed across its public API"
+    )]
+    /// Attach to `request`'s drive of `session` on the engine and return how
+    /// it ended. The drive is the one the request's schedule sent, or, when
+    /// none was sent, one this call starts under the same idempotency key.
+    pub async fn attach_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> Result<lash_core::engine::DriveOutcome, RestateHttpError> {
+        self.restate
+            .session_work_engine()
+            .attach_drive(session, request)
+            .await
     }
 
     /// Serve process segments with `worker`, the process worker of a core

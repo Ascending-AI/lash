@@ -195,7 +195,7 @@ pub struct ProcessEngineProcessContext {
     execution_write_authority: super::model::ProcessExecutionWriteAuthority,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
     process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: Arc<dyn crate::Clock>,
 }
@@ -209,7 +209,7 @@ impl ProcessEngineProcessContext {
         execution_write_authority: super::model::ProcessExecutionWriteAuthority,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
@@ -339,7 +339,7 @@ pub struct ProcessEngineRunContext<'run> {
     tool_catalog: Arc<crate::ToolCatalog>,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
     process_registry_available: bool,
     cancellation: CancellationToken,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -364,7 +364,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         tool_catalog: Arc<crate::ToolCatalog>,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
         process_registry_available: bool,
@@ -457,7 +457,7 @@ impl<'run> ProcessEngineRunContext<'run> {
     }
 
     /// Exposes the required queued-work port to process-engine implementors.
-    pub fn queued_work(&self) -> Arc<dyn crate::QueuedWorkSubstrate> {
+    pub fn queued_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
         Arc::clone(&self.queued_work)
     }
 

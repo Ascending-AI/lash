@@ -986,7 +986,7 @@ mod process_visibility_tests {
             .with_process_work(crate::testing::process_work_wiring_for_registry(
                 registry.clone(),
             ))
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build();
         let policy = standard_test_policy();
         let runtime = crate::LashRuntime::from_environment(

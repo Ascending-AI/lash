@@ -1543,9 +1543,12 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
         acceptance.ingress,
         lash_core::runtime::TurnInputIngress::next_turn()
     );
-    assert_eq!(
-        acceptance.source_key, None,
-        "direct ingress admits, it does not mint an identity to deduplicate by"
+    assert!(
+        acceptance
+            .source_key
+            .as_deref()
+            .is_some_and(|key| !key.is_empty()),
+        "direct ingress keys its row by the turn's id, the root the drive runs it under"
     );
     assert!(
         session.durable().pending_turn_inputs().await?.is_empty(),

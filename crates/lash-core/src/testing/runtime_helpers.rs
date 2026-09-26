@@ -572,7 +572,7 @@ impl TestRuntime {
                 let host = crate::ProcessRuntimeHost::with_ports(
                     self.host,
                     crate::testing::process_work_wiring_for_registry(registry),
-                    Arc::new(crate::NoQueuedWork::new()),
+                    Arc::new(crate::NoSessionWork::new()),
                 );
                 LashRuntime::from_persistent_background_state(
                     policy,
@@ -593,7 +593,7 @@ impl TestRuntime {
                 let host = crate::ProcessRuntimeHost::with_ports(
                     self.host,
                     crate::testing::process_work_wiring_for_registry(registry),
-                    Arc::new(crate::NoQueuedWork::new()),
+                    Arc::new(crate::NoSessionWork::new()),
                 );
                 LashRuntime::from_background_state(
                     policy,

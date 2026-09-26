@@ -8,9 +8,9 @@ pub(crate) use lash_core::runtime::{
 };
 pub(crate) use lash_core::{
     LiveReplayStore, MessageRole, NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig,
-    NoQueuedWork, ProcessHandleView, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate,
-    SessionListFilter, SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionSummary,
-    SessionWorkTarget, facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
+    NoSessionWork, ProcessHandleView, ProcessWorkSubstrate, ProcessWorkWiring, SessionListFilter,
+    SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionSummary, SessionWorkEngine,
+    facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
     facade_support::PluginHost, facade_support::PluginSpec, facade_support::PluginStack,
     facade_support::QueuedWorkRunHandle, facade_support::QueuedWorkRunRequest,
     facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,

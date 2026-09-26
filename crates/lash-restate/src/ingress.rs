@@ -668,6 +668,94 @@ impl RestateIngressClient {
             .await
     }
 
+    /// [`send_object_json`](Self::send_object_json) under an idempotency
+    /// key: a repeated send with the key names the first invocation instead
+    /// of starting another.
+    pub(crate) async fn send_object_json_idempotent<T: Serialize + ?Sized>(
+        &self,
+        object: &str,
+        key: &str,
+        handler: &str,
+        body: &T,
+        idempotency_key: &str,
+    ) -> Result<RestateInvocationId, RestateHttpError> {
+        let object = restate_path_component(object);
+        let key = restate_path_component(key);
+        let handler = restate_path_component(handler);
+        let url = format_restate_url(
+            self.connection.ingress_url(),
+            &format!("{object}/{key}/{handler}/send"),
+        );
+        let encoded = serde_json::to_vec(body).map_err(|source| RestateHttpError::Encode {
+            operation: "Restate /send",
+            url: url.clone(),
+            source,
+        })?;
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Control,
+            "Restate /send",
+            HttpRequest::post(&url, encoded)
+                .with_header("content-type", "application/json")
+                .with_header("idempotency-key", idempotency_key),
+        )
+        .await?;
+        if !response.is_success() {
+            return Err(status_error("Restate /send", url, response).await);
+        }
+        let accepted: RestateSendResponse =
+            decode_response("Restate /send", &url, response).await?;
+        if !matches_restate_accepted_status(&accepted.status) {
+            return Err(RestateHttpError::UnexpectedSendStatus {
+                url,
+                status: accepted.status,
+            });
+        }
+        Ok(RestateInvocationId::new(accepted.invocation_id))
+    }
+
+    /// [`call_object_json`](Self::call_object_json) under an idempotency
+    /// key: the call attaches to the invocation an earlier send or call with
+    /// the key started, and returns its output.
+    pub(crate) async fn call_object_json_idempotent<T, R>(
+        &self,
+        object: &str,
+        object_key: &str,
+        handler: &str,
+        body: &T,
+        idempotency_key: &str,
+    ) -> Result<R, RestateHttpError>
+    where
+        T: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let object = restate_path_component(object);
+        let object_key = restate_path_component(object_key);
+        let handler = restate_path_component(handler);
+        let url = format_restate_url(
+            self.connection.ingress_url(),
+            &format!("{object}/{object_key}/{handler}"),
+        );
+        let encoded = serde_json::to_vec(body).map_err(|source| RestateHttpError::Encode {
+            operation: "Restate object call",
+            url: url.clone(),
+            source,
+        })?;
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Attach,
+            "Restate object call",
+            HttpRequest::post(&url, encoded)
+                .with_header("content-type", "application/json")
+                .with_header("idempotency-key", idempotency_key),
+        )
+        .await?;
+        if !response.is_success() {
+            return Err(status_error("Restate object call", url, response).await);
+        }
+        decode_response("Restate object call", &url, response).await
+    }
+
     async fn post_json<T: Serialize + ?Sized>(
         &self,
         operation: &'static str,

@@ -124,6 +124,8 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
                 Arc::clone(&stores.continuations),
             )
             .with_retry_max_attempts(MAX_ATTEMPTS),
+            session_driver: crate::RestateSessionDriverSlot::new(),
+            build_generation: lash_core::engine::BuildGeneration::for_test("exhaustion-park"),
         },
     )
     .build();

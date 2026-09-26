@@ -6,7 +6,7 @@
 //! [`EffectHost`](super::executor::EffectHost),
 //! the effect-group surface it hands out
 //! ([`EffectGroupHandle`](super::group::EffectGroupHandle)),
-//! [`QueuedWorkSubstrate`](crate::runtime::QueuedWorkSubstrate) and
+//! [`SessionWorkEngine`](crate::runtime::SessionWorkEngine) and
 //! [`ProcessWorkSubstrate`](crate::runtime::ProcessWorkSubstrate). Every
 //! substrate answers those ports, and the conformance laws that say what an
 //! answer must mean live at that level, not here.

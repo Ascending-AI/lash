@@ -2082,7 +2082,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
             )),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy.clone()),
@@ -2226,7 +2226,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
             )),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy.clone()),
@@ -2371,7 +2371,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
             )),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy.clone()),

@@ -848,7 +848,7 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
             Arc::new(plugin_host),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy()),
