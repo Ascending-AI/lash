@@ -387,12 +387,21 @@ async fn runtime_for_config_settlement(
         None => host.build_session(request.session_id.clone()),
     }
     .expect("config-settlement plugins");
-    let host = crate::RuntimeHostConfig::new(
+    let mut host = crate::RuntimeHostConfig::new(
         backend,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     )
     .with_clock(clock as Arc<dyn crate::Clock>);
+    // The laws patch the route's model: S6 validates the route at acceptance,
+    // so the host must serve the request's `conformance-provider`. The model
+    // still never settles — the queued blocker holds the FIFO head.
+    host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
+        crate::testing::TestProvider::builder()
+            .kind("conformance-provider")
+            .build()
+            .into_handle(),
+    ));
     let runtime_host = crate::EmbeddedRuntimeHost::new(host);
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,

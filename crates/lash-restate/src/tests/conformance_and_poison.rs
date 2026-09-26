@@ -637,6 +637,14 @@ mod on_the_server_double {
         (harness, factory)
     });
 
+    // The session-config settlement laws on the Restate backend: its engine
+    // host over one SQLite memory store set per law.
+    lash_conformance::session_config_settlement_tests!({
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        let make = harness.backend_factory();
+        (harness, make)
+    });
+
     lash_conformance::effect_group_cancelled_child_terminal_tests!({
         let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
         let factory = harness.group_host_factory();

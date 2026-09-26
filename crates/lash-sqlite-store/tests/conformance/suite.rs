@@ -978,6 +978,21 @@ lash_conformance::session_store_factory_tests!({
     )
 });
 
+// The settlement laws run a facade runtime over a fresh backend per law: an
+// engine backend keeps its substrate alive and supplies the durable ports the
+// runtime takes from it.
+lash_conformance::session_config_settlement_tests!({
+    let retained: Retained<TestEngineBackend> = Retained::default();
+    let make = {
+        let retained = retained.clone();
+        move || {
+            let backend = retained.open_blocking();
+            async move { backend.as_backend() }
+        }
+    };
+    (retained, make)
+});
+
 lash_conformance::fresh_session_admission_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_session_id: &str| {
