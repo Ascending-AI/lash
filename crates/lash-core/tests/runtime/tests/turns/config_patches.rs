@@ -1,10 +1,13 @@
 use super::*;
 
-#[tokio::test]
+const SEED: u64 = 0x5_f420;
+
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, mock_provider(Vec::new())).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
+            .await;
     let models = ["queued-model-a", "queued-model-b", "queued-model-c"];
     for (index, model) in models.iter().enumerate() {
         enqueue_config_patch_command(
@@ -39,11 +42,23 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
     .acquired()
     .expect("session execution lease");
 
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            "session-command",
+        ))
+        .await
+        .expect("open the drain's handler");
     runtime
-        .drain_next_session_command(&lease.fence())
+        .drain_next_session_command_with_cancellation(
+            &lease.fence(),
+            CancellationToken::new(),
+            handler.scoped().controller(),
+        )
         .await
         .expect("drain coalesced config patches")
         .expect("one receipt from the coalesced claim");
+    handler.close().await.expect("close the drain's handler");
 
     assert_eq!(
         *store.runtime_commit_count.lock_recover(),
@@ -65,7 +80,7 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
 
 #[tokio::test]
 pub(super) async fn config_settlement_distinguishes_enqueue_rejection_from_durable_completion() {
-    let backend = memory_backend().await;
+    let backend = memory_store_backend().await;
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     let original_model = runtime.session_policy().model.clone();
     let outcome = runtime
@@ -142,8 +157,8 @@ pub(super) fn turn_budget_config_mutator(
 
 #[tokio::test]
 pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let backend = memory_store_backend().await;
+    let store = recording_unbound_store_on(&backend).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let persisted_budget = lash_core::TurnBudget::bounded(7);
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -217,7 +232,7 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
 
 #[tokio::test]
 pub(super) async fn every_session_config_patch_emits_a_lifecycle_event() {
-    let backend = memory_backend().await;
+    let backend = memory_store_backend().await;
     let observed = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let observed_hook = Arc::clone(&observed);
     let plugin = Arc::new(RuntimeTestPluginFactory {

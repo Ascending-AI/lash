@@ -1,9 +1,12 @@
 use super::*;
 use lash_sansio::sync::MutexExt;
 
+const SEED: u64 = 0x5_f470;
+
 #[tokio::test]
 async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default().with_replay_by_key();
     let trace_path = unique_trace_path("direct-llm-completion");
     let transport = mock_provider(vec![MockCall {
@@ -37,11 +40,20 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
             .await;
 
     let manager = runtime.runtime_session_services().expect("session manager");
+    let handler = double
+        .open_handler(AdmittedScope::runtime_operation(
+            "test-runtime-effect-controller",
+        ))
+        .await
+        .expect("open the operation's handler");
     let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(layered_operation_controller(
-            &backend,
-            Arc::new(recorder.clone()),
-        )),
+        RuntimeEffectControllerHandle::borrowed(
+            lash_core::testing::LayeredEffectHost::layer_scoped(
+                handler.scoped(),
+                Arc::new(recorder.clone()),
+            )
+            .expect("layer the operation's scoped controller"),
+        ),
         None,
     );
     let request = LlmRequest {
@@ -107,12 +119,19 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         1,
         "the same request id is the same durable effect even when request content differs"
     );
-    let ledger = runtime.shared_token_ledger.lock_recover();
-    assert_eq!(ledger.len(), 1);
-    assert_eq!(ledger[0].source, "direct-llm-test");
-    assert_eq!(ledger[0].model, "mock-model");
-    assert_eq!(
-        ledger[0].usage.input_tokens, 8,
-        "replaying the durable effect still accounts usage for each caller observation"
-    );
+    {
+        let ledger = runtime.shared_token_ledger.lock_recover();
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].source, "direct-llm-test");
+        assert_eq!(ledger[0].model, "mock-model");
+        assert_eq!(
+            ledger[0].usage.input_tokens, 8,
+            "replaying the durable effect still accounts usage for each caller observation"
+        );
+    }
+    drop(direct);
+    handler
+        .close()
+        .await
+        .expect("close the operation's handler");
 }
