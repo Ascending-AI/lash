@@ -424,7 +424,7 @@ pub(super) fn read_sqlite_triggers(connection: &rusqlite::Connection) -> Trigger
     }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
     let deliveries = sqlite_simple_json_rows(connection, "SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM trigger_deliveries ORDER BY occurrence_id, subscription_id", |row| {
         let snapshot: String = row.get(3)?;
-        Ok(serde_json::json!({"occurrence_id": row.get::<_, String>(0)?, "subscription_id": row.get::<_, String>(1)?, "process_id": row.get::<_, String>(2)?, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}))
+        Ok(serde_json::json!({"occurrence_id": row.get::<_, String>(0)?, "subscription_id": row.get::<_, String>(1)?, "process_id": row.get::<_, Option<String>>(2)?, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}))
     }).into_iter().map(|row| normalized_trigger_delivery_json(row, &mut incarnations)).collect();
     TriggerRows {
         subscriptions,
@@ -650,7 +650,7 @@ pub(super) async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
     .await
     .unwrap();
     let occurrences = occurrence_rows.into_iter().map(|record| normalized_trigger_json(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}), &mut incarnations)).collect();
-    let delivery_rows: Vec<(String, String, String, String)> = sqlx::query_as("SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM lash_trigger_deliveries ORDER BY occurrence_id, subscription_id").fetch_all(pool).await.unwrap();
+    let delivery_rows: Vec<(String, String, Option<String>, String)> = sqlx::query_as("SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM lash_trigger_deliveries ORDER BY occurrence_id, subscription_id").fetch_all(pool).await.unwrap();
     let deliveries = delivery_rows.into_iter().map(|(occurrence_id, subscription_id, process_id, snapshot)| normalized_trigger_delivery_json(serde_json::json!({"occurrence_id": occurrence_id, "subscription_id": subscription_id, "process_id": process_id, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}), &mut incarnations)).collect();
     TriggerRows {
         subscriptions,
