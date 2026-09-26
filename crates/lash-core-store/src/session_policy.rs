@@ -314,20 +314,6 @@ pub struct StaleConfigRevision {
     pub head: u64,
 }
 
-/// An `ApplyConfigPatch`'s `base_config_revision` did not match the running
-/// `config_revision` of the state it was presented to: the patch was written
-/// against a config the session no longer has, so nothing was applied.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "stale session config patch: written against revision {base}, but the running revision is {head}"
-)]
-pub struct StaleConfigRevision {
-    /// The revision the submitter wrote the patch against.
-    pub base: u64,
-    /// The revision the session's config actually carried.
-    pub head: u64,
-}
-
 /// A recorded provider pin that does not match the live request.
 ///
 /// `lash-core` widens this into `SessionError::ProviderMismatch`; the pin rule
