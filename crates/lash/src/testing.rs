@@ -41,7 +41,9 @@ pub use lash_core::testing::{
 /// — without a production runtime.
 ///
 /// Each takes the [`TestExecutionPorts`] it runs over: a backend's ports
-/// (`&backend` converts), or a host's with
+/// (`&backend` converts), a backend's with the controller one engine
+/// execution lent through [`TestExecutionPorts::lent`] (the context then
+/// cannot outlive that execution), or a host's with
 /// [`TestExecutionPorts::over_host`]. There is no in-memory default.
 pub use lash_core::testing::{
     TestExecutionPorts, cancelled_code_execution_context, code_execution_context,

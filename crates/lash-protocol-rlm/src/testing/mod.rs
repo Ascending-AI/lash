@@ -118,8 +118,54 @@ pub(crate) async fn fresh_memory_artifact_store() -> lashlang::LashlangArtifacts
 
 /// The ports of a fresh memory backend: the host a cell's effects journal
 /// on, its process-exec-env store and attachment port, and its clock.
-pub(crate) async fn memory_backend_ports() -> lash_core::testing::TestExecutionPorts {
+pub(crate) async fn memory_backend_ports() -> lash_core::testing::TestExecutionPorts<'static> {
     lash_core::testing::TestExecutionPorts::of(&memory_backend().await.into())
+}
+
+/// The scope a context built with no parent invocation claims: the builder's
+/// default test turn. Open the handler [`double_ports`] lends for it.
+pub(crate) fn default_cell_scope() -> lash_core::AdmittedScope {
+    lash_core::AdmittedScope::turn(
+        lash_core::SessionId::from("test-session"),
+        lash_core::TurnId::from("test-turn"),
+    )
+}
+
+/// The twin of [`memory_backend_ports`] on the server double: every port of
+/// `double`, with the controller `handler` lends serving the context's
+/// effects, as a Restate deployment serves a turn's cell from the turn's
+/// handler.
+///
+/// Open `handler` on `double` for the scope the context claims
+/// ([`default_cell_scope`], or the scope of the invocation the context
+/// installs), drop the context, then close the handler. The borrow keeps the
+/// context from outliving the handler.
+pub(crate) fn double_ports<'h>(
+    double: &lash_restate_test::RestateTestBackend,
+    handler: &'h lash_restate_test::OpenHandler,
+) -> lash_core::testing::TestExecutionPorts<'h> {
+    lash_core::testing::TestExecutionPorts::lent(&double.lash_backend(), handler.scoped())
+}
+
+/// The twin of [`ports_over_host`] on the server double: [`double_ports`]
+/// with `layer` in front of the double's host and of the controller
+/// `handler` lends, for a law that observes or perturbs the effect seam.
+pub(crate) fn double_ports_over_layer<'h>(
+    double: &lash_restate_test::RestateTestBackend,
+    handler: &'h lash_restate_test::OpenHandler,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> lash_core::testing::TestExecutionPorts<'h> {
+    let backend = double.lash_backend();
+    let lent =
+        lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), Arc::clone(&layer))
+            .expect("layer the handler's controller");
+    lash_core::testing::TestExecutionPorts {
+        effect_host: Arc::new(lash_core::testing::LayeredEffectHost::new(
+            backend.effect_host(),
+            layer,
+        )),
+        ..lash_core::testing::TestExecutionPorts::lent(&backend, lent)
+    }
 }
 
 /// A fresh memory backend's process registry, for a trigger router whose
@@ -137,7 +183,7 @@ pub(crate) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
 /// with a fresh memory backend's process-exec-env store beside it.
 pub(crate) async fn ports_over_host(
     effect_host: Arc<dyn lash_core::EffectHost>,
-) -> lash_core::testing::TestExecutionPorts {
+) -> lash_core::testing::TestExecutionPorts<'static> {
     lash_core::testing::TestExecutionPorts::over_host(
         effect_host,
         memory_backend().await.process_env_store(),
