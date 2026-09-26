@@ -719,7 +719,7 @@ pub(super) async fn drive_break_glass_scenario(
     wait_for_cancel_gate(storage.pool(), &break_glass.workflow_id).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
     admin
-        .kill_invocation_for_test_cleanup(&invocation_id)
+        .kill_invocation(&invocation_id)
         .await
         .context("kill Restate invocation as break-glass")?;
     report_workflow_progress(&break_glass.workflow_id, "admin-kill-requested");

@@ -10,8 +10,8 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    EnginePark, ParkCancelCause, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWriteDecision, ParkEventKind, close_admission, decide_root_terminal_write,
+    EnginePark, ParkCancelCause, ParkEventKind, RootStore, RootTerminal, RootTerminalCause,
+    RootTerminalKind, RootTerminalWriteDecision, close_admission, decide_root_terminal_write,
     root_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
@@ -92,10 +92,6 @@ pub(crate) fn root_terminal_conn(
 /// Write `terminal` in the caller's transaction, deciding it against the
 /// stored evidence first: the same terminal is a no-op, another one is
 /// [`StoreError::RootAlreadyTerminal`].
-#[expect(
-    dead_code,
-    reason = "the commit-path writer for RuntimeCommit::root_terminal lands with S7-B"
-)]
 pub(crate) fn write_root_terminal_conn(
     tx: &Connection,
     terminal: &RootTerminal,

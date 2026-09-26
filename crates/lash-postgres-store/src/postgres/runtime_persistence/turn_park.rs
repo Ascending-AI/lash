@@ -239,6 +239,10 @@ pub(crate) async fn record_turn_park_tx(
 
 /// Record redrive `intent` on session `session_id`'s park `park_id`, inside
 /// the redrive's store half.
+#[expect(
+    dead_code,
+    reason = "the redrive's store half lands with the parked-root verbs"
+)]
 pub(crate) async fn set_resume_intent_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,

@@ -234,6 +234,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
                 message: "diverged".to_string(),
             },
             at_ms: 1,
+            engine: None,
         })
         .await
         .expect("park the turn");

@@ -456,10 +456,11 @@ pub fn forked_root(root: &TurnId, park: ParkId) -> TurnId {
 /// The deployment's control-intent ledger (FIG-3600 S7, ADR 0104 O4, astra
 /// B6), carried by the session store factory.
 ///
-/// Every method is required: a factory states its answer, and a decorator
-/// forwards to the catalog it wraps. A factory with no ledger returns
-/// `StoreError::UnsupportedStoreOperation`, which fails a session deletion
-/// closed instead of deleting a session whose roots nothing closed.
+/// Every method is required — [`open_root_intent`](Self::open_root_intent)
+/// excepted while the verb stores land: a factory states its answer, and a
+/// decorator forwards to the catalog it wraps. A factory with no ledger
+/// returns `StoreError::UnsupportedStoreOperation`, which fails a session
+/// deletion closed instead of deleting a session whose roots nothing closed.
 #[async_trait::async_trait]
 pub trait ControlIntentStore: Send + Sync {
     /// Begin closing session `session_id`: the store half of its
@@ -539,11 +540,18 @@ pub trait ControlIntentStore: Send + Sync {
     ///
     /// The intent is `Pending`, carrying the park's engine handle for the
     /// engine half.
+    ///
+    /// A factory with no verb store answers `UnsupportedStoreOperation`.
     async fn open_root_intent(
         &self,
-        request: &RootIntentRequest,
-        at_ms: u64,
-    ) -> Result<ControlIntent, RootIntentRefused>;
+        _request: &RootIntentRequest,
+        _at_ms: u64,
+    ) -> Result<ControlIntent, RootIntentRefused> {
+        Err(super::StoreError::UnsupportedStoreOperation {
+            operation: "ControlIntentStore::open_root_intent",
+        }
+        .into())
+    }
 }
 
 #[cfg(test)]

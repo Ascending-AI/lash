@@ -11,6 +11,11 @@ pub const TABLE: &str = "control_intents";
 pub const ROW_COLUMNS: &str =
     "intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref";
 
+/// Every column an insert writes, in bind order: the id is the table's
+/// sequence (`RETURNING` answers it) and `attempts` opens at 0.
+pub const INSERT_COLUMNS: &str =
+    "session_id, format, kind, kind_json, state, state_json, attempts, created_at_ms, engine_ref";
+
 crate::statements! {
     /// `control_intents` statements both backends issue verbatim.
     pub struct ControlIntentStatements @ "control_intent" {
