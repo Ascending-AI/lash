@@ -373,6 +373,9 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
     let session = core.session("queued-work-live-lease").open().await?;
     let entered = first_entered.notified();
     let foreground = session.send(TurnInput::text("foreground turn")).await?;
+    // This core runs no session work: a waiter drives the input in its own
+    // task, so the events follower is what starts the turn.
+    let _foreground_events = foreground.events();
     entered.await;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
@@ -690,14 +693,14 @@ pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()
     .expect("core");
     let session = core.session("cancel-lock-queue").open().await?;
 
-    let first = session.send(TurnInput::text("hang one")).await?;
+    let first = session.turn(TurnInput::text("hang one")).stream()?;
     started_rx.await.expect("first turn reached the provider");
-    let second = session.send(TurnInput::text("hang two")).await?;
+    let second = session.turn(TurnInput::text("hang two")).stream()?;
 
     assert_eq!(session.cancel_running_turns(), 2);
 
-    let first = first.output().await?.result;
-    let second = second.output().await?.result;
+    let first = first.finish().await?;
+    let second = second.finish().await?;
     assert!(matches!(
         first.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
@@ -728,6 +731,9 @@ pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handle
     let handle_b = core.session("cancel-scope").open().await?;
 
     let hanging = handle_a.send(TurnInput::text("hang here")).await?;
+    // This core runs no session work: a waiter drives the input in its own
+    // task, so the events follower is what starts the turn.
+    let _hanging_events = hanging.events();
     started_rx.await.expect("turn reached the provider");
 
     // The other handle has its own registry: nothing to cancel there.
@@ -766,16 +772,16 @@ pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Re
     let session = core.session("provider-abort-evidence").open().await?;
 
     let hanging = session
-        .send(TurnInput::text("hang here"))
-        .id("abort-evidence-turn")
-        .await?;
+        .turn(TurnInput::text("hang here"))
+        .turn_id("abort-evidence-turn")
+        .stream()?;
     started_rx.await.expect("turn reached the provider");
     assert_eq!(
         session.cancel_running_turns_with_origin(Some("user".to_string())),
         1
     );
 
-    let result = hanging.output().await?.result;
+    let result = hanging.finish().await?;
     let evidence = result
         .cancellation()
         .expect("a cancelled turn names the request that stopped it");
@@ -855,6 +861,9 @@ pub(super) async fn assert_session_turn_cancel_disposition(
         .send(TurnInput::text("hang until session cancellation"))
         .id(turn_id)
         .await?;
+    // This core runs no session work: a waiter drives the input in its own
+    // task, so the events follower is what starts the turn.
+    let mut events = handle.events();
     started_rx.await.expect("turn reached the provider");
 
     let undelivered = session
@@ -894,6 +903,9 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             if evidence.request_id == request_id && evidence.undelivered == disposition
     ));
 
+    // Drain the follower to its end: it settles with the live turn report
+    // and leaves that answer on the handle, which output() then returns.
+    while let Some(_activity) = events.next_activity().await {}
     let interrupted = handle.output().await?.result;
     assert!(matches!(
         interrupted.outcome,

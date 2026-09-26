@@ -1243,6 +1243,9 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     let handle = session
         .send(TurnInput::text("use the tool, then stop"))
         .await?;
+    // This core runs no session work: a waiter drives the input in its own
+    // task, so the events follower is what starts the turn.
+    let mut events = handle.events();
     started.notified().await;
     assert_eq!(
         stopper.cancel_running_turns_with_origin_and_mode(
@@ -1254,6 +1257,9 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     released.store(true, Ordering::SeqCst);
     release.notify_one();
 
+    // Drain the follower to its end: it settles with the live turn report
+    // and leaves that answer on the handle, which output() then returns.
+    while let Some(_activity) = events.next_activity().await {}
     let result = handle.output().await?.result;
     let evidence = match &result.outcome {
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) => {
@@ -1301,6 +1307,9 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     let stopper = session.clone();
 
     let handle = session.send(TurnInput::text("hang, then escalate")).await?;
+    // This core runs no session work: a waiter drives the input in its own
+    // task, so the events follower is what starts the turn.
+    let _events = handle.events();
     started.notified().await;
     assert_eq!(
         stopper.cancel_running_turns_with_mode(crate::TurnCancelMode::AfterStep),
