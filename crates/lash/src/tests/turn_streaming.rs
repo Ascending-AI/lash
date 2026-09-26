@@ -96,56 +96,6 @@ struct TurnPersistedGraphAppendPlugin {
 }
 
 #[cfg(feature = "rlm")]
-struct StopAfterFrameSwitchCommitFactory;
-
-#[cfg(feature = "rlm")]
-impl lash_core::facade_support::PluginFactory for StopAfterFrameSwitchCommitFactory {
-    fn id(&self) -> &'static str {
-        "stop-after-frame-switch-commit"
-    }
-
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        Ok(Arc::new(StopAfterFrameSwitchCommitPlugin))
-    }
-}
-
-#[cfg(feature = "rlm")]
-struct StopAfterFrameSwitchCommitPlugin;
-
-#[cfg(feature = "rlm")]
-impl lash_core::facade_support::SessionPlugin for StopAfterFrameSwitchCommitPlugin {
-    fn id(&self) -> &'static str {
-        "stop-after-frame-switch-commit"
-    }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        reg.session().on_event(Arc::new(|event| {
-            Box::pin(async move {
-                if matches!(
-                    event,
-                    lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(_)
-                ) {
-                    return Err(lash_core::PluginError::Session(
-                        "stop after the accepted frame-switch commit".to_string(),
-                    ));
-                }
-                Ok(())
-            })
-        }));
-        Ok(())
-    }
-}
-
-#[cfg(feature = "rlm")]
 fn frame_state_probe_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:frame_state_probe",

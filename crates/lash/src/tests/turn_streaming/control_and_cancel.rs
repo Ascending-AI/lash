@@ -179,53 +179,52 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: a pre-fired cancel token withdraws the sent input before it runs, so no turn report exists (D1 S3)"]
-pub(super) async fn pre_cancelled_token_yields_cancelled_outcome() -> Result<()> {
+pub(super) async fn cancel_before_drive_yields_cancelled_outcome() -> Result<()> {
     let core = standard_core().await;
     let session = core.session("pre-cancelled").open().await?;
-    let cancel = CancellationToken::new();
-    cancel.cancel();
-
-    let output = session
-        .turn(TurnInput::text("never runs"))
-        .cancel(cancel)
-        .run()
-        .await?;
-
-    assert!(matches!(
-        output.result.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-    ));
-    let evidence = output
-        .result
-        .cancellation()
-        .expect("local token cancellation evidence");
-    assert_eq!(evidence.origin, None);
-    assert_eq!(evidence.reason, None);
+    let handle = session.send(TurnInput::text("never runs")).await?;
+    let receipt = handle.cancel().await?;
+    assert!(matches!(receipt, crate::CancelReceipt::Withdrawn(_)));
+    let outcome = handle.outcome().await?;
+    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    assert!(
+        outcome.output.is_none(),
+        "no root ran for a withdrawn input"
+    );
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: a pre-fired cancel token withdraws the sent input before it runs, so no turn report exists (D1 S3)"]
-pub(super) async fn local_cancel_token_preserves_explicit_origin_hint() -> Result<()> {
-    let core = standard_core().await;
-    let session = core.session("pre-cancelled-with-origin").open().await?;
-    let cancel = CancellationToken::new();
-    cancel.cancel();
-
-    let output = session
-        .turn(TurnInput::text("never runs"))
-        .cancel_with_origin(cancel, Some("shutdown".to_string()))
-        .run()
+pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
+    let (started_tx, started_rx) = oneshot::channel::<()>();
+    let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await.into(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("cancel-with-origin").open().await?;
+    let handle = session
+        .send(TurnInput::text("hang here"))
+        .id("origin-root")
         .await?;
-
-    assert!(matches!(
-        output.result.cancellation(),
-        Some(lash_core::facade_support::TurnCancellationEvidence {
-            origin: Some(origin),
-            ..
-        }) if origin == "shutdown"
-    ));
+    let input_id = handle.input_id().clone();
+    let outcome = tokio::spawn(async move { handle.outcome().await });
+    started_rx.await.expect("root reached the provider");
+    let receipt = session
+        .cancel(crate::CancelTarget::Input(input_id))
+        .request_id("origin-stop")
+        .origin("shutdown")
+        .await?;
+    assert!(matches!(receipt, crate::CancelReceipt::Requested { .. }));
+    let outcome = outcome.await.expect("send task")?;
+    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    let output = outcome.output.expect("running root has a report");
+    let evidence = output.result.cancellation().expect("cancellation evidence");
+    assert_eq!(evidence.request_id, "origin-stop");
+    assert_eq!(evidence.origin.as_deref(), Some("shutdown"));
     Ok(())
 }
 
@@ -674,7 +673,6 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: the stop sweep withdraws the queued second send, which answers Cancelled with no report (D1 §2.3)"]
 pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()> {
     // One opened session serializes turn execution on the runtime writer
     // lock, but a second turn is already registered while it waits for that
@@ -693,22 +691,19 @@ pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()
     .expect("core");
     let session = core.session("cancel-lock-queue").open().await?;
 
-    let first = session.turn(TurnInput::text("hang one")).stream()?;
+    let first = session.send(TurnInput::text("hang one")).await?;
+    let first_outcome = tokio::spawn(async move { first.outcome().await });
     started_rx.await.expect("first turn reached the provider");
-    let second = session.turn(TurnInput::text("hang two")).stream()?;
+    let second = session.send(TurnInput::text("hang two")).await?;
 
     assert_eq!(session.cancel_running_turns(), 2);
 
-    let first = first.finish().await?;
-    let second = second.finish().await?;
-    assert!(matches!(
-        first.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-    ));
-    assert!(matches!(
-        second.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-    ));
+    let first = first_outcome.await.expect("first send task")?;
+    let second = second.outcome().await?;
+    assert_eq!(first.status, crate::TurnStatus::Cancelled);
+    assert!(first.output.is_some(), "the running root commits its stop");
+    assert_eq!(second.status, crate::TurnStatus::Cancelled);
+    assert!(second.output.is_none(), "the queued input is withdrawn");
     assert_eq!(session.cancel_running_turns(), 0);
     Ok(())
 }
@@ -753,7 +748,6 @@ pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handle
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: the stop sweep cancels a sent input as a host request, so the committed evidence names that request, not a lash-internal one (D1 §2.3)"]
 pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Result<()> {
     // A process-local stop reaches the turn as a durable request on its
     // cancellation gate, with lash's internal evidence (FIG-3672 P9). The
@@ -772,20 +766,27 @@ pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Re
     let session = core.session("provider-abort-evidence").open().await?;
 
     let hanging = session
-        .turn(TurnInput::text("hang here"))
-        .turn_id("abort-evidence-turn")
-        .stream()?;
+        .send(TurnInput::text("hang here"))
+        .id("abort-evidence-turn")
+        .await?;
+    let input_id = hanging.input_id().clone();
+    let outcome = tokio::spawn(async move { hanging.outcome().await });
     started_rx.await.expect("turn reached the provider");
     assert_eq!(
         session.cancel_running_turns_with_origin(Some("user".to_string())),
         1
     );
 
-    let result = hanging.finish().await?;
-    let evidence = result
+    let result = outcome.await.expect("send task")?;
+    assert_eq!(result.status, crate::TurnStatus::Cancelled);
+    let output = result
+        .output
+        .expect("the running root commits a cancelled turn");
+    let evidence = output
+        .result
         .cancellation()
         .expect("a cancelled turn names the request that stopped it");
-    assert_eq!(evidence.request_id, "internal:abort-evidence-turn");
+    assert_eq!(evidence.request_id, format!("cancel:input:{input_id}"));
     assert_eq!(evidence.origin.as_deref(), Some("user"));
     Ok(())
 }
@@ -867,35 +868,27 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     started_rx.await.expect("turn reached the provider");
 
     let undelivered = session
-        .durable()
-        .enqueue(TurnInput::text("undelivered active-turn input"))
+        .send(TurnInput::text("undelivered active-turn input"))
         .id(format!("{session_id}:undelivered"))
         .ingress(lash_core::TurnInputIngress::active_turn(
             turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
         ))
-        .send()
         .await?;
+    let undelivered_id = undelivered.input_id().clone();
     let request_id = format!("{session_id}:cancel");
-    let receipt = if use_legacy_method {
-        session
-            .request_turn_cancel(
-                turn_id,
-                request_id.clone(),
-                Some("test-host".to_string()),
-                Some("legacy defer default".to_string()),
-            )
-            .await?
+    let cancel = session
+        .cancel(crate::CancelTarget::Root(turn_id.clone()))
+        .request_id(request_id.clone())
+        .origin("test-host")
+        .reason("undelivered active input");
+    let cancel = if use_legacy_method {
+        cancel
     } else {
-        session
-            .request_turn_cancel_with_disposition(
-                turn_id,
-                request_id.clone(),
-                Some("test-host".to_string()),
-                Some("explicit disposition".to_string()),
-                disposition,
-            )
-            .await?
+        cancel.undelivered(disposition)
+    };
+    let crate::CancelReceipt::Requested { receipt, .. } = cancel.await? else {
+        panic!("the running root must receive a cancellation request");
     };
     assert!(matches!(
         receipt.outcome,
@@ -913,7 +906,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     ));
     assert_eq!(interrupted.cancel_input_outcome.affected_inputs.len(), 1);
     let affected = &interrupted.cancel_input_outcome.affected_inputs[0];
-    assert_eq!(affected.input_id, undelivered.input_id);
+    assert_eq!(affected.input_id, undelivered_id);
     assert_eq!(affected.disposition, disposition);
 
     let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
@@ -929,29 +922,32 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             let raw_pending = sqlite_turn_input_states(&backend);
             let dropped = raw_pending
                 .iter()
-                .find(|(input_id, _)| input_id.as_str() == undelivered.input_id.as_str())
+                .find(|(input_id, _)| input_id.as_str() == undelivered_id.as_str())
                 .expect("dropped input retains terminal lifecycle evidence");
             assert_eq!(dropped.1, "cancelled");
             assert!(
                 pending
                     .iter()
-                    .all(|input| input.input.input_id != undelivered.input_id),
+                    .all(|input| input.input.input_id != undelivered_id),
                 "dropped input must be absent from next-turn ingress"
             );
         }
         lash_core::facade_support::TurnCancelDisposition::Defer => {
-            let deferred = pending
-                .iter()
-                .find(|input| input.input.input_id == undelivered.input_id)
-                .expect("deferred input remains available for the next turn");
+            let outcome = undelivered.outcome().await?;
+            assert_eq!(outcome.status, crate::TurnStatus::Answered);
             assert_eq!(
-                deferred.input.state,
-                lash_core::TurnInputState::DeferredNextTurn
+                outcome
+                    .output
+                    .expect("deferred input ran")
+                    .assistant_message(),
+                Some("echo: undelivered active-turn input")
             );
-            assert!(matches!(
-                deferred.input.ingress(),
-                lash_core::TurnInputIngress::NextTurn
-            ));
+            assert!(
+                pending
+                    .iter()
+                    .all(|input| input.input.input_id != undelivered_id),
+                "the session drive consumes the deferred input as the next root"
+            );
         }
     }
     let record = lash_core::store::TurnInputStore::turn_cancel_request(
@@ -979,9 +975,7 @@ pub(super) async fn request_turn_cancel_with_disposition_drops_undelivered_activ
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: the session drive also applies the active input the cancelled turn deferred, so it no longer waits for a next turn (D1 §2.2)"]
-pub(super) async fn request_turn_cancel_legacy_method_defers_undelivered_active_input() -> Result<()>
-{
+pub(super) async fn send_cancel_defaults_to_deferring_undelivered_active_input() -> Result<()> {
     assert_session_turn_cancel_disposition(
         &SessionId::from("session-cancel-legacy-defer"),
         &TurnId::from("session-cancel-legacy-defer:turn"),
@@ -992,7 +986,6 @@ pub(super) async fn request_turn_cancel_legacy_method_defers_undelivered_active_
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: a spawned turn (D1 S4): the session drive also applies the deferred steer the test expects to stay queued"]
 pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let started_tx = Arc::new(StdMutex::new(Some(started_tx)));
@@ -1033,72 +1026,49 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("active-steer-interrupt-cancel").open().await?;
     let active_turn_id = "active-steer-interrupt-turn";
-    let turn_session = session.clone();
-    let turn = tokio::spawn(async move {
-        let stream = turn_session
-            .turn(TurnInput::text("primary hangs"))
-            .turn_id(active_turn_id)
-            .stream()?;
-        stream.finish().await
-    });
+    let primary = session
+        .send(TurnInput::text("primary hangs"))
+        .id(active_turn_id)
+        .await?;
+    let turn = tokio::spawn(async move { primary.outcome().await });
 
     tokio::time::timeout(std::time::Duration::from_secs(1), started_rx)
         .await
         .expect("primary turn should reach provider")
         .expect("provider started signal");
     let active = session
-        .durable()
-        .enqueue(TurnInput::text("deferred active steer"))
+        .send(TurnInput::text("deferred active steer"))
         .id("active-steer")
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
         ))
-        .send()
         .await?;
     let queued = session
-        .durable()
-        .enqueue(TurnInput::text("cancelled next turn"))
+        .send(TurnInput::text("cancelled next turn"))
         .id("cancelled-next")
-        .send()
         .await?;
-    let cancelled = session
-        .durable()
-        .cancel_pending_turn_input(&queued.input_id)
-        .await?;
-    let crate::PendingTurnInputCancelOutcome::Cancelled(cancelled) = cancelled else {
+    let cancelled = queued.cancel().await?;
+    let crate::CancelReceipt::Withdrawn(cancelled) = cancelled else {
         panic!("queued input should be cancellable before it is claimed: {cancelled:?}");
     };
-    assert_eq!(cancelled.input_id, queued.input_id);
+    assert!(cancelled.outcome.is_cancelled());
 
-    assert_eq!(session.cancel_running_turns(), 1);
-    let interrupted = turn.await.expect("turn task")?;
-    assert!(matches!(
-        interrupted.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-    ));
+    let stopped = session
+        .cancel(crate::CancelTarget::Root(TurnId::from(active_turn_id)))
+        .undelivered(lash_core::facade_support::TurnCancelDisposition::Defer)
+        .await?;
+    assert!(matches!(stopped, crate::CancelReceipt::Requested { .. }));
+    let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)
+        .await
+        .expect("cancelled root settles")
+        .expect("turn task")?;
+    assert_eq!(interrupted.status, crate::TurnStatus::Cancelled);
+    assert_eq!(queued.outcome().await?.status, crate::TurnStatus::Cancelled);
 
-    let pending = session.durable().pending_turn_inputs().await?;
-    assert_eq!(
-        pending.len(),
-        1,
-        "only the unaccepted active steer should remain"
-    );
-    assert_eq!(pending[0].input.input_id, active.input_id);
-    assert!(matches!(
-        pending[0].input.ingress(),
-        lash_core::TurnInputIngress::NextTurn
-    ));
-    assert_eq!(
-        pending[0].input.state,
-        lash_core::TurnInputState::DeferredNextTurn
-    );
-
-    let drained = session
-        .queued_turn()
-        .run()
-        .await?
-        .expect("deferred active steer should run as the next turn");
+    let drained = tokio::time::timeout(std::time::Duration::from_secs(10), active.output())
+        .await
+        .expect("deferred steer settles")?;
     assert_eq!(
         drained.assistant_message(),
         Some("echo: deferred active steer")
@@ -1133,7 +1103,6 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: a spawned turn (D1 S4): the turn runs in the engine, not in the caller's future, so its held provider call is never dropped"]
 pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     let (first_started_tx, first_started_rx) = oneshot::channel::<()>();
     let (release_first_tx, release_first_rx) = oneshot::channel::<()>();
@@ -1160,14 +1129,27 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
                     if let Some(rx) = release_first_rx.lock().await.take() {
                         let _ = rx.await;
                     }
-                    return Ok(text_response("first response"));
+                    // A tool call keeps the turn working, so its
+                    // after-work checkpoint applies the accepted steer
+                    // instead of finishing on a plain answer first.
+                    return Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "primary-lookup".to_string(),
+                            tool_name: "app_lookup".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    });
                 }
-                if user_text == "accepted active steer" {
-                    if let Some(tx) = second_started_tx.lock_recover().take() {
-                        let _ = tx.send(());
-                    }
+                let steer_started = second_started_tx.lock_recover().take();
+                if user_text == "accepted active steer"
+                    && let Some(tx) = steer_started
+                {
+                    let _ = tx.send(());
                     std::future::pending::<()>().await;
-                    unreachable!("accepted steer provider call should be dropped by cancellation")
+                    unreachable!("accepted steer provider call should be dropped by cancellation");
                 }
                 Ok(text_response(&format!("echo: {user_text}")))
             }
@@ -1180,6 +1162,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
     ))
     .provider(provider)
     .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
     .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -1187,29 +1170,25 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .open()
         .await?;
     let active_turn_id = "accepted-active-steer-turn";
-    let turn_session = session.clone();
-    let turn = tokio::spawn(async move {
-        let stream = turn_session
-            .turn(TurnInput::text("primary waits for active steer"))
-            .turn_id(active_turn_id)
-            .stream()?;
-        stream.finish().await
-    });
+    let primary = session
+        .send(TurnInput::text("primary waits for active steer"))
+        .id(active_turn_id)
+        .await?;
+    let turn = tokio::spawn(async move { primary.outcome().await });
 
     tokio::time::timeout(std::time::Duration::from_secs(1), first_started_rx)
         .await
         .expect("first provider call should start")
         .expect("first provider signal");
     let active = session
-        .durable()
-        .enqueue(TurnInput::text("accepted active steer"))
+        .send(TurnInput::text("accepted active steer"))
         .id("accepted-active-steer")
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
         ))
-        .send()
         .await?;
+    let active_id = active.input_id().clone();
     release_first_tx
         .send(())
         .expect("release first provider response");
@@ -1218,20 +1197,35 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .expect("accepted active steer should start the follow-up provider call")
         .expect("second provider signal");
 
-    assert_eq!(session.cancel_running_turns(), 1);
-    let interrupted = turn.await.expect("turn task")?;
-    assert!(matches!(
-        interrupted.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-    ));
+    let stopped = session
+        .cancel(crate::CancelTarget::Root(TurnId::from(active_turn_id)))
+        .await?;
+    assert!(matches!(stopped, crate::CancelReceipt::Requested { .. }));
+    let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)
+        .await
+        .expect("first root settles")
+        .expect("turn task")?;
+    assert_eq!(interrupted.status, crate::TurnStatus::Cancelled);
+    assert!(
+        interrupted.output.is_some(),
+        "the interrupted root commits its cancelled turn"
+    );
+    assert_eq!(active.outcome().await?.status, crate::TurnStatus::Cancelled);
     assert!(
         session.durable().pending_turn_inputs().await?.is_empty(),
         "accepted active steer `{}` must be completed, not deferred after interrupt",
-        active.input_id
+        active_id
     );
-    assert!(
-        session.queued_turn().run().await?.ran().is_none(),
-        "accepted active steer must not replay as a later queued turn"
+    assert_eq!(
+        session
+            .durable()
+            .turn_input_applications()
+            .await?
+            .iter()
+            .filter(|application| application.input_id == active_id)
+            .count(),
+        1,
+        "the accepted steer applies to the interrupted root once"
     );
     let requests = requests.lock_recover().clone();
     assert_eq!(
