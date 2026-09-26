@@ -1260,6 +1260,19 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError>;
 
+    /// The follow-on the session head owes, if any (ADR 0101 §3): the head's
+    /// `pending_follow_on` as it is committed now.
+    ///
+    /// Drive admission asks this to decide whether the follow-on is the next
+    /// work it admits. It reads one head fact and is not a freshness probe of
+    /// the resident head; the default reads it from the head meta.
+    async fn load_pending_follow_on(&self) -> Result<Option<PendingFollowOn>, StoreError> {
+        Ok(self
+            .load_session_head_meta()
+            .await?
+            .and_then(|head| head.pending_follow_on))
+    }
+
     /// Raise the head's pending follow-on recovery count by one (ADR 0101 §3).
     ///
     /// A drive that recovers a pending follow-on calls this before the

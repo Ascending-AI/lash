@@ -36,6 +36,7 @@ struct OwedFollowOn {
     runtime: LashRuntime,
     store: Arc<RecordingStore>,
     requests: Arc<std::sync::Mutex<Vec<lash_core::llm::types::LlmRequest>>>,
+    clock: Arc<ManualClock>,
 }
 
 async fn owed_follow_on(
@@ -43,6 +44,24 @@ async fn owed_follow_on(
     tasks: &[&str],
     replies: Vec<LlmResponse>,
     lapses: usize,
+) -> OwedFollowOn {
+    Box::pin(owed_follow_on_with(
+        switch_turn,
+        tasks,
+        replies,
+        lapses,
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    ))
+    .await
+}
+
+/// [`owed_follow_on`] under `batching`.
+async fn owed_follow_on_with(
+    switch_turn: &str,
+    tasks: &[&str],
+    replies: Vec<LlmResponse>,
+    lapses: usize,
+    batching: lash_core::QueuedWorkBatchingConfig,
 ) -> OwedFollowOn {
     let backend = memory_backend().await;
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -70,7 +89,7 @@ async fn owed_follow_on(
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
         backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
+        batching,
     )
     .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(
@@ -98,7 +117,7 @@ async fn owed_follow_on(
     )
     .await;
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterEachRetainedCommit {
-        clock,
+        clock: Arc::clone(&clock),
         remaining: std::sync::atomic::AtomicUsize::new(lapses),
     }));
     let run = runtime
@@ -125,6 +144,7 @@ async fn owed_follow_on(
         runtime,
         store,
         requests,
+        clock,
     }
 }
 
@@ -375,5 +395,207 @@ pub(super) async fn fig3542_an_exhausted_follow_on_commits_failed_and_clears_the
     assert!(
         request_contains_text(&owed_run.requests.lock_recover()[1], TASK),
         "the task stays in the transcript as the failed turn's delivered input"
+    );
+}
+
+/// Panics as the first prompt is built: a worker that dies inside a turn,
+/// before the turn's first effect.
+#[derive(Default)]
+struct PanicOnceAtPromptBuild {
+    fired: std::sync::atomic::AtomicBool,
+}
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicOnceAtPromptBuild {
+    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
+        if phase == lash_core::runtime::RuntimeTurnPhase::PromptBuild
+            && !self.fired.swap(true, Ordering::SeqCst)
+        {
+            panic!("injected crash as the recovered follow-on's prompt is built");
+        }
+    }
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+}
+
+/// One drive of the session under `request`, run in process to its stop.
+async fn drive(
+    owed: &mut OwedFollowOn,
+    request: &str,
+) -> Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+    let controller = backend_queued_scope(
+        &owed.backend,
+        &SessionId::from("root"),
+        &TurnId::from(request),
+    );
+    let request = lash_core::engine::DriveRequest {
+        session: SessionId::from("root"),
+        request: lash_core::engine::DriveRequestId::new(request),
+        build_generation: owed.runtime.host.core.backend().build_generation().clone(),
+    };
+    Box::pin(lash_core::drive::drive_session(
+        &mut owed.runtime,
+        &controller,
+        &request,
+    ))
+    .await
+}
+
+/// FIG-3542, FIG-3600: the session drive recovers a follow-on the head owes
+/// at admission, as a root of its own, before the input waiting behind it.
+/// A direct turn that meets the owed follow-on runs nothing and is answered
+/// queued; the drive then answers its input after the follow-on, each once.
+#[tokio::test]
+pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_the_input_behind_it()
+ {
+    const TASK: &str = "the switched frame's task";
+    let mut owed_run = Box::pin(owed_follow_on(
+        "fig3542-drive",
+        &[TASK],
+        vec![
+            switch_reply(0),
+            text_reply("follow-on answer"),
+            text_reply("direct input answer"),
+        ],
+        1,
+    ))
+    .await;
+    let follow_on = owed(&owed_run.store)
+        .await
+        .expect("the switch owes its follow-on");
+
+    let direct = TurnId::from("fig3542-drive-direct");
+    let held = owed_run
+        .runtime
+        .run_turn_assembled(
+            TurnInput::text("direct input behind the follow-on"),
+            CancellationToken::new(),
+            host_turn_scope(
+                &owed_run.runtime.host.core,
+                &SessionId::from("root"),
+                &direct,
+            ),
+        )
+        .await
+        .expect("the direct turn is answered, not failed");
+    assert!(
+        matches!(held.outcome, TurnOutcome::Queued { ahead: 0 }),
+        "a direct turn never recovers the follow-on: {:?}",
+        held.outcome
+    );
+    assert_eq!(owed_run.requests.lock_recover().len(), 1);
+    assert_eq!(owed(&owed_run.store).await, Some(follow_on.clone()));
+
+    let outcome = drive(&mut owed_run, "fig3542-drive-engine")
+        .await
+        .expect("the session drive runs to its stop");
+    let roots: Vec<_> = outcome
+        .ran
+        .iter()
+        .map(|ran| match ran {
+            lash_core::engine::RootOutcome::Committed { root, .. } => root.clone(),
+            other => panic!("every admitted root commits: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        roots,
+        [
+            TurnId::from(format!("follow-on:{}#0", follow_on.follow_on_turn_id)),
+            direct,
+        ],
+        "the follow-on's recovery is admitted first, then the input behind it"
+    );
+    assert_eq!(outcome.stop, lash_core::engine::DriveStop::Idle);
+    assert_eq!(owed(&owed_run.store).await, None);
+    assert!(
+        lash_core::store::SessionCommitStore::committed_turn_exists(
+            owed_run.store.as_ref(),
+            &follow_on.follow_on_turn_id,
+        )
+        .await
+        .expect("read the follow-on's receipt")
+    );
+    let requests = owed_run.requests.lock_recover();
+    assert_eq!(
+        requests.len(),
+        3,
+        "the follow-on and the input each ran once"
+    );
+    assert!(request_contains_text(&requests[1], TASK));
+    assert!(!request_contains_text(
+        &requests[1],
+        "direct input behind the follow-on"
+    ));
+    assert!(request_contains_text(
+        &requests[2],
+        "direct input behind the follow-on"
+    ));
+}
+
+/// FIG-3542, FIG-3600: the recovery count a drive admission records is the
+/// one its root raises from. A recovery that crashed after its raise and is
+/// redriven continues the recovery it raised for; it neither raises again
+/// nor spends the bound, so a follow-on the host allows one recovery still
+/// runs.
+#[tokio::test]
+pub(super) async fn fig3542_a_redriven_recovery_raises_the_recorded_count_once() {
+    const TASK: &str = "a task whose first recovery crashes";
+    let mut owed_run = Box::pin(owed_follow_on_with(
+        "fig3542-recount",
+        &[TASK],
+        vec![switch_reply(0), text_reply("follow-on answer")],
+        1,
+        lash_core::QueuedWorkBatchingConfig::new(1).with_max_follow_on_recoveries(1),
+    ))
+    .await;
+    let follow_on = owed(&owed_run.store)
+        .await
+        .expect("the switch owes its follow-on");
+    assert_eq!(follow_on.attempts, 0);
+
+    // The recovery's worker dies as its follow-on's prompt is built: after
+    // the raise, before any effect.
+    owed_run
+        .runtime
+        .set_turn_phase_probe(Arc::new(PanicOnceAtPromptBuild::default()));
+    let crashed = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(drive(
+        &mut owed_run,
+        "fig3542-recount-drive",
+    )))
+    .await;
+    assert!(
+        crashed.is_err(),
+        "the recovery's worker crashes: {:?}",
+        crashed
+            .as_ref()
+            .map(|drive| drive.as_ref().map(|outcome| &outcome.ran))
+    );
+    assert_eq!(
+        owed(&owed_run.store).await.map(|owed| owed.attempts),
+        Some(1),
+        "the crashed recovery raised the count before its first effect"
+    );
+    // The crashed worker's lane lapses.
+    owed_run
+        .clock
+        .advance_ms(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+
+    let outcome = drive(&mut owed_run, "fig3542-recount-drive")
+        .await
+        .expect("the redriven drive runs to its stop");
+    assert!(
+        matches!(
+            outcome.ran.first(),
+            Some(lash_core::engine::RootOutcome::Committed {
+                outcome: TurnOutcome::Finished(_),
+                ..
+            })
+        ),
+        "the redrive continues its own recovery, within the bound: {outcome:?}"
+    );
+    assert_eq!(owed(&owed_run.store).await, None);
+    assert_eq!(
+        owed_run.requests.lock_recover().len(),
+        2,
+        "the follow-on answered on the redrive"
     );
 }

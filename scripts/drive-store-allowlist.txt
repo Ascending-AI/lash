@@ -10,11 +10,13 @@
 # RECONCILE is the reconcile sweep, which schedules drives and decides
 # nothing inside one. A hit fails when its (file, text) is unlisted or occurs
 # more times than the count; a count above the current occurrences is stale
-# and fails. The total may only shrink (scripts/drive-store-allowlist.count).
+# and fails. The occurrences not tagged RECORDED may only shrink
+# (scripts/drive-store-allowlist.count caps them).
 crates/lash-core/src/runtime/drive.rs  |  store.read_session_state_version().await.map_err(|error| {  |  1  # FIG-3824
 crates/lash-core/src/runtime/drive/admission.rs  |  .drive_epoch(session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .list_pending_queued_work(session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .list_pending_turn_inputs(session_id)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .load_pending_follow_on()  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .pending_queued_run(session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .pending_session_work_ordering(session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .read_session_state_version()  |  1  # RECORDED

@@ -53,32 +53,26 @@ lash_conformance::root_start_marker_tests!(
 // FIG-3788: a driver turn that switched frames, crashed after the switch
 // commit and redelivered replays its recorded admission and switched
 // turn from the journal and runs only the follow-on frame.
-lash_conformance::frame_switch_redrive_tests!(
-    #[ignore = "parked: a queued drain redriven after its switch commit diverges from its journal (570 at call 2) until queued drains run through the recorded drive admission (FIG-3788)"]
-    {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let effect_host = harness.endpoint_host();
-        let turn_runner = harness.turn_runner();
-        let stores = harness.law_stores();
-        let prefix: &'static str =
-            Box::leak(format!("restate-frame-switch-{}", harness.run_nonce()).into_boxed_str());
-        (harness, prefix, effect_host, stores, turn_runner)
-    }
-);
+lash_conformance::frame_switch_redrive_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let effect_host = harness.endpoint_host();
+    let turn_runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-frame-switch-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, effect_host, stores, turn_runner)
+});
 
 // FIG-3748: a queued drive crashed after its first commit replays that
 // root from its journal, and the input queued behind it runs once.
-lash_conformance::queued_after_commit_redrive_tests!(
-    #[ignore = "parked: a queued drive redriven after its first commit re-decides from the live queue and diverges from its journal until queued drains run through the recorded drive admission (FIG-3748)"]
-    {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let effect_host = harness.endpoint_host();
-        let turn_runner = harness.turn_runner();
-        let stores = harness.law_stores();
-        let prefix: &'static str =
-            Box::leak(format!("restate-queued-redrive-{}", harness.run_nonce()).into_boxed_str());
-        (harness, prefix, effect_host, stores, turn_runner)
-    }
-);
+lash_conformance::queued_after_commit_redrive_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let effect_host = harness.endpoint_host();
+    let turn_runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-queued-redrive-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, effect_host, stores, turn_runner)
+});

@@ -1598,20 +1598,34 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
         "the first turn must establish durable head freshness exactly once"
     );
 
-    runtime
-        .stream_turn(
-            TurnInput::text("turn after lease loss"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("turn-after-lease-loss"),
-                ),
-            ),
-        )
-        .await
-        .expect("turn after lease loss and reacquisition succeeds");
+    // The lost lease left the switch's follow-on owed. The session's drive
+    // recovers it at admission (FIG-3542), taking the lane again.
+    let request = lash_core::engine::DriveRequest {
+        session: SessionId::from("root"),
+        request: lash_core::engine::DriveRequestId::new("drive-after-lease-loss"),
+        build_generation: runtime.host.core.backend().build_generation().clone(),
+    };
+    let drive = Box::pin(lash_core::drive::drive_session(
+        &mut runtime,
+        &backend_queued_scope(
+            &backend,
+            &SessionId::from("root"),
+            &TurnId::from("drive-after-lease-loss"),
+        ),
+        &request,
+    ))
+    .await
+    .expect("the drive after lease loss and reacquisition runs");
+    assert!(
+        matches!(
+            drive.ran.as_slice(),
+            [lash_core::engine::RootOutcome::Committed {
+                outcome: TurnOutcome::Finished(_),
+                ..
+            }]
+        ),
+        "the reacquired lane recovers the owed follow-on: {drive:?}"
+    );
     assert_eq!(
         store.load_session_count(),
         1,

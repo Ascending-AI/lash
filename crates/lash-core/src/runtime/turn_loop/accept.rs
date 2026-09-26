@@ -310,11 +310,19 @@ impl LashRuntime {
             local_stop: opts.local_stop().clone(),
         };
         let accepted_id = accepted.input_id.clone();
-        let (outcome, runs) = Box::pin(self.drive_until(
+        // A follow-on the head owes is recovered by the session's drive, not
+        // by a direct turn: this drive stops where admission names it, and
+        // the accepted row waits behind it (ADR 0101 §3, FIG-3542).
+        let crate::runtime::drive::DriveRun {
+            outcome,
+            runs,
+            declined_follow_on,
+        } = Box::pin(self.drive_until(
             &scoped_effect_controller,
             &request,
             &sinks,
             Some((&accepted_id, &input)),
+            crate::runtime::drive::FollowOnRecovery::Decline,
             |run| run.driven_inputs.contains(&accepted_id),
         ))
         .await
@@ -339,12 +347,15 @@ impl LashRuntime {
             }
             // A follow-on the head owes blocks every other claim (ADR 0101
             // §3, FIG-3542), so the accepted row stays pending behind it: no
-            // turn runs, and the call reports that as an outcome. The drain
+            // turn runs, and the call reports that as an outcome. The drive
             // that recovers the follow-on answers the row after it.
-            if let Some(ahead) =
-                Box::pin(self.queued_behind_pending_follow_on(&store, &accepted_id))
-                    .await
-                    .map_err(aborted)?
+            if let Some(ahead) = Box::pin(self.queued_behind_pending_follow_on(
+                &store,
+                &accepted_id,
+                declined_follow_on,
+            ))
+            .await
+            .map_err(aborted)?
             {
                 let mut queued = crate::AssembledTurn {
                     state: self.export_state(),
@@ -390,14 +401,17 @@ impl LashRuntime {
     }
 
     /// How many accepted rows wait ahead of `accepted_id` when a follow-on
-    /// the refreshed head owes held it back, or `None` when nothing did: the
-    /// row is no longer pending, or no follow-on is owed.
+    /// held it back, or `None` when nothing did: the row is no longer
+    /// pending, or no follow-on was owed. A follow-on held it back when the
+    /// drive `declined` the recovery its admission named, or when the
+    /// refreshed head still owes one.
     async fn queued_behind_pending_follow_on(
         &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
         accepted_id: &crate::InputId,
+        declined: bool,
     ) -> Result<Option<u64>, RuntimeError> {
-        if self.state.pending_follow_on.is_none() {
+        if !declined && self.state.pending_follow_on.is_none() {
             return Ok(None);
         }
         let open = store
