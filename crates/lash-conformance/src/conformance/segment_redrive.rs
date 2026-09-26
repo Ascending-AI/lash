@@ -374,24 +374,51 @@ impl Scenario {
         })
     }
 
-    /// The child's segment body: it counts its run under the child's scope
-    /// and settles the child.
+    /// The child's segment body runs a journaled effect under the child's
+    /// scope, then settles the child. Restate may re-enter this body after a
+    /// suspension; only the effect executor counts as another run.
     fn child_body(&self) -> ConformanceTurnAttempt {
         let scenario = self.clone();
         Arc::new(move |scoped: ScopedEffectController<'_>| {
             let scenario = scenario.clone();
             Box::pin(async move {
-                let probe = Arc::clone(&scenario.probe);
                 let scope = scoped.execution_scope().clone();
                 if let ExecutionScope::Process { process_id } = &scope {
                     scenario.saw_child(process_id);
                 }
-                probe.ran(
-                    CHILD,
-                    Run {
-                        call_id: scope.id().to_owned(),
-                        replay_key: format!("{scope:?}"),
+                let call_id = scope.id().to_owned();
+                let replay_key = format!("segment-redrive:{call_id}:child-body");
+                let envelope = RuntimeEffectEnvelope::new(
+                    RuntimeEffectInvocation::new(
+                        EffectAddress::new(scope, replay_key.clone())
+                            .unwrap_or_else(|error| panic!("address {replay_key}: {error}")),
+                        RuntimeAttribution::none(),
+                        CHILD,
+                    ),
+                    RuntimeEffectCommand::ToolAttempt {
+                        call: crate::PreparedToolCall::from_parts(
+                            call_id.clone(),
+                            crate::ToolId::from("tool:segment_redrive_effect"),
+                            "segment_redrive_effect",
+                            serde_json::json!({ "call": call_id }),
+                            None,
+                            serde_json::json!({ "prepared": CHILD }),
+                        ),
+                        execution_grant: None,
+                        attempt: 1,
+                        max_attempts: 1,
                     },
+                );
+                let outcome = scoped
+                    .execute_effect(envelope, scenario.tool_executor(CHILD, None))
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("the child's journaled effect completes: {error}")
+                    });
+                assert_eq!(
+                    tool_run(&outcome),
+                    1,
+                    "the child observes its first effect run"
                 );
                 ConformanceTurnEnd::Settled
             })
