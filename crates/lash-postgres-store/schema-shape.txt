@@ -382,6 +382,9 @@ table lash_runtime_turn_commits
     shape /definitions/AnthropicThinkingRetention/oneOf/type=object/properties/turns/type integer
     shape /definitions/AnthropicThinkingRetention/oneOf/type=object/required/turns field
     shape /definitions/AnthropicThinkingRetention/oneOf/type=object/type object
+    shape /definitions/ApplyConfigPatch/properties/base_config_revision/format "uint64"
+    shape /definitions/ApplyConfigPatch/properties/base_config_revision/minimum 0.0
+    shape /definitions/ApplyConfigPatch/properties/base_config_revision/type integer
     shape /definitions/ApplyConfigPatch/properties/generation/anyOf/0/$ref GenerationOverlay
     shape /definitions/ApplyConfigPatch/properties/generation/anyOf/0/branch schema
     shape /definitions/ApplyConfigPatch/properties/generation/anyOf/1/branch schema
@@ -410,6 +413,7 @@ table lash_runtime_turn_commits
     shape /definitions/ApplyConfigPatch/properties/turn_budget/anyOf/0/branch schema
     shape /definitions/ApplyConfigPatch/properties/turn_budget/anyOf/1/branch schema
     shape /definitions/ApplyConfigPatch/properties/turn_budget/anyOf/1/type null
+    shape /definitions/ApplyConfigPatch/required/base_config_revision field
     shape /definitions/ApplyConfigPatch/required/schema_version field
     shape /definitions/ApplyConfigPatch/type object
     shape /definitions/AttachmentAcceptanceRule/oneOf/tag:kind=string:%22mime%22/additionalProperties false
@@ -1553,6 +1557,9 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/AnthropicThinkingRetention/oneOf/type=object/properties/turns/type integer
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/AnthropicThinkingRetention/oneOf/type=object/required/turns field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/AnthropicThinkingRetention/oneOf/type=object/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/base_config_revision/format "uint64"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/base_config_revision/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/base_config_revision/type integer
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/generation/anyOf/0/$ref GenerationOverlay
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/generation/anyOf/0/branch schema
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/generation/anyOf/1/branch schema
@@ -1581,6 +1588,7 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/turn_budget/anyOf/0/branch schema
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/turn_budget/anyOf/1/branch schema
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/properties/turn_budget/anyOf/1/type null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/required/base_config_revision field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/required/schema_version field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ApplyConfigPatch/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/AttachmentAcceptanceRule/oneOf/tag:kind=string:%22mime%22/additionalProperties false

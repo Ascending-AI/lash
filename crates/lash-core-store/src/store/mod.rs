@@ -408,6 +408,7 @@ pub fn persisted_session_config_from_state(
     config.tool_access = state.authority.tool_access.clone();
     config.subagent = state.authority.subagent.clone();
     config.protocol_turn_options = Some(state.protocol_turn_options.clone());
+    config.config_revision = state.config_revision;
     config
 }
 
