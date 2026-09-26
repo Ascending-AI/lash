@@ -532,7 +532,7 @@ mod label_annotation_tests {
                     .instruction_limit(crate::InstructionBound::instructions(1_000_000))
                     .memory_limit(crate::MemoryBound::mebibytes(64))
                     .build(),
-                &crate::testing::memory_backend().await.into(),
+                &crate::testing::memory_store_backend().await,
             )
             .with_process_lifecycle(false),
         );

@@ -997,13 +997,13 @@ impl RlmProtocolRun {
     }
 }
 
-/// A SQLite memory backend for the plugin's Lashlang artifacts, opened on a
+/// A storage-only backend for the plugin's Lashlang artifacts, opened on a
 /// runtime of its own thread so a synchronous scenario can build one.
 #[expect(
     clippy::expect_used,
     reason = "test support: a memory backend that cannot open is a broken fixture, named by each message"
 )]
-fn memory_artifact_backend() -> lash_sqlite_store::SqliteBackend {
+fn memory_artifact_backend() -> lash_core::Backend {
     std::thread::scope(|scope| {
         scope
             .spawn(|| {
@@ -1011,8 +1011,14 @@ fn memory_artifact_backend() -> lash_sqlite_store::SqliteBackend {
                     .enable_all()
                     .build()
                     .expect("build a current-thread runtime")
-                    .block_on(lash_sqlite_store::SqliteBackend::memory())
-                    .expect("open the artifact backend")
+                    .block_on(async {
+                        let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+                            lash_sqlite_store::SqliteStoreSet::memory()
+                                .await
+                                .expect("open the artifact store set"),
+                        );
+                        lash_conformance::recording_backend_over(stores)
+                    })
             })
             .join()
             .expect("open the artifact backend on its own thread")
@@ -1027,7 +1033,7 @@ pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &memory_artifact_backend().clone().into(),
+            &memory_artifact_backend(),
         )
         .with_process_lifecycle(false),
     )
