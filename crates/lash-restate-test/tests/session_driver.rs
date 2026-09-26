@@ -127,13 +127,6 @@ impl ScriptedDriver {
                     request.request.as_str()
                 )),
                 0,
-                lash_core::store::SessionHeadRef {
-                    generation: 0,
-                    revision: 0,
-                    leaf: None,
-                    checkpoint: None,
-                },
-                1,
                 lash_core::engine::AdmittedWork::Queued,
             )),
             None => AdmitVerdict::Idle,
@@ -458,13 +451,6 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
                         request("generation"),
                         lash_core::engine::AdmissionId::new("generation"),
                         0,
-                        lash_core::store::SessionHeadRef {
-                            generation: 0,
-                            revision: 0,
-                            leaf: None,
-                            checkpoint: None,
-                        },
-                        1,
                         lash_core::engine::AdmittedWork::Queued,
                     ),
                 },

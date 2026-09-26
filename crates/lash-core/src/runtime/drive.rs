@@ -370,15 +370,6 @@ impl LashRuntime {
                         store,
                         request: admit_request,
                         ordinal,
-                        base: crate::store::SessionHeadRef {
-                            // Read by the admission body.
-                            generation: 0,
-                            revision: self.state.head_revision,
-                            leaf: self.state.session_graph.leaf_node_id.clone(),
-                            checkpoint: self.state.checkpoint_ref.clone(),
-                        },
-                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                        turn_index: self.state.turn_index as u64 + 1,
                         clock: Arc::clone(&self.host.core.clock),
                     }),
                     None,

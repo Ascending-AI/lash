@@ -151,30 +151,17 @@ impl DriveAbort {
 #[doc(hidden)]
 pub mod admission_body {
     use super::super::admission::{AdmissionId, Admitted, AdmittedWork, DriveRequestId};
-    use crate::store::SessionHeadRef;
     use crate::{SessionId, TurnId};
 
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
     pub fn admitted(
         session: SessionId,
         root: TurnId,
         request: DriveRequestId,
         admission: AdmissionId,
         observed_epoch: u64,
-        base: SessionHeadRef,
-        turn_index: u64,
         work: AdmittedWork,
     ) -> Admitted {
-        Admitted::minted(
-            session,
-            root,
-            request,
-            admission,
-            observed_epoch,
-            base,
-            turn_index,
-            work,
-        )
+        Admitted::minted(session, root, request, admission, observed_epoch, work)
     }
 }

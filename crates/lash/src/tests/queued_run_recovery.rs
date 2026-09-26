@@ -751,6 +751,169 @@ async fn exhausted_input_root_resumes_or_is_withdrawn_without_new_input() -> Res
     Ok(())
 }
 
+/// One durable process wake for `session_id`: queued work, not an accepted
+/// next-turn input, so its drive runs a queued root.
+fn exhaustion_wake(session_id: &SessionId) -> crate::persistence::QueuedWorkBatchDraft {
+    let process_id = || lash_core::ProcessId::from("exhausted-wake-process");
+    lash_core::runtime::process_wake_batch_draft(lash_core::ProcessWakeDelivery {
+        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: "exhausted-wake-process-wake-1".to_string(),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core::RuntimeInvocation {
+            attribution: lash_core::RuntimeAttribution::for_session(session_id.clone()),
+            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core::QueuedWorkAuthority::default(),
+        input: "single queued wake".into(),
+        created_at_ms: 1,
+    })
+}
+
+/// The queued-work twin of
+/// [`exhausted_input_root_resumes_or_is_withdrawn_without_new_input`]
+/// (#2290 review, MEDIUM-10: the queued-run variant was deleted with no
+/// replacement). A queued run whose drive exhausts its physical retry budget
+/// keeps its durable ownership, and without any new input the host either
+/// has the engine drive the session again, which resumes the run and replays
+/// its recorded model call, or abandons the run, which settles it `Failed`.
+#[tokio::test]
+async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Result<()> {
+    use tracing_subscriber::prelude::*;
+    let session_id = SessionId::from("exhausted-queued-work");
+    for abandon in [false, true] {
+        let exhausted = Arc::new(tokio::sync::Notify::new());
+        let subscriber = tracing_subscriber::registry().with(ExhaustedWake(Arc::clone(&exhausted)));
+        let _dispatch = tracing::subscriber::set_default(subscriber);
+        let directory = tempfile::tempdir().unwrap();
+        let probe = Arc::new(RetryProbe::default());
+        let provider = crate::testing::TestProvider::builder()
+            .kind("embed-test")
+            .complete({
+                let probe = Arc::clone(&probe);
+                move |request| {
+                    let probe = Arc::clone(&probe);
+                    async move {
+                        probe.provider_calls.fetch_add(1, Ordering::SeqCst);
+                        probe.requests.lock_recover().push(request);
+                        Ok(text_response("recovered after exhaustion"))
+                    }
+                }
+            })
+            .build()
+            .into_handle();
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::open(directory.path().join("sessions"))
+                .await
+                .expect("open the SQLite backend"),
+        );
+        let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+            backend.clone().into(),
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
+        .native_substrate_config(lash_core::NativeSubstrateConfig {
+            work_cadence: lash_core::WorkCadencePolicy {
+                max_transient_attempts: std::num::NonZeroU32::new(1).unwrap(),
+                retry_initial: std::time::Duration::from_millis(50),
+                retry_max: std::time::Duration::from_millis(50),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .build(crate::testing::runtime_lease_owner())?;
+        let session = core.session(session_id.as_str()).open().await?;
+        let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+            backend.session_store_factory().as_ref(),
+            &session_id,
+        )
+        .await?
+        .expect("the opened session has a store");
+        let batch = store
+            .enqueue_queued_work(exhaustion_wake(&session_id))
+            .await?;
+        core.substrate_slot.ports().await.queued.schedule_drive(
+            &session_id,
+            lash_core::engine::DriveRequestId::new(batch.batch_id.to_string()),
+        );
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            probe.hook_entered.notified(),
+        )
+        .await
+        .expect("the queued run reaches its model response");
+        let recorded = recorded_provider_effects(&effect_journal(directory.path()));
+        probe.hook_release.add_permits(1);
+        tokio::time::timeout(std::time::Duration::from_secs(10), exhausted.notified())
+            .await
+            .expect("the engine exhausts its physical retry budget");
+        let pending = session
+            .durable()
+            .pending_queued_run()
+            .await?
+            .expect("exhaustion retains the queued run's durable ownership");
+        assert_eq!(probe.provider_calls.load(Ordering::SeqCst), 1);
+        probe.hook_release.add_permits(16);
+        if abandon {
+            let receipt = session
+                .abandon_queued_run(
+                    pending.scope.clone(),
+                    pending.revision,
+                    "host abandons the exhausted queued run",
+                )
+                .await?;
+            assert!(
+                matches!(
+                    receipt.terminal,
+                    Some(lash_core::store::QueuedRunTerminal::Failed { .. })
+                ),
+                "{receipt:?}"
+            );
+        } else {
+            // The host asks the engine to drive the session again, with no
+            // new input, and waits for the drive to resume the run.
+            core.substrate_slot.ports().await.queued.schedule_drive(
+                &session_id,
+                lash_core::engine::DriveRequestId::new("host resumes the exhausted queued run"),
+            );
+            for _ in 0..1_000 {
+                if session.durable().pending_queued_run().await?.is_none() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert_eq!(
+                probe.provider_calls.load(Ordering::SeqCst),
+                1,
+                "the resumed run replays its recorded model call"
+            );
+            assert_eq!(
+                recorded_provider_effects(&effect_journal(directory.path())),
+                recorded
+            );
+            assert_eq!(probe.hook_calls.load(Ordering::SeqCst), 2);
+        }
+        assert!(
+            session.durable().pending_queued_run().await?.is_none(),
+            "the run is settled"
+        );
+        assert!(session.durable().queued_work().await?.is_empty());
+    }
+    Ok(())
+}
+
 #[cfg(feature = "rlm")]
 struct StopQueuedTool;
 
