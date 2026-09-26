@@ -583,6 +583,7 @@ impl LashRuntime {
                 RuntimeEffectLocalExecutor::owned_runner(
                     Box::new(admission::AdmitDriveRunner {
                         store,
+                        stores: self.host.core.session_store_factory(),
                         request: admit_request,
                         ordinal,
                         clock: Arc::clone(&self.host.core.clock),

@@ -1115,6 +1115,29 @@ mod tests {
         );
     }
 
+    /// D15: the admission refusal a drive answers while a park names an
+    /// unsettled redrive is retryable, so its decode classifies it as a
+    /// retry — never a refused (failed-turn) row — and the handler failure
+    /// it becomes keeps the attempt open.
+    #[test]
+    fn an_unsettled_redrive_refusal_is_classified_retry_not_refused() {
+        let refusal = lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::SessionRedriveUnsettled,
+            "the parked root's redrive has not settled",
+        );
+        assert!(refusal.is_retryable());
+        assert!(!refusal.is_terminal());
+        assert!(matches!(
+            classify_refusal(refusal.clone()),
+            DriveAbort::Retry(_)
+        ));
+        let failure = abort_failure(DriveAbort::Refused(refusal));
+        assert!(
+            format!("{failure:?}").contains("Retryable"),
+            "an unsettled-redrive refusal must retry, not end the drive: {failure:?}"
+        );
+    }
+
     /// Answers each request in turn from a script.
     #[derive(Debug)]
     struct Scripted {

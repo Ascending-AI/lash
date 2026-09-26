@@ -1869,5 +1869,7 @@ mod root_control {
     (a_redrive_the_root_ran_past_is_never_applied_again, "s7b-17"),
     (a_stale_paused_listing_never_reparks_a_resumed_root, "s7b-18"),
     (a_parked_session_is_asked_to_drive_only_once_its_park_resolves, "s7b-19"),
+    (a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles, "l2-1"),
+    (a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted, "l2-2"),
     ]);
 }

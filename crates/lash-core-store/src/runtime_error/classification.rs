@@ -90,6 +90,8 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLeaseLost => Redrivable,
             // a live foreign executor holds the lane; a later attempt takes it.
             Self::SessionExecutionLaneBusy => Retryable,
+            // the park's redrive settles within a tick; the identical admission then proceeds.
+            Self::SessionRedriveUnsettled => Retryable,
             // the drive lost the head CAS; re-running the turn is how its result is obtained.
             Self::TurnInputSettlementSuperseded => Retryable,
             // the drive is journaled, so re-running the same turn cedes the same way.

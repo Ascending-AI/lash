@@ -50,6 +50,13 @@ pub enum RuntimeErrorCode {
     /// retry policy - the runtime deliberately stops waiting instead of
     /// blocking one invocation indefinitely.
     SessionExecutionLaneBusy,
+    /// A session's drive admission found a turn input while the parked
+    /// root's park still names a redrive intent that is not yet settled
+    /// (D15). The input is refused rather than interleaved with the
+    /// redrive; the refusal is never a recorded verdict, so the identical
+    /// admission is safe to retry and admits the input once the redrive
+    /// settles.
+    SessionRedriveUnsettled,
     /// A claim-less turn-input settlement lost the head CAS to whoever holds or
     /// already settled that row (ADR 0069 §5): no durable record was written.
     /// Since the initial drive set is journaled with its claim (ADR 0069 §6),
@@ -555,6 +562,7 @@ impl RuntimeErrorCode {
             Self::ExecutionScopeAdmissionRefused => "execution_scope_admission_refused",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
+            Self::SessionRedriveUnsettled => "session_redrive_unsettled",
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
             Self::AcceptedTurnInputCeded => "accepted_turn_input_ceded",
             Self::SessionWorkUnavailable => "session_work_unavailable",
@@ -823,6 +831,7 @@ impl RuntimeErrorCode {
         Self::ExecutionScopeAdmissionRefused,
         Self::SessionExecutionLeaseLost,
         Self::SessionExecutionLaneBusy,
+        Self::SessionRedriveUnsettled,
         Self::TurnInputSettlementSuperseded,
         Self::AcceptedTurnInputCeded,
         Self::SessionWorkUnavailable,
@@ -1017,6 +1026,7 @@ impl RuntimeErrorCode {
             "execution_scope_admission_refused" => Self::ExecutionScopeAdmissionRefused,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
+            "session_redrive_unsettled" => Self::SessionRedriveUnsettled,
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
             "accepted_turn_input_ceded" => Self::AcceptedTurnInputCeded,
             "session_work_unavailable" => Self::SessionWorkUnavailable,

@@ -8,7 +8,7 @@ use lash_core::engine::*;
 use lash_core::store::*;
 use lash_sansio::{SessionId, TurnId};
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 struct Control {
@@ -308,16 +308,115 @@ async fn drive(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     name: &str,
 ) -> DriveOutcome {
+    drive_result(f, runner, name).await.expect("the drive runs")
+}
+
+/// One admission of request `name`, answered as it was answered: a verdict,
+/// or the abort the drive returns when the step refuses the attempt.
+async fn admit_verdict(
+    f: &Fixture,
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    name: &str,
+) -> Result<AdmitVerdict, DriveAbort> {
     let request = f.parts.request(name);
     on_tier(runner, &f.parts, move |mut runtime, scope| {
         let request = request.clone();
-        Box::pin(async move {
-            lash_core::drive::drive_session(&mut runtime, &scope, &request)
-                .await
-                .expect("drive")
-        })
+        Box::pin(
+            async move { lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0).await },
+        )
     })
     .await
+}
+
+/// One drive of request `name` to a stop, answered with the abort it ended
+/// on when it refused one.
+async fn drive_result(
+    f: &Fixture,
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    name: &str,
+) -> Result<DriveOutcome, DriveAbort> {
+    let request = f.parts.request(name);
+    on_tier(runner, &f.parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(
+            async move { lash_core::drive::drive_session(&mut runtime, &scope, &request).await },
+        )
+    })
+    .await
+}
+
+/// A racing drive, in flight: in process it answers its refusal at once;
+/// on Restate the attempt dies inside its recorded admission step and the
+/// server keeps retrying the open invocation until the law settles what it
+/// waits on.
+fn spawn_drive(
+    f: &Fixture,
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    name: &str,
+) -> tokio::task::JoinHandle<Result<DriveOutcome, DriveAbort>> {
+    let parts = f.parts.clone();
+    let runner = Arc::clone(runner);
+    let request = parts.request(name);
+    tokio::spawn(async move {
+        on_tier(&runner, &parts, move |mut runtime, scope| {
+            let request = request.clone();
+            Box::pin(async move {
+                lash_core::drive::drive_session(&mut runtime, &scope, &request).await
+            })
+        })
+        .await
+    })
+}
+
+/// Counts the law session's parked-root probes: admission reads the park
+/// before it decides, so every probe is one admission evaluation. The
+/// second probe is held until the law settles — on Restate a refusal's
+/// retry re-decides admission inside its recorded step, and holding that
+/// re-decision at the park read keeps it suspended rather than burning the
+/// invocation's attempt budget, so the settle cannot lose the race.
+struct GateProbe {
+    inner: Arc<dyn crate::RuntimePersistence>,
+    probed: AtomicUsize,
+    probed_wake: tokio::sync::Notify,
+    settled: tokio::sync::watch::Receiver<bool>,
+}
+
+impl GateProbe {
+    /// Wait until at least `reads` park reads were probed.
+    async fn await_reads(&self, reads: usize) {
+        loop {
+            let notified = self.probed_wake.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.probed.load(Ordering::SeqCst) >= reads {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::store::RuntimePersistenceDecorator for GateProbe {
+    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn load_turn_park(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<TurnPark>, crate::StoreError> {
+        let probe = self.probed.fetch_add(1, Ordering::SeqCst) + 1;
+        self.probed_wake.notify_waiters();
+        if probe == 2 {
+            // The racing drive's second evaluation is its retry re-deciding
+            // admission under the still-unsettled intent: hold it until the
+            // law's settle landed, so what it then reads is the settled one.
+            let mut settled = self.settled.clone();
+            let _ = settled.wait_for(|done| *done).await;
+        }
+        self.inner.load_turn_park(session_id).await
+    }
 }
 
 pub async fn a_terminal_root_never_reparks(
@@ -1239,4 +1338,276 @@ pub async fn a_parked_session_is_asked_to_drive_only_once_its_park_resolves(
         resolved.drives.scheduled.contains(&f.parts.session_id),
         "the resolved session's open send is asked again"
     );
+}
+
+/// D15: while a parked root's park names a redrive intent that is not yet
+/// settled, admission of a new turn input answers a typed retryable
+/// refusal — never a recorded verdict, never a failed turn — and the
+/// command lane still drains first. Once the intent settles the parked
+/// root runs once and the send lands behind it.
+pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    // The command lane drains first (ADR 0101 §4): a session command
+    // pending while the redrive is unsettled is admitted ahead of the
+    // send waiting behind it.
+    let lane = Fixture::new(prefix, "redrive-command-lane", &host, &stores).await;
+    lane.parts
+        .enqueue("racing send", Some("lane-send-root"))
+        .await;
+    lane.parts
+        .store
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            lane.parts.session_id.clone(),
+            crate::DeliveryPolicy::AfterCurrentTurnCommit,
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "drain while the redrive is unsettled".into(),
+            },
+        ))
+        .await
+        .expect("command accepted");
+    lane.verb(RootVerb::Redrive).await.expect("redrive");
+    match admit_verdict(&lane, &runner, "command-lane").await {
+        Ok(AdmitVerdict::Admit(admitted)) => assert!(
+            matches!(admitted.work(), AdmittedWork::Queued),
+            "the command lane drains while the redrive is unsettled: {:?}",
+            admitted.work()
+        ),
+        other => panic!("the command lane drains first: {other:?}"),
+    }
+
+    let mut f = Fixture::new(prefix, "send-redrive-race", &host, &stores).await;
+    let send = f.parts.enqueue("racing send", Some("racing-root")).await;
+    let intent = f.verb(RootVerb::Redrive).await.expect("redrive");
+    assert!(f.intent_state(intent.id).await.is_open());
+    // The send's drive meets the unsettled redrive. In process its typed
+    // refusal answers at once; on Restate the attempt dies inside its
+    // recorded admission step and the open invocation retries until the
+    // intent settles. The probe holds that retry's re-decision at the park
+    // read, so the law's settle always lands inside the attempt budget.
+    let (settled, settled_rx) = tokio::sync::watch::channel(false);
+    let probe = Arc::new(GateProbe {
+        inner: Arc::clone(&f.parts.store),
+        probed: AtomicUsize::new(0),
+        probed_wake: tokio::sync::Notify::new(),
+        settled: settled_rx,
+    });
+    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimePersistence>;
+    let mut racing = spawn_drive(&f, &runner, "racing");
+    tokio::time::timeout(std::time::Duration::from_secs(30), probe.await_reads(1))
+        .await
+        .expect("the racing drive evaluated the parked root");
+    assert_eq!(
+        f.parts.calls(),
+        0,
+        "the parked root is not run ahead of its resume"
+    );
+    assert!(
+        f.parts.applications().await.is_empty(),
+        "nothing is interleaved with the unsettled redrive"
+    );
+    // A second probe is a re-decision under the unsettled intent — the
+    // refusal's own retry on Restate. Admission that instead ran the held
+    // input reaches a second read only behind a committed root, so a
+    // re-decision with nothing run is evidence the gate held.
+    let redecided =
+        tokio::time::timeout(std::time::Duration::from_millis(400), probe.await_reads(2))
+            .await
+            .is_ok();
+    if redecided {
+        assert_eq!(
+            f.parts.calls(),
+            0,
+            "a re-decision ran the root ahead of its redrive"
+        );
+        assert!(
+            f.parts.applications().await.is_empty(),
+            "a re-decision interleaved a run with the unsettled redrive"
+        );
+    }
+    let answered = if racing.is_finished() {
+        Some((&mut racing).await.expect("the racing drive ran"))
+    } else {
+        None
+    };
+    match &answered {
+        Some(Err(DriveAbort::Retry(refusal))) => {
+            assert_eq!(
+                refusal.code,
+                crate::RuntimeErrorCode::SessionRedriveUnsettled,
+                "{refusal:?}"
+            );
+            assert!(refusal.is_retryable(), "{refusal:?}");
+        }
+        // A drive that lands while its redrive is unsettled is the bug
+        // this law rules out (D15): admitted ahead of the redrive.
+        Some(Ok(landed)) => assert!(
+            !f.intent_state(intent.id).await.is_open(),
+            "the send landed while the redrive was unsettled: {landed:?}"
+        ),
+        Some(Err(abort)) => {
+            panic!("the refusal is retryable, never a failed turn: {abort:?}")
+        }
+        None => {}
+    }
+    // The engine half answers: the parked execution is resumed under
+    // its sealed fence (or, holding nothing, a drive is asked to
+    // re-run the root). The intent settles; admission proceeds — on
+    // Restate the held retry admits what was refused.
+    let (work, close) = f.control(false, false);
+    assert!(matches!(
+        f.apply(&work, &close, &intent).await,
+        ControlIntentState::Acknowledged { .. }
+    ));
+    let _ = settled.send(true);
+    let raced = match answered {
+        Some(raced) => raced,
+        None => racing.await.expect("the racing drive ran"),
+    };
+    match raced {
+        Ok(settled) => assert_eq!(settled.stop, DriveStop::Idle),
+        Err(DriveAbort::Retry(_)) => {
+            let settled = drive(&f, &runner, "after-settle").await;
+            assert_eq!(settled.stop, DriveStop::Idle);
+        }
+        Err(abort) => panic!("the settled drive ended on a refusal: {abort:?}"),
+    }
+    assert_eq!(
+        f.parts.applications().await,
+        vec![
+            (f.input.clone(), f.root.clone()),
+            (send, TurnId::from("racing-root"))
+        ],
+        "the held input runs the root once, then the send lands"
+    );
+    assert_eq!(
+        f.parts.calls(),
+        2,
+        "the parked root runs once and the send's root once"
+    );
+    assert!(
+        f.park().await.is_none(),
+        "the root's commit cleared its park"
+    );
+}
+
+/// D15: a redrive acknowledgement lost after the engine resumed never
+/// wedges the session — reconcile's redrive arm settles the intent within
+/// a tick — after which the queued send is admitted.
+pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut f = Fixture::new(prefix, "lost-redrive-ack", &host, &stores).await;
+    let send = f
+        .parts
+        .enqueue("queued send", Some("queued-send-root"))
+        .await;
+    let intent = f.verb(RootVerb::Redrive).await.expect("redrive");
+    // The engine resumed the root but its reply was lost: the intent stays
+    // open, retryable.
+    let (work, close) = f.control(false, false);
+    work.0.lose_resume_reply.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        f.apply(&work, &close, &intent).await,
+        ControlIntentState::Failed {
+            retryable: true,
+            ..
+        }
+    ));
+    assert!(f.intent_state(intent.id).await.is_open());
+    // The queued send's drive meets the unsettled redrive: its refusal is
+    // the typed retryable one in process, and an invocation the server
+    // keeps retrying on Restate. The probe holds that retry's re-decision
+    // at the park read until the law's reconcile lands.
+    let (settled, settled_rx) = tokio::sync::watch::channel(false);
+    let probe = Arc::new(GateProbe {
+        inner: Arc::clone(&f.parts.store),
+        probed: AtomicUsize::new(0),
+        probed_wake: tokio::sync::Notify::new(),
+        settled: settled_rx,
+    });
+    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimePersistence>;
+    let mut racing = spawn_drive(&f, &runner, "racing");
+    tokio::time::timeout(std::time::Duration::from_secs(30), probe.await_reads(1))
+        .await
+        .expect("the racing drive evaluated the parked root");
+    assert_eq!(f.parts.calls(), 0);
+    assert!(f.parts.applications().await.is_empty());
+    let redecided =
+        tokio::time::timeout(std::time::Duration::from_millis(400), probe.await_reads(2))
+            .await
+            .is_ok();
+    if redecided {
+        assert_eq!(
+            f.parts.calls(),
+            0,
+            "a re-decision ran the root ahead of its redrive"
+        );
+        assert!(
+            f.parts.applications().await.is_empty(),
+            "a re-decision interleaved a run with the unsettled redrive"
+        );
+    }
+    let answered = if racing.is_finished() {
+        Some((&mut racing).await.expect("the racing drive ran"))
+    } else {
+        None
+    };
+    match &answered {
+        Some(Err(DriveAbort::Retry(refusal))) => assert_eq!(
+            refusal.code,
+            crate::RuntimeErrorCode::SessionRedriveUnsettled,
+            "the queued send is refused retryably while the redrive is \
+             unsettled: {refusal:?}"
+        ),
+        Some(Ok(landed)) => assert!(
+            !f.intent_state(intent.id).await.is_open(),
+            "the queued send landed while the redrive was unsettled: {landed:?}"
+        ),
+        Some(Err(abort)) => {
+            panic!("the refusal is retryable, never a failed turn: {abort:?}")
+        }
+        None => {}
+    }
+    // Reconcile's redrive/park arm settles the lost intent within a tick.
+    let report = f.reconcile(&work, &close, "lost-ack").await;
+    assert!(report.failures.is_empty(), "{:?}", report.failures);
+    assert!(
+        report.intents.iter().any(|(id, state)| {
+            *id == intent.id && matches!(state, ControlIntentState::Acknowledged { .. })
+        }),
+        "reconcile settled the lost acknowledgement: {:?}",
+        report.intents
+    );
+    let _ = settled.send(true);
+    // After the tick the queued send is admitted: the held input drives
+    // the root once and the send lands behind it. On Restate the racing
+    // invocation's retry admits it; in process the drive answers on the
+    // next request.
+    let raced = match answered {
+        Some(raced) => raced,
+        None => racing.await.expect("the racing drive ran"),
+    };
+    match raced {
+        Ok(admitted) => assert_eq!(admitted.stop, DriveStop::Idle),
+        Err(DriveAbort::Retry(_)) => {
+            let admitted = drive(&f, &runner, "after-tick").await;
+            assert_eq!(admitted.stop, DriveStop::Idle);
+        }
+        Err(abort) => panic!("the settled drive ended on a refusal: {abort:?}"),
+    }
+    assert_eq!(
+        f.parts.applications().await,
+        vec![
+            (f.input.clone(), f.root.clone()),
+            (send, TurnId::from("queued-send-root"))
+        ]
+    );
+    assert_eq!(f.parts.calls(), 2);
 }

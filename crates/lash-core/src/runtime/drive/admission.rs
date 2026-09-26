@@ -56,6 +56,9 @@ fn executor_mismatch(
 /// the recorded step: the verdict it returns is what every replay decodes.
 pub(in crate::runtime) struct AdmitDriveRunner {
     pub(in crate::runtime) store: Arc<dyn crate::store::RuntimePersistence>,
+    /// The deployment's control-intent ledger: a park names its redrive by
+    /// intent id, and whether that redrive is settled lives here (D15).
+    pub(in crate::runtime) stores: Arc<dyn crate::SessionStoreFactory>,
     pub(in crate::runtime) request: AdmitRequest,
     pub(in crate::runtime) ordinal: u32,
     /// Decides which queued work is due: a batch made available later is
@@ -120,19 +123,49 @@ impl AdmitDriveRunner {
             Err(StoreError::UnsupportedStoreOperation { .. }) => None,
             Err(error) => return Err(store_fault("parked-root check", error)),
         };
-        if let Some(park) = park
+        if let Some(park) = park.as_ref()
             && park.resume_intent.is_none()
         {
             return Ok(AdmitVerdict::Parked(ParkRef {
                 session: session_id.clone(),
-                root: park.turn_id,
+                root: park.turn_id.clone(),
                 park: park.park_id,
             }));
         }
+        // D15: a park that names a redrive intent is being resolved. While
+        // that intent is unsettled — pending, or failed retryably with its
+        // engine half still owed — a new turn input is refused retryably,
+        // never interleaved with the redrive and never a recorded verdict.
+        // A ledger that cannot name intents holds no unsettled redrive.
+        let redrive = park.as_ref().and_then(|park| park.resume_intent);
+        let redrive_unsettled = match redrive {
+            Some(intent) => match self.stores.load_intent(intent).await {
+                Ok(intent) => intent.is_some_and(|intent| intent.state.is_open()),
+                Err(StoreError::UnsupportedStoreOperation { .. }) => false,
+                Err(error) => return Err(store_fault("redrive intent read", error)),
+            },
+            None => false,
+        };
 
         let Some((root, work)) = self.next_root().await? else {
             return Ok(AdmitVerdict::Idle);
         };
+        // The command lane drains first (ADR 0101 §4): queued work and an
+        // owed follow-on are admitted while the redrive is unsettled; only a
+        // turn input waits for it. The refusal is the attempt's — never a
+        // recorded verdict — so the engine's retry re-decides admission
+        // after the redrive settles.
+        if redrive_unsettled && matches!(work, AdmittedWork::Input { .. }) {
+            return Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::SessionRedriveUnsettled,
+                format!(
+                    "session `{session_id}` admits no turn input while the parked \
+                     root names unsettled redrive intent `{intent}`",
+                    intent = redrive.map(|id| id.to_string()).unwrap_or_default()
+                ),
+            )
+            .retryable_uncommitted_derivation());
+        }
         // A head input whose root already ended is answered from the root's
         // evidence, never run again (ADR 0105 L-S6, FIG-3600 S7): acceptance
         // keeps such an input out, so this is the defensive answer.
