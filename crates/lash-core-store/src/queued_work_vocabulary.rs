@@ -55,12 +55,58 @@ impl std::fmt::Display for SessionCommandReceipt {
 /// completion and session head committed together. `Pending` preserves an
 /// accepted receipt when the configured settlement deadline expires, while
 /// `Cancelled` reports a queued command withdrawn before that commit.
+/// `Stale` and `Refused` are the config patch's typed non-applications
+/// (FIG-3541): the command settled — durably — without changing the config.
 #[derive(Clone, Debug)]
 pub enum SessionCommandSettlement {
     Rejected(crate::RuntimeError),
     Durable(SessionCommandReceipt),
     Pending(SessionCommandReceipt),
     Cancelled(SessionCommandReceipt),
+    /// The patch was written against `base` and the running revision was
+    /// already `head` at the drain: the submitter re-reads and recomputes.
+    Stale {
+        base: u64,
+        head: u64,
+    },
+    /// Route validation refused the patch at apply time.
+    Refused {
+        code: crate::session_ingress_vocabulary::ConfigRefusalCode,
+    },
+}
+
+impl SessionCommandSettlement {
+    /// The settlement one drained command row's tombstone reports (FIG-3541).
+    ///
+    /// A command is never `Delivered`; `Applied` and `Delivered` both map to
+    /// `Durable` so a re-read tombstone of either kind answers the waiter the
+    /// same way. `StaleConfigRevision` and `Refused` carry their typed
+    /// fields through; `Cancelled` reports the cancelled receipt.
+    #[must_use]
+    pub fn from_terminal_cause(
+        receipt: SessionCommandReceipt,
+        cause: &crate::session_ingress_vocabulary::IngressTerminalCause,
+    ) -> Self {
+        match cause {
+            crate::session_ingress_vocabulary::IngressTerminalCause::Applied
+            | crate::session_ingress_vocabulary::IngressTerminalCause::Delivered => {
+                Self::Durable(receipt)
+            }
+            crate::session_ingress_vocabulary::IngressTerminalCause::StaleConfigRevision {
+                base,
+                head,
+            } => Self::Stale {
+                base: *base,
+                head: *head,
+            },
+            crate::session_ingress_vocabulary::IngressTerminalCause::Refused { code } => {
+                Self::Refused { code: *code }
+            }
+            crate::session_ingress_vocabulary::IngressTerminalCause::Cancelled { .. } => {
+                Self::Cancelled(receipt)
+            }
+        }
+    }
 }
 #[derive(
     Clone,
@@ -831,5 +877,63 @@ fn validate_payload_family<'a>(
             Ok(())
         }
         _ => Err("queued-work kind contradicts its payload family".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session_ingress_vocabulary::{
+        ConfigRefusalCode, IngressCancelReason, IngressTerminalCause, IngressWithdrawSelector,
+    };
+
+    fn receipt() -> SessionCommandReceipt {
+        SessionCommandReceipt {
+            session_id: SessionId::from("session-a"),
+            batch_id: crate::BatchId::from("batch-1"),
+            source_key: "command:apply_config_patch:k".to_string(),
+        }
+    }
+
+    /// The tombstone-to-settlement mapping (FIG-3541): each terminal cause
+    /// lands on its typed settlement, carrying the cause's fields.
+    #[test]
+    fn session_command_settlement_maps_every_terminal_cause() {
+        assert!(matches!(
+            SessionCommandSettlement::from_terminal_cause(
+                receipt(),
+                &IngressTerminalCause::Applied,
+            ),
+            SessionCommandSettlement::Durable(_)
+        ));
+        assert!(matches!(
+            SessionCommandSettlement::from_terminal_cause(
+                receipt(),
+                &IngressTerminalCause::StaleConfigRevision { base: 3, head: 5 },
+            ),
+            SessionCommandSettlement::Stale { base: 3, head: 5 }
+        ));
+        assert!(matches!(
+            SessionCommandSettlement::from_terminal_cause(
+                receipt(),
+                &IngressTerminalCause::Refused {
+                    code: ConfigRefusalCode::ProviderCredentialsMissing,
+                },
+            ),
+            SessionCommandSettlement::Refused {
+                code: ConfigRefusalCode::ProviderCredentialsMissing,
+            }
+        ));
+        assert!(matches!(
+            SessionCommandSettlement::from_terminal_cause(
+                receipt(),
+                &IngressTerminalCause::Cancelled {
+                    reason: IngressCancelReason::HostWithdrawn {
+                        selector: IngressWithdrawSelector::SourceKey,
+                    },
+                },
+            ),
+            SessionCommandSettlement::Cancelled(_)
+        ));
     }
 }

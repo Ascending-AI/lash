@@ -45,6 +45,7 @@ mod cell_binding_drift;
 mod cell_orchestration_redrive;
 pub mod cold_process_turn_parent;
 mod completion_routing;
+mod config_command_replay;
 mod direct_turn_acceptance;
 mod drain_end;
 mod durable_queued_drain_wait;

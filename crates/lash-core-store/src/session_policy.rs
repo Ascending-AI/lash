@@ -263,6 +263,41 @@ impl ApplyConfigPatch {
         state.config_revision = state.config_revision.saturating_add(1);
         Ok(())
     }
+
+    /// Apply the overlay to a persisted head config — the running value the
+    /// config-command planner mutates (FIG-3541, ADR 0101 §12).
+    ///
+    /// Field for field this is the same publication [`Self::apply_to_state`]
+    /// performs, on the persisted config's own homes (`tool_access`,
+    /// `protocol_turn_options`, `prompt` all live at their
+    /// `PersistedSessionConfig` fields). The revision check and bump stay
+    /// with the caller: reaching this method at all is the applied outcome.
+    pub(crate) fn apply_to_persisted_config(&self, config: &mut crate::PersistedSessionConfig) {
+        if let Some(provider_id) = self.provider_id.as_ref() {
+            config.provider_id = provider_id.clone();
+        }
+        if let Some(model) = self.model.as_ref() {
+            let mut model = model.clone();
+            model.capability.attachment_acceptance =
+                config.model.capability.attachment_acceptance.clone();
+            config.model = model;
+        }
+        if let Some(prompt) = self.prompt.as_ref() {
+            config.prompt = Some(prompt.clone());
+        }
+        if let Some(generation) = self.generation.as_ref() {
+            config.generation = generation.resolve(&config.generation);
+        }
+        if let Some(turn_budget) = self.turn_budget {
+            config.turn_budget = turn_budget;
+        }
+        if let Some(access) = self.tool_access.as_ref() {
+            config.tool_access = access.clone();
+        }
+        if let Some(options) = self.protocol_turn_options.as_ref() {
+            config.protocol_turn_options = Some(options.clone());
+        }
+    }
 }
 
 /// An `ApplyConfigPatch`'s `base_config_revision` did not match the running

@@ -14,8 +14,8 @@ use super::{
 };
 use crate::session_ingress_vocabulary::{
     ClaimMode, Delivery, IngressAffectedItem, IngressCancelReason, IngressClaim,
-    IngressClaimIdentity, IngressItem, IngressItemId, IngressKind, IngressTerminalCause,
-    IngressUndeliveredDisposition, IngressWithdrawSelector,
+    IngressClaimIdentity, IngressItem, IngressItemId, IngressKind, IngressLane,
+    IngressTerminalCause, IngressUndeliveredDisposition, IngressWithdrawSelector,
 };
 use crate::{ProcessId, SessionId, TurnId};
 
@@ -544,10 +544,13 @@ pub struct IngressSettlementRow {
 /// One planned row write of a settlement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IngressRowSettlement {
-    /// Tombstone the row `completed` with `cause`.
+    /// Tombstone the row with `cause` at `state` — the cause's own terminal
+    /// state for the row's kind, which only `Refused` splits (a refused
+    /// command completes; a refused input or wake cancels, FIG-3541).
     Complete {
         item_id: IngressItemId,
         cause: IngressTerminalCause,
+        state: crate::session_ingress_vocabulary::IngressState,
     },
     /// Tombstone the row `cancelled` with `reason`.
     Drop {
@@ -576,6 +579,7 @@ impl IngressSettlementPlan {
         }
         self.writes.push(IngressRowSettlement::Complete {
             item_id: item.item_id.clone(),
+            state: cause.state(item.kind()),
             cause,
         });
     }
@@ -713,16 +717,18 @@ fn claimed_rows<'a>(
 /// Plan one settlement (ADR 0101 §7, §10, §12).
 ///
 /// `observed` holds the current state of every row the settlement's claims
-/// name and every row that still carries one of its claims. `addressed`
-/// holds, for a turn cancel, the non-terminal rows addressed to the cancelled
-/// turn: open rows, and rows an interrupted claim of a superseded drive epoch
+/// name and every row that still carries one of its claims. `covered`
+/// holds the non-terminal rows beyond the claims the intent still settles:
+/// for a turn cancel the rows addressed to the cancelled turn; for a command
+/// drain with refused windows the turn-lane rows those windows can reach —
+/// open rows, and rows an interrupted claim of a superseded drive epoch
 /// still holds. Every claimed row must still carry its claim at `fence`'s
 /// epoch, or the whole settlement is refused.
 pub fn plan_ingress_settlement(
     settlement: &IngressClaimSettlement,
     fence: &DriveFence,
     observed: &[IngressSettlementRow],
-    addressed: &[IngressSettlementRow],
+    covered: &[IngressSettlementRow],
 ) -> Result<IngressSettlementPlan, StoreError> {
     let rows = claimed_rows(settlement, fence, observed)?;
     let mut plan = IngressSettlementPlan::default();
@@ -773,7 +779,7 @@ pub fn plan_ingress_settlement(
                 // whether it is still open or an interrupted claim of a
                 // superseded epoch holds it. A row a live claim of this epoch
                 // holds is that claim's to settle.
-                for row in addressed {
+                for row in covered {
                     let item = &row.item;
                     if item.state.is_terminal()
                         || item.delivery.addressed_turn() != Some(&cancel.turn_id)
@@ -791,7 +797,10 @@ pub fn plan_ingress_settlement(
                 }
             }
         }
-        IngressSettlementIntent::Commands { outcomes } => {
+        IngressSettlementIntent::Commands {
+            outcomes,
+            refused_windows,
+        } => {
             for outcome in outcomes {
                 if !rows.iter().any(|row| row.item.item_id == outcome.item_id) {
                     return Err(refused(
@@ -821,11 +830,73 @@ pub fn plan_ingress_settlement(
                             IngressCommandResult::StaleConfigRevision { base, head } => {
                                 IngressTerminalCause::StaleConfigRevision { base, head }
                             }
+                            IngressCommandResult::Refused { code } => {
+                                IngressTerminalCause::Refused { code }
+                            }
                         },
                     ),
                     None => plan.writes.push(IngressRowSettlement::Release {
                         item_id: item.item_id.clone(),
                     }),
+                }
+            }
+            // FIG-3541, HoS decision 68: a refused command's window turns back
+            // the open turn-lane rows enqueued after it and before the drain's
+            // next config command, in this same transaction. A row a live
+            // claim of this epoch holds is that claim's to settle; a
+            // command-lane row or a row outside the window is untouched.
+            for window in refused_windows {
+                let Some(opener) = rows.iter().find(|row| row.item.enqueue_seq == window.after)
+                else {
+                    return Err(refused(
+                        settlement,
+                        &IngressItemId::new(format!("seq:{}", window.after)),
+                        "a refused window opens on a claimed command",
+                    ));
+                };
+                let opener_refused = outcomes.iter().any(|outcome| {
+                    outcome.item_id == opener.item.item_id
+                        && outcome.result == IngressCommandResult::Refused { code: window.code }
+                });
+                if !opener_refused {
+                    return Err(refused(
+                        settlement,
+                        &opener.item.item_id,
+                        "a refused window opens on a command settled Refused with its code",
+                    ));
+                }
+                if let Some(before) = window.before {
+                    match rows.iter().find(|row| row.item.enqueue_seq == before) {
+                        Some(closer) if closer.item.payload.is_config_patch() => {}
+                        Some(closer) => {
+                            return Err(refused(
+                                settlement,
+                                &closer.item.item_id,
+                                "a refused window ends before the drain's next config command",
+                            ));
+                        }
+                        None => {
+                            return Err(refused(
+                                settlement,
+                                &opener.item.item_id,
+                                "a refused window's bound names a claimed config command",
+                            ));
+                        }
+                    }
+                }
+                for covered_row in covered {
+                    let item = &covered_row.item;
+                    if item.state.is_terminal()
+                        || item.lane() != IngressLane::Turn
+                        || item.enqueue_seq <= window.after
+                        || window
+                            .before
+                            .is_some_and(|before| item.enqueue_seq >= before)
+                        || covered_row.claim_epoch == Some(fence.epoch())
+                    {
+                        continue;
+                    }
+                    plan.complete(item, IngressTerminalCause::Refused { code: window.code });
                 }
             }
         }
