@@ -1,102 +1,44 @@
-#![allow(deprecated, reason = "Restate SDK retains the trait service API")]
-//! Restate supplies the schedule; the kernel owns every recovery decision.
-use restate_sdk::context::{
-    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, ObjectContext,
-    RunFuture as _,
-};
-use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
-use restate_sdk::serde::Json;
-use serde::{Deserialize, Serialize};
+//! The Restate engine's recovery-sweep schedule (FIG-3600 S7, ADR 0104
+//! O2/O3/O4): a task of the driver's own deployment, not a
+//! Restate-scheduled send.
+//!
+//! A durable object that re-sends its tick keeps firing after its
+//! endpoint is gone, and each retried delivery pins an open invocation
+//! the deployment can never drain to zero. The schedule therefore lives
+//! on a Tokio interval next to the installed driver — the same shape the
+//! in-process engine uses — carrying the [`ReconcileCursor`] forward and
+//! ending when the driver is dropped. The tick itself stays the
+//! engine-neutral [`SessionDriver::reconcile`] pass.
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ReconcileRequest {
-    pub version: u32,
-    pub sequence: u64,
-}
+use std::num::NonZeroUsize;
+use std::sync::Weak;
+use std::time::Duration;
 
-#[restate_sdk::object]
-pub(crate) trait LashReconcile {
-    async fn tick(request: Json<ReconcileRequest>) -> HandlerResult<()>;
-}
+use lash_core::SessionDriver;
+use lash_core::engine::ReconcileCursor;
 
-pub(crate) struct LashReconcileImpl(pub(crate) crate::RestateSessionDriverSlot);
-
-impl LashReconcile for LashReconcileImpl {
-    async fn tick(
-        &self,
-        ctx: ObjectContext<'_>,
-        Json(request): Json<ReconcileRequest>,
-    ) -> HandlerResult<()> {
-        if request.version != crate::LASH_SESSION_DRIVE_VERSION {
-            return Err(TerminalError::new("unsupported reconcile generation").into());
-        }
-        let previous = ctx.get::<u64>("sequence").await?;
-        if previous.is_some_and(|previous| previous >= request.sequence) {
-            return Ok(());
-        }
-        let cursor = ctx
-            .get::<Json<lash_core::engine::ReconcileCursor>>("cursor")
-            .await?
-            .map(|value| value.0)
-            .unwrap_or_default();
-        let driver = self.0.installed().ok_or_else(|| {
-            HandlerError::from(std::io::Error::other("no reconcile driver installed"))
-        })?;
-        let tick = format!("{}:{}", request.version, request.sequence);
-        let next = ctx
-            .run(|| async {
-                driver
-                    .reconcile(
-                        &cursor,
-                        std::num::NonZeroUsize::MIN.saturating_add(63),
-                        &tick,
-                    )
-                    .await
-                    .map(Json)
-                    .map_err(|error| HandlerError::from(std::io::Error::other(error.to_string())))
-            })
-            .name("reconcile-page")
-            .await?;
-        ctx.set("cursor", next);
-        ctx.set("sequence", request.sequence);
-        let sequence = request
-            .sequence
-            .checked_add(1)
-            .ok_or_else(|| TerminalError::new("reconcile sequence exhausted"))?;
-        ctx.object_client::<LashReconcileClient>("recovery")
-            .tick(Json(ReconcileRequest {
-                version: request.version,
-                sequence,
-            }))
-            .send_after(std::time::Duration::from_secs(10));
-        Ok(())
-    }
-}
-
-/// Keep the startup send alive while deployment registration catches up.
-/// After acceptance, the durable object owns every subsequent tick.
-pub(crate) async fn start_reconciliation(ingress: crate::RestateIngressClient) {
-    let request = ReconcileRequest {
-        version: crate::LASH_SESSION_DRIVE_VERSION,
-        sequence: 0,
-    };
-    let key = format!("reconcile-start:{}", request.version);
-    let mut delay = std::time::Duration::from_millis(250);
+/// Tick `driver`'s recovery pass every ten seconds until it is dropped.
+///
+/// Tick ids name the engine and the pass's own sequence, so drive asks
+/// from one tick dedupe and asks from two do not. A failed pass is logged
+/// and retried by the next tick; the cursor only advances on success.
+pub(crate) async fn run(driver: Weak<dyn SessionDriver>) {
+    let mut cursor = ReconcileCursor::default();
+    let mut sequence = 0_u64;
+    let mut interval = tokio::time::interval(Duration::from_secs(10));
     loop {
-        match ingress
-            .send_object_json_idempotent(
-                crate::LashService::Reconcile.name(),
-                "recovery",
-                "tick",
-                &request,
-                &key,
-            )
+        interval.tick().await;
+        let Some(driver) = driver.upgrade() else {
+            break;
+        };
+        let tick = format!("restate:{sequence}");
+        match driver
+            .reconcile(&cursor, NonZeroUsize::MIN.saturating_add(63), &tick)
             .await
         {
-            Ok(_) => return,
-            Err(error) => tracing::warn!(%error, "session reconcile startup send will retry"),
+            Ok(next) => cursor = next,
+            Err(error) => tracing::warn!(%error, "restate recovery pass failed"),
         }
-        tokio::time::sleep(delay).await;
-        delay = (delay * 2).min(std::time::Duration::from_secs(5));
+        sequence = sequence.wrapping_add(1);
     }
 }

@@ -1585,37 +1585,3 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
         Ok(Json(resolution))
     }
 }
-
-#[tokio::test]
-async fn reconcile_start_retries_registration_with_the_same_idempotency_key() {
-    let transport = Arc::new(effect_execution::ScriptedHttpTransport::new([
-        HttpResponse {
-            status: 404,
-            headers: vec![],
-            body: HttpResponseBody::buffered("service not registered"),
-        },
-        effect_execution::accepted_response("reconcile-start"),
-    ]));
-    let ingress = RestateIngressClient::new(RestateConnection::with_transport(
-        "https://restate.example",
-        transport.clone(),
-    ));
-    tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        crate::session_reconcile::start_reconciliation(ingress),
-    )
-    .await
-    .expect("registration retry finishes");
-    let requests = transport.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].url, requests[1].url);
-    assert_eq!(requests[0].headers, requests[1].headers);
-    assert_eq!(requests[0].body, requests[1].body);
-    assert!(
-        requests[0]
-            .headers
-            .iter()
-            .any(|(name, value)| name.eq_ignore_ascii_case("idempotency-key")
-                && value.starts_with("reconcile-start:"))
-    );
-}

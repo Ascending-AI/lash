@@ -101,7 +101,7 @@ pub trait SessionDriver: Send + Sync {
         false
     }
 
-    /// One bounded recovery pass, invoked by the engine's durable scheduler.
+    /// One bounded recovery pass, invoked on the engine's own schedule.
     async fn reconcile(
         &self,
         _cursor: &crate::engine::ReconcileCursor,

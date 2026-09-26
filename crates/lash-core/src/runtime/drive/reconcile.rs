@@ -25,9 +25,9 @@
 //! 6. **Drain hand-over (FIG-3799).** A named slot:
 //!    [`drain_hand_over_slot`].
 //!
-//! The engine supplies only the schedule: on Restate a `LashReconcile`
-//! object re-sends itself with a delay and runs one tick per send, carrying
-//! the [`ReconcileCursor`] forward. A tick never runs inside a drive, and it
+//! The engine supplies only the schedule: each engine runs the tick on an
+//! interval inside the driver's deployment and carries the
+//! [`ReconcileCursor`] forward. A tick never runs inside a drive, and it
 //! takes its tick id from the caller, which owns the clock and the journal.
 //!
 //! Every drive ask names its own request, derived from the tick and the row

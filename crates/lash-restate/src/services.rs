@@ -78,8 +78,6 @@ lash_services! {
     SessionDriver => "LashSession",
     /// One admitted root: its seal, turns and commits (FIG-3600).
     TurnDriver => "LashTurn",
-    /// Bounded, periodic session and process recovery.
-    Reconcile => "LashReconcile",
 }
 
 /// What the lash services of one deployment run over.
@@ -164,12 +162,6 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                 .serve(),
                 "drive",
             )),
-            LashService::Reconcile => {
-                use crate::session_reconcile::LashReconcile as _;
-                builder.bind(
-                    crate::session_reconcile::LashReconcileImpl(session_driver.clone()).serve(),
-                )
-            }
             LashService::TurnDriver => builder.bind(turn_service(
                 LashTurnImpl::new(
                     session_driver.clone(),

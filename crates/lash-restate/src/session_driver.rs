@@ -453,8 +453,7 @@ impl SessionWorkEngine for RestateSessionWork {
             return installed;
         }
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let ingress = self.ingress.clone();
-            runtime.spawn(crate::session_reconcile::start_reconciliation(ingress));
+            runtime.spawn(crate::session_reconcile::run(Arc::downgrade(&installed)));
         }
         installed
     }

@@ -4,9 +4,9 @@
 //!
 //! The tick itself is engine-neutral kernel code (`lash_core::drive::
 //! reconcile_once`); an engine only schedules it, through
-//! [`SessionDriver::reconcile`](crate::SessionDriver::reconcile). On Restate
-//! a `LashReconcile` object re-sends itself with a delay and runs one tick
-//! per send, carrying the [`ReconcileCursor`] in its state.
+//! [`SessionDriver::reconcile`](crate::SessionDriver::reconcile). Each
+//! engine runs the tick on an interval inside the driver's deployment and
+//! carries the [`ReconcileCursor`] forward.
 
 use serde::{Deserialize, Serialize};
 
