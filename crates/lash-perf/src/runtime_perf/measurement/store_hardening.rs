@@ -165,14 +165,11 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                 let (_, phase) = measure_runtime_perf_async_phase(
                     "store_hardening.postgres.open_enforce",
                     async {
-                        // Deliberately HostProvisioned: this arm measures the structural
-                        // verification gate without LashManaged's version preflight and
-                        // idempotent DDL. The report calls out that narrower open mode.
+                        // This arm measures the structural verification gate alone:
+                        // the open never runs DDL, so what remains is the catalog read.
                         lash_postgres_store::PostgresStorage::from_pool_with(
                             postgres.pool().clone(),
                             lash_postgres_store::PostgresStoreConfig {
-                                schema_provisioning:
-                                    lash_postgres_store::SchemaProvisioning::HostProvisioned,
                                 schema_check: lash_postgres_store::SchemaCheck::Enforce,
                                 ..lash_postgres_store::PostgresStoreConfig::default()
                             },

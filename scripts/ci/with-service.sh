@@ -176,6 +176,13 @@ service_setup() {
         docker exec "$container" psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
           -c "CREATE DATABASE lash_slot_${index}" >/dev/null
       done
+      # Worker open never provisions (FIG-3797): the schema is an operational
+      # step, so the harness applies the committed artifact to the default
+      # database and every slot itself — the same job `lash migrate` performs.
+      for database in lash $(seq 0 $((POSTGRES_SLOT_COUNT - 1)) | sed 's/^/lash_slot_/'); do
+        docker exec -i "$container" psql -U lash -d "$database" -v ON_ERROR_STOP=1 -q \
+          < crates/lash-postgres-store/schema.sql >/dev/null
+      done
       ;;
     *) : ;;
   esac

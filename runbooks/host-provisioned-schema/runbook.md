@@ -36,17 +36,23 @@ for the landing commit, so alpha.113 predates it). Figments' pinned revision
   — the byte-exact artifact host migration tooling applies. Copy it; never transcribe.
 - `PostgresStorage::verify_schema_for(&PgPool) -> SchemaReport` — the read-only CI gate;
   `SchemaReport::is_conformant()` is the verdict, `Display` renders the per-object diff.
-- `PostgresStoreConfig { schema_provisioning: SchemaProvisioning::HostProvisioned,
-  schema_check: SchemaCheck::Enforce, .. }` + `PostgresStorage::from_pool_with` — the
-  runtime open: no DDL, hard failure on drift or version mismatch.
+- `PostgresStorage::from_pool_with` / `connect` — the runtime open: no DDL, hard
+  failure on drift or a version outside the supported range. Worker opens never
+  run DDL at all (FIG-3797).
+- `lash-migrate` (FIG-3816) — the lash-owned operational step as an alternative
+  to host tooling: provisions a fresh database and applies pending expand-phase
+  migrations under the schema advisory lock, recording each step in the
+  `lash_migrations` ledger.
 - `PostgresStorage::schema_advisory_lock_key()` — the `(namespace, key)` for
-  `pg_advisory_lock` host tooling takes around its own schema operations.
+  `pg_advisory_lock` host tooling takes around its own schema operations;
+  `lash migrate` and verifying opens coordinate on it.
 
 ## Ownership and ordering
 
-- **DDL is host-owned.** `schema.sql` is the artifact the host's migration tooling
-  (Goose, in Figments) applies with a migration-privileged role. Lash never writes
-  schema under `HostProvisioned`.
+- **DDL is operationally owned.** `schema.sql` is the artifact the host's migration
+  tooling (Goose, in Figments) applies with a migration-privileged role — or
+  `lash-migrate` applies it and the expand catalog's steps. Worker opens never
+  write schema, under any configuration.
 - **Seed data ships in the same artifact.** `schema.sql` ends with the required
   seeds: the `lash_schema_versions` component stamp, the `lash_process_change_clock`
   and `lash_turn_park_clock` singletons, and the `lash_catalog_identity` row. A
@@ -71,7 +77,7 @@ seeds what the host did not.
 
 | Condition | Behavior |
 |---|---|
-| Version stamp ≠ this build's `SCHEMA_VERSION` | Open refuses, naming found and expected. Fatal under every `SchemaCheck`. |
+| Version stamp outside `[MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION]` | Open refuses with `SchemaVersionOutOfRange`, naming found version and the expected range. Fatal under every `SchemaCheck`. A stamp inside the range is admitted and the structural check still runs — for 1.0 the range is the single current version. |
 | Structural drift (missing/extra/diverged objects) | `SchemaCheck::Enforce` refuses with a per-object diff naming the drifted objects. `WarnOnly` logs and opens — for diagnosis, never production. |
 | Seed row missing (`lash_catalog_identity`) | `verify_schema_for` reports a `SEED ROWS` finding; open refuses naming the table and `schema.sql`. No `SchemaCheck` relaxes it. |
 | Upgrading across a reject-and-recreate bump | Drop the schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database, then re-apply this build's `schema.sql`. This build's `teardown.sql` names only this build's tables; an older catalog can hold tables it no longer declares (component 132 retired the effect engine's eight tables), and teardown leaves those behind. |
@@ -89,8 +95,10 @@ the dropped table stays dropped and the missing seed stays missing.
    proves the privilege is absent before it opens.
 4. **Refusal is the correct outcome** for missing, incomplete, or incompatible
    schemas, and it is non-destructive by construction.
-5. **No second provisioning path.** Lash-managed open (`SchemaProvisioning::LashManaged`)
-   remains for development; a host-provisioned deployment never mixes modes.
+5. **Opens never provision.** There is no lash-managed open mode: a worker that
+   finds an unprovisioned or out-of-range database refuses, and the remedies are
+   `lash migrate` or the host-applied artifact — never a runtime open that
+   repairs.
 
 ## Scorecard
 

@@ -7,21 +7,22 @@
 //!
 //! # Who provisions the schema
 //!
-//! By default lash applies its own DDL at open, which needs `CREATE` on the
-//! target schema. A host that owns its migrations instead vendors
-//! [`PostgresStorage::schema_ddl`] — the same bytes are committed as this crate's
-//! `schema.sql` — into its own tooling and opens with
-//! [`SchemaProvisioning::HostProvisioned`], which runs no DDL at all. Copy those
-//! bytes; never transcribe them.
+//! Workers never run DDL on PostgreSQL (FIG-3797). Schema is provisioned and
+//! advanced by `lash migrate`, which a deployment runs before rolling workers,
+//! or by the host's own tooling applying [`PostgresStorage::schema_ddl`] (the
+//! same bytes committed as this crate's `schema.sql`). Copy those bytes;
+//! never transcribe them.
 //!
-//! Either way, open ends by reading the live catalog and comparing it against the
-//! shape this build requires, so a database whose version stamp is right but whose
-//! tables are not is rejected at open with a per-object diff rather than failing at
-//! the first query — or silently losing a guard, which is what a dropped unique
-//! index or a dropped cascade does. [`SchemaCheck`] controls whether a structural
-//! mismatch is fatal. A component-version mismatch is fatal unless Lash-managed
-//! `Enforce` mode carries an explicit migration from the exact published source
-//! shape; no [`SchemaCheck`] relaxes the remaining boundary.
+//! Open ends by reading the live catalog and comparing it against the shape
+//! this build requires, so a database whose version stamp is right but whose
+//! tables are not is rejected at open with a per-object diff rather than
+//! failing at the first query — or silently losing a guard, which is what a
+//! dropped unique index or a dropped cascade does. [`SchemaCheck`] controls
+//! whether a structural mismatch is fatal. The component-version stamp is a
+//! separate, unconditional gate: open admits a stamp inside the supported
+//! range [min supported, latest] and refuses anything outside it with a typed
+//! [`StoreError::SchemaVersionOutOfRange`] naming the found version and the
+//! range — no [`SchemaCheck`] relaxes it (FIG-3797).
 //! [`PostgresStorage::verify_schema_for`] exposes the same check against a bare
 //! pool so a host can gate its own migration CI on it. See ADR 0052.
 //! [`PostgresStorage::inspect_required_constraints_for`] separately inspects the
@@ -538,7 +539,22 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // adds the projected, indexed `lash_turn_parks.park_executable_generation` column the
 // drain counts retired parks by. Component-132 catalogs are rejected and
 // recreated.
-const SCHEMA_VERSION: i32 = 133;
+// Version 134 (FIG-3816) adds `lash_migrations`, the ledger `lash migrate`
+// writes each applied step to. It is the first generation reachable by an
+// expand-phase migration instead of recreation: `lash migrate` carries a
+// component-133 catalog forward by creating the ledger and restamping,
+// and provisions an empty database outright. Older catalogs are still
+// rejected and recreated.
+const SCHEMA_VERSION: i32 = 134;
+
+/// The oldest component schema version this build admits at open (FIG-3797).
+///
+/// Workers open a database whose `lash_schema_versions` stamp falls inside
+/// the supported range `[MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION]`; a
+/// stamp outside it is refused with a typed error naming the found version and
+/// the range. For the 1.0 cut the range is the single current version — a
+/// compatibility release widens the floor when it is declared, never silently.
+const MIN_SUPPORTED_SCHEMA_VERSION: i32 = SCHEMA_VERSION;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -654,13 +670,12 @@ pub struct PostgresStoreConfig {
     /// Postgres `statement_timeout` applied to every connection. Default 30s — a
     /// backstop so a wedged query can never hold a connection indefinitely.
     pub statement_timeout: Option<Duration>,
-    /// Who owns the DDL. Default [`SchemaProvisioning::LashManaged`]: lash applies
-    /// its own creation statements at open. Hosts that vendor
-    /// [`PostgresStorage::schema_ddl`] into their own migration tooling set
-    /// [`SchemaProvisioning::HostProvisioned`] so open runs no DDL at all.
-    pub schema_provisioning: SchemaProvisioning,
     /// What open does when the live schema drifts from the shape this build
     /// expects. Default [`SchemaCheck::Enforce`].
+    ///
+    /// There is no provisioning knob: open never runs DDL. The schema arrives
+    /// through `lash migrate` or the host's own tooling before any worker
+    /// starts (FIG-3797, FIG-3816).
     pub schema_check: SchemaCheck,
 }
 
@@ -674,7 +689,6 @@ impl Default for PostgresStoreConfig {
             max_lifetime: Some(Duration::from_secs(1800)),
             lock_timeout: Some(Duration::from_secs(10)),
             statement_timeout: Some(Duration::from_secs(30)),
-            schema_provisioning: SchemaProvisioning::default(),
             schema_check: SchemaCheck::default(),
         }
     }
@@ -730,40 +744,73 @@ impl PostgresStorage {
             .connect(database_url)
             .await
             .map_err(store_sqlx_error)?;
-        let catalog_id = ensure_schema(&pool, schema_open_options(&config)).await?;
+        let catalog_id = ensure_schema(&pool, config.schema_check).await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
         })
     }
 
+    /// Provision or advance the schema for `database_url`: `lash migrate`'s
+    /// engine (FIG-3816).
+    ///
+    /// This is the separate operational step the open path deliberately is
+    /// not: it takes the schema advisory lock exclusively, applies the pending
+    /// expand-phase migrations this build declares — or provisions an
+    /// unprovisioned database outright — and records each applied step in the
+    /// `lash_migrations` ledger. Rerunning it is a no-op. `phase` selects the
+    /// operations-arc phase; [`MigrationPhase::Backfill`] and
+    /// [`MigrationPhase::Contract`] are refused until FIG-3817.
+    ///
+    /// Workers must not call it: an open verifies the schema and never runs
+    /// DDL, so a database that needs this is one that has not been provisioned
+    /// or migrated yet.
+    pub async fn migrate(
+        database_url: &str,
+        phase: MigrationPhase,
+    ) -> Result<MigrationReport, StoreError> {
+        migrate::migrate(database_url, phase).await
+    }
+
+    /// Plan what [`Self::migrate`] would apply without changing the database.
+    ///
+    /// The dry-run reads the installation under the shared advisory lock with
+    /// the same snapshot discipline an open's verification uses, so its answer
+    /// cannot describe a half-applied state.
+    pub async fn plan_migrations(
+        database_url: &str,
+        phase: MigrationPhase,
+    ) -> Result<MigrationReport, StoreError> {
+        migrate::plan_migrations(database_url, phase).await
+    }
+
     /// Build storage over an already-constructed pool.
     ///
     /// This runs the same schema gate `connect`/`connect_with` do, so every public
-    /// construction path enforces both the component schema version and the
-    /// structural shape: a pre-cutover (e.g. version-10) database is rejected
-    /// loudly with the same mismatch error rather than silently used, which would
-    /// resurrect the cross-version hazards the version bump exists to prevent. The
-    /// creation statements are idempotent, so running the gate against an
-    /// already-provisioned pool is safe.
+    /// construction path enforces both the supported component-version range and
+    /// the structural shape: a pre-cutover (e.g. version-10) database is rejected
+    /// loudly with the same out-of-range refusal rather than silently used, which
+    /// would resurrect the cross-version hazards the version gate exists to
+    /// prevent. The gate never runs DDL — the schema must already have been
+    /// provisioned by `lash migrate` or the host's own tooling.
     ///
-    /// Use [`PostgresStorage::from_pool_with`] to open a host-provisioned database
-    /// without running any DDL.
+    /// Use [`PostgresStorage::from_pool_with`] to choose how a structural
+    /// mismatch is handled.
     pub async fn from_pool(pool: PgPool) -> Result<Self, StoreError> {
         Self::from_pool_with(pool, PostgresStoreConfig::default()).await
     }
 
-    /// Build storage over an already-constructed pool, choosing who provisions
-    /// the schema and how a mismatch is handled.
+    /// Build storage over an already-constructed pool, choosing how a structural
+    /// mismatch is handled.
     ///
-    /// Only [`PostgresStoreConfig::schema_provisioning`] and
-    /// [`PostgresStoreConfig::schema_check`] are read: the pool already exists, so
-    /// its sizing and per-connection timeouts were fixed by whoever built it.
+    /// Only [`PostgresStoreConfig::schema_check`] is read: the pool already
+    /// exists, so its sizing and per-connection timeouts were fixed by whoever
+    /// built it.
     pub async fn from_pool_with(
         pool: PgPool,
         config: PostgresStoreConfig,
     ) -> Result<Self, StoreError> {
-        let catalog_id = ensure_schema(&pool, schema_open_options(&config)).await?;
+        let catalog_id = ensure_schema(&pool, config.schema_check).await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
@@ -785,8 +832,8 @@ impl PostgresStorage {
                 .fetch_optional(&pool)
                 .await
                 .map_err(store_sqlx_error)?;
-        if found_version != Some(SCHEMA_VERSION) {
-            return Err(version_mismatch_error(found_version, None));
+        if !crate::schema::supported_version(found_version) {
+            return Err(version_mismatch_error(None, found_version, None));
         }
         let catalog_id = crate::schema::read_catalog_id(&pool)
             .await
@@ -817,7 +864,7 @@ impl PostgresStorage {
     /// It names this build's objects only. An older build's catalog can hold
     /// tables this build no longer declares (component 132 retired the effect
     /// engine's tables), so at the reject-and-recreate boundary, when
-    /// [`open`][Self::open] refuses an incompatible component stamp, drop the
+    /// [`connect`][Self::connect] refuses an incompatible component stamp, drop the
     /// schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database
     /// rather than applying this to the older catalog.
     ///
@@ -837,16 +884,23 @@ impl PostgresStorage {
     }
 
     /// The component schema version this build implements, as stamped in
-    /// `lash_schema_versions`.
+    /// `lash_schema_versions` — the newest version the supported range admits.
     ///
-    /// The component schema is normally a reject-and-recreate boundary.
-    /// Component 62 is a hard append-identity cutover from component 61. Every
-    /// pre-61 graph shape also carries the retired graph-node sequence column
-    /// and is refused before historical creation-only migration DDL can run.
-    /// An older stamp over incompatible artifacts is refused with an
-    /// inspect-and-recreate remedy; other mismatches are rejected at open.
+    /// Open refuses a stamp outside
+    /// `[Self::min_supported_schema_version, Self::schema_version]` with a
+    /// typed [`StoreError::SchemaVersionOutOfRange`], whichever direction it
+    /// differs in (FIG-3797).
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
+    }
+
+    /// The oldest component schema version this build admits at open
+    /// (FIG-3797).
+    ///
+    /// For 1.0 the supported range is the single current version; a
+    /// compatibility release widens the floor when it declares one.
+    pub fn min_supported_schema_version() -> i32 {
+        MIN_SUPPORTED_SCHEMA_VERSION
     }
 
     /// This is the same check every open runs, exposed so a host can gate its own
@@ -1050,7 +1104,7 @@ impl PostgresStorage {
     /// Consequently, a mistyped id produces a valid absent handle that can subsequently create
     /// the mistyped session.
     /// Call
-    /// [`SessionStoreFactory::open_existing_store`](lash_core_execution::SessionStoreFactory::open_existing_store)
+    /// [`SessionStoreFactory::open_existing_store`]
     /// through [`Self::session_store_factory`] when existence must be checked.
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
@@ -1213,6 +1267,8 @@ mod blobs;
 mod connection_sql;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
+#[path = "postgres/migrate.rs"]
+mod migrate;
 #[path = "postgres/pending_turn_inputs.rs"]
 mod pending_turn_inputs;
 mod preflight;
@@ -1276,28 +1332,23 @@ pub use backend::PostgresStoreSet;
 pub use lash_core_execution::store_backend_support::required_constraints::{
     RequiredConstraintFinding, RequiredConstraintReport,
 };
+pub use migrate::{MigrationPhase, MigrationReport, MigrationStep};
 pub use preflight::PostgresStorePreflight;
 pub use process_definitions::PostgresProcessDefinitionRegistry;
+use schema_shape::verify_schema_shape;
 pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,
-    SchemaProvisioning, SchemaReport, UniqueGuard,
-};
-use schema_shape::{
-    ComponentVersion, SchemaShape, read_component_version, read_search_path, resolve_installation,
-    verify_schema_migration_source_shape, verify_schema_shape,
+    SchemaReport, UniqueGuard,
 };
 use {
     pending_turn_inputs::*, process_helpers::*, queued_work::*, runtime_persistence::*, schema::*,
     session_factory::*, support::*, turn_input_settlement::*,
 };
 
-/// Extracts the schema-gate knobs one open should use from a store config.
-fn schema_open_options(config: &PostgresStoreConfig) -> SchemaOpenOptions {
-    SchemaOpenOptions {
-        provisioning: config.schema_provisioning,
-        check: config.schema_check,
-    }
-}
+// `tests/support/mod.rs` is also compiled into this crate's unit tests (as
+// `postgres_test_support`), so it can only name this crate uniformly if the
+// crate answers to its own extern name.
+extern crate self as lash_postgres_store;
 
 #[cfg(test)]
 #[path = "postgres/checkpoint_depth_tests.rs"]

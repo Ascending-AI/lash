@@ -8,8 +8,8 @@
 //! built from. This module is the adapter between those two, and nothing more.
 //!
 //! **Construction is not an open.** Opening a `PostgresStorage` is the
-//! side-effectful act preflight exists to precede: it may run creation DDL or an
-//! explicit migration, it insists on a usable await-event signing secret, and it
+//! side-effectful act preflight exists to precede: it writes the release stamp,
+//! it insists on a usable await-event signing secret, and it
 //! emits schema-gate telemetry — each of which can be exactly what a broken
 //! deployment fails at, and none of which a probe may perform. Nothing here
 //! calls a `PostgresStorage` constructor. The only statements this module's own
@@ -207,7 +207,7 @@ impl StorePreflight for PostgresStorePreflight {
     /// constructed to serve the walk — building a `PostgresStorage` to read its
     /// tables would perform the open the whole surface exists to precede. The
     /// enumeration itself, and every argument for why each statement is shaped
-    /// the way it is, lives in [`walk`].
+    /// the way it is, lives in the `walk` submodule.
     async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {
         walk::scan_durable(&self.pool, scan).await
     }

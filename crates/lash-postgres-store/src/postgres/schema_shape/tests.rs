@@ -22,7 +22,7 @@ fn the_published_ddl_file_is_the_ddl_this_build_executes() {
     assert_eq!(
         crate::PostgresStorage::schema_ddl(),
         published,
-        "{} must be the exact DDL open executes",
+        "{} must be the exact DDL the migrate runner and host tooling execute",
         path.display()
     );
 }
@@ -594,8 +594,8 @@ async fn a_freshly_provisioned_scratch_schema_is_conformant() {
     drop_scratch_schema(connection, &scratch).await;
 }
 
-/// Applying the artifact twice must be a no-op, which is what lets
-/// `SchemaProvisioning::LashManaged` run it on every open.
+/// Applying the artifact twice must be a no-op, which is what lets `lash
+/// migrate` re-run it idempotently and lets a host re-apply it safely.
 #[tokio::test]
 async fn the_ddl_artifact_is_idempotent() {
     let Some(database_url) = postgres_test_support::database_url() else {

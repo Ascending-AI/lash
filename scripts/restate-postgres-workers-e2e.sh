@@ -120,9 +120,16 @@ trap cleanup EXIT
 # Several services share the host-binary runtime image. Pull it once with
 # retries so a transient Docker Hub HEAD error doesn't fail compose startup.
 for image in $("${compose[@]}" config --images); do bash scripts/docker-pull-with-retry.sh "$image"; done
-# The workers start once the S3 service's health check sees its bucket; the
-# conformance run below needs the same, so wait for it here too.
-"${compose[@]}" up -d postgres s3 restate mock-provider worker-a worker-b worker-proxy
+# Worker open never provisions the schema (FIG-3797): bringing Postgres up
+# alone first lets the harness apply the committed schema artifact before any
+# worker starts — the same step `lash migrate` performs in a deployment.
+"${compose[@]}" up -d postgres
+until "${compose[@]}" exec -T postgres pg_isready -U lash -d lash >/dev/null 2>&1; do
+  sleep 1
+done
+"${compose[@]}" exec -T postgres psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
+  < "$repo/crates/lash-postgres-store/schema.sql"
+"${compose[@]}" up -d s3 restate mock-provider worker-a worker-b worker-proxy
 lash_s3_wait "$("${compose[@]}" ps -q s3)" 60
 
 if [ "$workflow_segment" != "2" ] && [ "${LASH_E2E_TURN_CONTROL_ONLY:-0}" != "1" ]; then

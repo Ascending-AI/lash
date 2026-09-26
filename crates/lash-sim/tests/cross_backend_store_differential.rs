@@ -2329,6 +2329,12 @@ async fn cross_backend_store_differential_agrees() {
         .execute(&mut database_lock)
         .await
         .expect("acquire Postgres differential advisory lock");
+    // Worker open never provisions (FIG-3797): apply the committed artifact,
+    // the same step `lash migrate` performs, before opening.
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut database_lock)
+        .await
+        .expect("provision the shared Postgres database from schema.sql");
     let postgres = PostgresStorage::connect(&database_url)
         .await
         .expect("connect required Postgres differential backend");

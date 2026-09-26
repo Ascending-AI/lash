@@ -1,7 +1,10 @@
 use crate::*;
 
-/// The DDL this build provisions, committed verbatim as the crate's
+/// The DDL this build requires, committed verbatim as the crate's
 /// `schema.sql` artifact so a host can vendor the exact bytes lash executes.
+///
+/// Workers never run it: the only callers permitted to apply it are the `lash
+/// migrate` runner and host tooling, never an open (FIG-3797, FIG-3816).
 pub(crate) const SCHEMA_DDL: &str = include_str!("../../schema.sql");
 
 /// The DDL that drops every object `SCHEMA_DDL` provisions, committed verbatim
@@ -10,388 +13,43 @@ pub(crate) const SCHEMA_DDL: &str = include_str!("../../schema.sql");
 /// schema DDL declares, so the two files can never drift apart.
 pub(crate) const TEARDOWN_DDL: &str = include_str!("../../teardown.sql");
 
-/// Advisory-lock key lash takes for the duration of a schema-provisioning or
-/// schema-verifying transaction. See
+/// Advisory-lock key lash takes for the duration of a schema-verifying open or
+/// a `lash migrate` run. See
 /// [`crate::PostgresStorage::schema_advisory_lock_key`].
 pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
 
-struct SchemaMigration {
-    from: i32,
-    to: i32,
-    source_missing_tables: &'static [&'static str],
-    /// `(table, column)` pairs this build adds to a table the source already
-    /// has. Additive and nullable only: PostgreSQL records such a column in
-    /// catalog metadata and rewrites no row, which keeps a column-adding
-    /// migration in the same creation-only class as a table-adding one.
-    source_missing_columns: &'static [(&'static str, &'static str)],
-    /// Uniqueness guards this build adds to a table the source already has.
-    /// Adding one can fail against data the guard rejects, which is exactly why
-    /// it is declared: the migration transaction aborts and the operator sees
-    /// the conflict rather than a half-migrated schema.
-    source_missing_guards: &'static [DeclaredGuard],
-    /// Foreign keys this build adds to a table the source already has,
-    /// declared at the granularity the shape diff reports them: the
-    /// column pairing, the on-delete action, and the deferral flags.
-    source_missing_foreign_keys: &'static [DeclaredForeignKey],
-    introduced_relations: &'static [&'static str],
-    /// Named constraints the arm creates on tables the source already has.
-    /// `CHECK`s and foreign keys are `pg_constraint` rows, not `pg_class`
-    /// relations, so `introduced_relations` cannot see them — the divergence
-    /// probe looks these names up in the constraint catalog instead.
-    introduced_constraints: &'static [&'static str],
-    statements: &'static [&'static str],
+/// The generation component `$1` is provisioned at, or no row when the
+/// database has never been stamped for it.
+///
+/// It lives here, with the artifact that writes it, rather than in a table
+/// module: `schema_versions` is the one lash table whose *name* is also a
+/// *column* of another table (`lash_release_stamp.schema_versions`), and the
+/// renderer rewrites a table name wherever the token appears, so registering
+/// it would rewrite that column too. Provisioning owns the stamp; the schema
+/// artifacts are the ownership gate's declared home for it.
+pub(crate) const SELECT_COMPONENT_VERSION: &str =
+    "SELECT version FROM lash_schema_versions WHERE component = $1";
+
+/// Whether a stamped component version is inside the supported range
+/// [MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION] (FIG-3797).
+pub(crate) fn supported_version(version: Option<i32>) -> bool {
+    version.is_some_and(|v| (MIN_SUPPORTED_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&v))
 }
 
-/// One uniqueness guard an explicit migration adds, declared precisely enough
-/// that tolerating its absence tolerates *only* it.
-///
-/// Table and key columns alone are not an identity: a `PRIMARY KEY`, a full
-/// `UNIQUE`, and a partial `UNIQUE` over the same columns guard different row
-/// sets, and a declaration matching on columns alone would wave a missing
-/// primary key through the creation-only door on the strength of a partial
-/// index this build happens to add. The predicate is carried verbatim in the
-/// shape checker's normalized form, and `primary_key` and `nulls_not_distinct`
-/// are required to be false rather than declared: this build adds neither by
-/// migration, and a future one that needs to must say so here first.
-struct DeclaredGuard {
-    table: &'static str,
-    /// Key columns. The *set* is the identity, not the declared order, the same
-    /// way the shape checker pairs guards: column order changes which index
-    /// prefixes can be scanned, not which rows the guard rejects.
-    columns: &'static [&'static str],
-    /// The guard's partial-index predicate in [`UniqueGuard`]'s normalized form:
-    /// lower-cased, whitespace collapsed, outer parentheses stripped. `None`
-    /// declares a full `UNIQUE`, whose absence the declaration then tolerates
-    /// exactly — a predicate-less guard cannot match a partial index's finding
-    /// or vice versa.
-    predicate: Option<&'static str>,
-}
-
-/// One foreign key an explicit migration adds, declared precisely enough that
-/// tolerating its absence tolerates *only* it — the same discipline
-/// [`DeclaredGuard`] applies to uniqueness guards. The pairing of child to
-/// parent columns is the identity; the action and deferral flags are the
-/// semantics, so a declaration matching columns alone would wave a missing
-/// `DEFERRABLE` through on the strength of an immediate key this build happens
-/// to add.
-struct DeclaredForeignKey {
-    table: &'static str,
-    /// Referencing columns, zipped with `parent_columns` into the pairing set
-    /// the shape diff pairs on.
-    columns: &'static [&'static str],
-    parent_table: &'static str,
-    parent_columns: &'static [&'static str],
-    on_delete: ForeignKeyAction,
-    deferrable: bool,
-    initially_deferred: bool,
-}
-
-#[cfg(test)]
-const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_condemnations (
-            attachment_id TEXT PRIMARY KEY,
-            phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting')),
-            write_token TEXT,
-            CHECK (write_token IS NULL OR phase = 'condemned')
-        )"#;
-
-/// Each projection row is owned by the session whose head or anchor owns the
-/// checkpoint root named by `checkpoint_ref`. Owner-scoped session delete or
-/// process prune deletes an unreferenced root and cascades its edges in the same
-/// transaction. The component foreign key only prevents dangling edges; it is
-/// not a second reclaim trigger.
-#[cfg(test)]
-const CHECKPOINT_BLOB_REFS_DDL: &str = r#"CREATE TABLE lash_checkpoint_blob_refs (
-            checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
-            blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash),
-            PRIMARY KEY (checkpoint_ref, blob_ref)
-        )"#;
-
-#[cfg(test)]
-const CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_checkpoint_blob_refs_blob_ref
-            ON lash_checkpoint_blob_refs(blob_ref, checkpoint_ref)"#;
-
-#[cfg(test)]
-const SESSIONS_CHECKPOINT_REF_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_sessions_checkpoint_ref
-            ON lash_sessions(checkpoint_ref)"#;
-
-#[cfg(test)]
-const NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_node_anchors_checkpoint_ref
-            ON lash_node_anchors(checkpoint_ref)"#;
-
-#[cfg(test)]
-const SESSION_STATE_VERSION_DDL: &str =
-    r#"ALTER TABLE lash_session_meta ADD COLUMN session_state_version INTEGER"#;
-
-#[cfg(test)]
-const PROCESS_UPDATED_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_processes_updated
-    ON lash_processes(updated_at_ms)"#;
-
-/// Supports bounded operational inventory by session-state generation and gives
-/// the schema migration gate a relation-shaped witness when a component-60
-/// catalog is paired with a rewound component-59 ledger.
-#[cfg(test)]
-const SESSION_STATE_VERSION_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_session_meta_state_version
-            ON lash_session_meta(session_state_version, session_id)"#;
-
-#[cfg(test)]
-const PROCESS_PARENT_END_PLANS_DDL: &str = r#"CREATE TABLE lash_process_parent_end_plans (
-            process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-            actions_json TEXT NOT NULL
-        )"#;
-
-#[cfg(test)]
-const TOOL_INTENT_SUBMISSIONS_DDL: &str = r#"CREATE TABLE lash_tool_intent_submissions (
-            replay_key TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            execution_scope_id TEXT NOT NULL,
-            tool_call_id TEXT NOT NULL,
-            intent_index BIGINT NOT NULL,
-            kind TEXT NOT NULL,
-            payload_hash TEXT NOT NULL,
-            submission_json TEXT NOT NULL
-        )"#;
-
-#[cfg(test)]
-const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_intent_submissions_scope
-            ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index)"#;
-
-/// The two ordering indexes that back idle ingress-family arbitration.
-///
-/// Both cover columns component 52 already stores, so introducing them is
-/// creation-only: no column is added and no row is rewritten. This is why the
-/// 53 generation is reachable by migration at all.
-///
-/// `IF NOT EXISTS` makes each statement idempotent on its own, so a migration
-/// that is retried after failing later in its transaction cannot die on a
-/// duplicate-object error. The divergence probe over `introduced_relations` still
-/// refuses a stamp that already carries either index before any DDL runs; this
-/// is the second line, not a replacement for it.
-#[cfg(test)]
-const QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
-            ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)"#;
-
-#[cfg(test)]
-const PENDING_TURN_INPUT_ORDER_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
-            ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq)"#;
-
-#[cfg(test)]
-const TURN_CANCEL_REQUESTS_DDL: &str = r#"CREATE TABLE lash_turn_cancel_requests (
-    session_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    request_id TEXT NOT NULL,
-    origin TEXT,
-    reason TEXT,
-    disposition TEXT NOT NULL DEFAULT 'defer',
-    mode TEXT NOT NULL DEFAULT 'immediate',
-    affected_input_ids TEXT[] NOT NULL DEFAULT '{}',
-    affected_dispositions TEXT[] NOT NULL DEFAULT '{}',
-    PRIMARY KEY (session_id, turn_id)
-)"#;
-
-/// The durable effect-group journal, added by the 54 generation.
-///
-/// The group row is the settlement-sequence allocator: a finalizing child bumps
-/// `next_seq` inside its own fenced transaction, which is the only allocation
-/// that cannot lose an update the way `MAX(settlement_seq) + 1` can.
-#[cfg(test)]
-const RUNTIME_EFFECT_GROUP_DDL: &str = r#"CREATE TABLE lash_runtime_effect_group (
-            group_key TEXT PRIMARY KEY,
-            scope_id TEXT NOT NULL,
-            session_id TEXT,
-            wake TEXT NOT NULL,
-            loser_disposition TEXT NOT NULL,
-            children BIGINT NOT NULL,
-            next_seq BIGINT NOT NULL DEFAULT 0,
-            created_at_ms BIGINT NOT NULL
-        )"#;
-
-#[cfg(test)]
-const RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_session
-            ON lash_runtime_effect_group(session_id)"#;
-
-#[cfg(test)]
-const RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
-            ON lash_runtime_effect_group(scope_id)"#;
-
-/// Both columns are nullable with no default, so PostgreSQL adds them as catalog
-/// metadata: every already-journalled effect row survives the upgrade with its
-/// recorded `envelope_hash` — and therefore its lease fence — untouched.
-#[cfg(test)]
-const RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL: &str =
-    r#"ALTER TABLE lash_runtime_effect_replay ADD COLUMN IF NOT EXISTS group_key TEXT"#;
-
-#[cfg(test)]
-const RUNTIME_EFFECT_REPLAY_SETTLEMENT_SEQ_DDL: &str =
-    r#"ALTER TABLE lash_runtime_effect_replay ADD COLUMN IF NOT EXISTS settlement_seq BIGINT"#;
-
-#[cfg(test)]
-const RUNTIME_EFFECT_REPLAY_GROUP_SEQ_INDEX_DDL: &str = r#"CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
-            ON lash_runtime_effect_replay(group_key, settlement_seq)
-            WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL"#;
-
-/// The drain's queue read, indexed (FIG-1536).
-///
-/// `read_unsettled_group_children` asks for one group's children that hold no
-/// settlement rank. Without this the planner reaches that answer through the
-/// whole effect-replay table, which on a busy store is every effect any session
-/// ever journaled — a scan whose cost grows with history the drain has no
-/// interest in. The predicate keeps the index to exactly the rows a drain can
-/// act on: a settled child leaves it on finalize, so the index shrinks as a
-/// group drains and holds nothing at all for a fully settled one.
-///
-/// # Why this is a migration here and was not one on SQLite
-///
-/// The equivalent SQLite index shipped in the same generation as the columns it
-/// covers, with no version bump, because that tier's schema is
-/// reject-and-recreate: its guarded projection admits an idempotent index
-/// addition under the `sql_idempotent_index` carve-out precisely so that adding
-/// one does not force a bump that would delete every existing effect database.
-/// PostgreSQL has migrations, so it takes the routine path — a new generation
-/// with a creation-only migration into it — and the asymmetry is a property of
-/// what each tier can do about an old database, not a disagreement about what
-/// the index is for.
-#[cfg(test)]
-const RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_group_unsettled
-            ON lash_runtime_effect_replay(group_key, replay_key)
-            WHERE group_key IS NOT NULL AND settlement_seq IS NULL"#;
-
-#[cfg(test)]
-const TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL: &str = r#"ALTER TABLE lash_trigger_occurrences
-            ADD COLUMN IF NOT EXISTS reclaimable_at_ms BIGINT"#;
-
-#[cfg(test)]
-const TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL: &str = r#"UPDATE lash_trigger_occurrences AS occurrence
-            SET reclaimable_at_ms = occurrence.occurred_at_ms
-            WHERE occurrence.reclaimable_at_ms IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM lash_trigger_deliveries AS delivery
-                  WHERE delivery.occurrence_id = occurrence.occurrence_id
-              )"#;
-
-#[cfg(test)]
-const TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_reclaimable
-            ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
-            WHERE reclaimable_at_ms IS NOT NULL"#;
-
-const SESSION_META_ENUMERATION_DDL: &str = r#"ALTER TABLE lash_session_meta
-            ADD COLUMN created_at_ms BIGINT,
-            ADD COLUMN last_commit_at_ms BIGINT"#;
-
-const SESSION_META_ENUMERATION_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_session_meta_catalog
-            ON lash_session_meta(created_at_ms, session_id)"#;
-
-const DELETED_SESSION_ENUMERATION_DDL: &str = r#"ALTER TABLE lash_deleted_sessions
-            ADD COLUMN created_at_ms BIGINT,
-            ADD COLUMN last_commit_at_ms BIGINT,
-            ADD COLUMN head_revision BIGINT,
-            ADD COLUMN relation_kind TEXT,
-            ADD COLUMN parent_session_id TEXT"#;
-
-const DROP_REQUESTED_ANCESTOR_DDL: &str =
-    r#"ALTER TABLE lash_runtime_turn_commits DROP COLUMN requested_ancestor_node_id"#;
-
-const APPEND_IDENTITY_ALL_OR_NONE_DDL: &str = r#"ALTER TABLE lash_runtime_turn_commits
-            ADD CONSTRAINT lash_runtime_turn_commits_append_identity_all_or_none
-            CHECK (
-                (request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
-                AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL)
-            )"#;
-
-const PENDING_OBSERVER_INTENTS_DDL: &str = r#"CREATE TABLE lash_session_meta_pending_observer_intents (
-            session_id TEXT NOT NULL,
-            process_index BIGINT NOT NULL,
-            process_id TEXT NOT NULL,
-            process_incarnation BIGINT,
-            attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
-            PRIMARY KEY (session_id, process_id),
-            UNIQUE (session_id, process_index),
-            FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
-        )"#;
-
-const FOLD_PENDING_OBSERVER_INTENTS_DDL: &str = r#"WITH candidates AS (
-            SELECT session_id, process_id, 0 AS attribution_rank,
-                   layer_index AS source_group, process_index AS source_index,
-                   'host_requested'::TEXT AS attribution
-              FROM lash_session_meta_observer_intent_processes
-            UNION ALL
-            SELECT session_id, process_id, 1 AS attribution_rank,
-                   0 AS source_group, process_index AS source_index,
-                   'fork_inherited'::TEXT AS attribution
-              FROM lash_session_meta_fork_pending_observer_processes
-        ), occurrences AS (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY session_id, process_id
-                ORDER BY attribution_rank, source_group, source_index
-            ) AS occurrence
-              FROM candidates
-        ), indexed AS (
-            SELECT session_id, process_id, attribution,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY session_id
-                       ORDER BY attribution_rank, source_group, source_index, process_id
-                   ) - 1 AS process_index
-              FROM occurrences
-             WHERE occurrence = 1
-        )
-        INSERT INTO lash_session_meta_pending_observer_intents
-            (session_id, process_index, process_id, process_incarnation, attribution)
-        SELECT session_id, process_index, process_id, NULL, attribution
-          FROM indexed"#;
-
-const DROP_OBSERVER_INTENT_LAYERS_DDL: &str =
-    r#"DROP TABLE lash_session_meta_observer_intent_processes"#;
-const DROP_FORK_PENDING_OBSERVER_INTENTS_DDL: &str =
-    r#"DROP TABLE lash_session_meta_fork_pending_observer_processes"#;
-
-const DROP_OBSERVER_INTENT_DEPTH_DDL: &str =
-    r#"ALTER TABLE lash_session_meta DROP COLUMN observer_intent_depth"#;
-
-#[cfg(test)]
-const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
-    table: "lash_runtime_effect_replay",
-    columns: &["group_key", "settlement_seq"],
-    predicate: Some("(group_key is not null) and (settlement_seq is not null)"),
-}];
-
-/// Columns whose presence makes every older component shape a hard-cutover
-/// refusal. All published pre-61 graph catalogs expose this sequence column;
-/// no creation-only migration may silently carry it into component 61.
-const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "seq")];
-
-#[path = "schema/migrations.rs"]
-mod migrations;
-
-use migrations::SCHEMA_MIGRATIONS;
-
-#[cfg(test)]
-#[path = "schema/historical_migrations.rs"]
-mod historical_migrations;
-#[cfg(test)]
-use historical_migrations::HISTORICAL_MIGRATIONS;
-/// How one open should treat the database's schema.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct SchemaOpenOptions {
-    pub(crate) provisioning: SchemaProvisioning,
-    pub(crate) check: SchemaCheck,
-}
-
-/// Brings the database to the state this build requires and returns the
+/// Verifies the database is in the state this build admits and returns the
 /// catalog's identity.
 ///
-/// Both provisioning modes end in the same structural verification, so a
-/// database that opens is a database whose shape lash has read — never one whose
-/// version stamp merely claimed the right number.
-pub(crate) async fn ensure_schema(
-    pool: &PgPool,
-    options: SchemaOpenOptions,
-) -> Result<String, StoreError> {
+/// Open is read-only about the schema itself: workers never run DDL on
+/// PostgreSQL (FIG-3797), so this gate verifies rather than provisions. The
+/// only write is the release stamp, recorded by the transaction that admitted
+/// the database. A database that opens is a database whose shape lash has read
+/// — never one whose version stamp merely claimed the right number.
+pub(crate) async fn ensure_schema(pool: &PgPool, check: SchemaCheck) -> Result<String, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-    // Serializes lash's own openers, so two concurrent first opens cannot race
-    // each other's DDL and a verifying open cannot read a half-applied batch from
-    // a provisioning one. It does *not* coordinate with host migrations: nothing
-    // outside lash takes this key unless a host chooses to, which
-    // `PostgresStorage::schema_advisory_lock_key` exists to let it do. The lock
-    // needs no privileges, so it is taken in both modes.
+    // Serializes lash's own openers with each other and with a `lash migrate`
+    // run holding the same key exclusively, so a verifying open cannot read a
+    // half-applied migration batch. The lock needs no privileges, so a runtime
+    // role that can neither create nor alter anything can still hold it.
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
     sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
         .bind(lock_namespace)
@@ -399,140 +57,26 @@ pub(crate) async fn ensure_schema(
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-    if options.provisioning == SchemaProvisioning::LashManaged {
-        // Preflight before the DDL: a stale baseline must be rejected rather than
-        // have this build's creation statements layered over it.
-        let search_path = read_search_path(&mut tx).await?;
-        let installation = resolve_installation(&mut tx, &search_path).await?;
-        let mut search_path_to_restore = None;
-        let preflight_mismatch = if let Some(installation) = installation {
-            match read_component_version(&mut tx, &installation, &SchemaShape::expected()).await? {
-                ComponentVersion::Readable(Some(found)) if found != SCHEMA_VERSION => {
-                    match apply_schema_migration(
-                        &mut tx,
-                        installation.namespace(),
-                        found,
-                        options.check == SchemaCheck::Enforce,
-                    )
-                    .await?
-                    {
-                        SchemaMigrationOutcome::Applied {
-                            previous_search_path,
-                        } => {
-                            search_path_to_restore = Some(previous_search_path);
-                            None
-                        }
-                        SchemaMigrationOutcome::NotApplicable => {
-                            Some((installation.namespace().to_string(), Some(found)))
-                        }
-                        SchemaMigrationOutcome::Divergent { artifacts } => {
-                            let preflight = SchemaReport {
-                                schema: Some(installation.namespace().to_string()),
-                                expected_version: SCHEMA_VERSION,
-                                found_version: Some(found),
-                                findings: vec![SchemaFinding::VersionMismatch {
-                                    expected: SCHEMA_VERSION,
-                                    found: Some(found),
-                                }],
-                            };
-                            record_schema_migration_denial(
-                                &preflight,
-                                options,
-                                "denied_migration_divergence",
-                                "migration_artifacts",
-                                &artifacts.join(", "),
-                            );
-                            return Err(schema_migration_divergence_error(found, &artifacts));
-                        }
-                        SchemaMigrationOutcome::SourceMismatch { report } => {
-                            let details = report
-                                .findings
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<_>>()
-                                .join("; ");
-                            record_schema_migration_denial(
-                                &report,
-                                options,
-                                "denied_migration_source_shape",
-                                "migration_source_findings",
-                                &details,
-                            );
-                            return Err(schema_migration_source_mismatch_error(found, &report));
-                        }
-                    }
-                }
-                ComponentVersion::Readable(found) if found != Some(SCHEMA_VERSION) => {
-                    Some((installation.namespace().to_string(), found))
-                }
-                ComponentVersion::Readable(_) | ComponentVersion::Unreadable => None,
-            }
-        } else {
-            let unstamped_schema: Option<String> = sqlx::query_scalar(
-                r#"SELECT current_schema()::text
-                   WHERE EXISTS (
-                       SELECT 1
-                       FROM pg_catalog.pg_class AS class
-                       JOIN pg_catalog.pg_namespace AS namespace
-                         ON namespace.oid = class.relnamespace
-                       WHERE namespace.nspname = current_schema()
-                         AND class.relname LIKE 'lash\_%' ESCAPE '\'
-                         AND class.relname <> 'lash_schema_versions'
-                         AND class.relkind IN ('r', 'p', 'v', 'm', 'S')
-                   )"#,
-            )
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            unstamped_schema.map(|schema| (schema, None))
-        };
-        if let Some((schema, found_version)) = preflight_mismatch {
-            // Same field set as every other outcome, built from what the preflight
-            // knows: it runs before the structural read, so the only finding it can
-            // have is the version itself.
-            let preflight = SchemaReport {
-                schema: Some(schema),
-                expected_version: SCHEMA_VERSION,
-                found_version,
-                findings: vec![SchemaFinding::VersionMismatch {
-                    expected: SCHEMA_VERSION,
-                    found: found_version,
-                }],
-            };
-            record_schema_gate_decision(&preflight, options, "denied_version_preflight");
-            let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
-            return Err(version_mismatch_error(
-                found_version,
-                writing_release.as_deref(),
-            ));
-        }
-        tx.execute(SCHEMA_DDL).await.map_err(store_sqlx_error)?;
-        if let Some(search_path) = search_path_to_restore {
-            sqlx::query("SELECT set_config('search_path', $1, true)")
-                .bind(search_path)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-    }
 
     let report = verify_schema_shape(&mut tx).await?;
-    // Any mismatch left after the explicit migration preflight is the
-    // reject-and-recreate boundary. `SchemaCheck` governs the catalog comparison
-    // only; letting `WarnOnly` downgrade this would silently run one build against
-    // another schema generation.
-    if report.found_version != Some(SCHEMA_VERSION) {
-        record_schema_gate_decision(&report, options, "denied_version");
+    // The two-sided supported range is unconditional (FIG-3797): a stamp below
+    // the minimum is an older or skipped compatibility release, one above the
+    // latest is a newer build's catalog. `SchemaCheck` governs the structural
+    // comparison only; letting `WarnOnly` downgrade this would silently run one
+    // build against another schema generation.
+    if !supported_version(report.found_version) {
+        record_schema_gate_decision(&report, check, "denied_version");
         let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
         return Err(version_mismatch_error(
+            report.schema.as_deref(),
             report.found_version,
             writing_release.as_deref(),
         ));
     }
-    let admitted_as = match (report.is_conformant(), options.check) {
+    let admitted_as = match (report.is_conformant(), check) {
         (true, _) => "allowed",
         (false, SchemaCheck::Enforce) => {
-            record_schema_gate_decision(&report, options, "denied_shape");
+            record_schema_gate_decision(&report, check, "denied_shape");
             return Err(StoreError::Backend(report.to_string()));
         }
         (false, SchemaCheck::WarnOnly) => {
@@ -549,14 +93,16 @@ pub(crate) async fn ensure_schema(
     // itself. The admission is recorded only after this succeeds, so a refused
     // open never logs an admission first.
     let Some(catalog_id) = read_catalog_id(&mut *tx).await.map_err(store_sqlx_error)? else {
-        record_schema_gate_decision(&report, options, "denied_seed_catalog_identity_missing");
+        record_schema_gate_decision(&report, check, "denied_seed_catalog_identity_missing");
         return Err(missing_catalog_identity_error());
     };
-    record_schema_gate_decision(&report, options, admitted_as);
+    record_schema_gate_decision(&report, check, admitted_as);
     // Only an admitted open stamps. A refused open has not written this
     // database and must not claim it did, and the write rides the admitting
     // transaction so a rollback anywhere after this point takes the stamp with
-    // it.
+    // it. Stamping is DML on a lash-owned table, not DDL: a runtime role with
+    // only row privileges still records it, and a role that cannot is skipped
+    // rather than failed.
     crate::release_stamp::write(&mut tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -584,455 +130,6 @@ pub(crate) fn missing_catalog_identity_error() -> StoreError {
          statements from this build's schema.sql artifact"
             .to_string(),
     )
-}
-
-enum SchemaMigrationOutcome {
-    NotApplicable,
-    Applied { previous_search_path: String },
-    Divergent { artifacts: Vec<String> },
-    SourceMismatch { report: SchemaReport },
-}
-
-/// The generation component `$1` is provisioned at, or no row when the
-/// database has never been stamped for it.
-///
-/// It lives here, with the artifact that writes it, rather than in a table
-/// module: `schema_versions` is the one lash table whose *name* is also a
-/// *column* of another table (`lash_release_stamp.schema_versions`), and the
-/// renderer rewrites a table name wherever the token appears, so registering
-/// it would rewrite that column too. Provisioning owns the stamp; the schema
-/// artifacts are the ownership gate's declared home for it.
-pub(crate) const SELECT_COMPONENT_VERSION: &str =
-    "SELECT version FROM lash_schema_versions WHERE component = $1";
-
-async fn apply_schema_migration(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    namespace: &str,
-    found: i32,
-    apply: bool,
-) -> Result<SchemaMigrationOutcome, StoreError> {
-    let Some(migration) = SCHEMA_MIGRATIONS
-        .iter()
-        .find(|migration| migration.from == found && migration.to == SCHEMA_VERSION)
-    else {
-        return Ok(SchemaMigrationOutcome::NotApplicable);
-    };
-    let introduced_relations = migration
-        .introduced_relations
-        .iter()
-        .copied()
-        .chain((migration.from < 64).then_some("lash_session_meta_pending_observer_intents"))
-        .collect::<Vec<_>>();
-    let mut artifacts = sqlx::query_scalar::<_, String>(
-        r#"SELECT pg_catalog.format('%I.%I', namespace.nspname, class.relname)
-           FROM pg_catalog.pg_class AS class
-           JOIN pg_catalog.pg_namespace AS namespace
-             ON namespace.oid = class.relnamespace
-          WHERE namespace.nspname = ANY(pg_catalog.current_schemas(true))
-            AND class.relname = ANY($1)
-          ORDER BY namespace.nspname, class.relname"#,
-    )
-    .bind(introduced_relations)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    let retired_columns = sqlx::query_scalar::<_, String>(
-        r#"SELECT pg_catalog.format(
-                    '%I.%I.%I', column_info.table_schema,
-                    column_info.table_name, column_info.column_name
-                )
-             FROM information_schema.columns AS column_info
-            WHERE column_info.table_schema = ANY(pg_catalog.current_schemas(true))
-              AND (column_info.table_name, column_info.column_name) IN (
-                    SELECT retired.table_name, retired.column_name
-                      FROM unnest($1::TEXT[], $2::TEXT[])
-                           AS retired(table_name, column_name)
-                  )
-            ORDER BY column_info.table_schema, column_info.table_name,
-                     column_info.column_name"#,
-    )
-    .bind(
-        RETIRED_HARD_CUTOVER_COLUMNS
-            .iter()
-            .map(|(table, _)| *table)
-            .collect::<Vec<_>>(),
-    )
-    .bind(
-        RETIRED_HARD_CUTOVER_COLUMNS
-            .iter()
-            .map(|(_, column)| *column)
-            .collect::<Vec<_>>(),
-    )
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    artifacts.extend(retired_columns);
-    if !migration.introduced_constraints.is_empty() {
-        let constraint_artifacts = sqlx::query_scalar::<_, String>(
-            r#"SELECT pg_catalog.format('%I.%I', namespace.nspname, constraint_catalog.conname)
-               FROM pg_catalog.pg_constraint AS constraint_catalog
-               JOIN pg_catalog.pg_namespace AS namespace
-                 ON namespace.oid = constraint_catalog.connamespace
-              WHERE namespace.nspname = ANY(pg_catalog.current_schemas(true))
-                AND constraint_catalog.conname = ANY($1)
-              ORDER BY namespace.nspname, constraint_catalog.conname"#,
-        )
-        .bind(migration.introduced_constraints.to_vec())
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        artifacts.extend(constraint_artifacts);
-    }
-    artifacts.sort();
-    artifacts.dedup();
-    if !artifacts.is_empty() {
-        return Ok(SchemaMigrationOutcome::Divergent { artifacts });
-    }
-    // A zero-statement declaration represents a hard cutover, not an empty
-    // migration. Its introduced relation may produce a more precise divergence
-    // refusal above, but the boundary remains refusal-only if that witness is
-    // absent: source-shape matching and the shared historical DDL must never
-    // advance its stamp.
-    if migration.is_recreate_boundary() {
-        return Ok(SchemaMigrationOutcome::NotApplicable);
-    }
-    if !apply {
-        return Ok(SchemaMigrationOutcome::NotApplicable);
-    }
-    let source_report = verify_schema_migration_source_shape(tx).await?;
-    if !migration.matches_source_shape(&source_report) {
-        return Ok(SchemaMigrationOutcome::SourceMismatch {
-            report: source_report,
-        });
-    }
-    let previous_search_path: String = sqlx::query_scalar("SELECT current_setting('search_path')")
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    sqlx::query("SELECT set_config('search_path', pg_catalog.quote_ident($1::text), true)")
-        .bind(namespace)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    for statement in migration.statements {
-        sqlx::query(statement)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    }
-    if migration.from < 62 {
-        for statement in [
-            SESSION_META_ENUMERATION_DDL,
-            DELETED_SESSION_ENUMERATION_DDL,
-            SESSION_META_ENUMERATION_INDEX_DDL,
-            DROP_REQUESTED_ANCESTOR_DDL,
-            APPEND_IDENTITY_ALL_OR_NONE_DDL,
-        ] {
-            sqlx::query(statement)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-        backfill_checkpoint_blob_refs_tx(tx).await?;
-        for statement in [
-            PENDING_OBSERVER_INTENTS_DDL,
-            FOLD_PENDING_OBSERVER_INTENTS_DDL,
-            DROP_OBSERVER_INTENT_LAYERS_DDL,
-            DROP_FORK_PENDING_OBSERVER_INTENTS_DDL,
-            DROP_OBSERVER_INTENT_DEPTH_DDL,
-        ] {
-            sqlx::query(statement)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-    }
-
-    let stamped = sqlx::query(
-        "UPDATE lash_schema_versions
-         SET version = $1
-         WHERE component = $2 AND version = $3",
-    )
-    .bind(migration.to)
-    .bind(SCHEMA_COMPONENT)
-    .bind(migration.from)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?
-    .rows_affected();
-    if stamped != 1 {
-        return Err(StoreError::Backend(format!(
-            "Postgres schema migration {} -> {} updated {stamped} component stamps, expected 1",
-            migration.from, migration.to
-        )));
-    }
-    tracing::info!(
-        component = SCHEMA_COMPONENT,
-        from_version = migration.from,
-        to_version = migration.to,
-        outcome = "migrated",
-        "applied Lash-managed PostgreSQL schema migration"
-    );
-    Ok(SchemaMigrationOutcome::Applied {
-        previous_search_path,
-    })
-}
-
-/// Arm exact-edge reclaim for every checkpoint manifest that was rooted before
-/// component 57 existed. This runs after the projection table is created and
-/// before the component stamp advances, inside the opener's schema transaction.
-///
-/// Only the manifest envelope is decoded. Component codec compatibility remains
-/// a hydration concern: an old component version can still name an exact blob
-/// edge without this binary interpreting its body.
-async fn backfill_checkpoint_blob_refs_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<(), StoreError> {
-    let rooted_manifests = sqlx::query(
-        "WITH rooted AS (
-             SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL
-             UNION
-             SELECT checkpoint_ref FROM lash_node_anchors
-         )
-         SELECT rooted.checkpoint_ref, blob.content
-         FROM rooted
-         LEFT JOIN lash_blobs AS blob ON blob.hash = rooted.checkpoint_ref
-         ORDER BY rooted.checkpoint_ref",
-    )
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    for row in rooted_manifests {
-        let checkpoint_ref: String = row.get(0);
-        let bytes: Option<Vec<u8>> = row.get(1);
-        let bytes = bytes.ok_or_else(|| StoreError::StoredDataCorrupt {
-            record_kind: "SessionCheckpoint",
-            message: format!("rooted checkpoint manifest `{checkpoint_ref}` is missing"),
-        })?;
-        let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
-            &bytes,
-            "SessionCheckpoint",
-            lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-        )?;
-        let component_refs = manifest
-            .components
-            .values()
-            .map(|descriptor| descriptor.blob_ref.as_str())
-            .collect::<Vec<_>>();
-        sqlx::query(
-            "INSERT INTO lash_checkpoint_blob_refs (checkpoint_ref, blob_ref)
-             SELECT $1, component_ref
-             FROM unnest($2::TEXT[]) AS component_ref
-             ON CONFLICT (checkpoint_ref, blob_ref) DO NOTHING",
-        )
-        .bind(&checkpoint_ref)
-        .bind(component_refs)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    }
-    Ok(())
-}
-
-impl SchemaMigration {
-    fn is_recreate_boundary(&self) -> bool {
-        self.statements.is_empty()
-    }
-
-    fn matches_source_shape(&self, report: &SchemaReport) -> bool {
-        if report.found_version != Some(self.from) {
-            return false;
-        }
-        let mut missing_tables = self
-            .source_missing_tables
-            .iter()
-            .copied()
-            .collect::<std::collections::BTreeSet<_>>();
-        let mut missing_columns = self
-            .source_missing_columns
-            .iter()
-            .copied()
-            .collect::<std::collections::BTreeSet<_>>();
-        let mut missing_guards = self.source_missing_guards.iter().collect::<Vec<_>>();
-        let mut missing_foreign_keys = self.source_missing_foreign_keys.iter().collect::<Vec<_>>();
-        let mut saw_version = false;
-        let mut saw_requested_ancestor = false;
-        let mut saw_observer_intent_depth = false;
-        let mut saw_missing_pending_observer_intents = false;
-        for finding in &report.findings {
-            match finding {
-                SchemaFinding::VersionMismatch { expected, found }
-                    if *expected == self.to && *found == Some(self.from) =>
-                {
-                    if saw_version {
-                        return false;
-                    }
-                    saw_version = true;
-                }
-                SchemaFinding::MissingTable { table } if missing_tables.remove(table.as_str()) => {}
-                SchemaFinding::MissingTable { table }
-                    if self.from <= 62 && table == "lash_session_meta_pending_observer_intents" =>
-                {
-                    if saw_missing_pending_observer_intents {
-                        return false;
-                    }
-                    saw_missing_pending_observer_intents = true;
-                }
-                SchemaFinding::MissingColumn { table, expected }
-                    if is_creation_only_column(expected)
-                        && missing_columns.remove(&(table.as_str(), expected.name.as_str())) => {}
-                SchemaFinding::MissingUniqueGuard { table, expected }
-                    if remove_guard(&mut missing_guards, table, expected) => {}
-                SchemaFinding::MissingForeignKey { table, expected }
-                    if remove_foreign_key(&mut missing_foreign_keys, table, expected) => {}
-                SchemaFinding::UnexpectedColumn { table, found }
-                    if table == "lash_runtime_turn_commits"
-                        && found.name == "requested_ancestor_node_id" =>
-                {
-                    if saw_requested_ancestor {
-                        return false;
-                    }
-                    saw_requested_ancestor = true;
-                }
-                SchemaFinding::UnexpectedColumn { table, found }
-                    if self.from <= 62
-                        && table == "lash_session_meta"
-                        && found.name == "observer_intent_depth" =>
-                {
-                    if saw_observer_intent_depth {
-                        return false;
-                    }
-                    saw_observer_intent_depth = true;
-                }
-                _ => return false,
-            }
-        }
-        saw_version
-            && missing_tables.is_empty()
-            && missing_columns.is_empty()
-            && missing_guards.is_empty()
-            && missing_foreign_keys.is_empty()
-            && (self.from >= 62 || self.from == 60 || saw_requested_ancestor)
-            && (self.from > 62 || saw_missing_pending_observer_intents)
-            && (self.from > 62 || saw_observer_intent_depth)
-    }
-}
-
-/// Whether a missing column is one PostgreSQL adds without rewriting a row.
-///
-/// This is the property that put column-adding migrations in the creation-only
-/// class at all. A nullable column with no value source of its own is recorded
-/// in catalog metadata and touches no page, so an effect journal keeps every
-/// recorded `envelope_hash` across the bump. A `NOT NULL DEFAULT` or a
-/// `BIGSERIAL` supplies a value for every existing row, which is a rewrite of
-/// the whole table under a lock — a data migration wearing a creation-only
-/// declaration. Checked here rather than trusted from the declaration, because
-/// the declaration names a column and the *shape* is what decides.
-fn is_creation_only_column(expected: &ColumnShape) -> bool {
-    expected.nullable && !expected.value_source.supplies_own_value()
-}
-
-/// Consumes the declared guard matching a finding.
-///
-/// Matched on table, key-column set, and predicate together — and only for a
-/// guard that is neither a primary key nor `NULLS NOT DISTINCT`. Columns alone
-/// would make a declaration for an added partial index also excuse a *missing
-/// primary key* or a missing full `UNIQUE` over the same columns, which guard
-/// strictly more rows and whose absence is real drift.
-fn remove_guard(
-    declared: &mut Vec<&'static DeclaredGuard>,
-    table: &str,
-    expected: &UniqueGuard,
-) -> bool {
-    if expected.primary_key || expected.nulls_not_distinct {
-        return false;
-    }
-    let columns = expected
-        .columns
-        .iter()
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    let Some(index) = declared.iter().position(|guard| {
-        guard.table == table
-            && guard
-                .columns
-                .iter()
-                .copied()
-                .map(str::to_string)
-                .collect::<std::collections::BTreeSet<_>>()
-                == columns
-            && expected.predicate.as_deref() == guard.predicate
-    }) else {
-        return false;
-    };
-    declared.remove(index);
-    true
-}
-
-/// Consumes the declared foreign key matching a finding.
-///
-/// Matched on the same identity the shape diff pairs on — the parent table
-/// and the set of child-to-parent column pairings — plus the action and
-/// deferral flags, because a declaration for the deferred key this build adds
-/// must not excuse a missing immediate key over the same columns.
-fn remove_foreign_key(
-    declared: &mut Vec<&'static DeclaredForeignKey>,
-    table: &str,
-    expected: &ForeignKeyShape,
-) -> bool {
-    let pairings: std::collections::BTreeSet<(String, String)> = expected
-        .columns
-        .iter()
-        .cloned()
-        .zip(expected.parent_columns.iter().cloned())
-        .collect();
-    let Some(index) = declared.iter().position(|key| {
-        key.table == table
-            && key.parent_table == expected.parent_table
-            && key
-                .columns
-                .iter()
-                .copied()
-                .map(str::to_string)
-                .zip(key.parent_columns.iter().copied().map(str::to_string))
-                .collect::<std::collections::BTreeSet<_>>()
-                == pairings
-            && key.on_delete == expected.on_delete
-            && key.deferrable == expected.deferrable
-            && key.initially_deferred == expected.initially_deferred
-    }) else {
-        return false;
-    };
-    declared.remove(index);
-    true
-}
-
-fn schema_migration_divergence_error(found: i32, artifacts: &[String]) -> StoreError {
-    StoreError::Backend(format!(
-        "Postgres schema component `{SCHEMA_COMPONENT}` has version {found}, expected \
-         {SCHEMA_VERSION}, but the live schema contains schema artifacts newer than the recorded \
-         version or explicitly retired by the current hard cutover: {}. Lash will not guess \
-         whether this is a partial migration, version-ledger rollback, old graph shape, or other \
-         corruption. Stop the deployment and inspect the database. {}",
-        artifacts.join(", "),
-        recreate_trust_domain_remedy()
-    ))
-}
-
-fn schema_migration_source_mismatch_error(found: i32, report: &SchemaReport) -> StoreError {
-    let findings = report
-        .findings
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("; ");
-    StoreError::Backend(format!(
-        "Postgres schema component `{SCHEMA_COMPONENT}` has version {found}, expected \
-         {SCHEMA_VERSION}, but the live schema does not match the published component-{found} \
-         migration source shape. Lash will not run migration DDL against an unknown source or \
-         guess at repairs. Stop the deployment, inspect and recreate the whole Lash trust domain \
-         before retrying; source-shape findings: {findings}"
-    ))
 }
 
 /// Runs the structural check under the published advisory key, held in *shared*
@@ -1098,14 +195,10 @@ async fn verify_within_repeatable_read(
 }
 
 /// A gate that can deny ships the inputs it consulted, not just its verdict
-/// (`docs/agents/way-of-working.md`): the stamped and expected versions, both
-/// policy knobs, and the finding counts per class, so a refused open can be
+/// (`docs/agents/way-of-working.md`): the stamped and expected versions, the
+/// policy knob, and the finding counts per class, so a refused open can be
 /// diagnosed from a trace without reproducing it.
-fn record_schema_gate_decision(
-    report: &SchemaReport,
-    options: SchemaOpenOptions,
-    outcome: &'static str,
-) {
+fn record_schema_gate_decision(report: &SchemaReport, check: SchemaCheck, outcome: &'static str) {
     let counts = report.finding_counts();
     let fields = tracing::field::display(
         counts
@@ -1121,8 +214,8 @@ fn record_schema_gate_decision(
             schema,
             expected_version = report.expected_version,
             found_version = ?report.found_version,
-            provisioning = ?options.provisioning,
-            schema_check = ?options.check,
+            supported_min = MIN_SUPPORTED_SCHEMA_VERSION,
+            schema_check = ?check,
             findings = %fields,
             finding_total = report.findings.len(),
             outcome,
@@ -1133,8 +226,8 @@ fn record_schema_gate_decision(
             schema,
             expected_version = report.expected_version,
             found_version = ?report.found_version,
-            provisioning = ?options.provisioning,
-            schema_check = ?options.check,
+            supported_min = MIN_SUPPORTED_SCHEMA_VERSION,
+            schema_check = ?check,
             findings = %fields,
             finding_total = report.findings.len(),
             outcome,
@@ -1143,109 +236,37 @@ fn record_schema_gate_decision(
     }
 }
 
-/// Emits the full basis for a migration-specific denial.
-///
-/// The ordinary schema-gate event carries finding counts. Migration preflight
-/// also consults concrete artifact names or source-shape findings, so those
-/// inputs ride the denial event rather than existing only in the returned error.
-fn record_schema_migration_denial(
-    report: &SchemaReport,
-    options: SchemaOpenOptions,
-    outcome: &'static str,
-    detail_kind: &'static str,
-    details: &str,
-) {
-    let counts = report.finding_counts();
-    let fields = tracing::field::display(
-        counts
-            .iter()
-            .map(|(section, count)| format!("{section}={count}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    let schema = report.schema.as_deref().unwrap_or("<unresolved>");
-    tracing::warn!(
-        component = SCHEMA_COMPONENT,
-        schema,
-        expected_version = report.expected_version,
-        found_version = ?report.found_version,
-        provisioning = ?options.provisioning,
-        schema_check = ?options.check,
-        findings = %fields,
-        finding_total = report.findings.len(),
-        migration_detail_kind = detail_kind,
-        migration_details = details,
-        outcome,
-        "lash Postgres schema migration preflight refused the database"
-    );
-}
-
-/// Names, from the live catalog, what this build can migrate into its own
-/// component version, so a refusal never describes a cutover the catalog has
-/// already left behind (FIG-3172).
-fn forward_migration_sentence(found: i32) -> String {
-    let sources = SCHEMA_MIGRATIONS
-        .iter()
-        // Only *executable* upgrades advertise a path: a recreate-boundary row
-        // exists so preflight can refuse with the right vocabulary, and naming
-        // it here would tell an operator to "re-open with provisioning" for a
-        // migration that can never apply anything.
-        .filter(|migration| migration.to == SCHEMA_VERSION && !migration.is_recreate_boundary())
-        .map(|migration| migration.from)
-        .collect::<Vec<_>>();
-    if sources.is_empty() {
-        format!(
-            "This build declares no forward migration into component {SCHEMA_VERSION}, so no \
-             recorded version upgrades into it."
-        )
-    } else if sources.contains(&found) {
-        format!(
-            "This build does declare a forward migration from component {found} into \
-             {SCHEMA_VERSION}, so this refusal means the migration was not applied for this open \
-             rather than that none exists: re-open with Lash-managed provisioning enabled."
-        )
-    } else {
-        format!(
-            "This build declares a forward migration into component {SCHEMA_VERSION} only from \
-             component {}, so component {found} has no upgrade path.",
-            sources
-                .iter()
-                .map(i32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-}
-
 /// The recreate procedure, stated where the operator reads it rather than behind
 /// a link. Every SQL-store refusal that ends in reject-and-recreate shares this
 /// text so the four durable surfaces are always named together (FIG-3173).
 fn recreate_trust_domain_remedy() -> String {
     "Drain the affected sessions and recreate the whole Lash trust domain with this build: drop \
-     the schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database, provision it from \
-     the DDL artifact this build ships (`PostgresStorage::schema_ddl()`, committed as \
-     crates/lash-postgres-store/schema.sql), and reset the Restate state with it — Restate left \
-     behind still refers to sessions the recreated database does not have. An older build's \
-     catalog can hold tables this build's teardown no longer names, so this build's \
+     the schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database, provision it with \
+     `lash migrate` or this build's schema.sql artifact (`PostgresStorage::schema_ddl()`, \
+     committed as crates/lash-postgres-store/schema.sql), and reset the Restate state with it — \
+     Restate left behind still refers to sessions the recreated database does not have. An older \
+     build's catalog can hold tables this build's teardown no longer names, so this build's \
      `teardown_ddl()` does not clear it. \
      docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md records why \
      this boundary refuses instead of migrating."
         .to_string()
 }
 
-/// Renders the remaining version-mismatch error, naming the remedy rather than
-/// only the numbers. The explicit floor migrations have already been handled
-/// by the Lash-managed `Enforce` preflight when it is applicable.
+/// Renders the supported-range refusal, naming the found version and the
+/// admitted range rather than only the expected integer (FIG-3797).
 ///
-/// Every caller reaches this only for a stamp that is not `SCHEMA_VERSION`, so
-/// the explanation is derived here from the two live facts — the direction of
-/// the mismatch and the migration catalog — instead of a frozen paragraph about
-/// one historical cutover (FIG-3172).
+/// The range is the two-sided fact every arm shares: a stamp below
+/// `MIN_SUPPORTED_SCHEMA_VERSION` is an older build or a skipped compatibility
+/// release, a stamp above `SCHEMA_VERSION` is a newer build's catalog, and no
+/// stamp at all means the generation cannot be established — or the database
+/// was never provisioned, in which case the remedy is `lash migrate`, not
+/// recreation.
 ///
-/// Every arm keeps the phrase `has no applicable migration`: it is what the
-/// version-bump runbook companion classifies this refusal by, and it is the one
-/// claim that holds in all three directions. The sibling migration refusals must
-/// not acquire it.
+/// Every arm keeps the phrase `has no applicable migration` where a migration
+/// is the thing that does not exist: it is what the version-bump runbook
+/// companion classifies this refusal by. The one exception is a database with
+/// no installation at all, where the honest statement is that nothing was ever
+/// provisioned.
 ///
 /// `writing_release` names the lash release that wrote the database when the
 /// release stamp could still be read. It rides as a trailing sentence: every
@@ -1255,17 +276,21 @@ fn recreate_trust_domain_remedy() -> String {
 /// database with no readable stamp produces the message unchanged rather than a
 /// hedge about an unknown release.
 pub(crate) fn version_mismatch_error(
+    installed_schema: Option<&str>,
     found: Option<i32>,
     writing_release: Option<&str>,
 ) -> StoreError {
+    let range = format!("{MIN_SUPPORTED_SCHEMA_VERSION}..={SCHEMA_VERSION}");
     let (stamp, explanation) = match found {
-        Some(version) if version < SCHEMA_VERSION => (
+        Some(version) if version < MIN_SUPPORTED_SCHEMA_VERSION => (
             format!("has version {version}"),
             format!(
-                "That database was provisioned by an older build: component {version} predates \
-                 this build's component {SCHEMA_VERSION} and has no applicable migration. The \
-                 component schema is normally a reject-and-recreate boundary. {}",
-                forward_migration_sentence(version)
+                "That database was provisioned by an older or skipped release: component \
+                 {version} predates this build's minimum supported component \
+                 {MIN_SUPPORTED_SCHEMA_VERSION} and has no applicable migration. This build \
+                 declares no forward migration into component {SCHEMA_VERSION}. The component \
+                 schema is normally a reject-and-recreate boundary. {}",
+                recreate_trust_domain_remedy()
             ),
         ),
         // A caller only renders a mismatch, so the remaining stamped case is a
@@ -1274,30 +299,48 @@ pub(crate) fn version_mismatch_error(
             format!("has version {version}"),
             format!(
                 "That database was provisioned by a newer build: component {version} is ahead of \
-                 this build's component {SCHEMA_VERSION} and has no applicable migration, because \
-                 Lash never migrates a schema backwards. Deploy a build whose component version \
-                 is {version} against this database instead of downgrading it."
+                 this build's supported range {range} and has no applicable migration, because \
+                 Lash never migrates a schema backwards. Deploy a build whose supported range \
+                 includes component {version} instead of downgrading it."
             ),
         ),
-        None => (
+        // Lash relations exist but the stamp row does not: the generation
+        // cannot be established and the remedy is recreation, not migration.
+        None if installed_schema.is_some() => (
             "has no version stamp".to_string(),
             format!(
-                "That database carries Lash relations but no `lash_schema_versions` row for this \
-                 component, so its generation cannot be established at all and it has no \
-                 applicable migration. This build requires component {SCHEMA_VERSION}."
+                "That database carries Lash relations but no readable `lash_schema_versions` row \
+                 for this component, so its generation cannot be established at all and it has no \
+                 applicable migration. {}",
+                recreate_trust_domain_remedy()
             ),
+        ),
+        // Nothing on the search path is lash's: the host never provisioned.
+        // Migration, not recreation, is the remedy — there is no trust domain
+        // to drain.
+        None => (
+            "has no version stamp".to_string(),
+            "That database is unprovisioned: no lash schema installation resolves through the \
+             connection's search_path. Run `lash migrate` (or apply this build's schema.sql \
+             artifact through the host's own tooling) before opening it."
+                .to_string(),
         ),
     };
     let release_clause = match writing_release {
         Some(release) => format!(" This database was last written by lash release {release}."),
         None => String::new(),
     };
-    StoreError::Backend(format!(
-        "Postgres schema component `{SCHEMA_COMPONENT}` {stamp}, expected {SCHEMA_VERSION}. \
-         {explanation} {} This gate is unconditional; SchemaCheck::WarnOnly does not relax \
-         it.{release_clause}",
-        recreate_trust_domain_remedy()
-    ))
+    StoreError::SchemaVersionOutOfRange {
+        component: SCHEMA_COMPONENT.to_string(),
+        found,
+        supported_min: MIN_SUPPORTED_SCHEMA_VERSION,
+        supported_latest: SCHEMA_VERSION,
+        message: format!(
+            "Postgres schema component `{SCHEMA_COMPONENT}` {stamp}, expected {SCHEMA_VERSION} \
+             (supported range {range}). {explanation} This gate is unconditional; \
+             SchemaCheck::WarnOnly does not relax it.{release_clause}"
+        ),
+    }
 }
 
 #[cfg(test)]

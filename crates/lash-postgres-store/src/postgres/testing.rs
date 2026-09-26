@@ -8,10 +8,11 @@
 //! turns; suites that do not need their own database instead of a turn.
 //!
 //! [`IsolatedDatabase`] gives a suite a uniquely named, freshly created
-//! database derived from the configured URL, and drops it on teardown. The
-//! caller opens [`PostgresStorage`](crate::PostgresStorage) against
-//! [`IsolatedDatabase::url`], which provisions the schema the same way it does
-//! for the shared database.
+//! database derived from the configured URL, and drops it on teardown.
+//! Creation applies this build's committed `schema.sql` artifact into the new
+//! database — the same provisioning `lash migrate` performs — so a following
+//! [`PostgresStorage`](crate::PostgresStorage) open verifies a schema it did
+//! not create (FIG-3797).
 
 use sqlx::{Connection, PgConnection};
 
@@ -70,11 +71,30 @@ impl IsolatedDatabase {
             .unwrap_or_else(|error| {
                 panic!("create isolated test database {database_name}: {error}")
             });
-        Self {
+        connection
+            .close()
+            .await
+            .expect("close Postgres maintenance connection");
+        let isolated = Self {
             maintenance_url: base_url.to_string(),
             database_name,
             url,
-        }
+        };
+        // Open never provisions: worker startup runs no DDL (FIG-3797), so the
+        // harness applies the committed artifact itself — the same job `lash
+        // migrate` does for a deployment.
+        let mut connection = PgConnection::connect(&isolated.url)
+            .await
+            .expect("connect isolated database for provisioning");
+        sqlx::raw_sql(crate::schema::SCHEMA_DDL)
+            .execute(&mut connection)
+            .await
+            .expect("provision isolated test database from schema.sql");
+        connection
+            .close()
+            .await
+            .expect("close isolated provisioning connection");
+        isolated
     }
 
     /// The connection URL for the isolated database.

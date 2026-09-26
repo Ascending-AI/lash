@@ -42,9 +42,17 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macros"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+
+# The migrate binary wraps the library's runner; anyhow is the CLI-facing
+# error type, matching the runbook binaries' convention.
+anyhow = { workspace = true }
+
+[[bin]]
+name = "lash-migrate"
+path = "src/bin/lash_migrate.rs"
 
 [dev-dependencies]
 lash-conformance = { workspace = true, features = ["lashlang"] }
@@ -89,6 +97,10 @@ path = "tests/schema_drift.rs"
 [[test]]
 name = "host_provisioned_rollout"
 path = "tests/host_provisioned_rollout.rs"
+
+[[test]]
+name = "migrate"
+path = "tests/migrate.rs"
 
 [[test]]
 name = "schema_constraints"

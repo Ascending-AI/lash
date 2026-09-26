@@ -617,6 +617,12 @@ async fn generated_cross_backend_surface_differential_agrees() {
         .execute(&mut database_lock)
         .await
         .unwrap();
+    // Worker open never provisions (FIG-3797): apply the committed artifact,
+    // the same step `lash migrate` performs, before opening.
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut database_lock)
+        .await
+        .unwrap();
     let storage = PostgresStorage::connect(&database_url).await.unwrap();
     // CI seed 852 minimized to occurrence ingestion with no subscription state.
     if let Some(divergence) = Box::pin(first_divergence(

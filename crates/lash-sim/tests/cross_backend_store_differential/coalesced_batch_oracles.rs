@@ -171,6 +171,12 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
         .execute(&mut database_lock)
         .await
         .expect("acquire Postgres literal-oracle advisory lock");
+    // Worker open never provisions (FIG-3797): apply the committed artifact,
+    // the same step `lash migrate` performs, before opening.
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut database_lock)
+        .await
+        .expect("provision the shared Postgres database from schema.sql");
     let postgres = PostgresStorage::connect(&database_url)
         .await
         .expect("connect required Postgres literal-oracle backend");
@@ -331,6 +337,12 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
         .execute(&mut database_lock)
         .await
         .expect("acquire Postgres ready-gap advisory lock");
+    // Worker open never provisions (FIG-3797): apply the committed artifact,
+    // the same step `lash migrate` performs, before opening.
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut database_lock)
+        .await
+        .expect("provision the shared Postgres database from schema.sql");
     let postgres = PostgresStorage::connect(&database_url)
         .await
         .expect("connect required Postgres ready-gap backend");

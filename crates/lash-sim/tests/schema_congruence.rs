@@ -120,6 +120,14 @@ const TABLE_REGISTRY: &[TablePair] = &[
             reason: "Postgres uses a schema-version table while SQLite uses PRAGMA user_version",
         },
     },
+    TablePair {
+        sqlite_table: None,
+        postgres_table: Some("lash_migrations"),
+        parity: Parity::OneBackendOnly {
+            side: Backend::Postgres,
+            reason: "the `lash migrate` ledger records applied expand/backfill/contract steps; SQLite provisions from its schema text at open and runs no separate migrator (FIG-3816)",
+        },
+    },
     pair("session_execution_leases", "lash_session_execution_leases"),
     pair("session_ingress", "lash_session_ingress"),
     pair("session_meta", "lash_session_meta"),

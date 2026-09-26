@@ -46,23 +46,26 @@ use serde_json::json;
 use sqlx::PgPool;
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
-/// The oldest component version this build has an explicit migration from
-/// (`lash_postgres_store::postgres::schema::SCHEMA_MIGRATIONS`). Anything below
-/// it is the ordinary reject-and-recreate boundary, which is what the
-/// older-store refusal exists to prove — so the fixture stamps a version under
-/// this floor, never one the build would happily migrate.
+/// A component version well below this build's supported range floor: worker
+/// open admits only `[min_supported, latest]` (FIG-3797), so anything under
+/// this fixture version is the ordinary reject-and-recreate boundary, which is
+/// what the older-store refusal exists to prove.
 ///
 /// This constant and the four artifact lists below are pinned to the newest
-/// component generation. `scripts/check_version_bump_fixtures.py` derives every
-/// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
-/// component without moving them, so they are never discovered stale by a live
-/// run.
+/// component generation. `scripts/check_version_bump_fixtures.py` fails when a
+/// bump moves the component without moving them, so they are never discovered
+/// stale by a live run.
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The tables component 101 lacks: the cancellation affected-input child table
 /// component 102 installed (FIG-3263), the queued-run tables, the session
 /// ingress component 127 installs (FIG-3540), the park-feed clock and event
 /// tables component 128 installs (FIG-3659), and the catalog identity
 /// component 132 installs (FIG-3667).
+///
+/// Generation pinning is historical: no open-time migration catalog remains,
+/// so these lists now describe a catalog old enough that the supported-range
+/// gate refuses it outright rather than a source an in-open migration arm
+/// would have accepted.
 const POST_FLOOR_TABLES: [&str; 7] = [
     "lash_catalog_identity",
     "lash_queued_run_members",
@@ -98,19 +101,13 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 12] = [
 /// The named constraints absent from component 101 on tables that survive the
 /// table drops: none.
 const POST_FLOOR_CONSTRAINTS: [(&str, &str); 0] = [];
-/// Every post-floor relation, for proving the fixture retained none of them: the
-/// floor migration's `introduced_relations`.
+/// Every post-floor relation, for proving the fixture retained none of them.
 const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
-/// What the newest generation alone introduced — the `introduced_relations`
-/// and `introduced_constraints` of the migration out of the immediate
-/// predecessor version. The divergent fixture records that predecessor over
-/// the *current* catalog, so these are exactly the artifacts its refusal must
-/// enumerate.
-///
-/// The retained 130 -> 131 generation introduced no relation or constraint
-/// the refusal would name. Component 132 (FIG-3667) is destructive: no
-/// 131 → 132 arm exists, so the component-131 stamp over the current catalog
-/// is refused for having no applicable migration and names no artifacts.
+/// What the newest generation alone introduced — the artifacts a predecessor
+/// stamp over the *current* catalog would have to name for the refusal to be
+/// about divergence rather than the version boundary. The supported-range gate
+/// (FIG-3797) short-circuits before the structural diff, so a divergent stamp
+/// is refused on version alone and enumerates none.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over
 /// the current catalog is refused at the ordinary reject-and-recreate
@@ -127,13 +124,13 @@ const TRIGGER_SOURCE_TYPE: &str = "runbook.button.pressed";
 /// does is an effect.
 const UNREACHABLE_RESTATE_INGRESS: &str = "http://127.0.0.1:9";
 
-/// Prose that only the divergence refusal carries
-/// (`schema_migration_divergence_error`).
+/// Prose the retired divergence refusal used to carry. No gate emits it now —
+/// the marker survives so a refusal that somehow resurfaces the old claim is
+/// still classified rather than mistaken for the version boundary.
 const DIVERGENT_ARTIFACTS_MARKER: &str = "schema artifacts newer than the recorded version";
-/// Prose that only the migration-source-shape refusal carries
-/// (`schema_migration_source_mismatch_error`).
+/// Prose the retired migration-source-shape refusal used to carry.
 const SOURCE_MISMATCH_MARKER: &str = "does not match the published component-";
-/// Prose that only the plain exact-match refusal carries
+/// Prose that only the supported-range refusal carries
 /// (`version_mismatch_error`).
 const NO_APPLICABLE_MIGRATION_MARKER: &str = "has no applicable migration";
 
@@ -540,9 +537,16 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
 }
 
 async fn seed(database_url: &str) -> Result<()> {
+    // Worker open never provisions (FIG-3797): the harness applies the
+    // committed artifact itself, the way `lash migrate` does for a deployment.
+    let admin = admin_pool(database_url).await?;
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&admin)
+        .await
+        .context("provision the pre-bump store from schema.sql")?;
     let storage = PostgresStorage::connect(database_url)
         .await
-        .context("create the pre-bump store")?;
+        .context("open the provisioned pre-bump store")?;
     let pool = storage.pool().clone();
     let expected_version = recorded_version(&pool).await?;
 
@@ -767,12 +771,12 @@ async fn refuse(database_url: &str) -> Result<()> {
         "older-store fixture retained {current_artifact_count} current-only artifacts"
     );
 
-    // Versions below every explicit migration's source remain the ordinary
-    // reject-and-recreate boundary. This must stay *below* the floor, not merely
-    // one behind the divergent stamp: this build migrates from both 50 and 51,
-    // so either of those would be migrated rather than refused. Leave this stamp
-    // in place after all refusal checks so the next phase exercises recreation
-    // from that path.
+    // Versions below the supported range floor remain the ordinary
+    // reject-and-recreate boundary. The floor stamp must sit under
+    // `min_supported_schema_version`, not merely behind the divergent stamp:
+    // any stamp the range admits would open rather than refuse. Leave this
+    // stamp in place after all refusal checks so the next phase exercises
+    // recreation from that path.
     let older = MIGRATION_FLOOR_VERSION - 1;
     stamp_version(&pool, older).await?;
     let (opened_older, error_older) = open_attempt(database_url).await;
@@ -887,6 +891,13 @@ async fn recreate(database_url: &str) -> Result<()> {
         .execute(&pool)
         .await
         .context("drop lash-owned tables")?;
+
+    // Worker open never provisions (FIG-3797): recreation applies the committed
+    // artifact explicitly, the way `lash migrate` does for a deployment.
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&pool)
+        .await
+        .context("provision the recreated store from schema.sql")?;
 
     let storage = PostgresStorage::connect(database_url)
         .await

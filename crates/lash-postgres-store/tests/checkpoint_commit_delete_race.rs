@@ -9,7 +9,7 @@ use lash_core_execution::{
     HydratedCheckpointComponent, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaProvisioning};
+use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck};
 use sqlx::postgres::PgPoolOptions;
 
 use crate::support::{SharedDatabaseLock, database_url};
@@ -148,7 +148,6 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
     let commit_storage = PostgresStorage::from_pool_with(
         commit_pool.clone(),
         PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::HostProvisioned,
             schema_check: SchemaCheck::Enforce,
             ..PostgresStoreConfig::default()
         },

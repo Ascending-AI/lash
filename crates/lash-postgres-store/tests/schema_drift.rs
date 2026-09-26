@@ -25,7 +25,7 @@ use lash_core_execution::{
 };
 use lash_postgres_store::{
     ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig,
-    RequiredConstraintFinding, SchemaCheck, SchemaFinding, SchemaProvisioning,
+    RequiredConstraintFinding, SchemaCheck, SchemaFinding,
 };
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
@@ -618,13 +618,13 @@ fn with_credentials(database_url: &str, role: &str, password: &str) -> String {
     format!("{scheme}://{role}:{password}@{host_and_path}")
 }
 
-/// `SchemaProvisioning::HostProvisioned` must run no DDL at all — the point of the
-/// mode is that a host under restricted grants can open lash. Proven against a
-/// purpose-made role that holds nothing but `USAGE` on the schema and `SELECT` on
-/// its tables: any mode that executed even one `CREATE TABLE IF NOT EXISTS`, or
-/// that wrote a version stamp or a seed row, fails here.
+/// Worker open must run no DDL at all (FIG-3797): a deployment may run lash
+/// under a role with nothing but `USAGE` on the schema and row privileges on
+/// its tables. Proven against a purpose-made role that holds `USAGE` plus
+/// `SELECT` alone: any open that executed even one `CREATE TABLE IF NOT
+/// EXISTS`, or that wrote a version stamp or a seed row, fails here.
 #[tokio::test]
-async fn host_provisioned_mode_needs_no_ddl_privilege() {
+async fn worker_open_needs_no_ddl_privilege() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping host-provisioned no-DDL proof: database URL is not set");
         return;
@@ -659,32 +659,17 @@ async fn host_provisioned_mode_needs_no_ddl_privilege() {
     let storage = PostgresStorage::from_pool_with(
         reader_pool.clone(),
         PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::HostProvisioned,
             ..PostgresStoreConfig::default()
         },
     )
     .await
-    .unwrap_or_else(|error| {
-        panic!("host-provisioned open must need no privilege beyond SELECT: {error}")
-    });
+    .unwrap_or_else(|error| panic!("worker open must need no privilege beyond SELECT: {error}"));
     assert!(
         storage
             .verify_schema()
             .await
-            .expect("verify host-provisioned schema")
+            .expect("verify provisioned schema")
             .is_conformant()
-    );
-
-    // The default mode still provisions, which is what every existing caller
-    // relies on — and it is exactly what this role cannot do.
-    let denied =
-        PostgresStorage::from_pool_with(reader_pool.clone(), PostgresStoreConfig::default())
-            .await
-            .err()
-            .expect("lash-managed provisioning must need DDL privilege the role lacks");
-    assert!(
-        denied.to_string().contains("permission denied"),
-        "the default mode must fail on the missing DDL privilege: {denied}"
     );
     reader_pool.close().await;
 
@@ -694,10 +679,10 @@ async fn host_provisioned_mode_needs_no_ddl_privilege() {
     scratch.cleanup().await;
 }
 
-/// An unprovisioned database in host-provisioned mode is a configuration error,
-/// and the message must say so rather than emit a diff of every missing table.
+/// An unprovisioned database is a configuration error every open refuses, and
+/// the message must say so rather than emit a diff of every missing table.
 #[tokio::test]
-async fn host_provisioned_mode_rejects_an_unprovisioned_database() {
+async fn worker_open_rejects_an_unprovisioned_database() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping unprovisioned rejection: database URL is not set");
         return;
@@ -728,13 +713,12 @@ async fn host_provisioned_mode_rejects_an_unprovisioned_database() {
     let error = PostgresStorage::from_pool_with(
         pool.clone(),
         PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::HostProvisioned,
             ..PostgresStoreConfig::default()
         },
     )
     .await
     .err()
-    .expect("an unprovisioned database must not open in host-provisioned mode");
+    .expect("an unprovisioned database must not open");
     assert!(
         error.to_string().contains("has no version stamp"),
         "the error must say the database is unprovisioned: {error}"
@@ -812,7 +796,6 @@ async fn a_partial_installation_fronting_a_complete_one_is_rejected() {
     let error = PostgresStorage::from_pool_with(
         pool.clone(),
         PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::HostProvisioned,
             ..PostgresStoreConfig::default()
         },
     )
@@ -882,7 +865,6 @@ async fn a_lash_table_shadowing_the_anchored_installation_is_reported() {
     let error = PostgresStorage::from_pool_with(
         pool.clone(),
         PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::HostProvisioned,
             ..PostgresStoreConfig::default()
         },
     )
@@ -917,33 +899,24 @@ async fn a_stale_version_stamp_is_fatal_in_every_mode() {
             "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
         )
         .await;
-    for provisioning in [
-        SchemaProvisioning::HostProvisioned,
-        SchemaProvisioning::LashManaged,
-    ] {
-        for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-            let error = PostgresStorage::from_pool_with(
-                scratch.pool.clone(),
-                PostgresStoreConfig {
-                    schema_provisioning: provisioning,
-                    schema_check: check,
-                    ..PostgresStoreConfig::default()
-                },
-            )
-            .await
-            .err()
-            .unwrap_or_else(|| {
-                panic!("{provisioning:?} + {check:?} must reject a stale version stamp")
-            });
-            let rendered = error.to_string();
-            assert!(
-                rendered.contains("has version 1")
-                    && rendered.contains("reject-and-recreate")
-                    && rendered.contains("does not relax it"),
-                "{provisioning:?} + {check:?} must name the boundary and say the valve does not \
-                 relax it: {rendered}"
-            );
-        }
+    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
+        let error = PostgresStorage::from_pool_with(
+            scratch.pool.clone(),
+            PostgresStoreConfig {
+                schema_check: check,
+                ..PostgresStoreConfig::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("{check:?} must reject a stale version stamp"));
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("has version 1")
+                && rendered.contains("reject-and-recreate")
+                && rendered.contains("does not relax it"),
+            "{check:?} must name the boundary and say the valve does not relax it: {rendered}"
+        );
     }
     scratch.cleanup().await;
 }
@@ -974,31 +947,23 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         )
         .await;
 
-    for provisioning in [
-        SchemaProvisioning::HostProvisioned,
-        SchemaProvisioning::LashManaged,
-    ] {
-        let error = PostgresStorage::from_pool_with(
-            scratch.pool.clone(),
-            PostgresStoreConfig {
-                schema_provisioning: provisioning,
-                schema_check: SchemaCheck::WarnOnly,
-                ..PostgresStoreConfig::default()
-            },
-        )
-        .await
-        .err()
-        .unwrap_or_else(|| {
-            panic!("{provisioning:?} + WarnOnly must refuse the pre-cutover install")
-        });
-        let rendered = error.to_string();
-        assert!(
-            rendered.contains("has version 43")
-                && rendered.contains(&format!("expected {}", PostgresStorage::schema_version()))
-                && rendered.contains("does not relax it"),
-            "the version boundary must dominate the incompatible queued-work shape: {rendered}"
-        );
-    }
+    let error = PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_check: SchemaCheck::WarnOnly,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .err()
+    .unwrap_or_else(|| panic!("WarnOnly must refuse the pre-cutover install"));
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("has version 43")
+            && rendered.contains(&format!("expected {}", PostgresStorage::schema_version()))
+            && rendered.contains("does not relax it"),
+        "the version boundary must dominate the incompatible queued-work shape: {rendered}"
+    );
     scratch.cleanup().await;
 }
 
@@ -1055,16 +1020,10 @@ async fn component_115_is_refused_at_queued_run_cutover() {
         )
         .await;
 
-    let error = PostgresStorage::from_pool_with(
-        scratch.pool.clone(),
-        PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::LashManaged,
-            ..PostgresStoreConfig::default()
-        },
-    )
-    .await
-    .err()
-    .expect("component 115 must be refused at queued-run cutover");
+    let error = PostgresStorage::from_pool(scratch.pool.clone())
+        .await
+        .err()
+        .expect("component 115 must be refused at queued-run cutover");
     let rendered = error.to_string();
     assert!(
         rendered.contains("version 115")
@@ -1099,16 +1058,10 @@ async fn component_114_is_refused() {
         )
         .await;
 
-    let error = PostgresStorage::from_pool_with(
-        scratch.pool.clone(),
-        PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::LashManaged,
-            ..PostgresStoreConfig::default()
-        },
-    )
-    .await
-    .err()
-    .unwrap_or_else(|| panic!("component 114 must be refused at queued-run cutover"));
+    let error = PostgresStorage::from_pool(scratch.pool.clone())
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("component 114 must be refused at queued-run cutover"));
     let rendered = error.to_string();
     assert!(
         rendered.contains("no applicable migration"),
@@ -1159,33 +1112,25 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
         )
         .await;
 
-    for provisioning in [
-        SchemaProvisioning::HostProvisioned,
-        SchemaProvisioning::LashManaged,
-    ] {
-        for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-            let error = PostgresStorage::from_pool_with(
-                scratch.pool.clone(),
-                PostgresStoreConfig {
-                    schema_provisioning: provisioning,
-                    schema_check: check,
-                    ..PostgresStoreConfig::default()
-                },
-            )
-            .await
-            .err()
-            .unwrap_or_else(|| panic!("{provisioning:?} + {check:?} must refuse component 65"));
-            let rendered = error.to_string();
-            assert!(
-                rendered.contains("has version 65")
-                    && rendered
-                        .contains(&format!("expected {}", PostgresStorage::schema_version()))
-                    && rendered.contains("no applicable migration")
-                    && rendered.contains("does not relax it"),
-                "the destructive version boundary was lost for {provisioning:?} + {check:?}: \
-                 {rendered}"
-            );
-        }
+    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
+        let error = PostgresStorage::from_pool_with(
+            scratch.pool.clone(),
+            PostgresStoreConfig {
+                schema_check: check,
+                ..PostgresStoreConfig::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("{check:?} must refuse component 65"));
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("has version 65")
+                && rendered.contains(&format!("expected {}", PostgresStorage::schema_version()))
+                && rendered.contains("no applicable migration")
+                && rendered.contains("does not relax it"),
+            "the destructive version boundary was lost for {check:?}: {rendered}"
+        );
     }
 
     let version: i32 = sqlx::query_scalar(
@@ -1620,44 +1565,12 @@ async fn the_schema_gate_emits_its_decision_basis() {
         ],
     );
 
-    // (e) the LashManaged preflight is a separate early return: it denies before the
-    // structural read runs at all, and has to carry the same basis.
-    assert!(
-        PostgresStorage::from_pool_with(
-            scratch.pool.clone(),
-            PostgresStoreConfig {
-                schema_provisioning: SchemaProvisioning::LashManaged,
-                ..PostgresStoreConfig::default()
-            },
-        )
-        .await
-        .is_err()
-    );
-    assert_evidence_with_provisioning(
-        capture,
-        &scratch.name,
-        "denied_version_preflight",
-        "LashManaged",
-        &["found_version=Some(1)", "COMPONENT VERSION=1"],
-    );
-
     scratch.cleanup().await;
 }
 
 /// Asserts one captured decision carries the named outcome plus the inputs the gate
 /// consulted to reach it.
 fn assert_evidence(capture: &EventCapture, schema: &str, outcome: &str, extra: &[&str]) {
-    assert_evidence_with_provisioning(capture, schema, outcome, "HostProvisioned", extra);
-}
-
-/// As [`assert_evidence`], for an outcome reached under another provisioning mode.
-fn assert_evidence_with_provisioning(
-    capture: &EventCapture,
-    schema: &str,
-    outcome: &str,
-    provisioning: &str,
-    extra: &[&str],
-) {
     let events = capture.events_for(schema);
     let event = events
         .iter()
@@ -1667,12 +1580,18 @@ fn assert_evidence_with_provisioning(
                 "no schema-gate event with outcome={outcome} for {schema}; captured:\n{events:#?}"
             )
         });
-    let provisioning = format!("provisioning={provisioning}");
     let expected_version = format!("expected_version={}", PostgresStorage::schema_version());
-    for field in ["component=lash-postgres-store", expected_version.as_str()]
-        .iter()
-        .chain(std::iter::once(&provisioning.as_str()))
-        .chain(extra)
+    let supported_min = format!(
+        "supported_min={}",
+        PostgresStorage::min_supported_schema_version()
+    );
+    for field in [
+        "component=lash-postgres-store",
+        expected_version.as_str(),
+        supported_min.as_str(),
+    ]
+    .iter()
+    .chain(extra)
     {
         assert!(
             event.contains(field),

@@ -20,9 +20,7 @@ use lash_core_execution::{
     BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan, DurableSurface,
     ScanCoverage, StorePreflight,
 };
-use lash_postgres_store::{
-    PostgresStorage, PostgresStoreConfig, PostgresStorePreflight, SchemaProvisioning,
-};
+use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, PostgresStorePreflight};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -102,7 +100,6 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     let storage = PostgresStorage::from_pool_with(
         scratch.pool.clone(),
         PostgresStoreConfig {
-            schema_provisioning: SchemaProvisioning::HostProvisioned,
             ..PostgresStoreConfig::default()
         },
     )

@@ -16,7 +16,7 @@ use lash_core_execution::{
     ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence, SessionStoreFactory,
     TriggerStore,
 };
-use lash_postgres_store::PostgresStorage;
+use lash_postgres_store::{MigrationPhase, PostgresStorage};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 
@@ -256,6 +256,7 @@ async fn postgres_durable_fixture_reads_with_identical_semantics_when_configured
     assert_fixture_version();
     restore_dump(&database_url).await;
     let fixture_database_url = fixture_database_url(&database_url);
+    migrate_fixture_forward(&fixture_database_url).await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
         .expect("open restored Postgres durable fixture");
@@ -316,8 +317,11 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 133);
+    assert_eq!(PostgresStorage::schema_version(), 134);
     let fixture_database_url = fixture_database_url(&database_url);
+    // The committed dump was captured at the previous component; advance it
+    // the way a deployment does (FIG-3816).
+    migrate_fixture_forward(&fixture_database_url).await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
         .expect("open Postgres component-version refusal fixture");
@@ -661,6 +665,12 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("refresh queued run catalog");
+    // Component 134 (FIG-3816) adds the migration ledger. `schema.sql`
+    // declares it creation-only, so the authoritative block drops straight in.
+    sqlx::raw_sql(schema_table_ddl("lash_migrations"))
+        .execute(&pool)
+        .await
+        .expect("create the migration ledger from the authoritative DDL");
     sqlx::query(
         "UPDATE lash_schema_versions
             SET version = $1
@@ -1091,12 +1101,29 @@ fn assert_fixture_version() {
     let current = PostgresVersion {
         schema: PostgresStorage::schema_version(),
     };
-    assert_eq!(
-        recorded, current,
-        "declared Postgres durable schema version changed without fixture regeneration; run \
-         LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run //crates/lash-postgres-store:durable_read_fixture__test -- \
-         regenerate_postgres_durable_fixture --ignored --exact"
+    // The dump records the component it was captured at, and a version at or
+    // behind this build's is honest durable data — the test advances it with
+    // `lash migrate` (FIG-3816), the same path a deployment runs, instead of
+    // regenerating. A version *ahead* is impossible and a version the expand
+    // catalog can no longer carry fails loudly in `migrate` below; regenerate
+    // then with LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run
+    // //crates/lash-postgres-store:durable_read_fixture__test --
+    // regenerate_postgres_durable_fixture --ignored --exact
+    assert!(
+        recorded.schema <= current.schema,
+        "committed Postgres durable fixture declares schema {}, ahead of this build's component {}",
+        recorded.schema,
+        current.schema
     );
+}
+
+/// Advances a restored fixture catalog to this build's component through the
+/// same runner a deployment invokes: `lash migrate` under the schema advisory
+/// lock, recording each step in the ledger the migration itself creates.
+async fn migrate_fixture_forward(fixture_database_url: &str) {
+    PostgresStorage::migrate(fixture_database_url, MigrationPhase::Expand)
+        .await
+        .expect("migrate the restored fixture catalog to this build's component");
 }
 
 /// PostgreSQL runs process leases on the database clock, so the seed claims a
@@ -1178,6 +1205,16 @@ async fn recreate_fixture_schema(database_url: &str) {
     .execute(&pool)
     .await
     .expect("recreate dedicated Postgres durable-fixture schema");
+    // Worker open never provisions (FIG-3797): the fixture schema gets its
+    // tables from the committed artifact, applied the way `lash migrate` does.
+    sqlx::raw_sql(&format!("SET search_path TO {FIXTURE_SCHEMA};"))
+        .execute(&pool)
+        .await
+        .expect("point the fixture pool at the recreated schema");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&pool)
+        .await
+        .expect("provision the durable-fixture schema from schema.sql");
     pool.close().await;
 }
 

@@ -2,11 +2,12 @@
 //!
 //! An operator provisions the database out of band — applying the committed
 //! `schema.sql` artifact through host tooling, not through lash's open — and the
-//! runtime then opens with [`SchemaProvisioning::HostProvisioned`] under a role
-//! that cannot run DDL at all. The three cases below are the runbook's claims
-//! turned into assertions: prepare + verify + open succeeds, and both an
-//! incomplete (missing seed row) and an incompatible (drifted shape) schema are
-//! refused with the object named and nothing repaired behind the host's back.
+//! runtime then opens under a role that cannot run DDL at all (FIG-3797: open
+//! never runs DDL, on any configuration). The three cases below are the
+//! runbook's claims turned into assertions: prepare + verify + open succeeds,
+//! and both an incomplete (missing seed row) and an incompatible (drifted
+//! shape) schema are refused with the object named and nothing repaired behind
+//! the host's back.
 
 #![expect(
     clippy::expect_used,
@@ -15,7 +16,7 @@
 
 use std::str::FromStr;
 
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaProvisioning};
+use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection, Row};
 
@@ -32,7 +33,6 @@ use harness::ScratchSchema;
 
 fn host_provisioned_config() -> PostgresStoreConfig {
     PostgresStoreConfig {
-        schema_provisioning: SchemaProvisioning::HostProvisioned,
         schema_check: SchemaCheck::Enforce,
         ..PostgresStoreConfig::default()
     }
@@ -121,8 +121,8 @@ impl RuntimeRole {
 /// Prepare → verify → open under a role with no schema-changing privileges.
 ///
 /// This is the runbook's happy path end to end: host applies `schema.sql`, CI
-/// gates on `verify_schema_for`, and the runtime opens HostProvisioned +
-/// Enforce through a role for which DDL is not merely disabled but impossible.
+/// gates on `verify_schema_for`, and the runtime opens with Enforce through a
+/// role for which DDL is not merely disabled but impossible.
 #[tokio::test]
 async fn a_host_provisioned_schema_opens_under_a_role_without_ddl_privileges() {
     let Some(database_url) = database_url() else {
@@ -235,7 +235,7 @@ async fn a_schema_missing_its_seed_row_is_refused_without_repair() {
 
 /// An incompatible schema — one lash table dropped after provisioning — is
 /// refused under Enforce with the drifted object named, and stays dropped:
-/// HostProvisioned never re-runs the DDL the host owns.
+/// open never re-runs the DDL the host owns.
 #[tokio::test]
 async fn a_drifted_schema_is_refused_without_repair() {
     let Some(database_url) = database_url() else {
