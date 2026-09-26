@@ -158,6 +158,7 @@ pub(crate) fn drive_epoch_conn(
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, bool>(4)?,
                 ))
             },
         )
@@ -167,6 +168,7 @@ pub(crate) fn drive_epoch_conn(
             session_id: session_id.clone(),
         })?;
     Ok(StoredDriveEpoch {
+        control_pending: row.4,
         epoch: u64::try_from(row.0)
             .map_err(|_| stored_data_corrupt("SessionMeta", "drive_epoch must be non-negative"))?,
         admission: row.1.map(AdmissionId::new),

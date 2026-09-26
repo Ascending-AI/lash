@@ -9,7 +9,7 @@
 
 use lash_sansio::ProcessId;
 mod admission;
-mod park_reconcile;
+pub(crate) mod park_reconcile;
 mod workflow;
 
 mod stamped_requests;

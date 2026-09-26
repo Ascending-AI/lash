@@ -199,7 +199,7 @@ pub(crate) fn nearest_frame_node_id_conn(
 
 mod claim_support;
 mod maintenance;
-mod queued_run;
+pub(crate) mod queued_run;
 mod queued_run_assignment;
 mod queued_run_selection;
 mod queued_work;
@@ -209,6 +209,7 @@ mod session_commit;
 mod session_execution_lease;
 mod session_ingress;
 mod turn_input;
+pub(crate) mod turn_park;
 pub(crate) mod turn_park_feed;
 
 use claim_support::*;

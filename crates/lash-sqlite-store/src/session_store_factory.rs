@@ -31,7 +31,7 @@ pub struct SqliteSessionStoreFactory {
     pub(crate) effect_journal: Option<DatabaseLocation>,
     pub(crate) turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>>,
-    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
+    pub(crate) effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     artifact_stores: SharedArtifactStores,
 }
 
@@ -531,6 +531,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                             row.get::<_, i64>(5)?,
                             row.get::<_, i64>(6)?,
                             row.get::<_, i64>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                            row.get::<_, Option<i64>>(9)?,
                         ))
                     },
                 )?;
@@ -549,6 +551,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                     since_ms,
                     last_refused_ms,
                     attempts,
+                    engine_ref,
+                    resume_intent,
                 )| {
                     lash_core_execution::store::TurnPark::decode(
                         SessionId::from(session_id),
@@ -561,6 +565,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                         u64::try_from(since_ms).unwrap_or_default(),
                         u64::try_from(last_refused_ms).unwrap_or_default(),
                         u32::try_from(attempts).unwrap_or(u32::MAX),
+                        engine_ref,
+                        resume_intent.and_then(|intent| u64::try_from(intent).ok()),
                     )
                 },
             )
@@ -584,6 +590,89 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         root: &lash_sansio::TurnId,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
         self.read_root_terminal(session_id, root).await
+    }
+
+    async fn list_control_intents(
+        &self,
+        after: Option<lash_core_execution::store::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
+        let Some(conn) = self.control_ledger().await? else {
+            return Ok(Vec::new());
+        };
+        conn.call(move |conn| {
+            let sql = &crate::session_roots::session_roots_sql().verbs;
+            let mut stmt = conn.prepare(sql.intents.sql())?;
+            let rows = stmt
+                .query_map(
+                    params![
+                        after.map_or(0, |id| id.sequence()) as i64,
+                        limit.get() as i64
+                    ],
+                    crate::session_roots::intent_row,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows
+                .into_iter()
+                .map(crate::session_roots::StoredIntentRow::decode)
+                .collect())
+        })
+        .await
+        .map_err(sqlite_error)?
+    }
+
+    async fn list_reconcilable_sessions(
+        &self,
+        after: Option<&SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        let after = after.map_or_else(String::new, ToString::to_string);
+        let Some(conn) = self.control_ledger().await? else {
+            return Ok(Vec::new());
+        };
+        conn.call(move |conn| {
+            let sql = &crate::session_roots::session_roots_sql().verbs;
+            let mut statement = conn.prepare(sql.sessions.sql())?;
+            statement
+                .query_map(params![after, limit.get() as i64], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .map(|row| row.map(SessionId::from))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .await
+        .map_err(sqlite_error)
+    }
+
+    async fn list_terminal_roots(
+        &self,
+        after: Option<(SessionId, lash_sansio::TurnId)>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core_execution::store::RootTerminal>, StoreError> {
+        let Some(conn) = self.control_ledger().await? else {
+            return Ok(Vec::new());
+        };
+        conn.call(move |conn| {
+            let sql = &crate::session_roots::session_roots_sql().verbs;
+            let (session, root) = after
+                .map(|(s, r)| (s.to_string(), r.to_string()))
+                .unwrap_or_default();
+            let mut stmt = conn.prepare(sql.terminals.sql())?;
+            let keys = stmt
+                .query_map(params![session, root, limit.get() as i64], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(keys
+                .into_iter()
+                .map(|(s, r)| {
+                    crate::session_roots::root_terminal_conn(conn, &s.into(), &r.into())
+                        .and_then(|value| value.ok_or(StoreError::Contended))
+                })
+                .collect())
+        })
+        .await
+        .map_err(sqlite_error)?
     }
 
     async fn list_open_control_intents(

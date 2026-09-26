@@ -133,6 +133,7 @@ mod process_registry_completion;
 mod queued_work;
 mod release_stamp;
 mod required_constraints;
+mod root_verbs;
 mod schema;
 mod schema_fragments;
 mod schema_layout;

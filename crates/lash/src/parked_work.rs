@@ -36,6 +36,8 @@ pub struct ParkedWork {
     pub(crate) store_factory: Arc<dyn SessionStoreFactory>,
     pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,
+    pub(crate) scopes: Arc<dyn lash_core::engine::ScopeCloseSink>,
 }
 
 impl std::fmt::Debug for ParkedWork {

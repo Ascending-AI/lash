@@ -96,6 +96,23 @@ fn session_work_unavailable(
 /// same either way.
 #[async_trait::async_trait]
 pub trait SessionDriver: Send + Sync {
+    /// Whether this driver owns the deployment recovery pass.
+    fn owns_reconciliation(&self) -> bool {
+        false
+    }
+
+    /// One bounded recovery pass, invoked on the engine's own schedule.
+    async fn reconcile(
+        &self,
+        _cursor: &crate::engine::ReconcileCursor,
+        _page: std::num::NonZeroUsize,
+        _tick: &str,
+    ) -> Result<crate::engine::ReconcileCursor, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionDriver::reconcile",
+        })
+    }
+
     /// Drive `request` to a stop on the driver's own effect host: admit,
     /// seal and run roots until admission answers something other than an
     /// admitted root.

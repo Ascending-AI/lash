@@ -194,6 +194,8 @@ impl LashCore {
     /// (FIG-3659).
     pub fn parked_work(&self) -> crate::parked_work::ParkedWork {
         crate::parked_work::ParkedWork {
+            work: self.env.queued_work(),
+            scopes: Arc::clone(&self.env.core.control.scope_close),
             store_factory: Arc::clone(&self.store_factory),
             process_registry: Arc::clone(&self.process_registry),
             clock: Arc::clone(&self.env.core.clock),

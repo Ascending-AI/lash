@@ -30,3 +30,10 @@ crate::statements! {
              ORDER BY item_index ASC";
     }
 }
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct ItemRootVerbStatements @ "queued_work_item" {
+        delete_batch_items = "DELETE FROM queued_work_items WHERE batch_id = ?1";
+    }
+}

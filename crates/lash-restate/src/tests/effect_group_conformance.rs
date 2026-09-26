@@ -455,9 +455,7 @@ impl HarnessAdmin {
                     .unwrap_or_else(|error| panic!("find the run of `{service}/{key}`: {error}"))
                     .unwrap_or_else(|| panic!("an invocation of `{service}/{key}/run`"));
                 admin
-                    .kill_invocation_for_test_cleanup(&crate::RestateInvocationId::new(
-                        open.id.clone(),
-                    ))
+                    .kill_invocation(&crate::RestateInvocationId::new(open.id.clone()))
                     .await
                     .unwrap_or_else(|error| panic!("kill `{}`: {error}", open.id));
                 open.id
@@ -517,6 +515,7 @@ impl HarnessAdmin {
 pub(super) struct LiveConformanceHarness {
     connection: RestateConnection,
     admin: HarnessAdmin,
+    session_driver: crate::RestateSessionDriverSlot,
     host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
     /// The storage the endpoint's process workflow and a law's runtime share.
@@ -627,6 +626,7 @@ impl LiveConformanceHarness {
             .expect("open the endpoint's SQLite memory store set");
         let process_registry = stores.process_registry();
         let process_runner = Arc::new(LawProcessRunner::default());
+        let session_driver = crate::RestateSessionDriverSlot::new();
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
             crate::services::LashServiceParts {
@@ -640,7 +640,7 @@ impl LiveConformanceHarness {
                 ),
                 // The laws run their turns in the probe's handler; no core
                 // installs a session driver on this endpoint.
-                session_driver: crate::RestateSessionDriverSlot::new(),
+                session_driver: session_driver.clone(),
                 build_generation: lash_core::engine::BuildGeneration::for_test(
                     "effect-group-conformance",
                 ),
@@ -687,6 +687,7 @@ impl LiveConformanceHarness {
         Self {
             connection,
             admin,
+            session_driver,
             host,
             executors,
             stores,
@@ -694,6 +695,24 @@ impl LiveConformanceHarness {
             shutdown_tx: tokio::sync::Mutex::new(shutdown_tx),
             server: tokio::sync::Mutex::new(server),
         }
+    }
+
+    pub(super) fn session_work(&self) -> crate::RestateSessionWork {
+        let admin = match &self.admin {
+            HarnessAdmin::Live { admin_url } => RestateConnection::new(admin_url.clone()),
+            HarnessAdmin::InProcess { server } => {
+                RestateConnection::with_transport(server.ingress_url(), server.transport())
+            }
+        };
+        crate::RestateSessionWork::new(
+            crate::RestateIngressClient::new(self.connection.clone()),
+            self.session_driver.clone(),
+            lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
+            Arc::new(crate::session_control::RestateSessionControl {
+                admin: Some(crate::RestateAdminClient::new(admin)),
+                processes: self.stores.process_registry(),
+            }),
+        )
     }
 
     /// The tool-child laws over this endpoint's host.

@@ -315,7 +315,41 @@ impl SessionWorkEngine for NativeQueuedWork {
     }
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        Arc::clone(self.inner.driver.get_or_init(|| driver))
+        Arc::clone(self.inner.driver.get_or_init(|| {
+            if !driver.owns_reconciliation() {
+                return driver;
+            }
+            let installed = Arc::downgrade(&driver);
+            let shutdown = self.inner.shutdown.clone();
+            self.inner.wake_tasks.spawn(async move {
+                let mut cursor = crate::engine::ReconcileCursor::default();
+                let mut sequence = 0_u64;
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+                loop {
+                    tokio::select! {
+                        () = shutdown.cancelled() => break,
+                        _ = interval.tick() => {}
+                    }
+                    let Some(driver) = installed.upgrade() else {
+                        break;
+                    };
+                    let tick = format!("native:{sequence}");
+                    match driver
+                        .reconcile(
+                            &cursor,
+                            std::num::NonZeroUsize::MIN.saturating_add(63),
+                            &tick,
+                        )
+                        .await
+                    {
+                        Ok(next) => cursor = next,
+                        Err(error) => tracing::warn!(%error, "native recovery pass failed"),
+                    }
+                    sequence = sequence.wrapping_add(1);
+                }
+            });
+            driver
+        }))
     }
 
     /// Re-asks (coalesced with any run already queued), then waits for the

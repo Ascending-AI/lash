@@ -152,3 +152,14 @@ crate::statements! {
         delete_by_session = "DELETE FROM queued_work_batches WHERE session_id = ?1";
     }
 }
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct BatchRootVerbStatements @ "queued_work_batch" {
+        release_batches = "UPDATE queued_work_batches SET
+            claim_id = NULL,
+            claim_token = NULL, claim_session_lease_generation = 0
+            WHERE session_id = ?1 AND claim_token IS NOT NULL";
+        delete_batch = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND batch_id = ?2";
+    }
+}

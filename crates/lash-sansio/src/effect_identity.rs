@@ -74,6 +74,21 @@ impl ExecutionScope {
         }
     }
 
+    /// The logical root this scope runs under: a turn scope is its root's
+    /// own; a queue drain names its queued root by its drain id until queued
+    /// roots run under turn scopes (FIG-3600 S8). `None` outside a session
+    /// turn (a process body, a session delete, a runtime operation).
+    #[must_use]
+    pub fn logical_root(&self) -> Option<TurnId> {
+        match self {
+            Self::Turn { turn_id, .. } => Some(turn_id.clone()),
+            Self::QueueDrain { drain_id, .. } => Some(TurnId::from(drain_id.as_str())),
+            Self::Process { .. } | Self::SessionDelete { .. } | Self::RuntimeOperation { .. } => {
+                None
+            }
+        }
+    }
+
     /// Canonical typed identity persisted by durable effect journals.
     pub fn journal_identity(&self) -> Result<EffectJournalIdentity, EffectIdentityError> {
         self.validate()?;

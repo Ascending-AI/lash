@@ -28,6 +28,7 @@ pub struct RestateConfig {
     authority: RestateAuthorityId,
     build_generation: BuildGeneration,
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
+    admin_connection: Option<RestateConnection>,
 }
 
 impl RestateConfig {
@@ -51,7 +52,14 @@ impl RestateConfig {
             authority,
             build_generation,
             process_event_sink: None,
+            admin_connection: None,
         }
+    }
+
+    /// The admin endpoint used by root control and park reconciliation.
+    pub fn with_admin_connection(mut self, connection: impl Into<RestateConnection>) -> Self {
+        self.admin_connection = Some(connection.into());
+        self
     }
 
     /// Install a host-facing [`ProcessEventSink`] on the process registry
@@ -87,6 +95,7 @@ impl RestateEngine {
             authority,
             build_generation,
             process_event_sink,
+            admin_connection,
         } = config;
         let effect_host = Arc::new(RestateEffectHost::new(
             connection.clone(),
@@ -103,6 +112,10 @@ impl RestateEngine {
             RestateIngressClient::new(connection.clone()),
             crate::RestateSessionDriverSlot::new(),
             build_generation.clone(),
+            Arc::new(crate::session_control::RestateSessionControl {
+                admin: admin_connection.map(crate::RestateAdminClient::new),
+                processes: stores.process_registry(),
+            }),
         ));
         Self {
             stores,

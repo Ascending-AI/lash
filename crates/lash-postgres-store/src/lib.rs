@@ -1443,6 +1443,8 @@ mod release_stamp;
 mod rendered_statement_sets_tests;
 #[path = "postgres/required_constraints.rs"]
 mod required_constraints;
+#[path = "postgres/root_verbs.rs"]
+mod root_verbs;
 #[path = "postgres/runtime_persistence/mod.rs"]
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]

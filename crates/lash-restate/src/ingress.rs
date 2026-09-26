@@ -851,9 +851,13 @@ impl RestateAdminClient {
             .await
     }
 
-    /// Forcefully kill an invocation. This is intended for test/dev cleanup
-    /// after graceful cancellation has failed.
-    pub async fn kill_invocation_for_test_cleanup(
+    /// Kill an invocation: it stops for good, with no compensation and no
+    /// further attempt, and the kill propagates to the calls it is waiting
+    /// on. The release half of an operator's cancel or fork of a parked root
+    /// ([`SessionControlEngine::release_root`](lash_core::engine::SessionControlEngine::release_root)),
+    /// run after the store recorded the root's end; never proof of a lash
+    /// outcome (ADR 0104 O4).
+    pub async fn kill_invocation(
         &self,
         invocation_id: &RestateInvocationId,
     ) -> Result<(), RestateHttpError> {
@@ -979,6 +983,17 @@ impl RestateAdminClient {
             "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND target_service_name = {service}"
         ))
         .await
+    }
+
+    pub(crate) async fn paused_work_page(
+        &self,
+        after: Option<&str>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
+        let after = sql_string_literal(after.unwrap_or(""));
+        self.query_json(&format!(
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND ((target_service_name = 'LashSession' AND target_handler_name = 'drive') OR (target_service_name IN ('LashTurn', 'LashProcessWorkflow') AND target_handler_name = 'run')) ORDER BY id LIMIT {}", limit.get()
+        )).await
     }
 
     /// Resume a paused invocation: a fresh retry loop over its kept journal.

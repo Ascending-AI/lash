@@ -20,7 +20,7 @@ fn scope_key(scope: &lash_core_execution::ExecutionScope) -> Result<String, Stor
         .map_err(|error| StoreError::Backend(error.to_string()))
 }
 
-pub(super) async fn load_run_tx(
+pub(crate) async fn load_run_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     scope: Option<&lash_core_execution::ExecutionScope>,
@@ -104,7 +104,7 @@ pub(super) async fn load_run_tx(
     Ok(Some(admission))
 }
 
-pub(super) async fn write_run_tx(
+pub(crate) async fn write_run_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     admission: &QueuedRunAdmission,
     insert: bool,

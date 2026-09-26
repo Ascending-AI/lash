@@ -69,3 +69,12 @@ crate::statements! {
              WHERE session_id = ?1 AND kind <> 'close_session'";
     }
 }
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct ControlVerbStatements @ "control_intent" {
+        set_kind = "UPDATE control_intents SET kind_json = ?2 WHERE intent_id = ?1";
+        intents = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+            FROM control_intents WHERE intent_id > ?1 ORDER BY intent_id LIMIT ?2";
+    }
+}

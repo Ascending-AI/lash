@@ -3983,3 +3983,27 @@ Both stores bind the shared session allocation explicitly. SQLite returns
 the stored enqueue sequence; PostgreSQL already retains that value for item-id
 construction. Their insert call sites bind the allocation in different slots.
 """
+
+[[dialect_only]]
+statement = "session_head.clear_pending_follow_on"
+backends = ["sqlite"]
+kind = "head table differs"
+reason = "The existing head table is session_head on SQLite and sessions on PostgreSQL. Root cancellation clears its owed follow-on without moving the head revision."
+
+[[dialect_only]]
+statement = "sessions.clear_pending_follow_on"
+backends = ["postgres"]
+kind = "head table differs"
+reason = "The existing head table is session_head on SQLite and sessions on PostgreSQL. Root cancellation clears its owed follow-on without moving the head revision."
+
+[[cross_family]]
+statement = "session_root_input.bound_inputs"
+owner = "crates/lash-store-sql/src/session_roots/root_inputs.rs"
+touches = ["pending_turn_inputs"]
+reason = "A root verb changes only nonterminal bound inputs. The binding and current lifecycle state must be read in one statement so historical settled bindings cannot be reactivated."
+
+[[cross_family]]
+statement = "session_meta.select_drive_epoch"
+owner = "crates/lash-store-sql/src/session/meta.rs"
+touches = ["control_intents"]
+reason = "Admission reads the epoch and pending destructive control in one snapshot. A cancel or fork blocks a new seal until its old engine execution has been released and its intent acknowledged."

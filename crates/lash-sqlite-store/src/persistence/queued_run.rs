@@ -22,7 +22,7 @@ fn scope_key(scope: &lash_core_execution::ExecutionScope) -> Result<String, Stor
         .map_err(|error| StoreError::Backend(error.to_string()))
 }
 
-pub(super) fn load_run_conn(
+pub(crate) fn load_run_conn(
     tx: &Connection,
     session_id: &SessionId,
     scope: Option<&lash_core_execution::ExecutionScope>,
@@ -108,7 +108,7 @@ pub(super) fn load_run_conn(
     Ok(Some(admission))
 }
 
-pub(super) fn write_run_conn(
+pub(crate) fn write_run_conn(
     tx: &Connection,
     admission: &QueuedRunAdmission,
     insert: bool,

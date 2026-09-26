@@ -60,6 +60,13 @@ pub async fn reconcile_process_parks(
                 "read paused process invocations from Restate: {error}"
             ))
         })?;
+    reconcile_process_invocations(registry, paused).await
+}
+
+pub(crate) async fn reconcile_process_invocations(
+    registry: &Arc<dyn ProcessRegistry>,
+    paused: Vec<RestatePausedInvocation>,
+) -> Result<ProcessParkReconcileReport, PluginError> {
     let mut report = ProcessParkReconcileReport::default();
     for invocation in paused
         .into_iter()
@@ -224,7 +231,7 @@ fn execution_authority(record: &ProcessRecord) -> Option<ProcessExecutionWriteAu
     )
 }
 
-fn exhausted_reason(invocation: &RestatePausedInvocation) -> ParkReason {
+pub(crate) fn exhausted_reason(invocation: &RestatePausedInvocation) -> ParkReason {
     let attempts = invocation
         .retry_count
         .and_then(|count| u32::try_from(count).ok())

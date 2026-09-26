@@ -102,7 +102,9 @@ impl AdmitDriveRunner {
         // every root and raised the epoch past every admission. A store with
         // no drive epoch holds no close; the admission below still needs one.
         let stored_epoch = match self.store.drive_epoch(session_id).await {
-            Ok(epoch) if epoch.closing.is_some() => return Ok(AdmitVerdict::Idle),
+            Ok(epoch) if epoch.closing.is_some() || epoch.control_pending => {
+                return Ok(AdmitVerdict::Idle);
+            }
             Ok(epoch) => Ok(epoch),
             Err(
                 error @ (StoreError::DriveEpochUnavailable { .. }
@@ -118,7 +120,9 @@ impl AdmitDriveRunner {
             Err(StoreError::UnsupportedStoreOperation { .. }) => None,
             Err(error) => return Err(store_fault("parked-root check", error)),
         };
-        if let Some(park) = park {
+        if let Some(park) = park
+            && park.resume_intent.is_none()
+        {
             return Ok(AdmitVerdict::Parked(ParkRef {
                 session: session_id.clone(),
                 root: park.turn_id,

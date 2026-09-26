@@ -14,7 +14,7 @@ lash_store_sql::statements! {
         /// `(since_ms, session_id)` order: optionally one session `?2`, only
         /// parks at or before `?3`, strictly after keyset `?4`/`?5`, reason
         /// codes drawn from the text array `?6` (`NULL` means all).
-        list = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts
+        list = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent
              FROM turn_parks
              WHERE (?2 IS NULL OR session_id = ?2)
                AND (?3 IS NULL OR since_ms <= ?3)
@@ -27,7 +27,7 @@ lash_store_sql::statements! {
         /// a same-turn re-park or a superseding park — decides on what this
         /// read saw, so under READ COMMITTED the lock is what makes the
         /// decision atomic.
-        select_for_update_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts
+        select_for_update_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent
              FROM turn_parks
              WHERE session_id = ?1
              FOR UPDATE";

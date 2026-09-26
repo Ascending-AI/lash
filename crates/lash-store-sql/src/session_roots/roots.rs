@@ -45,3 +45,65 @@ crate::statements! {
         delete_by_session = "DELETE FROM session_roots WHERE session_id = ?1";
     }
 }
+
+/// Terminal evidence plus its key, for the cross-session reconciliation cursor.
+/// This is the complete terminal record; no input bindings or intent bodies are read.
+pub const TERMINAL_PAGE_COLUMNS: &str =
+    "session_id, root, terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms";
+
+/// Rendered statements used by a parked-root control transaction.
+pub struct RootVerbStatements {
+    pub bound_inputs: crate::Rendered,
+    pub rebind: crate::Rendered,
+    pub unbind: crate::Rendered,
+    pub set_kind: crate::Rendered,
+    pub raise_epoch: crate::Rendered,
+    pub input: crate::Rendered,
+    pub release_inputs: crate::Rendered,
+    pub release_batches: crate::Rendered,
+    pub delete_batch_items: crate::Rendered,
+    pub delete_batch: crate::Rendered,
+    pub terminals: crate::Rendered,
+    pub sessions: crate::Rendered,
+    pub intents: crate::Rendered,
+}
+
+impl RootVerbStatements {
+    /// Render each statement through its table owner.
+    #[must_use]
+    pub fn render(dialect: crate::Dialect) -> Self {
+        let group0 = crate::session_roots::root_inputs::RootInputVerbStatements::render(dialect);
+        let group1 = crate::session_roots::control_intents::ControlVerbStatements::render(dialect);
+        let group2 = crate::session::meta::MetaRootVerbStatements::render(dialect);
+        let group3 =
+            crate::turn_ingress::pending_inputs::PendingRootVerbStatements::render(dialect);
+        let group4 = crate::turn_ingress::queued_batches::BatchRootVerbStatements::render(dialect);
+        let group5 = crate::turn_ingress::queued_items::ItemRootVerbStatements::render(dialect);
+        let group6 = crate::session_roots::roots::TerminalPageStatements::render(dialect);
+        Self {
+            bound_inputs: group0.bound_inputs,
+            rebind: group0.rebind,
+            unbind: group0.unbind,
+            set_kind: group1.set_kind,
+            intents: group1.intents,
+            raise_epoch: group2.raise_epoch,
+            sessions: group2.sessions,
+            input: group3.input,
+            release_inputs: group3.release_inputs,
+            release_batches: group4.release_batches,
+            delete_batch: group4.delete_batch,
+            delete_batch_items: group5.delete_batch_items,
+            terminals: group6.terminals,
+        }
+    }
+}
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct TerminalPageStatements @ "session_root" {
+        terminals = "SELECT session_id, root, terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms
+            FROM session_roots WHERE terminal_kind IS NOT NULL
+              AND (session_id > ?1 OR (session_id = ?1 AND root > ?2))
+            ORDER BY session_id, root LIMIT ?3";
+    }
+}

@@ -619,28 +619,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .await
         .map_err(store_sqlx_error)?;
         rows.iter()
-            .map(|row| {
-                let session_id: String = row.get(0);
-                let turn_id: String = row.get(1);
-                let park_id: i64 = row.get(2);
-                let reason_code: String = row.get(3);
-                let reason_json: String = row.get(4);
-                let since_ms: i64 = row.get(5);
-                let last_refused_ms: i64 = row.get(6);
-                let attempts: i64 = row.get(7);
-                lash_core_execution::store::TurnPark::decode(
-                    SessionId::from(session_id),
-                    lash_sansio::TurnId::from(turn_id),
-                    lash_core_execution::store::ParkId::from_feed_sequence(
-                        u64::try_from(park_id).unwrap_or_default(),
-                    ),
-                    &reason_code,
-                    &reason_json,
-                    u64::try_from(since_ms).unwrap_or_default(),
-                    u64::try_from(last_refused_ms).unwrap_or_default(),
-                    u32::try_from(attempts).unwrap_or(u32::MAX),
-                )
-            })
+            .map(crate::runtime_persistence::turn_park::decode_turn_park_row)
             .collect()
     }
 
@@ -741,6 +720,74 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 .await?
                 .and_then(|intent| intent.session_deleted_terminal(root)),
         )
+    }
+
+    async fn list_control_intents(
+        &self,
+        after: Option<lash_core_execution::store::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
+        let sql = &crate::session_roots::session_roots_sql().verbs;
+        let rows = sqlx::query(sql.intents.sql())
+            .bind(after.map_or(0, |id| id.sequence()) as i64)
+            .bind(limit.get() as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?;
+        rows.iter()
+            .map(crate::session_roots::decode_intent)
+            .collect()
+    }
+
+    async fn list_reconcilable_sessions(
+        &self,
+        after: Option<&SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        let sql = &crate::session_roots::session_roots_sql().verbs;
+        let rows: Vec<String> = sqlx::query_scalar(sql.sessions.sql())
+            .bind(after.map_or("", SessionId::as_str))
+            .bind(limit.get() as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(crate::support::store_sqlx_error)?;
+        Ok(rows.into_iter().map(SessionId::from).collect())
+    }
+
+    async fn list_terminal_roots(
+        &self,
+        after: Option<(SessionId, lash_sansio::TurnId)>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core_execution::store::RootTerminal>, StoreError> {
+        let sql = &crate::session_roots::session_roots_sql().verbs;
+        let (session, root) = after
+            .map(|(s, r)| (s.to_string(), r.to_string()))
+            .unwrap_or_default();
+        let rows = sqlx::query(sql.terminals.sql())
+            .bind(session)
+            .bind(root)
+            .bind(limit.get() as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?;
+        rows.iter()
+            .map(|row| {
+                lash_core_execution::store::RootTerminal::from_stored(
+                    row.try_get::<String, _>(0)
+                        .map_err(store_sqlx_error)?
+                        .into(),
+                    row.try_get::<String, _>(1)
+                        .map_err(store_sqlx_error)?
+                        .into(),
+                    &row.try_get::<String, _>(2).map_err(store_sqlx_error)?,
+                    &row.try_get::<String, _>(3).map_err(store_sqlx_error)?,
+                    row.try_get::<Option<i64>, _>(4)
+                        .map_err(store_sqlx_error)?
+                        .map(|n| n as u64),
+                    row.try_get::<i64, _>(5).map_err(store_sqlx_error)? as u64,
+                )
+            })
+            .collect()
     }
 
     async fn list_open_control_intents(

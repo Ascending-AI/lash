@@ -1,4 +1,4 @@
-//! The engine half of a control intent (FIG-3600 S7, ADR 0104 O4, astra B6).
+//! The engine half of a control intent (FIG-3600 S7, ADR 0104 O4, B6).
 //!
 //! An intent's store half commits in the transaction that records it: a
 //! parked root's cancel or fork, or a session's close. What remains is the
@@ -49,20 +49,48 @@ pub async fn apply_control_intent(
         ControlIntentKind::CloseSession { roots } => {
             close_session_engine_half(engine, scopes, &intent, roots).await
         }
-        ControlIntentKind::Redrive { .. }
-        | ControlIntentKind::Cancel { .. }
-        | ControlIntentKind::Fork { .. } => {
-            let _ = work;
-            return Err(StoreError::UnsupportedStoreOperation {
-                operation: "apply_control_intent: the parked-root verbs",
-            });
+        ControlIntentKind::Redrive { root, .. } => {
+            let target = RootRef {
+                session: intent.session_id.clone(),
+                root: root.clone(),
+            };
+            match engine.resume_root(&target, intent.engine.as_ref()).await {
+                Ok(crate::engine::EngineAck::NothingHeld) => {
+                    work.schedule_drive(
+                        &intent.session_id,
+                        crate::engine::DriveRequestId::new(format!("intent:{}", intent.id)),
+                    );
+                    Ok(())
+                }
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.into()),
+            }
+        }
+        ControlIntentKind::Cancel { root, .. } | ControlIntentKind::Fork { root, .. } => {
+            release_root_engine_half(stores, engine, scopes, &intent, root).await
         }
     };
     match applied {
         Ok(()) => {
             let at_ms = clock.timestamp_ms();
             stores.acknowledge_intent(intent.id, at_ms).await?;
-            Ok(ControlIntentState::Acknowledged { at_ms })
+            let state = stores
+                .load_intent(intent.id)
+                .await?
+                .ok_or(StoreError::ControlIntentUnknown { intent: intent.id })?
+                .state;
+            if matches!(state, ControlIntentState::Acknowledged { .. })
+                && matches!(
+                    intent.kind,
+                    ControlIntentKind::Cancel { .. } | ControlIntentKind::Fork { .. }
+                )
+            {
+                work.schedule_drive(
+                    &intent.session_id,
+                    crate::engine::DriveRequestId::new(format!("intent:{}", intent.id)),
+                );
+            }
+            Ok(state)
         }
         Err(failure) => {
             let failed = stores
@@ -122,4 +150,41 @@ async fn close_session_engine_half(
             message: format!("session scope close: {error}"),
             retryable: true,
         })
+}
+
+async fn release_root_engine_half(
+    stores: &dyn SessionStoreFactory,
+    engine: &dyn SessionControlEngine,
+    scopes: &dyn ScopeCloseSink,
+    intent: &ControlIntent,
+    root: &crate::TurnId,
+) -> Result<(), EngineHalfFailure> {
+    engine
+        .release_root(
+            &RootRef {
+                session: intent.session_id.clone(),
+                root: root.clone(),
+            },
+            intent.engine.as_ref(),
+        )
+        .await?;
+    let terminal = stores
+        .root_terminal(&intent.session_id, root)
+        .await
+        .map_err(|error| EngineHalfFailure {
+            message: error.to_string(),
+            retryable: true,
+        })?
+        .ok_or_else(|| EngineHalfFailure {
+            message: "root control intent has no terminal evidence".into(),
+            retryable: false,
+        })?;
+    scopes
+        .close_root_scope(&terminal)
+        .await
+        .map_err(|error| EngineHalfFailure {
+            message: error.to_string(),
+            retryable: true,
+        })?;
+    Ok(())
 }

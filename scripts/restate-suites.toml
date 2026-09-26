@@ -95,3 +95,12 @@ filters = ["live_restate_"]
 endpoints = ["DEP_A", "DEP_B"]
 shards = 1
 timeout_seconds = 120
+
+[suites.root-control]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::root_control_witnesses::live_"]
+endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
+shards = 1
+timeout_seconds = 240
+redelivery_laws = ["tests::root_control_witnesses::live_pause_reconcile_resume_preserves_the_journal_and_clears_the_park", "tests::root_control_witnesses::live_cancel_fork_and_close_recover_each_engine_crash_gap", "tests::root_control_witnesses::live_a_released_root_is_consumed_and_the_next_root_runs"]

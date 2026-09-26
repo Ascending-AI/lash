@@ -123,7 +123,10 @@ crate::statements! {
         /// Session `?1`'s drive epoch, the admission that last raised it, the
         /// start marker of the execution that sealed that admission, and the
         /// control intent the session is closing under.
-        select_drive_epoch = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent FROM session_meta WHERE session_id = ?1";
+        select_drive_epoch = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
+            EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
+                AND kind IN ('cancel', 'fork') AND state NOT IN ('acknowledged', 'superseded'))
+            FROM session_meta WHERE session_id = ?1";
 
         /// The seal's compare-and-set: raise session `?1`'s drive epoch from
         /// `?2` to `?3` under admission `?4`, sealed by the execution whose
@@ -169,5 +172,13 @@ crate::statements! {
         set_state_version = "UPDATE session_meta SET session_state_version = ?2 WHERE session_id = ?1";
 
         delete_by_session = "DELETE FROM session_meta WHERE session_id = ?1";
+    }
+}
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct MetaRootVerbStatements @ "session_meta" {
+        raise_epoch = "UPDATE session_meta SET drive_epoch = drive_epoch + 1, drive_admission_id = ?2, drive_root_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
+        sessions = "SELECT session_id FROM session_meta WHERE session_id > ?1 AND closing_intent IS NULL ORDER BY session_id LIMIT ?2";
     }
 }

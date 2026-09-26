@@ -14,7 +14,7 @@ use crate::session_roots::{begin_session_close_conn, load_intent_conn, write_int
 impl SqliteSessionStoreFactory {
     /// A writer on the durable core, or `None` when the catalog was never
     /// created (it then holds no session and no intent).
-    async fn control_ledger(&self) -> Result<Option<SqliteConnection>, StoreError> {
+    pub(crate) async fn control_ledger(&self) -> Result<Option<SqliteConnection>, StoreError> {
         if !self.core.target().exists() {
             return Ok(None);
         }
@@ -65,6 +65,33 @@ impl SqliteSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl ControlIntentStore for SqliteSessionStoreFactory {
+    async fn open_root_intent(
+        &self,
+        request: &lash_core_execution::store::RootIntentRequest,
+        at_ms: u64,
+    ) -> Result<ControlIntent, lash_core_execution::store::RootIntentRefused> {
+        let host = self
+            .effect_host
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        lash_core_execution::runtime::require_root_groups_closed(host.as_deref(), request).await?;
+        let Some(conn) = self.control_ledger().await? else {
+            return Err(lash_core_execution::store::RootIntentRefused::NotParked);
+        };
+        let request = request.clone();
+        conn.write_flow(move |tx| {
+            Ok(
+                match crate::root_verbs::open_root_intent_conn(tx, &request, at_ms) {
+                    Ok(intent) => TxOutcome::Commit(Ok(intent)),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                },
+            )
+        })
+        .await
+        .map_err(sqlite_error)?
+    }
+
     async fn begin_session_close(
         &self,
         session_id: &SessionId,

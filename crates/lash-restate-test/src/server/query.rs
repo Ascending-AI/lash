@@ -217,6 +217,7 @@ enum Cond {
     And(Box<Cond>, Box<Cond>),
     Or(Box<Cond>, Box<Cond>),
     Eq(String, Value, bool),
+    Greater(String, Value),
     In(String, Vec<Value>),
     Like(String, String),
     IsNull(String, bool),
@@ -228,6 +229,7 @@ impl Cond {
         match self {
             Self::And(left, right) => left.eval(row) && right.eval(row),
             Self::Or(left, right) => left.eval(row) || right.eval(row),
+            Self::Greater(column, value) => compare(Some(get(column)), Some(value)).is_gt(),
             Self::Eq(column, value, equal) => loose_eq(get(column), value) == *equal,
             Self::In(column, values) => values.iter().any(|value| loose_eq(get(column), value)),
             Self::Like(column, pattern) => {
@@ -345,7 +347,7 @@ impl Parser {
                 } else {
                     return Err(format!("unsupported operator {character}{next}"));
                 }
-            } else if "(),=*;".contains(character) {
+            } else if "(),=*;>".contains(character) {
                 tokens.push(Token::Sym(character));
                 index += 1;
             } else {
@@ -524,6 +526,9 @@ impl Parser {
             return Ok(cond);
         }
         let column = self.ident()?;
+        if self.symbol('>') {
+            return Ok(Cond::Greater(column, self.literal()?));
+        }
         if self.symbol('=') {
             return Ok(Cond::Eq(column, self.literal()?, true));
         }

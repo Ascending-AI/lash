@@ -107,6 +107,8 @@ enum CaseName {
     TurnBoundClaimBindAndReclaim,
     RefusedSurfaceOnDeletedSession,
     SessionCloseLedger,
+    RootCancelLedger,
+    RootForkLedger,
     CorruptGraphNodeRefusals,
     CorruptPendingTurnInputRefusals,
     CorruptQueuedWorkRefusals,
@@ -163,6 +165,8 @@ impl CaseName {
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
             }
+            Self::RootCancelLedger => "root_cancel_ledger",
+            Self::RootForkLedger => "root_fork_ledger",
             Self::SessionCloseLedger => "session_close_ledger_closes_roots_and_tracks_its_intent",
             Self::CorruptGraphNodeRefusals => "corrupt_graph_node_refuses_every_reader",
             Self::CorruptPendingTurnInputRefusals => {
@@ -659,6 +663,8 @@ fn generated_cases() -> Vec<GeneratedCase> {
         surface_sweep::turn_bound_claim_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         surface_sweep::session_close_ledger_case(),
+        surface_sweep::root_control_case(false),
+        surface_sweep::root_control_case(true),
         GeneratedCase {
             name: CaseName::StaleHandleAfterDelete,
             operations: vec![
@@ -2350,7 +2356,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 30);
+    assert_eq!(cases.len(), 32);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2383,6 +2389,8 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "turn_bound_claim_binds_defers_and_reclaims_across_generations",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "session_close_ledger_closes_roots_and_tracks_its_intent",
+            "root_cancel_ledger",
+            "root_fork_ledger",
             "stale_handle_after_delete",
             "corrupt_graph_node_refuses_every_reader",
             "corrupt_pending_turn_input_refuses_list_and_claim",

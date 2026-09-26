@@ -199,6 +199,7 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
                 message: "parked before session close".into(),
             },
             at_ms: 1,
+            engine: None,
         })
         .await
         .expect("record parked root");

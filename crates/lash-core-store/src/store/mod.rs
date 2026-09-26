@@ -86,8 +86,10 @@ pub use commit_identity::{
 pub use config_command_plan::{ConfigCommandPlan, plan_config_commands};
 pub use control_intent::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    ControlIntentStore, IntentApplication, decide_intent_acknowledgement,
-    decide_intent_application, decide_intent_failure, stored_intent_kind, stored_intent_state,
+    ControlIntentStore, IntentApplication, RootIntentFacts, RootIntentPlan, RootIntentRefused,
+    RootIntentRequest, RootVerb, decide_intent_acknowledgement, decide_intent_application,
+    decide_intent_failure, decide_root_intent, forked_root, stored_intent_kind,
+    stored_intent_state,
 };
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
@@ -130,8 +132,8 @@ pub use maintenance::{
 pub use park::{
     EnginePark, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
     ParkId, ParkReason, ParkReasonCode, ParkSummary, ProcessPark, ProcessParkKey, ProcessParkQuery,
-    ProcessParkWrite, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause,
-    UnsettledTurnCounts,
+    ProcessParkWrite, StoredTurnParkHead, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite,
+    TurnParkWriteDecision, UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
 };
 pub use pending_follow_on::{
     DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnBlocked, FollowOnClaim, FollowOnRecovery,
