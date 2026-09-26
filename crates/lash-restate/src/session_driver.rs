@@ -472,7 +472,7 @@ impl SessionWorkEngine for RestateSessionWork {
                     if let lash_core::engine::RootOutcome::Released { root } = ran
                         && let Some(refusal) = self.released_root_refusal(session, root).await
                     {
-                        return Err(DriveAbort::Refused(refusal));
+                        return Err(classify_refusal(refusal));
                     }
                 }
                 return Ok(outcome);
@@ -482,7 +482,7 @@ impl SessionWorkEngine for RestateSessionWork {
         if let crate::RestateHttpError::Status { body, .. } = &error
             && let Some(refusal) = decode_drive_refusal(body)
         {
-            return Err(DriveAbort::Refused(refusal));
+            return Err(classify_refusal(refusal));
         }
         Err(DriveAbort::Retry(lash_core::RuntimeError::new(
             lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
@@ -506,6 +506,14 @@ fn drive_refusal(error: &lash_core::RuntimeError) -> HandlerError {
         serde_json::json!({ "code": error.code.as_str(), "message": error.message }).to_string()
     });
     TerminalError::new(format!("{DRIVE_REFUSAL_MARKER}{encoded}")).into()
+}
+
+fn classify_refusal(error: lash_core::RuntimeError) -> DriveAbort {
+    if error.is_retryable() {
+        DriveAbort::Retry(error)
+    } else {
+        DriveAbort::Refused(error)
+    }
 }
 
 /// The refusal a failed attach's response body carries, when a
@@ -618,6 +626,7 @@ fn abort_failure(abort: DriveAbort) -> HandlerError {
         // The park is durable; the invocation keeps its journal and pauses
         // after its attempt budget.
         DriveAbort::Parked { error, .. } => parked_turn_failure(error),
+        DriveAbort::Refused(error) if error.is_retryable() => HandlerError::from(error),
         DriveAbort::Refused(error) => drive_refusal(&error),
     }
 }
@@ -851,6 +860,9 @@ async fn run_root_journal(
         Err(abort @ (DriveAbort::Retry(_) | DriveAbort::Parked { .. })) => {
             return Err(abort_failure(abort));
         }
+        Err(DriveAbort::Refused(error)) if error.is_retryable() => {
+            return Err(HandlerError::from(error));
+        }
         Err(abort @ DriveAbort::Refused(_)) => {
             (RootOutcome::Released { root }, Err(abort_failure(abort)))
         }
@@ -972,6 +984,24 @@ mod tests {
         assert!(decode_drive_refusal("{\"message\":\"connection reset\"}").is_none());
     }
 
+    #[test]
+    fn a_retryable_lane_refusal_keeps_the_handler_attempt_open() {
+        let busy = lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::SessionExecutionLaneBusy,
+            "another execution holds the lane",
+        );
+        assert!(busy.is_retryable());
+        assert!(matches!(
+            classify_refusal(busy.clone()),
+            DriveAbort::Retry(_)
+        ));
+        let failure = abort_failure(DriveAbort::Refused(busy));
+        assert!(
+            format!("{failure:?}").contains("Retryable"),
+            "a racing lane release must not end the workflow: {failure:?}"
+        );
+    }
+
     /// Answers each request in turn from a script.
     #[derive(Debug)]
     struct Scripted {
@@ -1067,6 +1097,57 @@ mod tests {
                 && requests[1].url.contains("restate/workflow/LashTurn/"),
             "{}",
             requests[1].url
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lane_refusal_on_the_transport_double_is_retried_after_release() {
+        let session = SessionId::from("racing-lane-session");
+        let request = DriveRequestId::new("racing-lane-request");
+        let busy = lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::SessionExecutionLaneBusy,
+            "lane release is still in flight",
+        );
+        let failure = serde_json::json!({
+            "message": format!(
+                "{DRIVE_REFUSAL_MARKER}{}",
+                serde_json::to_string(&busy).expect("encode")
+            ),
+        });
+        let completed = DriveOutcome {
+            ran: vec![],
+            stop: DriveStop::Idle,
+        };
+        let transport = Arc::new(Scripted {
+            requests: std::sync::Mutex::default(),
+            responses: std::sync::Mutex::new(
+                [
+                    scripted_response(500, failure.to_string()),
+                    scripted_response(200, serde_json::to_string(&completed).expect("encode")),
+                ]
+                .into(),
+            ),
+        });
+        let work = RestateSessionWork::new(
+            crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            RestateSessionDriverSlot::new(),
+            BuildGeneration::for_test("t0"),
+        );
+        let first = work.await_drive(&session, &request).await;
+        assert!(matches!(first, Err(DriveAbort::Retry(ref error)) if error.code == busy.code));
+        let redrive = work.await_drive(&session, &request).await;
+        assert_eq!(redrive.expect("redrive after lane release"), completed);
+        let requests = transport
+            .requests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[0].url, requests[1].url,
+            "redrive keeps its request identity"
         );
     }
 
