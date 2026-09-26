@@ -35,6 +35,68 @@ struct JournaledCancelAdmission {
     realization: lash_core::StoreRealization,
 }
 
+/// A process command's recorded outcome (FIG-3827): the outcome and the
+/// realization the store reported for it, which a replay answers instead of
+/// re-running the command against the registry as it is now.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledProcessOutcome {
+    outcome: ProcessEffectOutcome,
+    realization: lash_core::StoreRealization,
+}
+
+impl JournaledProcessOutcome {
+    fn realized(outcome: ProcessEffectOutcome) -> Self {
+        Self {
+            outcome,
+            realization: lash_core::StoreRealization::Realized,
+        }
+    }
+}
+
+/// A signal's recorded append (FIG-3827): the stored event, its realization
+/// and the ordinal the signal's wait resolution is keyed by, all read in the
+/// step that appended it.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledSignalAppend {
+    event: Box<lash_core::ProcessEvent>,
+    realization: lash_core::StoreRealization,
+    ordinal: u64,
+}
+
+/// Runs a process command's store work as one recorded step named
+/// `operation` (FIG-3827). The step records the value or the typed refusal
+/// the store gave, so a replay answers the recorded result even after the
+/// store moved on; a retryable store fault ends the attempt unrecorded and the
+/// step runs again.
+async fn recorded_process_step<'ctx, C, T, Fut>(
+    context: &C,
+    invocation: &RuntimeEffectInvocation,
+    operation: &'static str,
+    work: Fut,
+) -> Result<T, RuntimeEffectControllerError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+    T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, PluginError>> + Send,
+{
+    let Json(recorded) = context
+        .run_json_or_retry_send::<Result<T, PluginError>, _>(
+            process_command_journal_name(invocation, operation),
+            async move {
+                match work.await {
+                    Ok(value) => Ok(Ok(value)),
+                    Err(error) if error.is_retryable() => Err(error.to_string()),
+                    Err(error) => Ok(Err(error)),
+                }
+            },
+        )
+        .await
+        .map_err(|error| process_command_journal_error(operation, error))?;
+    Ok(recorded?)
+}
+
 pub(super) fn process_command_journal_name(
     invocation: &RuntimeEffectInvocation,
     operation: &str,
@@ -286,57 +348,74 @@ where
                 realization,
             ))
         }
+        // A listing, a transfer and a session delete each record their outcome
+        // (FIG-3827): a replay answers what the first execution saw and did,
+        // never a re-read or a re-write of the registry as it is now.
         ProcessCommand::List {
             session_scope,
             mode,
         } => {
-            let entries = match mode {
-                lash_core::ProcessListMode::Live => {
-                    registry
-                        .list_live_observed_by(&session_scope.session_id)
-                        .await?
-                }
-                lash_core::ProcessListMode::All => {
-                    registry
-                        .list_observed_by(
-                            &session_scope.session_id,
-                            &lash_core::ProcessListFilter {
-                                status: lash_core::ProcessStatusFilter::Any,
-                                ..Default::default()
-                            },
-                        )
-                        .await?
-                }
-            };
-            Ok((
-                ProcessEffectOutcome::List { entries },
-                lash_core::StoreRealization::Realized,
-            ))
+            let step_registry = Arc::clone(&registry);
+            recorded_process_step(context, invocation, "process-list", async move {
+                let entries = match mode {
+                    lash_core::ProcessListMode::Live => {
+                        step_registry
+                            .list_live_observed_by(&session_scope.session_id)
+                            .await?
+                    }
+                    lash_core::ProcessListMode::All => {
+                        step_registry
+                            .list_observed_by(
+                                &session_scope.session_id,
+                                &lash_core::ProcessListFilter {
+                                    status: lash_core::ProcessStatusFilter::Any,
+                                    ..Default::default()
+                                },
+                            )
+                            .await?
+                    }
+                };
+                Ok(JournaledProcessOutcome::realized(
+                    ProcessEffectOutcome::List { entries },
+                ))
+            })
+            .await
+            .map(|recorded| (recorded.outcome, recorded.realization))
         }
         ProcessCommand::Transfer {
             from_scope,
             to_scope,
             process_ids,
         } => {
-            registry
-                .transfer_observers(
-                    &from_scope.session_id,
-                    &to_scope.session_id,
-                    &process_ids,
-                    lash_core::ProcessObserverBy::host("restate-transfer"),
-                )
-                .await?;
-            Ok((
-                ProcessEffectOutcome::Transfer,
-                lash_core::StoreRealization::Realized,
-            ))
+            let step_registry = Arc::clone(&registry);
+            recorded_process_step(context, invocation, "process-transfer", async move {
+                step_registry
+                    .transfer_observers(
+                        &from_scope.session_id,
+                        &to_scope.session_id,
+                        &process_ids,
+                        lash_core::ProcessObserverBy::host("restate-transfer"),
+                    )
+                    .await?;
+                Ok(JournaledProcessOutcome::realized(
+                    ProcessEffectOutcome::Transfer,
+                ))
+            })
+            .await
+            .map(|recorded| (recorded.outcome, recorded.realization))
         }
         ProcessCommand::DeleteSession { session_id } => {
-            let report = registry.delete_session_process_state(&session_id).await?;
-            Ok((
-                ProcessEffectOutcome::DeleteSession { report },
-                lash_core::StoreRealization::Realized,
-            ))
+            let step_registry = Arc::clone(&registry);
+            recorded_process_step(context, invocation, "process-delete-session", async move {
+                let report = step_registry
+                    .delete_session_process_state(&session_id)
+                    .await?;
+                Ok(JournaledProcessOutcome::realized(
+                    ProcessEffectOutcome::DeleteSession { report },
+                ))
+            })
+            .await
+            .map(|recorded| (recorded.outcome, recorded.realization))
         }
         ProcessCommand::Await { process_id } => {
             // The existence guard is a recorded step (FIG-3808): a guard the
@@ -511,7 +590,15 @@ where
             // applies: a host that prunes a terminal row out from under a
             // waiter breaks the wait, and the refusal here is loud rather than
             // a silent park.
-            registry.require_process_id(&process_id).await?;
+            // The guard is a recorded step, as the await's is (FIG-3808,
+            // FIG-3827): a replay after the process was pruned answers the
+            // recorded pass instead of refusing.
+            let guard_registry = Arc::clone(&registry);
+            let guard_id = process_id.clone();
+            recorded_process_step(context, invocation, "process-attach-guard", async move {
+                await_existence_guard(guard_registry.as_ref(), &guard_id).await
+            })
+            .await?;
             context
                 .attach_process_terminal(RestateProcessAttachRequest { process_id, key })
                 .await
@@ -614,14 +701,34 @@ where
             request,
             ..
         } => {
-            let result = registry.append_event(&process_id, request).await?;
-            let realization = result.realization;
-            let ordinal = signal_ordinal_for_event(
-                registry.as_ref(),
-                &process_id,
-                result.event.event_type.as_str(),
-                result.event.sequence,
-            )
+            // The append and the ordinal the resolution is keyed by are one
+            // recorded step ahead of the resolution (FIG-3827): a replay after
+            // the target was pruned resolves the recorded wait with the
+            // recorded payload, never re-appending or re-counting a log that
+            // is gone.
+            let step_registry = Arc::clone(&registry);
+            let step_process_id = process_id.clone();
+            let JournaledSignalAppend {
+                event,
+                realization,
+                ordinal,
+            } = recorded_process_step(context, invocation, "process-signal-append", async move {
+                let appended = step_registry
+                    .append_event(&step_process_id, request)
+                    .await?;
+                let ordinal = signal_ordinal_for_event(
+                    step_registry.as_ref(),
+                    &step_process_id,
+                    appended.event.event_type.as_str(),
+                    appended.event.sequence,
+                )
+                .await?;
+                Ok(JournaledSignalAppend {
+                    event: Box::new(appended.event),
+                    realization: appended.realization,
+                    ordinal,
+                })
+            })
             .await?;
             let key = restate_await_event_key_for_authority(
                 authority_id,
@@ -632,7 +739,7 @@ where
             context
                 .resolve_event(RestateDurableWaitResolveRequest {
                     key,
-                    resolution: Resolution::Ok(result.event.payload.clone()),
+                    resolution: Resolution::Ok(event.payload.clone()),
                 })
                 .await
                 .map_err(|err| {
@@ -641,25 +748,27 @@ where
                         format!("Restate process signal resolution failed: {err}"),
                     ))
                 })?;
-            Ok((
-                ProcessEffectOutcome::Signal {
-                    event: Box::new(result.event),
-                },
-                realization,
-            ))
+            Ok((ProcessEffectOutcome::Signal { event }, realization))
         }
         ProcessCommand::EmitEvent {
             process_id,
             request,
         } => {
-            let result = registry.append_event(&process_id, request).await?;
-            Ok((
-                ProcessEffectOutcome::EmitEvent {
-                    event: Box::new(result.event),
-                    wake_delivery: result.wake_delivery.map(Box::new),
-                },
-                result.realization,
-            ))
+            // The append records its receipt (FIG-3827), so a replay answers
+            // the recorded event and wake delivery.
+            let step_registry = Arc::clone(&registry);
+            recorded_process_step(context, invocation, "process-emit-event", async move {
+                let appended = step_registry.append_event(&process_id, request).await?;
+                Ok(JournaledProcessOutcome {
+                    outcome: ProcessEffectOutcome::EmitEvent {
+                        event: Box::new(appended.event),
+                        wake_delivery: appended.wake_delivery.map(Box::new),
+                    },
+                    realization: appended.realization,
+                })
+            })
+            .await
+            .map(|recorded| (recorded.outcome, recorded.realization))
         }
         // Served by the early arm above against the process-definition
         // executor; it never reaches the process executor.

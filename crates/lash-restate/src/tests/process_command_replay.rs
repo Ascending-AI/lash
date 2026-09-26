@@ -1,19 +1,18 @@
 //! Restate process commands replay by their recorded outcome, not by live
 //! re-execution (FIG-3827).
 //!
-//! A start journals its registration (ADR 0107), so its replay reads the
-//! recorded id. Every other process command but `Signal` runs as a direct
-//! process execution that records no outcome, and `Signal`'s eager record
-//! awaits its body before the record step: a replay re-runs each against the
-//! registry as it is *now*. A replay after the store moved on (a signalled
-//! child pruned, a listed process ended) answers differently from the run that
-//! wrote the journal, or issues different commands, which Restate refuses as a
-//! journal mismatch and parks the handler.
+//! Every process command's store work is a recorded step: a start journals
+//! its registration (ADR 0107), a signal journals its append with the ordinal
+//! it keys the resolution by, and a listing, a transfer, a session delete and
+//! an event emit journal their outcome. A replay after the store moved on (a
+//! signalled child pruned, a listed process ended or a new one started, a
+//! session's observers written again) reads the recorded answer and issues
+//! the recorded commands, instead of re-running the command against the
+//! registry as it is now.
 //!
 //! Each law records one command live, moves the store on, replays the same
 //! command against the recorded journal and requires the recorded answer and
-//! the same command sequence. The start law holds; the others fail today and
-//! are ignored under FIG-3827.
+//! the same command sequence.
 
 use super::*;
 
@@ -77,7 +76,6 @@ fn assert_same_commands(context: &ReplayableRecordingContext, live: &[String], r
 /// resolution by are the recorded run's, not a live re-read of a row that is
 /// gone.
 #[tokio::test]
-#[ignore = "FIG-3827: a replayed Signal re-appends and re-counts live; once the target is pruned it fails before its resolve_event command"]
 pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_recorded() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
@@ -140,11 +138,11 @@ pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_reco
     );
 }
 
-/// A listing replayed after a listed process ended answers the recorded
-/// entries: the body that branched on them takes the same path.
+/// A listing replayed after a listed process ended and another one started
+/// answers the recorded entries: the body that branched on them takes the
+/// same path.
 #[tokio::test]
-#[ignore = "FIG-3827: a replayed List re-reads the registry live and answers the current listing"]
-pub(super) async fn a_list_replayed_after_a_listed_process_ended_answers_as_recorded() {
+pub(super) async fn a_list_replayed_after_the_listed_processes_change_answers_as_recorded() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
@@ -192,6 +190,19 @@ pub(super) async fn a_list_replayed_after_a_listed_process_ended_answers_as_reco
         )
         .await
         .expect("the listed process ends");
+    let started = registry
+        .register_process(external_registration())
+        .await
+        .expect("register a second process")
+        .id;
+    registry
+        .add_observer(
+            &scope.session_id,
+            &started,
+            lash_core::ProcessObserverBy::host("fig3827-list"),
+        )
+        .await
+        .expect("observe the second process");
     context.start_replay();
     let replay_from = context.journal_commands.lock_recover().len();
     let replay = host
@@ -268,7 +279,6 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
 /// An observer transfer replayed after the transferred process was pruned
 /// answers the recorded transfer.
 #[tokio::test]
-#[ignore = "FIG-3827: a replayed Transfer re-runs its observer writes live against the current registry"]
 pub(super) async fn a_transfer_replayed_after_its_process_is_pruned_answers_as_recorded() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
@@ -316,5 +326,97 @@ pub(super) async fn a_transfer_replayed_after_its_process_is_pruned_answers_as_r
         format!("{replay:?}"),
         format!("{first:?}"),
         "the replay answers the recorded transfer"
+    );
+}
+
+/// A session delete replayed after the session observes a process again
+/// answers the recorded report and deletes nothing: the observation written
+/// after the delete survives the replay.
+#[tokio::test]
+pub(super) async fn a_session_delete_replayed_after_the_session_observes_again_answers_as_recorded()
+{
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
+    let registry = process_registry();
+    let scope = lash_core::SessionScope::new("fig3827-delete-session");
+    let observe = |process_id: ProcessId| {
+        let registry = registry.clone();
+        let scope = scope.clone();
+        async move {
+            registry
+                .add_observer(
+                    &scope.session_id,
+                    &process_id,
+                    lash_core::ProcessObserverBy::host("fig3827-delete"),
+                )
+                .await
+                .expect("observe the process");
+        }
+    };
+    let first_observed = registry
+        .register_process(external_registration())
+        .await
+        .expect("register the first observed process")
+        .id;
+    observe(first_observed).await;
+    let delete = || {
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::Process, "fig3827-delete-session"),
+            RuntimeEffectCommand::process(ProcessCommand::DeleteSession {
+                session_id: scope.session_id.clone(),
+            }),
+        )
+    };
+    let first = host
+        .execute_effect(delete(), registry_local_executor(registry.clone()))
+        .await
+        .expect("the live session delete");
+    let live_commands = commands_since(&context, 0);
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::DeleteSession { report },
+    } = &first
+    else {
+        panic!("a session-delete outcome: {first:?}");
+    };
+    assert_eq!(
+        report.removed_observer_count, 1,
+        "the live delete removes the one observation"
+    );
+
+    let observed_again = registry
+        .register_process(external_registration())
+        .await
+        .expect("register a process the session observes again")
+        .id;
+    observe(observed_again.clone()).await;
+    context.start_replay();
+    let replay_from = context.journal_commands.lock_recover().len();
+    let replay = host
+        .execute_effect(delete(), registry_local_executor(registry.clone()))
+        .await;
+    let replay = replayed(replay, "session delete");
+    assert_same_commands(&context, &live_commands, replay_from);
+    assert_eq!(
+        format!("{replay:?}"),
+        format!("{first:?}"),
+        "the replay answers the recorded session delete"
+    );
+    let observed = registry
+        .list_observed_by(
+            &scope.session_id,
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("list the session's observations");
+    assert_eq!(
+        observed
+            .iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>(),
+        vec![observed_again],
+        "the replay deletes nothing the session observed after the delete"
     );
 }
