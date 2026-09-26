@@ -126,12 +126,13 @@ pub(super) fn echo_tools() -> Arc<dyn ToolProvider> {
 }
 
 /// A fresh SQLite memory backend: each live-E2E core is its own substrate.
-async fn memory_backend() -> Result<Arc<lash_sqlite_store::SqliteBackend>> {
+async fn memory_backend() -> Result<lash::Backend> {
     Ok(Arc::new(
         lash_sqlite_store::SqliteBackend::memory()
             .await
             .map_err(|error| anyhow::anyhow!("open a SQLite memory backend: {error}"))?,
-    ))
+    )
+    .into())
 }
 
 pub(super) async fn standard_core(
@@ -191,7 +192,7 @@ pub(super) async fn rlm_core(
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend,
     );
     let mut builder = LashCore::rlm_builder(
         backend,

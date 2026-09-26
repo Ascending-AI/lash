@@ -1256,9 +1256,15 @@ impl ZombieRoot {
     /// Restate's retry of the root invocation, with its first `journaled`
     /// commands acknowledged.
     async fn retry_root(&self, prior: &[u8], journaled: usize) -> bytes::Bytes {
+        self.retry(0, prior, journaled).await
+    }
+
+    /// Restate's retry of `segment_ordinal`'s invocation, with its first
+    /// `journaled` commands acknowledged.
+    async fn retry(&self, segment_ordinal: u64, prior: &[u8], journaled: usize) -> bytes::Bytes {
         let body = encode_journal_retry(
-            &self.key(0),
-            &segment_input(&self.registration, 0),
+            &self.key(segment_ordinal),
+            &segment_input(&self.registration, segment_ordinal),
             prior,
             journaled,
         )
@@ -1439,5 +1445,51 @@ pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
             .await
             .expect("read handovers"),
         None
+    );
+}
+
+/// FIG-3819: a terminal stored between a later segment's verdict and its start
+/// step is fenced by the start marker. The verdict is journaled before the
+/// process ends; the start step's marker write finds the terminal in its own
+/// transaction and is refused, so the segment records `Ended`, runs nothing and
+/// starts nothing.
+#[tokio::test]
+pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_body() {
+    let root = ZombieRoot::new("fig3819-verdict-then-terminal").await;
+    root.zombie_hands_over()
+        .await
+        .expect("the root hands segment 1 over");
+    let verdict = root.invoke_fresh(1, false).await;
+    assert_eq!(
+        proposed_runs(&verdict),
+        1,
+        "the verdict proposed: {verdict:?}"
+    );
+    root.registry
+        .complete_process(
+            &root.registration.id,
+            process_success(serde_json::json!("ended")),
+            crate::process::workflow_key_authority(&root.registration.id),
+        )
+        .await
+        .expect("the process ends after the verdict");
+    let _ = root.retry(1, &verdict, 1).await;
+    assert_eq!(root.runs(), 0, "no segment body runs after the terminal");
+    assert_eq!(
+        root.continuations
+            .segment_start(&lash_core::ProcessSegmentKey::new(
+                root.registration.id.clone(),
+                1
+            ))
+            .await
+            .expect("read segment 1's marker"),
+        None,
+        "the refused start records no marker"
+    );
+    assert!(
+        root.outcome()
+            .await
+            .is_some_and(|outcome| !matches!(outcome, ProcessAwaitOutput::Abandoned { .. })),
+        "the stored terminal stands"
     );
 }

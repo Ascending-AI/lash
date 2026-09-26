@@ -112,6 +112,8 @@ pub(crate) enum SegmentFailure {
     Boundary(String),
     /// The handover to the successor could not be written.
     HandoverWrite(String),
+    /// The process's records break an admission invariant (FIG-3819).
+    AdmissionInvariant(String),
 }
 
 impl SegmentFailure {
@@ -122,6 +124,7 @@ impl SegmentFailure {
             Self::Controller(_) => "process_segment_controller",
             Self::Boundary(_) => "process_segment_boundary",
             Self::HandoverWrite(_) => "process_segment_handover_write",
+            Self::AdmissionInvariant(_) => "process_segment_admission_invariant",
         }
     }
 
@@ -131,7 +134,8 @@ impl SegmentFailure {
         | Self::HandoverMismatch(message)
         | Self::Controller(message)
         | Self::Boundary(message)
-        | Self::HandoverWrite(message)) = self;
+        | Self::HandoverWrite(message)
+        | Self::AdmissionInvariant(message)) = self;
         ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
             lash_core::ToolFailure::runtime(lash_core::ToolFailureClass::Execution, code, message),
         ))
@@ -193,6 +197,7 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     segment_effect_budget: super::SegmentEffectBudget,
+    retry_max_attempts: u64,
     cancel_ingress: Option<RestateIngressClient>,
     authority_id: crate::RestateAuthorityId,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
@@ -246,6 +251,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             registry,
             continuations,
             segment_effect_budget: Arc::new(|_| 10_000),
+            retry_max_attempts: super::PROCESS_HANDLER_MAX_ATTEMPTS,
             cancel_ingress,
             authority_id,
             trace_sink: None,
@@ -264,6 +270,19 @@ impl<R> LashProcessWorkflowImpl<R> {
         self.trace_sink = Some(sink);
         self.trace_context = context;
         self
+    }
+
+    /// Stop retrying a segment after `max_attempts` attempts and pause its
+    /// invocation (FIG-3675): the process parks through the park reconcile
+    /// instead of burning retries forever.
+    pub(crate) fn with_retry_max_attempts(mut self, max_attempts: u64) -> Self {
+        self.retry_max_attempts = max_attempts;
+        self
+    }
+
+    /// The attempts a segment's `run` invocation makes before it pauses.
+    pub(crate) fn retry_max_attempts(&self) -> u64 {
+        self.retry_max_attempts
     }
 
     pub(crate) fn with_segment_effect_budget(
@@ -752,7 +771,7 @@ where
                 self.registry
                     .park_process_with_authority(
                         process_id,
-                        reason,
+                        reason.into(),
                         &park_authority(&record, started),
                     )
                     .await
@@ -951,6 +970,17 @@ where
                             "missing persisted handover for process `{process_id}` segment {}",
                             input.segment_ordinal
                         )),
+                        SegmentSignal::Unresolved,
+                    )
+                    .await;
+            }
+            SegmentAdmission::Invariant { message } => {
+                return self
+                    .fail_segment(
+                        &ctx,
+                        &process_id,
+                        input.segment_ordinal,
+                        SegmentFailure::AdmissionInvariant(message),
                         SegmentSignal::Unresolved,
                     )
                     .await;

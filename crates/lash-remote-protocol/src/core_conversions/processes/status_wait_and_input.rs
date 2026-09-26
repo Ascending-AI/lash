@@ -129,6 +129,7 @@ impl TryFrom<lash_core::store::ProcessPark> for RemoteProcessPark {
             last_refused_ms,
             attempts,
             refusing,
+            engine,
         } = value;
         // The mirror is the reason's serde form, arm for arm: a round trip
         // through it is the conversion, so a core arm the mirror lacks is
@@ -146,6 +147,7 @@ impl TryFrom<lash_core::store::ProcessPark> for RemoteProcessPark {
             last_refused_ms,
             attempts,
             refusing,
+            engine: engine.map(|engine| engine.as_str().to_string()),
         })
     }
 }
@@ -162,6 +164,7 @@ impl TryFrom<RemoteProcessPark> for lash_core::store::ProcessPark {
             last_refused_ms,
             attempts,
             refusing,
+            engine,
         } = value;
         let reason = serde_json::to_value(&reason)
             .and_then(serde_json::from_value)
@@ -176,6 +179,7 @@ impl TryFrom<RemoteProcessPark> for lash_core::store::ProcessPark {
             last_refused_ms,
             attempts,
             refusing,
+            engine: engine.map(lash_core::store::EnginePark::new),
         })
     }
 }

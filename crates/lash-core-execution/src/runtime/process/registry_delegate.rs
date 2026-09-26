@@ -461,14 +461,14 @@ macro_rules! delegate_process_lifecycle {
             async fn park_process_with_authority(
                 &self,
                 process_id: &$crate::ProcessId,
-                reason: $crate::store::ParkReason,
+                park: $crate::store::ProcessParkWrite,
                 authority: &$crate::ProcessExecutionWriteAuthority,
             ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
                 let $event_process_id = process_id;
                 let $event_self = self;
                 let $event_call = self
                     .$inner
-                    .park_process_with_authority(process_id, reason, authority);
+                    .park_process_with_authority(process_id, park, authority);
                 $event_hook
             }
 

@@ -571,6 +571,7 @@ mod tests {
             "SELECT id, pinned_deployment_id FROM sys_invocation WHERE status IN ('pending', 'ready', 'running', 'backing-off', 'suspended') AND (target_service_name LIKE 'Lash%' OR target_service_name LIKE 'Effect%') ORDER BY modified_at DESC",
             "SELECT pinned_deployment_id, COUNT(1) as open_count FROM sys_invocation WHERE status IN ('pending', 'ready') GROUP BY pinned_deployment_id",
             "SELECT id FROM sys_invocation WHERE status = 'paused' AND last_failure IS NOT NULL",
+            "SELECT id, target_service_name, target_service_key, target_handler_name, retry_count, last_failure, last_failure_error_code FROM sys_invocation WHERE status = 'paused' AND target_service_name = 'LashProcessWorkflow'",
         ] {
             Parser::new(sql).and_then(Parser::query).unwrap();
         }

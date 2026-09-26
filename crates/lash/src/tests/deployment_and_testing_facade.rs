@@ -204,7 +204,8 @@ async fn parked_work_merges_parked_turns_and_processes() {
             lash_core::store::ParkReason::EffectReplayDivergence {
                 effect_kind: "llm_call".to_string(),
                 message: "diverged".to_string(),
-            },
+            }
+            .into(),
             &authority,
         )
         .await

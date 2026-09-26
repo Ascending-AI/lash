@@ -120,7 +120,7 @@ async fn parked(
     let record = registry
         .park_process_with_authority(
             id,
-            reason,
+            reason.into(),
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
         .await
@@ -310,7 +310,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     );
 
     let repeated = registry
-        .park_process_with_authority(&id, divergence("llm_call"), &authority)
+        .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
         .expect("repeat the park write");
     assert_eq!(
@@ -333,7 +333,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     assert_eq!(again.park, rerun.park, "a second rerun start is unchanged");
 
     let reparked = registry
-        .park_process_with_authority(&id, divergence("llm_call"), &authority)
+        .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
         .expect("the rerun refuses again");
     let park = reparked.park.as_deref().expect("the process stays parked");
@@ -413,7 +413,7 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
     );
 
     let reparked = registry
-        .park_process_with_authority(&id, divergence("llm_call"), &authority)
+        .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
         .expect("a later refusal parks again");
     let park = reparked.park.as_deref().expect("a new park");
@@ -529,7 +529,7 @@ pub async fn only_a_refusing_park_exempts_a_start_from_the_attempt_budget(
     registry
         .park_process_with_authority(
             &id,
-            cell_divergence(),
+            cell_divergence().into(),
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
         .await

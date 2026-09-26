@@ -16,7 +16,8 @@
 use std::sync::Arc;
 
 use restate_sdk::context::RunRetryPolicy;
-use restate_sdk::endpoint::Builder;
+use restate_sdk::endpoint::{Builder, HandlerOptions, ServiceOptions};
+use restate_sdk::service::IntoServiceDefinition as _;
 
 use crate::RestateEffectHost;
 use crate::durable_wait::{
@@ -100,7 +101,18 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
     } = parts;
     // `LASH_SERVICES` lists each variant once, so the process-workflow arm runs once and
     // always finds the workflow here.
-    let mut process_workflow = Some(process_workflow.serve());
+    // A segment that keeps failing live stops after its deployment's attempt
+    // bound and pauses, keeping its journal: the park reconcile parks its
+    // process and a resume retries it (FIG-3675).
+    let run_options = HandlerOptions::new()
+        .retry_policy_max_attempts(process_workflow.retry_max_attempts())
+        .retry_policy_pause_on_max_attempts();
+    let mut process_workflow = Some(
+        process_workflow
+            .serve()
+            .into_service_definition()
+            .options(ServiceOptions::new().handler("run", run_options)),
+    );
     LASH_SERVICES
         .iter()
         .fold(builder, |builder, service| match service {

@@ -960,7 +960,7 @@ finish("done via Restate E2E");
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &lash::Backend::new(backend.clone()),
         );
         let core = LashCore::rlm_builder(
             lash::Backend::new(backend.clone()),

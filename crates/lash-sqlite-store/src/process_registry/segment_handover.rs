@@ -154,6 +154,16 @@ impl SqliteProcessRegistry {
             .conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
+                    let record = Self::require_process_conn(tx, &process_id)?;
+                    // An ended process starts no segment: the check and the
+                    // marker share this transaction, so no terminal lands
+                    // between them (FIG-3819).
+                    if record.is_terminal() {
+                        return Err(lash_core_execution::PluginError::ProcessAlreadyTerminal {
+                            process_id: record.id.clone(),
+                            status: record.status,
+                        });
+                    }
                     let encoded = process_encode_json(&marker)?;
                     tx.execute(
                         process_sql().handover.mark_started.sql(),

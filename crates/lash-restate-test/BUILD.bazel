@@ -54,6 +54,23 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
+    name = "admission_invariant__test",
+    crate_features = [],
+    crate_name = "admission_invariant",
+    crate_root = "tests/admission_invariant.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "admission_invariant", "//crates/lash-restate-test:admission_invariant__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "drop__test",
     crate_features = [],
     crate_name = "drop",
@@ -196,6 +213,7 @@ lash_batch_test(
     budget = test_batch_budget("//crates/lash-restate-test:test_batch"),
     jobs = 2,
     tests = [
+        ":admission_invariant__test",
         ":drop__test",
         ":lash-restate-test__unit_test",
         ":process_crash_replay__test",
