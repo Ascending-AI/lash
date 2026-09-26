@@ -215,6 +215,7 @@ async fn turn_stop_process_cancel_admission(
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
     authority_id: &RestateAuthorityId,
+    sender_generation: Option<&lash_core::engine::BuildGeneration>,
     process_cancel: context::ProcessCancelRace,
     invocation: &RuntimeEffectInvocation,
     command: ProcessCommand,
@@ -338,6 +339,7 @@ where
                 started,
                 registration,
                 *execution_context,
+                sender_generation.cloned(),
                 context,
                 invocation,
             )

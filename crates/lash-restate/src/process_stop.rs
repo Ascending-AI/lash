@@ -40,8 +40,10 @@ impl ProcessStopDelivery {
         Self { watch: None }
     }
 
-    /// Watch `workflow_key`'s cancel promise over `ingress` and fire `stop`
-    /// when it holds an accepted cancel request.
+    /// Watch the cancel promise of `workflow_key` under `route` — the lane
+    /// the segment runs under, where its cancel promise lives (FIG-3795) —
+    /// over `ingress`, and fire `stop` when it holds an accepted cancel
+    /// request.
     ///
     /// The watch fails closed. A transport fault is retried on the shared
     /// ladder; a watch that exhausts it, or addresses a workflow nothing
@@ -52,18 +54,20 @@ impl ProcessStopDelivery {
     /// committed cancel cannot reach.
     pub(crate) fn watch(
         ingress: RestateIngressClient,
+        route: crate::services::ServiceRoute,
         process_id: ProcessId,
         workflow_key: String,
         stop: CancellationToken,
     ) -> Self {
         let request = RestateProcessAwaitRequest { process_id };
+        let service = route.name().into_owned();
         let watch = lash_core::task::spawn(async move {
             let mut faults = 0;
             let mut delay = WATCH_RETRY_FIRST_DELAY;
             loop {
                 match ingress
                     .call_workflow_json::<_, RestateProcessCancelSignal>(
-                        crate::LashService::ProcessWorkflow.name(),
+                        &service,
                         &workflow_key,
                         "await_cancel",
                         &request,
@@ -86,7 +90,7 @@ impl ProcessStopDelivery {
                     Err(error) if error.is_service_unregistered() => {
                         // Retrying cannot make the binding appear (FIG-1579).
                         return crate::ingress::unregistered_service_terminal(
-                            crate::LashService::ProcessWorkflow.name(),
+                            &service,
                             "await_cancel",
                             &error,
                         )

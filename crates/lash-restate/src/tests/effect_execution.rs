@@ -1119,10 +1119,6 @@ pub(super) async fn restate_process_attach_calls_await_terminal_ingress() {
 
 #[tokio::test]
 pub(super) async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolves() {
-    assert_eq!(
-        terminal_completion_workflow_key(&ProcessId::fixture("retained-terminal"), 2),
-        Some(ProcessId::fixture("retained-terminal").to_string())
-    );
     let registry = process_registry();
     let record = registry
         .register_process(external_registration())
@@ -1611,8 +1607,9 @@ pub(super) async fn restate_admin_client_cancels_kills_and_queries_invocation_st
         requests[2]
     );
     assert!(requests[2].contains("FROM sys_invocation WHERE id = 'inv_123'"));
+    // A workflow's status is looked up on every lane of its name (FIG-3795).
     assert!(requests[3].contains(
-        "target_service_name = 'WorkbenchTurnWorkflow' AND target_service_key = 'turn-2' AND target_handler_name = 'run'"
+        "(target_service_name = 'WorkbenchTurnWorkflow' OR target_service_name LIKE 'WorkbenchTurnWorkflow_g%') AND target_service_key = 'turn-2' AND target_handler_name = 'run'"
     ));
 }
 

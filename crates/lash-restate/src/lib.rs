@@ -89,6 +89,7 @@ mod object_state;
 mod process;
 mod process_attach;
 mod process_stop;
+mod sentinel;
 mod services;
 mod session_administration;
 mod session_control;
@@ -129,7 +130,7 @@ pub use effect_group::{
     EffectGroupSettlementTerminal, EffectGroupShape, EffectGroupWaitResolution,
 };
 pub use effect_host::RestateEffectHost;
-pub use engine::{RestateConfig, RestateEngine};
+pub use engine::{RestateConfig, RestateEngine, deployment_path};
 pub use formats::{EngineDurableFormat, durable_formats};
 pub use ingress::{
     DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
@@ -170,7 +171,7 @@ pub(crate) use durable_wait::{
     LashDurableWaitWorkflowImpl,
 };
 #[cfg(test)]
-pub(crate) use effect_group::EffectGroupDispatch;
+pub(crate) use effect_group::{EffectGroupDispatch, EffectGroupDispatchImpl};
 #[cfg(test)]
 pub(crate) use process::{
     LashProcessWorkflow, LashProcessWorkflowImpl, RestateCoreProcessRunner, RestateProcessRunner,

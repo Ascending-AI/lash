@@ -53,22 +53,26 @@ use std::sync::Arc;
 /// The generation of the Restate process handler's journaled commands.
 ///
 /// This version owns the commands every `LashProcessWorkflow/run` invocation
-/// journals around its runner: the admission verdict and the start step above,
-/// the segment's recorded cancel races and peeks, and the terminal, boundary
-/// and handover steps after it (FIG-3673). Any change to those commands, or to
-/// what they key on, bumps it (paused pre-1.0, FIG-3660).
-/// Every submitter stamps it on
-/// [`RestateProcessWorkflowInput`](super::RestateProcessWorkflowInput), and the
-/// handler refuses any other generation before it journals anything. An
-/// unstamped input is generation 1, the prefix before FIG-3588. Generation 4
-/// (FIG-3607) names the process by its minted id alone: the input carries the
-/// id beside its registration, which no longer names one, the start step
-/// journals the id it started, and the requests a caller sends into a running
-/// workflow (complete, await, cancel, attach) are stamped with this generation
-/// and refused by it before their shape is decoded. Generation 4 changed in
-/// place under the pre-1.0 version freeze (FIG-3846): a registration records
-/// its lifetime, ancestry and session capability where it carried a parent
-/// policy (FIG-3607).
+/// journals around its runner: the generation sentinel first, the successor
+/// window a stable-lane successor from another build passes, the admission
+/// verdict and the start step above, the segment's recorded cancel races and
+/// peeks, and the terminal, boundary and handover steps after it (FIG-3673,
+/// FIG-3795). Any change to those commands, or to what they key on, bumps it
+/// (paused pre-1.0, FIG-3660). It is a drain format, so it moves the build's
+/// generation `G`: a journal of another generation is refused by the
+/// generation sentinel on replay, and a new invocation is routed by the
+/// sender generation its input carries
+/// ([`RestateProcessWorkflowInput::sender_generation`](super::RestateProcessWorkflowInput::sender_generation)).
+/// Generation 4 (FIG-3607) names the process by its minted id alone: the
+/// input carries the id beside its registration, which no longer names one,
+/// the start step journals the id it started, and the requests a caller sends
+/// into a running workflow (complete, await, cancel, attach) are stamped with
+/// this generation and refused by it before their shape is decoded. An
+/// unstamped request is generation 1. Generation 4 changed in place under the
+/// pre-1.0 version freeze (FIG-3846): a registration records its lifetime,
+/// ancestry and session capability where it carried a parent policy
+/// (FIG-3607), and the input carries its sender's drain generation in place
+/// of this version, behind the generation sentinel (FIG-3795).
 pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the
@@ -87,15 +91,15 @@ const ADMIT_STEP: &str = "lash.segment.admit";
 /// The journal name of the start step.
 const START_STEP: &str = "lash.segment.start";
 
-/// The generation an input that carries no stamp was written by.
-pub(crate) fn unstamped_journal_version() -> u32 {
+/// The generation a request that carries no stamp was written by.
+fn unstamped_journal_version() -> u32 {
     1
 }
 
-/// The generation a process input or request was written by, read before
-/// its shape is decoded: an input of another generation is refused by
-/// generation, never by a shape error its retired fields would raise.
-pub(crate) fn stamped_journal_version(payload: &serde_json::Value) -> u32 {
+/// The generation a process request was written by, read before its shape
+/// is decoded: a request of another generation is refused by generation,
+/// never by a shape error its retired fields would raise.
+fn stamped_journal_version(payload: &serde_json::Value) -> u32 {
     payload
         .get("journal_version")
         .and_then(serde_json::Value::as_u64)

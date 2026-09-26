@@ -75,8 +75,7 @@ use lash_core::engine::{
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
 use restate_sdk::context::{
-    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, ObjectContext,
-    RunFuture as _, SharedWorkflowContext, WorkflowContext,
+    ContextReadState, ContextWriteState, ObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -147,33 +146,6 @@ pub struct RestateTurnDriveRequest {
     /// its recorded claim was admitted on, and a replay reads that claim back;
     /// adopting that head still reads live store state (FIG-3824).
     pub admitted: Admitted,
-}
-
-/// The frozen name of the generation sentinel step, the first command every
-/// session-driver journal records. Its name and its output (the executing
-/// build's [`BuildGeneration`] as a JSON string) never change.
-const GENERATION_SENTINEL: &str = "lash.build.generation";
-
-/// The generation sentinel's verdict. Each handler records the executing
-/// build's generation as its journal's first command
-/// ([`GENERATION_SENTINEL`]); a replay that reads back another generation
-/// parks its attempt, typed with the recorded generation, before any other
-/// command, and keeps its journal for a build of that generation.
-fn check_generation(
-    service: LashService,
-    recorded: &BuildGeneration,
-    executing: &BuildGeneration,
-) -> Result<(), HandlerError> {
-    if recorded == executing {
-        return Ok(());
-    }
-    Err(parked_turn_failure(format!(
-        "RetiredGeneration: {} journal was recorded under generation `{}`; this build is \
-         generation `{}` and parks it for a build of the recorded generation",
-        service.name(),
-        recorded.as_str(),
-        executing.as_str()
-    )))
 }
 
 /// The `LashTurn` workflow key of `root` in `session`: one workflow per
@@ -806,16 +778,11 @@ async fn drive_session_journal(
             request.session
         )));
     }
-    let Json(recorded) = ctx
-        .run(|| {
-            let executing = generation.clone();
-            async move { Ok(Json(executing)) }
-        })
-        .name(GENERATION_SENTINEL)
-        .await?;
-    check_generation(LashService::SessionDriver, &recorded, generation)?;
+    let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
+    crate::sentinel::check_generation(LashService::SessionDriver.name(), &recorded, generation)?;
     let driver = slot.driver_for(LashService::SessionDriver.name())?;
-    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
+        .with_build_generation(generation.clone());
     let admission_scope = drive_admission_scope(&request.session, &request.request);
     let mut ran = Vec::new();
     // The kernel's stop rules, the same ones the in-process drive keeps.
@@ -842,16 +809,22 @@ async fn drive_session_journal(
                 let root = admitted.root().clone();
                 let work = admitted.work().clone();
                 let key = turn_workflow_key(admitted.session(), &root);
-                let outcome = match controller
-                    .context()
-                    .workflow_client::<LashTurnClient>(key.clone())
-                    .run(Json(RestateTurnDriveRequest {
+                // A newly admitted root is new work: its `LashTurn` goes to
+                // the stable lane, which Restate hands to the newest build
+                // (FIG-3795), and its outcome reads back under the same route.
+                let outcome = match crate::services::routed_workflow::<_, _, RootOutcome>(
+                    controller.context(),
+                    &crate::services::ServiceRoute::stable(LashService::TurnDriver),
+                    key.clone(),
+                    "run",
+                    RestateTurnDriveRequest {
                         drive_version: LASH_SESSION_DRIVE_VERSION,
                         sender_generation: Some(generation.clone()),
                         admitted,
-                    }))
-                    .call()
-                    .await
+                    },
+                )
+                .call()
+                .await
                 {
                     Ok(Json(outcome)) => outcome,
                     // The call ended without a lash outcome: an earlier drive
@@ -862,10 +835,14 @@ async fn drive_session_journal(
                     // never a failure of the whole drive: the next admission
                     // reads what the store decided about it (ADR 0104 O4).
                     Err(error) => {
-                        let recorded = controller
-                            .context()
-                            .workflow_client::<LashTurnClient>(key)
-                            .outcome()
+                        let recorded =
+                            crate::services::routed_workflow::<_, (), Option<RootOutcome>>(
+                                controller.context(),
+                                &crate::services::ServiceRoute::stable(LashService::TurnDriver),
+                                key,
+                                "outcome",
+                                (),
+                            )
                             .call()
                             .await
                             .map_err(HandlerError::from)?;
@@ -902,16 +879,19 @@ async fn drive_session_journal(
                         build_generation: request.build_generation.clone(),
                     };
                     let continuation_id = continuation.request.as_str().to_owned();
-                    controller
-                        .context()
-                        .object_client::<LashSessionClient>(request.session.as_str().to_owned())
-                        .drive(Json(RestateSessionDriveRequest {
+                    crate::services::routed_object::<_, _, ()>(
+                        controller.context(),
+                        &crate::services::ServiceRoute::stable(LashService::SessionDriver),
+                        request.session.as_str().to_owned(),
+                        "drive",
+                        RestateSessionDriveRequest {
                             drive_version: LASH_SESSION_DRIVE_VERSION,
                             request: continuation,
-                        }))
-                        .idempotency_key(continuation_id)
-                        .send()
-                        .await?;
+                        },
+                    )
+                    .idempotency_key(continuation_id)
+                    .send()
+                    .await?;
                     return Ok(DriveOutcome {
                         ran,
                         stop: DriveStop::Yielded { root: yielded_root },
@@ -953,16 +933,11 @@ async fn run_root_journal(
             ctx.key()
         )));
     }
-    let Json(recorded) = ctx
-        .run(|| {
-            let executing = generation.clone();
-            async move { Ok(Json(executing)) }
-        })
-        .name(GENERATION_SENTINEL)
-        .await?;
-    check_generation(LashService::TurnDriver, &recorded, generation)?;
+    let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
+    crate::sentinel::check_generation(LashService::TurnDriver.name(), &recorded, generation)?;
     let driver = slot.driver_for(LashService::TurnDriver.name())?;
-    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
+        .with_build_generation(generation.clone());
     let scoped = controller
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
@@ -1058,18 +1033,6 @@ mod tests {
         let unstamped: RestateSessionDriveRequest =
             serde_json::from_value(stamped).expect("an unstamped request decodes");
         assert_eq!(unstamped.drive_version, 0);
-    }
-
-    #[test]
-    fn the_sentinel_admits_only_its_own_generation() {
-        let own = BuildGeneration::for_test("t0");
-        assert!(check_generation(LashService::TurnDriver, &own, &own).is_ok());
-        let other = BuildGeneration::for_test("t1");
-        let refusal = check_generation(LashService::TurnDriver, &other, &own)
-            .expect_err("another generation parks");
-        let message = format!("{refusal:?}");
-        assert!(message.contains("RetiredGeneration"), "{message}");
-        assert!(message.contains(other.as_str()), "{message}");
     }
 
     #[test]
@@ -1411,16 +1374,6 @@ mod tests {
         assert_eq!(
             requests[0].url, requests[1].url,
             "redrive keeps its request identity"
-        );
-    }
-
-    #[test]
-    fn the_sentinel_step_is_frozen() {
-        assert_eq!(GENERATION_SENTINEL, "lash.build.generation");
-        let generation = BuildGeneration::for_test("t0");
-        assert_eq!(
-            serde_json::to_string(&generation).expect("encode"),
-            format!("\"{}\"", generation.as_str())
         );
     }
 }

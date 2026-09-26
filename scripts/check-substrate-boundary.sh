@@ -305,6 +305,31 @@ if [[ ${#engine_format_roots[@]} -gt 0 ]]; then
   fi
 fi
 
+# A pinned lash service (FIG-3795: the process workflow, the effect-group
+# dispatcher, the session object's drive and turn) is addressed only through a
+# `ServiceRoute`: the name a call targets is always a route — stable, or the
+# generation lane a recorded route names — never the name a generated typed
+# client bakes into the request target. Shared services keep their typed
+# clients until FIG-3803 epoch-names them.
+pinned_client_forbidden='(workflow_client|object_client|service_client)::[[:space:]]*<[[:space:]]*(LashProcessWorkflowClient|EffectGroupDispatchClient|LashSessionClient|LashTurnClient)'
+capture_search "pinned-service typed client" "$pinned_client_forbidden" "$tmp_dir/rule4f.raw" "${rule4_roots[@]}"
+: >"$tmp_dir/rule4f.hits"
+while IFS=: read -r file line source; do
+  [[ -n "$file" ]] || continue
+  if [[ $file =~ $test_path_regex ]]; then
+    continue
+  fi
+  if [[ $(line_in_test_region "$file" "$line") == 1 ]]; then
+    continue
+  fi
+  printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule4f.hits"
+done <"$tmp_dir/rule4f.raw"
+if [[ -s "$tmp_dir/rule4f.hits" ]]; then
+  cat "$tmp_dir/rule4f.hits" >&2
+  echo "substrate boundary rule 4 failed: a pinned lash service is called through a typed client; route it through services::routed_workflow with a ServiceRoute" >&2
+  failed=1
+fi
+
 # Rule 5 — drive determinism ratchet.
 #
 # The turn driver is workflow code: on replay it must re-issue exactly the

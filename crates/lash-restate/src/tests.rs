@@ -24,7 +24,7 @@ use crate::durable_wait::{
 use crate::process::{
     boundary_must_be_declined, handler_error_from_plugin, process_segment_workflow_key,
     restate_process_terminal_await_key, restate_process_terminal_output,
-    restate_process_terminal_resolution, terminal_completion_workflow_key, workflow_key_authority,
+    restate_process_terminal_resolution, workflow_key_authority,
 };
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -152,11 +152,13 @@ mod bindings;
 mod determinism;
 mod drive_laws_on_the_double;
 mod effect_group_conformance;
+mod effect_group_generation_routing;
 mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;
 mod effect_group_shape;
 mod effect_layer_wait_children;
 mod endpoint_protocol;
+mod generation_sentinel_on_the_double;
 mod journal_cut_runner;
 mod live_turn_probe;
 mod parent_end_on_the_double;
@@ -164,12 +166,14 @@ mod process_effect_summary;
 mod process_tool_replay;
 mod replay_corpus;
 mod root_control_witnesses;
+mod segment_generation_handoff;
 mod segment_redrive_on_the_double;
 mod tool_context_conformance;
 mod trigger_intent_cutover;
 mod turn_cancel_modes;
 mod turn_crash_on_the_double;
 mod turn_laws_on_the_double;
+mod wait_handoff_generations;
 use endpoint_protocol::{
     RecordedCommand, admission_journal, admitted_invocation_body, durable_wait_index_call_response,
     encode_call_replay, encode_captured_run_and_call_replay, encode_captured_run_command_replay,

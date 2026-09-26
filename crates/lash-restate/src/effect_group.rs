@@ -568,6 +568,20 @@ impl EffectGroupState {
         Json(request): Json<EffectGroupOpenRequest>,
     ) -> HandlerResult<Json<EffectGroupOpenResponse>> {
         request.shape.validate_wire()?;
+        // The route is recorded verbatim, so it must name a dispatcher lane
+        // a deployment binds (FIG-3795): an opener cannot declare a route
+        // no dispatch could ever run under.
+        if !crate::services::ServiceRoute::parse(&request.dispatch_route)
+            .is_some_and(|route| route.service() == crate::LashService::EffectGroupDispatch)
+        {
+            return Err(TerminalError::new(format!(
+                "effect group {} open declared dispatch route `{}`, which names no \
+                 EffectGroupDispatch lane",
+                ctx.key(),
+                request.dispatch_route
+            ))
+            .into());
+        }
         let Some(mut record) = load_index(&ctx).await? else {
             let shape_digest = request.shape.digest()?;
             let dispatch_route = request.dispatch_route.clone();
@@ -1554,8 +1568,8 @@ mod dispatch;
 mod payload;
 #[cfg(test)]
 pub(crate) use dispatch::EffectGroupChildRequest;
-pub(crate) use dispatch::EffectGroupDispatch;
 pub use dispatch::EffectGroupDispatchRequest;
+pub(crate) use dispatch::{EffectGroupDispatch, EffectGroupDispatchImpl};
 pub use payload::{
     EFFECT_GROUP_PAYLOAD_FORMAT_VERSION, EffectGroupPayloadGetResponse,
     EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,

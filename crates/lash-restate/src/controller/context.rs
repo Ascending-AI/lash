@@ -47,8 +47,8 @@ use crate::effect_group::{
     EffectGroupReadRankResponse, EffectGroupStateClient,
 };
 use crate::process::{
-    LashProcessWorkflowClient, RestateProcessAwaitRequest, RestateProcessCancelRequest,
-    RestateProcessWorkflowInput,
+    RestateProcessCancelRequest, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
+    RestateProcessWorkflowPayload,
 };
 use crate::process_attach::{LashProcessAttachClient, RestateProcessAttachRequest};
 
@@ -392,6 +392,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
+        sender_generation: Option<lash_core::engine::BuildGeneration>,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run;
@@ -961,6 +962,7 @@ macro_rules! impl_restate_controller_context {
                     process_id: lash_core::ProcessId,
                     registration: ProcessRegistration,
                     execution_context: ProcessExecutionContext,
+                    sender_generation: Option<lash_core::engine::BuildGeneration>,
                 ) -> Pin<
                     Box<
                         dyn Future<Output = Result<String, ProcessWorkflowStartFailure>>
@@ -971,19 +973,22 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
+                    // A new process starts on the stable lane (FIG-3795):
+                    // Restate runs segment 0 on the newest build.
                     let workflow_key = process_id.to_string();
-                    let request = self
-                        .workflow_client::<LashProcessWorkflowClient>(workflow_key.clone())
-                        .run(Json(
-                            RestateProcessWorkflowInput {
-                                process_id,
-                                registration,
-                                execution_context,
-                                segment_ordinal: 0,
-                                journal_version: crate::process::RESTATE_PROCESS_JOURNAL_VERSION,
-                            }
-                            .into(),
-                        ));
+                    let request = crate::services::routed_workflow::<_, _, RestateProcessWorkflowOutput>(
+                        self,
+                        &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow),
+                        workflow_key,
+                        "run",
+                        RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
+                            process_id,
+                            registration,
+                            execution_context,
+                            segment_ordinal: 0,
+                            sender_generation,
+                        }),
+                    );
                     let handle = request.send();
                     Box::pin(async move {
                         // A journaled send that completes with a terminal
@@ -1005,11 +1010,17 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
+                    // A process-level cancel goes to the stable root, which
+                    // routes it on to the live segment's recorded lane.
                     let workflow_key = request.process_id.to_string();
-                    let request = self
-                        .workflow_client::<LashProcessWorkflowClient>(workflow_key.clone())
-                        .cancel(Json(request));
-                    let call = request.call();
+                    let call = crate::services::routed_workflow::<_, _, ()>(
+                        self,
+                        &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow),
+                        workflow_key,
+                        "cancel",
+                        request,
+                    )
+                    .call();
                     Box::pin(async move {
                         let Json(()) = call.await?;
                         Ok(())
@@ -1227,10 +1238,7 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let request = self
-                        .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
-                        .await_terminal(Json(RestateProcessAwaitRequest { process_id }));
-                    let call = request.call();
+                    let call = crate::process::await_terminal_on_stable_root(self, process_id).call();
                     Box::pin(async move {
                         let Json(output) = call.await?;
                         Ok(output)
@@ -1248,10 +1256,9 @@ macro_rules! impl_restate_controller_context {
                 {
                     Box::pin(async move {
                         let Some(turn_cancel) = turn_cancel else {
-                            let terminal = self
-                                .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
-                                .await_terminal(Json(RestateProcessAwaitRequest { process_id }));
-                            let terminal = terminal.call();
+                            let terminal =
+                                crate::process::await_terminal_on_stable_root(self, process_id)
+                                    .call();
                             let promise = match process_cancel {
                                 ProcessCancelRace::Raced => {
                                     process_cancel_promise!($promises, $context, 'run, self)
@@ -1286,11 +1293,10 @@ macro_rules! impl_restate_controller_context {
                         // Restate SDK 0.10. Construct this call first so a suspended
                         // pre-FIG-790 journal remains the exact prefix of every
                         // redrive after the cancellation adjudicator was added.
-                        let process = self
-                            .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
-                            .await_terminal(Json(RestateProcessAwaitRequest {
-                                process_id: process_id.clone(),
-                            }));
+                        let process = crate::process::await_terminal_on_stable_root(
+                            self,
+                            process_id.clone(),
+                        );
                         let process = erase_gate_wait(process.call());
                         let outcome = race_turn_cancel_gate(
                             self,

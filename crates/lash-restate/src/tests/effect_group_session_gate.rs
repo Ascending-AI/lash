@@ -10,6 +10,7 @@
 //! generation, and pin that the child settles with the typed refusal before it
 //! admits, records membership, runs anything, or dispatches its tool.
 
+use crate::EffectGroupDispatch as _;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -320,13 +321,17 @@ fn endpoint(sessions: Arc<dyn SessionStoreFactory>, executors: Arc<CountingExecu
     host.register_group_executors(executors as Arc<dyn GroupExecutors>)
         .expect("register the counting resolver");
     Endpoint::builder()
-        .bind(crate::EffectGroupDispatch::new(
-            &host,
-            crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
-            restate_sdk::context::RunRetryPolicy::new(),
-            sessions,
-            crate::LashService::EffectGroupDispatch.name().to_string(),
-        ))
+        .bind(
+            crate::EffectGroupDispatchImpl::new(
+                &host,
+                crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
+                restate_sdk::context::RunRetryPolicy::new(),
+                sessions,
+                crate::services::ServiceRoute::stable(crate::LashService::EffectGroupDispatch),
+                lash_core::engine::BuildGeneration::for_test("session-gate"),
+            )
+            .serve(),
+        )
         .build()
 }
 
@@ -402,9 +407,19 @@ async fn a_pre_cutover_sessions_group_child_is_refused_before_its_tool_is_dispat
         "the found generation stays readable on the settlement: {}",
         error.message
     );
+    assert_eq!(
+        restate_command_frame_types(&output)
+            .iter()
+            .filter(|ty| **ty == RESTATE_RUN_COMMAND_MESSAGE_TYPE)
+            .count(),
+        1,
+        "the refused child journals no run but its generation sentinel (FIG-3795)"
+    );
     assert!(
-        !restate_command_frame_types(&output).contains(&RESTATE_RUN_COMMAND_MESSAGE_TYPE),
-        "the refused child journals no run"
+        output
+            .windows(crate::sentinel::GENERATION_SENTINEL.len())
+            .any(|window| window == crate::sentinel::GENERATION_SENTINEL.as_bytes()),
+        "the one run is the generation sentinel"
     );
     assert_eq!(
         executors.consulted.load(Ordering::SeqCst),

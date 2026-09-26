@@ -74,7 +74,8 @@ impl RestateSessionControl {
         // the root's session. A follow-on's recovery runs under an admitted
         // name of its own, so the key's root may differ from the park's.
         if let Some(status) = status.as_ref()
-            && (status.target_service_name != crate::LashService::TurnDriver.name()
+            && (!crate::services::ServiceRoute::parse(&status.target_service_name)
+                .is_some_and(|route| route.service() == crate::LashService::TurnDriver)
                 || status.target_handler_name != "run"
                 || status
                     .target_service_key
@@ -102,13 +103,17 @@ impl RestateSessionControl {
             report.unchanged += 1;
             return Ok(());
         };
-        if invocation.target_service_name == crate::LashService::SessionDriver.name() {
+        // Any lane of the service (FIG-3795): a paused invocation keeps the
+        // lane it was pinned under.
+        let service = crate::services::ServiceRoute::parse(&invocation.target_service_name)
+            .map(|route| route.service());
+        if service == Some(crate::LashService::SessionDriver) {
             self.admin
                 .resume_invocation(&invocation.invocation_id())
                 .await
                 .map_err(refusal)?;
             report.resumed_drives.push(key.as_str().into());
-        } else if invocation.target_service_name == crate::LashService::ProcessWorkflow.name() {
+        } else if service == Some(crate::LashService::ProcessWorkflow) {
             let pass = crate::process::park_reconcile::reconcile_process_invocations(
                 &self.processes,
                 &self.continuations,

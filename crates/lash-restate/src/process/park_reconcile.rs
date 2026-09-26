@@ -259,7 +259,9 @@ async fn read(
 /// admission's recorded start, whose execution the engine stopped. The
 /// reconcile writes the park on that execution's behalf, which is what the
 /// registry's same-execution fence checks.
-fn execution_authority(record: &ProcessRecord) -> Option<ProcessExecutionWriteAuthority> {
+pub(crate) fn execution_authority(
+    record: &ProcessRecord,
+) -> Option<ProcessExecutionWriteAuthority> {
     let started = record.first_started.as_deref()?;
     let execution_id = started.owner.engine_process_execution_id(&record.id)?;
     Some(

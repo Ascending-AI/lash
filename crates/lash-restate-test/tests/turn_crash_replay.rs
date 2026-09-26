@@ -94,8 +94,15 @@ impl lash_core::ToolProvider for CountingTool {
     }
 }
 
-/// `(id, service, entries in journal order)` of one invocation.
-type InvocationJournal = (String, String, Vec<(MessageType, Option<String>)>);
+/// `(id, service, key, handler, entries in journal order)` of one
+/// invocation. The key is the object or workflow key when the target has one.
+type InvocationJournal = (
+    String,
+    String,
+    Option<String>,
+    String,
+    Vec<(MessageType, Option<String>)>,
+);
 
 /// What one run of the turn observed.
 #[derive(Debug)]
@@ -216,14 +223,28 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     let journals = views
         .into_iter()
         .map(|view| {
+            // A target is `service/key/handler` for keyed services and
+            // `service/handler` otherwise; the key itself holds no `/`.
             let service = view.target.split('/').next().unwrap_or_default().to_owned();
+            let handler = view
+                .target
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            let key = view
+                .target
+                .strip_prefix(&format!("{service}/"))
+                .and_then(|rest| rest.strip_suffix(&format!("/{handler}")))
+                .filter(|key| !key.is_empty())
+                .map(str::to_owned);
             let entries = server
                 .journal(&view.id)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|entry| (entry.ty, entry.name))
                 .collect();
-            (view.id, service, entries)
+            (view.id, service, key, handler, entries)
         })
         .collect();
     Run {
@@ -240,8 +261,19 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
 /// each `ctx.run` result, named.
 fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String>)> {
     let mut points = Vec::new();
-    for (_, journal_service, entries) in &reference.journals {
-        if journal_service != service {
+    for (_, journal_service, key, handler, entries) in &reference.journals {
+        // A pinned service's journal may be recorded under its generation
+        // lane `<service>_g<G>` (FIG-3795): the same service's points, and
+        // the name the crash rule must target.
+        let same_service = journal_service == service
+            || journal_service.strip_prefix(service).is_some_and(|rest| {
+                rest.len() == 14
+                    && rest.starts_with("_g")
+                    && rest[2..]
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            });
+        if !same_service {
             continue;
         }
         let commands = entries.iter().filter(|(ty, _)| ty.is_command());
@@ -249,24 +281,29 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
             // The SDK starts a run's closure as it writes the RunCommand, so
             // a crash before the server stores that command may already
             // have run the effect: it too is a lost run.
+            // The rule fires on the first frame any invocation of the
+            // service sends at this command index, so it must name the
+            // handler (and key, when the service is keyed) of the invocation
+            // the point was enumerated from: another invocation's same-index
+            // command is a different step.
+            let rule = |point| {
+                let rule = CrashRule::new(point)
+                    .service(journal_service.clone())
+                    .handler(handler.clone())
+                    .within_attempts(1);
+                match key {
+                    Some(key) => rule.key(key.clone()),
+                    None => rule,
+                }
+            };
             let lost_on_command = (*ty == MessageType::RunCommand)
                 .then(|| name.clone())
                 .flatten();
-            points.push((
-                CrashRule::new(CrashPoint::BeforeCommand { index })
-                    .service(service)
-                    .within_attempts(1),
-                lost_on_command,
-            ));
+            points.push((rule(CrashPoint::BeforeCommand { index }), lost_on_command));
             if *ty == MessageType::RunCommand {
                 // By position: a drive's admission and seal names embed the
                 // accepted input's id, which each execution mints afresh.
-                points.push((
-                    CrashRule::new(CrashPoint::BeforeRunResultAt { index })
-                        .service(service)
-                        .within_attempts(1),
-                    name.clone(),
-                ));
+                points.push((rule(CrashPoint::BeforeRunResultAt { index }), name.clone()));
             }
         }
         // One invocation of the service is enough: its points repeat.
@@ -283,10 +320,10 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
     assert_eq!(reference.answer, "done");
     assert_eq!(reference.tool_executions, 1);
     assert_eq!(reference.crashes, 0);
-    if let Some((_, _, entries)) = reference
+    if let Some((_, _, _, _, entries)) = reference
         .journals
         .iter()
-        .find(|(_, service, _)| service == TURN_DRIVER_SERVICE)
+        .find(|(_, service, _, _, _)| service == TURN_DRIVER_SERVICE)
     {
         for (index, entry) in entries.iter().filter(|(ty, _)| ty.is_command()).enumerate() {
             println!("root workflow command {index}: {entry:?}");
@@ -353,8 +390,8 @@ async fn one_seed_reproduces_the_turn_journals_and_ids() {
     let turn_journal = |run: &Run| {
         run.journals
             .iter()
-            .find(|(_, service, _)| service == TURN_DRIVER_SERVICE)
-            .map(|(id, _, entries)| {
+            .find(|(_, service, _, _, _)| service == TURN_DRIVER_SERVICE)
+            .map(|(id, _, _, _, entries)| {
                 let entries: Vec<_> = entries
                     .iter()
                     .map(|(ty, name)| {

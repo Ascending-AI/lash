@@ -242,18 +242,23 @@ impl RestateTestBackend {
     }
 
     /// Register another build of this backend's services on the server: a
-    /// second deployment of the same code under the opaque `label` (FIG-3795
-    /// part A turns it into a typed `BuildGeneration`). `hooks` are the
-    /// test's levers on this build — refuse a handler call, record that this
-    /// build served one. A new invocation routes to this deployment; one
-    /// already in flight stays pinned to the build that started it.
+    /// second deployment of drain generation `generation` over the same
+    /// stores, effect host and session driver, under the opaque `label`.
+    /// Each lash journal-bearing service is bound under its stable name and
+    /// under `generation`'s lane (FIG-3795), so a new invocation of a stable
+    /// name routes to the newest build, one of a generation lane only to a
+    /// build of that generation, and one already in flight stays pinned to
+    /// the build that started it. `hooks` are the test's levers on this
+    /// build — refuse a handler call, record that this build served one.
     pub async fn add_build(
         &self,
+        generation: lash_core::engine::BuildGeneration,
         label: impl Into<String>,
         hooks: DeploymentHooks,
     ) -> Result<DeploymentId, BackendError> {
         let endpoint = self
             .restate
+            .sibling_build(generation)
             .endpoint_builder(self.processes.clone())
             .bind(HandlerHost {
                 jobs: Arc::clone(&self.jobs),

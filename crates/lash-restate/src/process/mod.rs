@@ -43,9 +43,7 @@ use crate::ingress::{RestateConnection, RestateIngressClient};
 
 #[cfg(test)]
 pub(crate) use workflow::complete_process_outcome;
-pub(crate) use workflow::{
-    LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
-};
+pub(crate) use workflow::{LashProcessWorkflow, LashProcessWorkflowImpl};
 
 /// Attempts a process segment's `run` invocation makes before it pauses, by
 /// default: the same bound a turn handler has
@@ -83,11 +81,28 @@ pub(crate) fn process_segment_workflow_key(process_id: &ProcessId, segment_ordin
     }
 }
 
-pub(crate) fn terminal_completion_workflow_key(
-    process_id: &ProcessId,
-    segment_ordinal: u64,
-) -> Option<String> {
-    (segment_ordinal > 0).then(|| process_id.to_string())
+/// The handler-side call that awaits `process_id`'s terminal: on the stable
+/// root `LashProcessWorkflow/<pid>`, whose terminal promise outlives every
+/// segment's lane (FIG-3795). A segment running under a generation lane
+/// still completes the terminal there.
+pub(crate) fn await_terminal_on_stable_root<'ctx, C>(
+    ctx: &C,
+    process_id: ProcessId,
+) -> restate_sdk::context::Request<
+    'ctx,
+    restate_sdk::serde::Json<RestateProcessAwaitRequest>,
+    restate_sdk::serde::Json<ProcessAwaitOutput>,
+>
+where
+    C: restate_sdk::context::ContextClient<'ctx>,
+{
+    crate::services::routed_workflow(
+        ctx,
+        &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow),
+        process_id.to_string(),
+        "await_terminal",
+        RestateProcessAwaitRequest { process_id },
+    )
 }
 
 /// Converts Lash failures at the Restate process-handler boundary without
@@ -568,13 +583,21 @@ impl RestateProcessIngressRunner {
             .map_or(0, |handover| handover.segment_ordinal);
         let workflow_key = process_segment_workflow_key(&process_id, segment_ordinal);
         // The route is data (FIG-3795 S3/S5): a redrive addresses the route
-        // the latest handover recorded rather than recomputing a name. A
-        // root segment, which has no handover, was sent under the stable
-        // name.
+        // the latest handover recorded rather than recomputing a name, and
+        // carries the handover writer's generation as its sender, so the lane
+        // it reaches judges it as the send it repeats. A root segment, which
+        // has no handover, was sent under the stable name, where a redrive of
+        // segment 0 is admitted from any sender.
         let route = latest_handover.as_ref().map_or_else(
-            || crate::LashService::ProcessWorkflow.name().to_string(),
+            || {
+                crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow)
+                    .to_string()
+            },
             |handover| handover.route.clone(),
         );
+        let sender_generation = latest_handover
+            .as_ref()
+            .and_then(|handover| handover.written_generation.clone());
         let registration = ProcessRegistration {
             start_key: record.start_key,
             input: record.input,
@@ -601,7 +624,7 @@ impl RestateProcessIngressRunner {
                     registration,
                     execution_context,
                     segment_ordinal,
-                    journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+                    sender_generation,
                 },
             )
             .await
@@ -811,7 +834,7 @@ impl RestateProcessIngressRunner {
         let outcome = self
             .ingress
             .call_workflow_json::<_, ProcessAwaitOutput>(
-                crate::LashService::ProcessWorkflow.name(),
+                &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow).name(),
                 process_id.as_str(),
                 "await_terminal",
                 &RestateProcessAwaitRequest {
@@ -1188,30 +1211,66 @@ pub struct RestateProcessWorkflowInput {
     pub execution_context: ProcessExecutionContext,
     #[serde(default)]
     pub segment_ordinal: u64,
-    /// The generation of the handler's journaled command prefix the submitter
-    /// was built for ([`RESTATE_PROCESS_JOURNAL_VERSION`]). The handler refuses
-    /// any other generation before it journals anything.
-    #[serde(default = "admission::unstamped_journal_version")]
-    pub journal_version: u32,
+    /// The drain generation of the build that sent this segment (FIG-3795
+    /// S6): for a successor, the build that wrote the handover it resumes
+    /// from; for a new process, the build whose turn or segment started it.
+    /// A generation lane admits only its own generation's inputs, and the
+    /// stable lane holds a successor from another build to its successor
+    /// window. `None` names no build: a controller a host built, or a
+    /// redrive of a handover written before generations were stamped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_generation: Option<lash_core::engine::BuildGeneration>,
 }
 
-/// What a process workflow invocation was submitted with, read generation
-/// first.
+/// What a process workflow invocation was submitted with.
 ///
-/// The handler must refuse an input of another journal generation typed, and
-/// it can only do so if the input reaches it: an input of a retired generation
-/// is not decoded against this generation's shape, so its missing or retired
-/// fields cannot fail the invocation before the handler runs.
+/// A sender of another build may send an input whose shape this build does
+/// not read. The handler must still refuse it typed — park it for its
+/// sender's generation — and it can only do so if the input reaches it: an
+/// input this build cannot decode keeps what of it this build can read
+/// rather than failing the invocation before the handler runs.
 #[derive(Clone, Debug)]
 pub enum RestateProcessWorkflowPayload {
-    /// An input of this handler's generation.
+    /// An input this build reads.
     Current(Box<RestateProcessWorkflowInput>),
-    /// An input stamped with another generation, with the process it names
-    /// when its id is one this build reads.
-    Retired {
-        journal_version: u32,
+    /// An input this build does not decode, with the process, segment and
+    /// sender generation it names when this build can read them.
+    Unreadable {
         process_id: Option<ProcessId>,
+        segment_ordinal: u64,
+        sender_generation: Option<lash_core::engine::BuildGeneration>,
+        error: String,
     },
+}
+
+impl RestateProcessWorkflowPayload {
+    /// The process the input names, when this build can read it.
+    pub(crate) fn process_id(&self) -> Option<&ProcessId> {
+        match self {
+            Self::Current(input) => Some(&input.process_id),
+            Self::Unreadable { process_id, .. } => process_id.as_ref(),
+        }
+    }
+
+    /// The segment the input runs.
+    pub(crate) fn segment_ordinal(&self) -> u64 {
+        match self {
+            Self::Current(input) => input.segment_ordinal,
+            Self::Unreadable {
+                segment_ordinal, ..
+            } => *segment_ordinal,
+        }
+    }
+
+    /// The generation of the build that sent the input, when it names one.
+    pub(crate) fn sender_generation(&self) -> Option<&lash_core::engine::BuildGeneration> {
+        match self {
+            Self::Current(input) => input.sender_generation.as_ref(),
+            Self::Unreadable {
+                sender_generation, ..
+            } => sender_generation.as_ref(),
+        }
+    }
 }
 
 impl From<RestateProcessWorkflowInput> for RestateProcessWorkflowPayload {
@@ -1224,12 +1283,15 @@ impl Serialize for RestateProcessWorkflowPayload {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Current(input) => input.serialize(serializer),
-            Self::Retired {
-                journal_version,
+            Self::Unreadable {
                 process_id,
+                segment_ordinal,
+                sender_generation,
+                error: _,
             } => serde_json::json!({
                 "process_id": process_id,
-                "journal_version": journal_version,
+                "segment_ordinal": segment_ordinal,
+                "sender_generation": sender_generation,
             })
             .serialize(serializer),
         }
@@ -1239,20 +1301,26 @@ impl Serialize for RestateProcessWorkflowPayload {
 impl<'de> serde::Deserialize<'de> for RestateProcessWorkflowPayload {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let payload = serde_json::Value::deserialize(deserializer)?;
-        let journal_version = admission::stamped_journal_version(&payload);
-        if journal_version != RESTATE_PROCESS_JOURNAL_VERSION {
-            let process_id = payload
-                .get("process_id")
-                .and_then(serde_json::Value::as_str)
-                .and_then(|process_id| ProcessId::parse(process_id).ok());
-            return Ok(Self::Retired {
-                journal_version,
-                process_id,
-            });
+        match serde_json::from_value::<RestateProcessWorkflowInput>(payload.clone()) {
+            Ok(input) => Ok(Self::Current(Box::new(input))),
+            Err(error) => Ok(Self::Unreadable {
+                process_id: payload
+                    .get("process_id")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|process_id| ProcessId::parse(process_id).ok()),
+                segment_ordinal: payload
+                    .get("segment_ordinal")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                sender_generation: payload
+                    .get("sender_generation")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|generation| {
+                        lash_core::engine::BuildGeneration::parse(generation).ok()
+                    }),
+                error: error.to_string(),
+            }),
         }
-        serde_json::from_value(payload)
-            .map(|input| Self::Current(Box::new(input)))
-            .map_err(serde::de::Error::custom)
     }
 }
 

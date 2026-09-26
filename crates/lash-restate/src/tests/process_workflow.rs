@@ -123,11 +123,6 @@ fn process_1() -> ProcessId {
 
 #[test]
 pub(super) fn cancel_terminal_from_successor_routes_to_root_await_workflow_key() {
-    assert_eq!(terminal_completion_workflow_key(&process_1(), 0), None);
-    assert_eq!(
-        terminal_completion_workflow_key(&process_1(), 1),
-        Some(process_1().to_string())
-    );
     assert_eq!(
         process_segment_workflow_key(&process_1(), 1),
         format!("{}#1", process_1()),
@@ -212,7 +207,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
             registration,
             execution_context: ProcessExecutionContext::default(),
             segment_ordinal: 0,
-            journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+            sender_generation: None,
         },
         true,
     )

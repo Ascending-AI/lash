@@ -253,6 +253,12 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     authority_id: RestateAuthorityId,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
+    /// The drain generation of the build whose lash handler runs this
+    /// controller (FIG-3795): an effect group it opens dispatches on that
+    /// build's lane, so the group's children run on the build that opened
+    /// it. A controller a host builds inside its own handler names none, and
+    /// its groups dispatch on the stable lane.
+    build_generation: Option<lash_core::engine::BuildGeneration>,
     _ctx: PhantomData<&'ctx ()>,
 }
 
@@ -275,8 +281,21 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             authority_id,
             options,
             trace: None,
+            build_generation: None,
             _ctx: PhantomData,
         }
+    }
+
+    /// Run as a controller of the build of `generation`: the groups it
+    /// opens dispatch on that build's `EffectGroupDispatch` lane and the
+    /// processes it starts carry the generation as their sender (FIG-3795).
+    /// Lash's own handlers set it; a host's never do.
+    pub(crate) fn with_build_generation(
+        mut self,
+        generation: lash_core::engine::BuildGeneration,
+    ) -> Self {
+        self.build_generation = Some(generation);
+        self
     }
 
     #[cfg(test)]
@@ -612,11 +631,17 @@ where
         let handle = EffectGroupHandle::new(&group);
         let shape = EffectGroupShape::from_group(&group, opener)?;
         // The route the dispatch is sent under is data (FIG-3795 S10): the
-        // opener declares it to the index, which retains it, and the submit
-        // below goes to the recorded route the open response reports.
-        // Generation lanes are FIG-3795 part D; until then the route is the
-        // stable name.
-        let dispatch_route = crate::LashService::EffectGroupDispatch.name().to_string();
+        // opener declares its own build's lane to the index, which retains
+        // it, and the submit below goes to the recorded route the open
+        // response reports — a reopen's retained route wins over the one
+        // offered here. Every child the dispatcher sends goes to that same
+        // lane, so the group runs on the build that opened it.
+        let dispatch_route = crate::services::ServiceRoute::own_or_stable(
+            crate::LashService::EffectGroupDispatch,
+            self.build_generation.as_ref(),
+        )
+        .name()
+        .into_owned();
         let open_request = EffectGroupOpenRequest {
             shape,
             dispatch_route: dispatch_route.clone(),
@@ -1066,6 +1091,7 @@ where
             } => execute_restate_process_command(
                 &self.context,
                 &self.authority_id,
+                self.build_generation.as_ref(),
                 self.options.process_cancel,
                 &invocation,
                 *command,
@@ -1104,6 +1130,7 @@ where
                         execute_restate_process_command(
                             &self.context,
                             &self.authority_id,
+                            self.build_generation.as_ref(),
                             self.options.process_cancel,
                             &invocation,
                             *command,

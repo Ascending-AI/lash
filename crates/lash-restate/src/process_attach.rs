@@ -30,7 +30,6 @@ use crate::durable_wait::{
     LASH_REPLAY_KEY_HEADER, LashDurableWaitRegistryClient, RestateDurableWaitAddress,
     RestateDurableWaitResolveRequest, durable_wait_index_object_key,
 };
-use crate::process::{LashProcessWorkflowClient, RestateProcessAwaitRequest};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -72,11 +71,9 @@ impl LashProcessAttach for LashProcessAttachImpl {
         Json(request): Json<RestateProcessAttachRequest>,
     ) -> HandlerResult<Json<()>> {
         let RestateProcessAttachRequest { process_id, key } = request;
-        let output = ctx
-            .workflow_client::<LashProcessWorkflowClient>(process_id.to_string())
-            .await_terminal(Json(RestateProcessAwaitRequest {
-                process_id: process_id.clone(),
-            }))
+        // The terminal lives on the stable root, whatever lane the process's
+        // last segment ran under (FIG-3795).
+        let output = crate::process::await_terminal_on_stable_root(&ctx, process_id.clone())
             .call()
             .await;
         // A terminal is a fact, not an error of the wait: a failed or cancelled

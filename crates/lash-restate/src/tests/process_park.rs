@@ -65,7 +65,7 @@ fn run_input(
         registration: registration.clone(),
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+        sender_generation: None,
     }
 }
 

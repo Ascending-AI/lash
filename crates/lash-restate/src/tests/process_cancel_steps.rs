@@ -88,7 +88,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+        sender_generation: None,
     };
     let key = process_segment_workflow_key(&process_id, 1);
 
@@ -387,90 +387,4 @@ pub(super) async fn a_retired_cancel_request_is_refused_before_any_command() {
             "{handler}: a refused request records nothing"
         );
     }
-}
-
-/// Answers every ingress call with `200 null` and keeps the requests.
-#[derive(Debug, Default)]
-struct RecordingIngress {
-    requests: Mutex<Vec<HttpRequest>>,
-}
-
-#[async_trait::async_trait]
-impl HttpTransport for RecordingIngress {
-    async fn send(
-        &self,
-        request: HttpRequest,
-        _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, LlmTransportError> {
-        self.requests.lock_recover().push(request);
-        Ok(HttpResponse {
-            status: 200,
-            headers: vec![("content-type".to_string(), "application/json".to_string())],
-            body: HttpResponseBody::buffered("null"),
-        })
-    }
-}
-
-/// A refused retired-generation segment publishes the terminal it stored to
-/// the root's awaiters through the root's `complete_terminal`, a separate
-/// invocation, so awaiters are released even when the refused invocation's
-/// own journal can never replay (FIG-3673).
-#[tokio::test]
-pub(super) async fn a_retired_generation_refusal_publishes_its_stored_terminal() {
-    let registry = process_registry();
-    let registration = rerunnable_registration();
-    let process_id = registry
-        .register_process(registration.clone())
-        .await
-        .expect("register the process")
-        .id;
-    let ingress = Arc::new(RecordingIngress::default());
-    let endpoint = Endpoint::builder()
-        .bind(
-            LashProcessWorkflowImpl::new(
-                Arc::new(Fig788SegmentBoundaryRunner),
-                Arc::clone(&registry),
-                continuation_store(),
-                RestateIngressClient::new(RestateConnection::with_transport(
-                    "https://restate.invalid",
-                    ingress.clone(),
-                )),
-                test_restate_authority_id(),
-                lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
-            )
-            .serve(),
-        )
-        .build();
-    let mut input = serde_json::to_value(RestateProcessWorkflowInput {
-        process_id: process_id.clone(),
-        registration,
-        execution_context: ProcessExecutionContext::default(),
-        segment_ordinal: 0,
-        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
-    })
-    .expect("encode the input");
-    input["journal_version"] = serde_json::json!(2);
-    let output =
-        invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)
-            .await
-            .unwrap_or_default();
-    assert!(restate_output_failure_message(&output).is_some());
-    let stored = registry
-        .get_process(&process_id)
-        .await
-        .expect("read the refused process")
-        .and_then(|record| record.outcome)
-        .expect("the refusal is stored");
-    let requests = ingress.requests.lock_recover();
-    assert_eq!(requests.len(), 1, "one publish");
-    assert_eq!(
-        requests[0].url,
-        format!("https://restate.invalid/LashProcessWorkflow/{process_id}/complete_terminal")
-    );
-    let published: RestateProcessCompleteRequest =
-        serde_json::from_slice(requests[0].body.as_ref()).expect("decode the publish");
-    assert_eq!(
-        published.output, stored,
-        "the stored refusal is what awaiters get"
-    );
 }

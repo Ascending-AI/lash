@@ -1145,7 +1145,11 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
     assert_eq!(server.pinned_deployment(&pinned_id), Some(build_n.clone()));
 
     let build_n1 = backend
-        .add_build("n+1", served_hook(&served))
+        .add_build(
+            lash_core::engine::BuildGeneration::for_test("n+1"),
+            "n+1",
+            served_hook(&served),
+        )
         .await
         .expect("register build N+1");
     assert_ne!(build_n, build_n1);

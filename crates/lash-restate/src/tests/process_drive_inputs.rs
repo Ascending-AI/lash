@@ -69,7 +69,7 @@ pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_record
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+        sender_generation: None,
     };
 
     // Admitted under a host that cuts every two effects.

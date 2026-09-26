@@ -64,6 +64,19 @@ pub struct RestateEffectHost {
 
 impl RestateEffectHost {
     pub fn new(connection: impl Into<RestateConnection>, authority_id: RestateAuthorityId) -> Self {
+        Self::new_for_build(connection, authority_id, None)
+    }
+
+    /// The host of a [`RestateEngine`](crate::RestateEngine), which knows
+    /// its build's drain generation (FIG-3795): a group this host opens
+    /// outside a handler dispatches on that build's lane. A host built with
+    /// [`new`](Self::new) names no build, and its groups dispatch on the
+    /// stable lane.
+    pub(crate) fn new_for_build(
+        connection: impl Into<RestateConnection>,
+        authority_id: RestateAuthorityId,
+        build_generation: Option<lash_core::engine::BuildGeneration>,
+    ) -> Self {
         let connection = connection.into();
         let turn_control_binding_id: Arc<str> = Arc::from(authority_id.binding_id());
         let turn_attach_authority_id = authority_id.clone();
@@ -73,6 +86,7 @@ impl RestateEffectHost {
                     ingress: RestateIngressClient::new(connection.clone()),
                 },
                 authority_id,
+                build_generation,
                 registrations: std::sync::Mutex::new(None),
                 group_executors: OnceLock::new(),
             }),
@@ -471,6 +485,10 @@ use ingress::*;
 struct RestateEffectHostController {
     await_event_ingress: RestateAwaitEventIngress,
     authority_id: RestateAuthorityId,
+    /// The drain generation of the build this host runs, when an engine
+    /// built it: the `EffectGroupDispatch` lane the groups it opens dispatch
+    /// on (FIG-3795).
+    build_generation: Option<lash_core::engine::BuildGeneration>,
     /// The bound process registry's registration truth (ADR 0049): a process
     /// scope's index says `revoked` only as a cache of the registry's fence,
     /// so a revoked index on a registered process is stale and is reinstated
@@ -852,6 +870,12 @@ impl RestateEffectHostController {
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
         let shape = EffectGroupShape::from_group(&group, opener)?;
+        // The group dispatches on this host's build's lane (FIG-3795): its
+        // children run on the build that opened it.
+        let dispatch_lane = crate::services::ServiceRoute::own_or_stable(
+            LashService::EffectGroupDispatch,
+            self.build_generation.as_ref(),
+        );
         let probe = ingress
             .call_object_empty_json::<EffectGroupProbeResponse>(
                 LashService::EffectGroupState,
@@ -869,7 +893,7 @@ impl RestateEffectHostController {
                 found @ Some(_) => found,
                 None => ingress
                     .call_workflow_json::<_, Option<usize>>(
-                        LashService::EffectGroupDispatch.name(),
+                        &dispatch_lane.name(),
                         &group_key,
                         "preflight",
                         &group.children(),
@@ -891,9 +915,8 @@ impl RestateEffectHostController {
         let content_checked = group.reopen() == lash_core::GroupReopen::RetainedContent;
         // The dispatch route is data (FIG-3795 S10): declared at open,
         // retained by the index, and the submit goes to the route the open
-        // response reports. Generation lanes are FIG-3795 part D; until then
-        // the route is the stable name.
-        let dispatch_route = LashService::EffectGroupDispatch.name().to_string();
+        // response reports — a reopen's retained route wins over this one.
+        let dispatch_route = dispatch_lane.name().into_owned();
         let opened = ingress
             .call_object_json::<_, EffectGroupOpenResponse>(
                 LashService::EffectGroupState.name(),

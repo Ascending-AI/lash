@@ -32,10 +32,10 @@ impl HostTurnWorkflow for HostTurnWorkflowImpl {
     }
 }
 
-/// The service names `endpoint` reports in the discovery document it serves
-/// the Restate runtime. It asks for manifest v4, as the runtime does: only v4
-/// can carry a turn handler's retry policy.
-async fn discovered_service_names(endpoint: &Endpoint) -> BTreeSet<String> {
+/// The discovery document `endpoint` serves the Restate runtime. It asks
+/// for manifest v4, as the runtime does: only v4 can carry a turn handler's
+/// retry policy.
+async fn discovery_document(endpoint: &Endpoint) -> serde_json::Value {
     let request = http::Request::builder()
         .uri("/discover")
         .header(
@@ -57,9 +57,12 @@ async fn discovered_service_names(endpoint: &Endpoint) -> BTreeSet<String> {
         "discovery answered {status}: {}",
         String::from_utf8_lossy(&body)
     );
-    let document: serde_json::Value =
-        serde_json::from_slice(&body).expect("decode the discovery document");
-    document["services"]
+    serde_json::from_slice(&body).expect("decode the discovery document")
+}
+
+/// The service names `endpoint` reports in its discovery document.
+async fn discovered_service_names(endpoint: &Endpoint) -> BTreeSet<String> {
+    discovery_document(endpoint).await["services"]
         .as_array()
         .expect("the discovery document lists its services")
         .iter()
@@ -79,6 +82,21 @@ fn lash_service_names() -> BTreeSet<String> {
         .collect()
 }
 
+/// The generation the bindings backend's build runs.
+fn bindings_generation() -> lash_core::engine::BuildGeneration {
+    lash_core::engine::BuildGeneration::for_test("bindings")
+}
+
+/// Every name a build of the bindings generation serves: each shared
+/// service under its stable name, each pinned one under its stable name and
+/// under the build's generation lane (FIG-3795).
+fn lash_lane_names() -> BTreeSet<String> {
+    crate::services::lash_service_routes(&bindings_generation())
+        .iter()
+        .map(|route| route.name().into_owned())
+        .collect()
+}
+
 /// A Restate backend over a memory store set, and the process worker of a
 /// core built over it: what a host hands `endpoint_builder`.
 async fn backend_and_process_worker() -> (Arc<RestateEngine>, lash_core_worker::DurableProcessWorker)
@@ -93,7 +111,7 @@ async fn backend_and_process_worker() -> (Arc<RestateEngine>, lash_core_worker::
             "http://127.0.0.1:9",
             "http://127.0.0.1:9",
             RestateAuthorityId::new("lash-restate-endpoint-builder").expect("valid authority"),
-            lash_core::engine::BuildGeneration::for_test("bindings"),
+            bindings_generation(),
         ),
     ));
     let core = lash::LashCore::standard_builder(
@@ -155,17 +173,61 @@ fn a_generation_suffixed_service_name_is_valid_to_the_sdk() {
 }
 
 /// The discovery document is what the Restate runtime registers, so this is
-/// the set a deployment serves. Each name is the one every lash caller
-/// addresses, so a service lash calls is a service the endpoint binds, and a
-/// handler macro whose name drifts from its caller's fails here.
+/// the set a deployment serves: exactly `LASH_SERVICES` × lanes (FIG-3795
+/// law L0). Each name is the one every lash caller addresses, so a service
+/// lash calls is a service the endpoint binds, and a handler macro whose
+/// name drifts from its caller's fails here.
 #[tokio::test]
 async fn the_endpoint_builder_binds_every_lash_service() {
     let (backend, worker) = backend_and_process_worker().await;
     let endpoint = backend.endpoint_builder(worker).build();
-    assert_eq!(
-        discovered_service_names(&endpoint).await,
-        lash_service_names()
-    );
+    let discovered = discovered_service_names(&endpoint).await;
+    assert_eq!(discovered, lash_lane_names());
+    let generation = bindings_generation();
+    for service in LASH_SERVICES {
+        let lane = format!("{}{}", service.name(), generation.service_suffix());
+        assert_eq!(
+            discovered.contains(&lane),
+            service.lane_class() == crate::services::LaneClass::Pinned,
+            "{lane}: a pinned service is bound under its generation lane, a shared one never"
+        );
+    }
+}
+
+/// A service bound under its generation lane serves every handler it serves
+/// under its stable name: the renamed binding keeps the generated
+/// dispatcher, which matches on the handler name alone (FIG-3795 `bind_as`).
+#[tokio::test]
+async fn a_generation_lane_serves_the_same_handlers_as_its_stable_name() {
+    let (backend, worker) = backend_and_process_worker().await;
+    let endpoint = backend.endpoint_builder(worker).build();
+    let document = discovery_document(&endpoint).await;
+    let handlers = |name: &str| -> BTreeSet<String> {
+        document["services"]
+            .as_array()
+            .expect("services")
+            .iter()
+            .find(|service| service["name"] == name)
+            .unwrap_or_else(|| panic!("`{name}` is bound"))["handlers"]
+            .as_array()
+            .expect("handlers")
+            .iter()
+            .map(|handler| {
+                handler["name"]
+                    .as_str()
+                    .expect("a handler name")
+                    .to_string()
+            })
+            .collect()
+    };
+    let generation = bindings_generation();
+    for service in LASH_SERVICES
+        .iter()
+        .filter(|service| service.lane_class() == crate::services::LaneClass::Pinned)
+    {
+        let lane = format!("{}{}", service.name(), generation.service_suffix());
+        assert_eq!(handlers(service.name()), handlers(&lane), "{lane}");
+    }
 }
 
 /// A host binds its own services — here a turn workflow carrying a handler
@@ -179,7 +241,7 @@ async fn a_host_binds_its_own_services_beside_lash_services() {
         )
         .bind(crate::turn_service(HostTurnWorkflowImpl.serve(), "run"))
         .build();
-    let mut expected = lash_service_names();
+    let mut expected = lash_lane_names();
     expected.insert("HostTurnWorkflow".to_string());
     assert_eq!(discovered_service_names(&endpoint).await, expected);
 }

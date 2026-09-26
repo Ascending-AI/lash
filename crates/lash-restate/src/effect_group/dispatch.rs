@@ -30,7 +30,7 @@ enum EffectGroupChildRunOutcome {
 }
 
 #[derive(Clone)]
-pub(crate) struct EffectGroupDispatch {
+pub(crate) struct EffectGroupDispatchImpl {
     pub(super) executors: Arc<dyn GroupExecutors>,
     pub(super) ingress: RestateIngressClient,
     pub(super) authority_id: crate::ingress::RestateAuthorityId,
@@ -38,19 +38,25 @@ pub(crate) struct EffectGroupDispatch {
     /// The catalog a session-scope child reads its owning session's state
     /// generation from at invocation entry (FIG-3619).
     pub(super) sessions: Arc<dyn lash_core::SessionStoreFactory>,
-    /// The service name this dispatcher is bound under (FIG-3795 S10): the
-    /// route its self-calls — the child sends — address, recorded on each
-    /// group's index record at `open`.
-    pub(super) route: String,
+    /// The lane this dispatcher is bound under (FIG-3795): the route its
+    /// self-calls — the child sends — address. An opener records the lane
+    /// on the group's index record at `open`, so a group's dispatch and its
+    /// children all run under the route the opener chose.
+    pub(super) route: crate::services::ServiceRoute,
+    /// The drain generation of the build this dispatcher runs: its journals
+    /// lead with it (the generation sentinel), and a group a child opens
+    /// dispatches on this build's lane.
+    pub(super) build_generation: lash_core::engine::BuildGeneration,
 }
 
-impl EffectGroupDispatch {
+impl EffectGroupDispatchImpl {
     pub(crate) fn new(
         host: &crate::RestateEffectHost,
         ingress: RestateIngressClient,
         infinite_retry_policy: RunRetryPolicy,
         sessions: Arc<dyn lash_core::SessionStoreFactory>,
-        route: String,
+        route: crate::services::ServiceRoute,
+        build_generation: lash_core::engine::BuildGeneration,
     ) -> Self {
         Self {
             executors: host.group_executors(),
@@ -59,20 +65,22 @@ impl EffectGroupDispatch {
             infinite_retry_policy,
             sessions,
             route,
+            build_generation,
         }
     }
 }
 
-impl std::fmt::Debug for EffectGroupDispatch {
+impl std::fmt::Debug for EffectGroupDispatchImpl {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("EffectGroupDispatch")
+            .debug_struct("EffectGroupDispatchImpl")
+            .field("route", &self.route)
             .field("infinite_retry_policy", &self.infinite_retry_policy)
             .finish_non_exhaustive()
     }
 }
 
-impl EffectGroupDispatch {
+impl EffectGroupDispatchImpl {
     /// Ends a tool child whose drive refused where it parks its opener,
     /// recording nothing (FIG-3725).
     ///
@@ -152,14 +160,40 @@ impl EffectGroupDispatch {
     }
 }
 
-#[restate_sdk::workflow(name = "EffectGroupDispatch")]
-impl EffectGroupDispatch {
-    #[handler]
+/// The effect-group dispatcher: sends a group's children and runs each one.
+///
+/// A pinned service (FIG-3795): each build binds it under its stable name
+/// and under its generation's lane, and a group's opener records the lane
+/// its dispatch runs under on the group's index record. Every child call
+/// addresses the dispatcher's own lane, so a group's children run on the
+/// build that opened it, however many newer builds are registered.
+#[restate_sdk::workflow]
+pub trait EffectGroupDispatch {
+    async fn run(request: Json<EffectGroupDispatchRequest>) -> HandlerResult<Json<()>>;
+
+    #[shared]
+    async fn preflight(
+        children: Json<Vec<RuntimeEffectEnvelope>>,
+    ) -> HandlerResult<Json<Option<usize>>>;
+
+    #[shared]
+    async fn child(request: Json<EffectGroupChildRequest>) -> HandlerResult<Json<()>>;
+
+    #[shared]
+    async fn retire(group_key: String) -> HandlerResult<Json<()>>;
+}
+
+impl EffectGroupDispatch for EffectGroupDispatchImpl {
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
         Json(request): Json<EffectGroupDispatchRequest>,
     ) -> HandlerResult<Json<()>> {
+        // The generation sentinel leads the journal (FIG-3795 §4.4): a
+        // journal another generation recorded parks, retryably, for a build
+        // of that generation.
+        let recorded = crate::sentinel::record_generation!(&ctx, &self.build_generation)?;
+        crate::sentinel::check_generation(&self.route.name(), &recorded, &self.build_generation)?;
         let own_id = ctx.invocation_id().to_string();
         let Json(adopted) = ctx
             .object_client::<EffectGroupStateClient>(request.group_key.clone())
@@ -259,26 +293,27 @@ impl EffectGroupDispatch {
         let mut calls = Vec::with_capacity(children.len());
         for (position, envelope) in children.into_iter().enumerate() {
             let replay_key = shape.replay_key(position)?.to_string();
-            // A child call goes to this dispatcher's own route (FIG-3795
-            // S10): the recorded name the index retains for the group's
-            // dispatch, never a name recomputed from the running build.
-            let call = ctx
-                .request::<Json<EffectGroupChildRequest>, Json<()>>(
-                    restate_sdk::context::RequestTarget::workflow(
-                        self.route.clone(),
-                        request.group_key.clone(),
-                        "child",
-                    ),
-                    Json(EffectGroupChildRequest {
-                        group_key: request.group_key.clone(),
-                        shape: shape.clone(),
-                        position,
-                        envelope,
-                    }),
-                )
-                .idempotency_key(replay_key.clone())
-                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                .call();
+            // A child call goes to this dispatcher's own lane (FIG-3795):
+            // the route the index recorded for the group's dispatch, which
+            // this dispatch runs under, never a name recomputed from the
+            // running build. The child's replay key is its idempotency key,
+            // and Restate scopes that key by service name, so a retry can
+            // only ever attach to the one child this lane started.
+            let call = crate::services::routed_workflow::<_, _, ()>(
+                &ctx,
+                &self.route,
+                request.group_key.clone(),
+                "child",
+                EffectGroupChildRequest {
+                    group_key: request.group_key.clone(),
+                    shape: shape.clone(),
+                    position,
+                    envelope,
+                },
+            )
+            .idempotency_key(replay_key.clone())
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
+            .call();
             let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
             let Json(recorded) = ctx
                 .object_client::<EffectGroupStateClient>(request.group_key.clone())
@@ -349,7 +384,6 @@ impl EffectGroupDispatch {
         Ok(Json(()))
     }
 
-    #[handler]
     async fn preflight(
         &self,
         _ctx: SharedWorkflowContext<'_>,
@@ -365,20 +399,23 @@ impl EffectGroupDispatch {
         ))
     }
 
-    #[handler]
     async fn child(
         &self,
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<EffectGroupChildRequest>,
     ) -> HandlerResult<Json<()>> {
+        // The generation sentinel leads the journal (FIG-3795 §4.4): a child
+        // runs on its dispatcher's lane, the build that opened its group.
+        let recorded = crate::sentinel::record_generation!(&ctx, &self.build_generation)?;
+        crate::sentinel::check_generation(&self.route.name(), &recorded, &self.build_generation)?;
         // FIG-3619: the owning session's generation is checked before
         // anything else this invocation does — before admission, before its
-        // membership record, before its journal is read or an effect key is
-        // derived, and so before its effect can be dispatched. A child is its
-        // own invocation and ADR 0043 routes it to the latest deployment, so a
-        // turn another build started can open children that land here. A
-        // refused child settles with the typed refusal, which resolves the
-        // opener's rank wait instead of stranding it; its effect never runs.
+        // membership record, before an effect key is derived, and so before
+        // its effect can be dispatched. A session's state generation moves
+        // independently of the build that opened the group, so a child can
+        // still land on a session another build moved on. A refused child
+        // settles with the typed refusal, which resolves the opener's rank
+        // wait instead of stranding it; its effect never runs.
         if let Some(refusal) = session_generation_refusal(self.sessions.as_ref(), &request).await? {
             request.shape.validate_wire()?;
             return record_child_settlement(
@@ -542,7 +579,8 @@ impl EffectGroupDispatch {
                 ))
                 .into());
             };
-            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
+                .with_build_generation(self.build_generation.clone());
             // The child's own admitted controller, bound to its recorded
             // identity: the recorded pair — claim scope and the incarnation
             // it was admitted under — never the dispatching scope and never
@@ -646,7 +684,8 @@ impl EffectGroupDispatch {
                 ))
                 .into());
             };
-            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
+                .with_build_generation(self.build_generation.clone());
             let envelope = RuntimeEffectEnvelope {
                 group: None,
                 ..request.envelope.clone()
@@ -736,7 +775,6 @@ impl EffectGroupDispatch {
         record_child_settlement(&ctx, &request, outcome).await
     }
 
-    #[handler]
     async fn retire(
         &self,
         ctx: SharedWorkflowContext<'_>,

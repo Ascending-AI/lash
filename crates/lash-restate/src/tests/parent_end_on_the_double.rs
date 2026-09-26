@@ -542,7 +542,7 @@ async fn a_process_end_cancels_its_cancel_children_on_restate() {
                 registration,
                 execution_context: lash_core::ProcessExecutionContext::default(),
                 segment_ordinal: 0,
-                journal_version: crate::RESTATE_PROCESS_JOURNAL_VERSION,
+                sender_generation: None,
             },
         )
         .await

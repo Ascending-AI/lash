@@ -945,26 +945,37 @@ pub(super) fn encode_journal_retry<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
-/// The two admission steps every `LashProcessWorkflow/run` invocation
-/// journals first (FIG-3588), as the runtime recorded them: the verdict's and
-/// the start's `RunCommand` frames and proposed completions, gathered from a
-/// first try (which proposes the verdict) and Restate's retry over it (which
-/// proposes the start). Splice them into a replay with [`with_admission`].
+/// The steps every `LashProcessWorkflow/run` invocation journals first, as
+/// the runtime recorded them: the generation sentinel (FIG-3795), then the
+/// admission verdict and start (FIG-3588) — each step's `RunCommand` frame
+/// and proposed completion, gathered from a first try (which proposes the
+/// sentinel) and Restate's retries over it (each proposing the next step).
+/// Splice them into a replay with [`with_admission`].
 pub(super) async fn admission_journal<T: serde::Serialize>(
     endpoint: &Endpoint,
     workflow_key: &str,
     input: &T,
 ) -> Result<Vec<u8>, TerminalError> {
-    let verdict =
-        invoke_endpoint(endpoint, "LashProcessWorkflow", "run", workflow_key, input).await?;
-    let retry = encode_journal_retry(workflow_key, input, &verdict, 1)?;
-    let start = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", retry).await?;
-    let mut journal = verdict.to_vec();
-    journal.extend_from_slice(&start);
+    let mut journal = invoke_endpoint(endpoint, "LashProcessWorkflow", "run", workflow_key, input)
+        .await?
+        .to_vec();
+    let mut steps = 1;
+    while !journal
+        .windows(b"lash.segment.start".len())
+        .any(|window| window == b"lash.segment.start")
+    {
+        if steps >= 4 {
+            return Err(TerminalError::new("admission never reached its start step"));
+        }
+        let retry = encode_journal_retry(workflow_key, input, &journal, steps)?;
+        let next = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", retry).await?;
+        journal.extend_from_slice(&next);
+        steps += 1;
+    }
     // A segment that resumes from a handover journals it right after
     // admission (`lash.segment.resume`); it belongs to the prefix every later
     // command follows.
-    let retry = encode_journal_retry(workflow_key, input, &journal, 2)?;
+    let retry = encode_journal_retry(workflow_key, input, &journal, steps)?;
     let next = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", retry).await?;
     let resumes = restate_recorded_commands(&next)
         .ok_or_else(|| TerminalError::new("post-admission attempt omitted a valid frame"))?
@@ -998,7 +1009,7 @@ pub(super) async fn admission_journal<T: serde::Serialize>(
         .into_iter()
         .filter(|command| command.message_type == 0x0411)
         .count();
-    if runs != 2 + usize::from(resumes) {
+    if runs != steps + usize::from(resumes) {
         return Err(TerminalError::new(format!(
             "admission journals exactly its steps, found {runs} runs"
         )));

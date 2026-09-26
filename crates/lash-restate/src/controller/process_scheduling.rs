@@ -43,6 +43,7 @@ pub(super) async fn schedule_restate_process<'ctx, C>(
     started: lash_core::runtime::RegisteredProcessStart,
     registration: lash_core::ProcessRegistration,
     execution_context: lash_core::ProcessExecutionContext,
+    sender_generation: Option<lash_core::engine::BuildGeneration>,
     context: &C,
     invocation: &RuntimeEffectInvocation,
 ) -> Result<(ProcessRecord, lash_core::StoreRealization), RuntimeEffectControllerError>
@@ -61,7 +62,12 @@ where
     let record = started.record;
     let process_id = record.id.clone();
     let invocation_id = match context
-        .start_process_workflow(process_id.clone(), registration, execution_context)
+        .start_process_workflow(
+            process_id.clone(),
+            registration,
+            execution_context,
+            sender_generation,
+        )
         .await
     {
         Ok(invocation_id) => invocation_id,
@@ -146,9 +152,13 @@ where
                         &process_id,
                         ProcessExternalRef {
                             backend: "restate".to_string(),
+                            // A new process starts on the stable lane
+                            // (FIG-3795): the newest build runs segment 0.
                             id: format!(
                                 "{}/{}",
-                                crate::LashService::ProcessWorkflow.name(),
+                                crate::services::ServiceRoute::stable(
+                                    crate::LashService::ProcessWorkflow
+                                ),
                                 crate::process::process_segment_workflow_key(&process_id, 0)
                             ),
                             metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),

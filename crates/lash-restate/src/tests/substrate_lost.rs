@@ -117,7 +117,7 @@ fn segment_input(
         registration: registration.clone(),
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal,
-        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+        sender_generation: None,
     }
 }
 
@@ -249,6 +249,17 @@ impl HandedOverSegment {
         .unwrap_or_default()
     }
 
+    /// A fresh invocation's journal through its admission verdict, none of
+    /// it acknowledged past what each retry needed: the generation sentinel
+    /// a first try proposed (FIG-3795), then the verdict Restate's retry over
+    /// it proposed. Its two commands are the prefix a later retry
+    /// acknowledges.
+    async fn through_verdict(&self) -> Vec<u8> {
+        let sentinel = self.invoke_fresh(false).await;
+        let verdict = self.retry(&sentinel, 1, false).await;
+        [sentinel.to_vec(), verdict.to_vec()].concat()
+    }
+
     /// Restate's retry of an earlier try, whose first `journaled` commands
     /// the runtime acknowledged.
     async fn retry(&self, prior: &[u8], journaled: usize, complete_runs: bool) -> bytes::Bytes {
@@ -297,11 +308,11 @@ fn proposed_runs(output: &[u8]) -> usize {
 #[tokio::test]
 pub(super) async fn law_b_a_journal_lost_before_the_marker_admits_a_fresh_run() {
     let segment = HandedOverSegment::new().await;
-    let lost = segment.invoke_fresh(false).await;
+    let lost = segment.through_verdict().await;
     assert_eq!(
         proposed_runs(&lost),
-        1,
-        "the try proposed its verdict: {lost:?}"
+        2,
+        "the tries proposed the sentinel and the verdict: {lost:?}"
     );
     assert!(
         segment.marker().await.is_none(),
@@ -325,10 +336,10 @@ pub(super) async fn law_b_a_journal_lost_before_the_marker_admits_a_fresh_run() 
 #[tokio::test]
 pub(super) async fn law_a_a_crash_between_verdict_and_marker_retries_without_refusal() {
     let segment = HandedOverSegment::new().await;
-    let first = segment.invoke_fresh(false).await;
+    let first = segment.through_verdict().await;
     // The runtime acknowledged the verdict; the start step then wrote the
     // marker and the endpoint died before its completion was journaled.
-    let crashed = segment.retry(&first, 1, false).await;
+    let crashed = segment.retry(&first, 2, false).await;
     assert_eq!(
         proposed_runs(&crashed),
         1,
@@ -340,7 +351,7 @@ pub(super) async fn law_a_a_crash_between_verdict_and_marker_retries_without_ref
         .expect("the start step wrote its marker");
     assert_eq!(segment.runs(), 0);
 
-    segment.retry(&first, 1, true).await;
+    segment.retry(&first, 2, true).await;
     assert_eq!(
         segment.marker().await,
         Some(marker),
@@ -360,8 +371,8 @@ pub(super) async fn law_a_a_crash_between_verdict_and_marker_retries_without_ref
 #[tokio::test]
 pub(super) async fn law_c_a_journal_lost_after_the_marker_is_substrate_lost_with_no_effect() {
     let segment = HandedOverSegment::new().await;
-    let first = segment.invoke_fresh(false).await;
-    segment.retry(&first, 1, false).await;
+    let first = segment.through_verdict().await;
+    segment.retry(&first, 2, false).await;
     assert!(segment.marker().await.is_some());
 
     segment.invoke_fresh(true).await;
@@ -624,8 +635,8 @@ pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() 
 #[tokio::test]
 pub(super) async fn a_completed_segment_is_superseded_not_refused() {
     let segment = HandedOverSegment::new().await;
-    let first = segment.invoke_fresh(false).await;
-    segment.retry(&first, 1, false).await;
+    let first = segment.through_verdict().await;
+    segment.retry(&first, 2, false).await;
     assert!(segment.marker().await.is_some(), "segment 1 started");
     segment
         .continuations
@@ -1063,23 +1074,31 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
         "the sweep addresses the latest segment's key: {}",
         requests[0]
     );
+    // The sweep repeats the handover's send: it carries the generation of
+    // the build that wrote the handover as its sender (FIG-3795 S6).
+    let written = segment
+        .continuations
+        .latest_segment_handover(&segment.process_id)
+        .await
+        .expect("read the latest handover")
+        .expect("segment 1's handover is retained")
+        .written_generation
+        .expect("the handover records its writer's generation");
     assert!(
-        requests[0].contains(&format!(
-            "\"journal_version\":{RESTATE_PROCESS_JOURNAL_VERSION}"
-        )),
-        "the sweep stamps the journal generation: {}",
+        requests[0].contains(&format!("\"sender_generation\":\"{written}\"")),
+        "the sweep stamps the handover writer's generation: {}",
         requests[0]
     );
 }
 
-/// FIG-3607 review item 4: a real input of a retired generation — the shape a
-/// generation-2 or -3 submitter wrote, whose registration named its process by
-/// a host-chosen `id` and which carries no minted `process_id` — reaches the
-/// handler and is refused by its generation, never by the shape error its
-/// retired fields would raise at decode. It names no process this store holds,
-/// so nothing is stored and nothing is journaled.
+/// FIG-3795 S6: an input this build cannot decode — here the retired
+/// generation-2/3 shape, whose registration named its process by a
+/// host-chosen `id` and which carries no minted `process_id` — still reaches
+/// the handler and is refused typed, never by a decode failure before the
+/// handler runs. It names no process this store holds, so nothing is parked
+/// and nothing past the generation sentinel is journaled.
 #[tokio::test]
-pub(super) async fn a_real_retired_generation_input_is_refused_by_generation_not_by_shape() {
+pub(super) async fn an_undecodable_input_is_refused_after_the_sentinel_not_by_its_shape() {
     for generation in [2_u32, 3] {
         let registry = process_registry();
         let registration = rerunnable_registration();
@@ -1112,21 +1131,28 @@ pub(super) async fn a_real_retired_generation_input_is_refused_by_generation_not
             invoke_process_workflow_endpoint(&endpoint, "run", "legacy-host-name", &input, true)
                 .await
                 .unwrap_or_default();
+        let commands = restate_recorded_commands(&output).expect("decode the journal");
+        let runs: Vec<_> = commands
+            .iter()
+            .filter(|command| command.message_type != 0x0401)
+            .collect();
         assert_eq!(
-            restate_recorded_commands(&output).map(|commands| {
-                commands
-                    .iter()
-                    .filter(|command| command.message_type != 0x0401)
-                    .count()
-            }),
-            Some(0),
-            "generation {generation}: nothing but the terminal output is journaled: {output:?}"
+            runs.len(),
+            1,
+            "generation {generation}: only the generation sentinel is journaled: {output:?}"
+        );
+        assert!(
+            runs[0]
+                .frame
+                .windows(crate::sentinel::GENERATION_SENTINEL.len())
+                .any(|window| window == crate::sentinel::GENERATION_SENTINEL.as_bytes()),
+            "generation {generation}: the one command is the sentinel"
         );
         let failure = restate_output_failure_message(&output)
             .unwrap_or_else(|| panic!("generation {generation}: a terminal failure: {output:?}"));
         assert!(
-            failure.contains(&format!("restate-process-journal-v{generation}")),
-            "generation {generation}: refused by its generation, not its shape: {failure}"
+            failure.contains("does not decode"),
+            "generation {generation}: refused typed after the sentinel: {failure}"
         );
         assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
     }
@@ -1213,86 +1239,6 @@ pub(super) fn retired_process_requests_are_refused_by_generation_not_by_shape() 
             .process_id,
         awaited.process_id
     );
-}
-
-/// An input built for another generation of the handler's command prefix —
-/// stamped with a retired version, or unstamped — is refused before the
-/// handler journals anything: the process ends Abandoned with
-/// `ResumeRefused { RetiredGeneration }` naming the generation, and the
-/// runner is never asked for anything.
-#[tokio::test]
-pub(super) async fn a_retired_journal_generation_is_refused_before_any_command() {
-    for stamped in [Some(1_u32), Some(2_u32), Some(3_u32), None] {
-        let registry = process_registry();
-        let registration = rerunnable_registration();
-        let process_id = registry
-            .register_process(registration.clone())
-            .await
-            .expect("register the row")
-            .id;
-        let runner = Arc::new(EffectRunner::default());
-        let endpoint = Endpoint::builder()
-            .bind(
-                LashProcessWorkflowImpl::new_for_test(
-                    Arc::clone(&runner),
-                    Arc::clone(&registry),
-                    continuation_store(),
-                )
-                .serve(),
-            )
-            .build();
-        let mut input = serde_json::to_value(segment_input(&process_id, &registration, 0))
-            .expect("encode the input");
-        match stamped {
-            Some(version) => input["journal_version"] = serde_json::json!(version),
-            None => {
-                input
-                    .as_object_mut()
-                    .expect("the input is an object")
-                    .remove("journal_version");
-            }
-        }
-        let output =
-            invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)
-                .await
-                .unwrap_or_default();
-        assert_eq!(
-            restate_recorded_commands(&output).map(|commands| {
-                commands
-                    .iter()
-                    .filter(|command| command.message_type != 0x0401)
-                    .count()
-            }),
-            Some(0),
-            "{process_id}: nothing but the terminal output is journaled: {output:?}"
-        );
-        assert!(
-            restate_output_failure_message(&output).is_some(),
-            "{process_id}: the refusal is a terminal failure: {output:?}"
-        );
-        assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
-        let outcome = registry
-            .get_process(&process_id)
-            .await
-            .expect("read the refused row")
-            .and_then(|record| record.outcome)
-            .expect("the refusal is stored");
-        assert!(
-            matches!(
-                &outcome,
-                ProcessAwaitOutput::Abandoned { evidence, .. }
-                    if evidence.writer == lash_core::AbandonWriter::ResumeRefused {
-                        reason: lash_core::ProcessResumeRefusal::RetiredGeneration {
-                            found: format!(
-                                "restate-process-journal-v{}",
-                                stamped.unwrap_or(1)
-                            ),
-                        },
-                    }
-            ),
-            "{process_id}: got {outcome:?}"
-        );
-    }
 }
 
 /// FIG-3818 → FIG-3820: after the SubstrateLost recovery stored the
@@ -1406,6 +1352,27 @@ impl ZombieRoot {
         self.retry(0, prior, journaled).await
     }
 
+    /// Restate's retry of `segment_ordinal`'s invocation over its first
+    /// `journaled` commands, whose own runs the runtime never acknowledges:
+    /// it proposes the next step and stops.
+    async fn retry_unacknowledged(
+        &self,
+        segment_ordinal: u64,
+        prior: &[u8],
+        journaled: usize,
+    ) -> bytes::Bytes {
+        let body = encode_journal_retry(
+            &self.key(segment_ordinal),
+            &segment_input(&self.process_id, &self.registration, segment_ordinal),
+            prior,
+            journaled,
+        )
+        .expect("encode the acknowledged journal");
+        invoke_process_workflow_body(&self.endpoint, "run", body, false)
+            .await
+            .unwrap_or_default()
+    }
+
     /// Restate's retry of `segment_ordinal`'s invocation, with its first
     /// `journaled` commands acknowledged.
     async fn retry(&self, segment_ordinal: u64, prior: &[u8], journaled: usize) -> bytes::Bytes {
@@ -1490,16 +1457,19 @@ impl ZombieRoot {
 #[tokio::test]
 pub(super) async fn a_zombie_handover_between_the_recovery_verdict_and_its_terminal_wins() {
     let root = ZombieRoot::new().await;
-    let verdict = root.invoke_fresh(0, false).await;
+    // The sentinel, then the verdict over it (FIG-3795).
+    let sentinel = root.invoke_fresh(0, false).await;
+    let verdict = root.retry_unacknowledged(0, &sentinel, 1).await;
     assert_eq!(
         proposed_runs(&verdict),
         1,
         "the verdict proposed: {verdict:?}"
     );
+    let verdict = [sentinel.to_vec(), verdict.to_vec()].concat();
     root.zombie_hands_over()
         .await
         .expect("the zombie hands over before any terminal");
-    let recovered = root.retry_root(&verdict, 1).await;
+    let recovered = root.retry_root(&verdict, 2).await;
     assert!(
         matches!(
             restate_output_json::<RestateProcessWorkflowOutput>(&recovered),
@@ -1610,12 +1580,15 @@ pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_b
     root.zombie_hands_over()
         .await
         .expect("the root hands segment 1 over");
-    let verdict = root.invoke_fresh(1, false).await;
+    // The sentinel, then the verdict over it (FIG-3795).
+    let sentinel = root.invoke_fresh(1, false).await;
+    let verdict = root.retry_unacknowledged(1, &sentinel, 1).await;
     assert_eq!(
         proposed_runs(&verdict),
         1,
         "the verdict proposed: {verdict:?}"
     );
+    let verdict = [sentinel.to_vec(), verdict.to_vec()].concat();
     root.registry
         .complete_process(
             &root.process_id,
@@ -1624,7 +1597,7 @@ pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_b
         )
         .await
         .expect("the process ends after the verdict");
-    let _ = root.retry(1, &verdict, 1).await;
+    let _ = root.retry(1, &verdict, 2).await;
     assert_eq!(root.runs(), 0, "no segment body runs after the terminal");
     assert_eq!(
         root.continuations

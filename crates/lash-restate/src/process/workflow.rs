@@ -32,20 +32,23 @@ use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 
 use super::{
-    PROCESS_CANCEL_PROMISE_KEY, RESTATE_PROCESS_JOURNAL_VERSION, RestateProcessAwaitRequest,
-    RestateProcessCancelRequest, RestateProcessCancelSignal, RestateProcessCompleteRequest,
-    RestateProcessRunner, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
-    RestateProcessWorkflowPayload, SegmentAdmission, SegmentStarted, admit_segment,
-    boundary_must_be_declined, handler_error_from_plugin, handover_digest, is_replay_mismatch,
-    process_segment_workflow_key, resolve_process_cancel_signal, resolve_process_terminal_promise,
-    restate_now_ms, restate_process_terminal_await_key, restate_process_terminal_output,
-    terminal_completion_workflow_key, terminal_process_output, workflow_key_authority,
+    PROCESS_CANCEL_PROMISE_KEY, RestateProcessAwaitRequest, RestateProcessCancelRequest,
+    RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessRunner,
+    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, RestateProcessWorkflowPayload,
+    SegmentAdmission, SegmentStarted, admit_segment, boundary_must_be_declined,
+    handler_error_from_plugin, handover_digest, is_replay_mismatch, process_segment_workflow_key,
+    resolve_process_cancel_signal, resolve_process_terminal_promise, restate_now_ms,
+    restate_process_terminal_await_key, restate_process_terminal_output, terminal_process_output,
+    workflow_key_authority,
 };
 use crate::controller::{
     RestateControllerContext, RestateEffectControllerOptions, RestateRuntimeEffectController,
 };
 use crate::ingress::RestateIngressClient;
 use crate::process_stop::ProcessStopDelivery;
+use crate::services::{Lane, LashService, ServiceRoute, routed_workflow};
+
+mod lanes;
 
 /// The journal name of the terminal completion step.
 const COMPLETE_STEP: &str = "lash.process.complete";
@@ -71,6 +74,13 @@ const PARENT_END_STEP: &str = "lash.process.parent-end";
 /// redrive replays the runner from the recorded handover even after the
 /// segment retired it (FIG-3809).
 const RESUME_STEP: &str = "lash.segment.resume";
+/// The live segment a process-level cancel is forwarded to: its ordinal and
+/// the route its handover recorded it was sent under.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct CancelTarget {
+    segment_ordinal: u64,
+    route: String,
+}
 
 /// The terminal a segment proposes; the completion step turns it into the
 /// stored outcome.
@@ -215,6 +225,11 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     /// under (FIG-3795 S1): each start marker, handover and park stamps it,
     /// beside the route the successor was sent under.
     build_generation: lash_core::engine::BuildGeneration,
+    /// The lane this instance is bound under (FIG-3795): segment 0 on the
+    /// stable lane resolves the process terminal itself, every other segment
+    /// completes it on the stable root, and a generation lane admits only
+    /// its own generation's inputs.
+    route: ServiceRoute,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_context: lash_trace::TraceContext,
 }
@@ -250,6 +265,25 @@ impl lash_core::ProcessWorkSubstrate for RegistryReadCancel {
         _delivery_key: &str,
     ) -> Result<(), PluginError> {
         Ok(())
+    }
+}
+
+impl<R> Clone for LashProcessWorkflowImpl<R> {
+    fn clone(&self) -> Self {
+        Self {
+            runner: Arc::clone(&self.runner),
+            registry: Arc::clone(&self.registry),
+            continuations: Arc::clone(&self.continuations),
+            segment_effect_budget: Arc::clone(&self.segment_effect_budget),
+            retry_max_attempts: self.retry_max_attempts,
+            cancel_ingress: self.cancel_ingress.clone(),
+            parent_end_delivery: Arc::clone(&self.parent_end_delivery),
+            authority_id: self.authority_id.clone(),
+            build_generation: self.build_generation.clone(),
+            route: self.route.clone(),
+            trace_sink: self.trace_sink.clone(),
+            trace_context: self.trace_context.clone(),
+        }
     }
 }
 
@@ -320,9 +354,18 @@ impl<R> LashProcessWorkflowImpl<R> {
             parent_end_delivery,
             authority_id,
             build_generation,
+            route: ServiceRoute::stable(LashService::ProcessWorkflow),
             trace_sink: None,
             trace_context: lash_trace::TraceContext::default(),
         }
+    }
+
+    /// This workflow bound under `route`: the binder serves one instance per
+    /// lane of the pinned `LashProcessWorkflow`.
+    pub(crate) fn on_route(&self, route: ServiceRoute) -> Self {
+        let mut workflow = self.clone();
+        workflow.route = route;
+        workflow
     }
 
     /// Attach the host's live trace observer to every process-segment
@@ -378,6 +421,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         match self.cancel_ingress.clone() {
             Some(ingress) => ProcessStopDelivery::watch(
                 ingress,
+                self.route.clone(),
                 process_id.clone(),
                 process_segment_workflow_key(process_id, segment_ordinal),
                 stop,
@@ -391,9 +435,12 @@ impl<R> LashProcessWorkflowImpl<R>
 where
     R: RestateProcessRunner,
 {
-    /// Publish a terminal this segment reached: the root segment resolves the
-    /// process's terminal promise itself, a later segment completes it on the
-    /// root workflow.
+    /// Publish a terminal this segment reached: the root segment on the
+    /// stable lane is the stable root and resolves the process's terminal
+    /// promise itself; every other segment — a later one, or any segment on
+    /// a generation lane — completes it on the stable root
+    /// `LashProcessWorkflow/<pid>`, whose terminal promise outlives every
+    /// segment's lane (FIG-3795).
     async fn deliver_segment_terminal(
         &self,
         context: &WorkflowContext<'_>,
@@ -401,16 +448,21 @@ where
         segment_ordinal: u64,
         output: ProcessAwaitOutput,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
-        if terminal_completion_workflow_key(process_id, segment_ordinal).is_none() {
+        if segment_ordinal == 0 && *self.route.lane() == Lane::Stable {
             resolve_process_terminal_promise(context, &self.authority_id, process_id, &output)?;
         } else {
-            let request = context
-                .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
-                .complete_terminal(Json(RestateProcessCompleteRequest {
+            routed_workflow::<_, _, ()>(
+                context,
+                &ServiceRoute::stable(LashService::ProcessWorkflow),
+                process_id.to_string(),
+                "complete_terminal",
+                RestateProcessCompleteRequest {
                     process_id: process_id.clone(),
                     output: output.clone(),
-                }));
-            request.call().await?;
+                },
+            )
+            .call()
+            .await?;
         }
 
         // FIG-811: the handover remains replay authority until the terminal
@@ -420,84 +472,6 @@ where
         Ok(Json(RestateProcessWorkflowOutput::Terminal {
             output: Box::new(output),
         }))
-    }
-
-    /// Refuse an input built for another generation of the handler's command
-    /// prefix, before journaling anything: the process ends Abandoned with
-    /// `ResumeRefused { RetiredGeneration }` naming the generation it
-    /// carried, and the invocation fails terminally without a journal
-    /// command, so a journal recorded under that generation is never replayed
-    /// against this one (FIG-3588, current temporary cutover policy).
-    ///
-    /// This is the one registry write and clock read outside a step: a step
-    /// here would be a command, and an in-flight journal of the retired
-    /// generation would meet it as a mismatch before it could be refused.
-    ///
-    /// An input whose process id this build cannot read (a retired
-    /// generation's host-chosen name) names no process this store holds, so
-    /// only the invocation is refused.
-    async fn refuse_retired_journal(
-        &self,
-        process_id: Option<&ProcessId>,
-        journal_version: u32,
-    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
-        let found = format!("restate-process-journal-v{journal_version}");
-        let named = process_id.map_or("an unreadable process id", ProcessId::as_str);
-        tracing::warn!(
-            process_id = named,
-            found = found.as_str(),
-            expected = RESTATE_PROCESS_JOURNAL_VERSION,
-            "refusing a process segment built for a retired journal generation"
-        );
-        let Some(process_id) = process_id else {
-            return Err(TerminalError::new(format!(
-                "process segment input for {named} carries {found}; this handler journals generation {RESTATE_PROCESS_JOURNAL_VERSION}"
-            ))
-            .into());
-        };
-        let stored = complete_process_outcome(
-            &self.registry,
-            process_id,
-            ProcessAwaitOutput::Abandoned {
-                evidence: Box::new(AbandonEvidence {
-                    writer: AbandonWriter::ResumeRefused {
-                        reason: lash_core::ProcessResumeRefusal::RetiredGeneration {
-                            found: found.clone(),
-                        },
-                    },
-                    owner: None,
-                    epoch_ms: restate_now_ms(),
-                }),
-                control: None,
-            },
-            Vec::new(),
-        )
-        .await
-        .map_err(handler_error_from_plugin)?;
-        // Awaiters wait on the root workflow's terminal promise. Publish the
-        // stored refusal through the root's shared `complete_terminal`, a
-        // separate invocation, so it lands even when this invocation's own
-        // retired journal can never replay. It is idempotent: a promise
-        // already resolved stays as it was, and a failed publish is retried
-        // with this attempt.
-        if let Some(ingress) = self.cancel_ingress.as_ref() {
-            ingress
-                .call_workflow_json::<_, ()>(
-                    crate::LashService::ProcessWorkflow.name(),
-                    process_id.as_str(),
-                    "complete_terminal",
-                    &RestateProcessCompleteRequest {
-                        process_id: process_id.clone(),
-                        output: stored,
-                    },
-                )
-                .await
-                .map_err(HandlerError::from)?;
-        }
-        Err(TerminalError::new(format!(
-            "process `{process_id}` segment input carries {found}; this handler journals generation {RESTATE_PROCESS_JOURNAL_VERSION}"
-        ))
-        .into())
     }
 
     /// End the process Failed, typed by `failure`'s code, from a segment
@@ -1031,21 +1005,20 @@ where
         ctx: WorkflowContext<'_>,
         Json(payload): Json<RestateProcessWorkflowPayload>,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
-        // The journal-generation gate runs before the handler journals
-        // anything, and before the input is decoded against this generation's
-        // shape: an input built for another command prefix is refused typed
-        // rather than replayed against commands it never recorded (FIG-3588).
-        let input = match payload {
-            RestateProcessWorkflowPayload::Current(input) => *input,
-            RestateProcessWorkflowPayload::Retired {
-                journal_version,
-                process_id,
-            } => {
-                return self
-                    .refuse_retired_journal(process_id.as_ref(), journal_version)
-                    .await;
-            }
-        };
+        // The generation sentinel is the journal's first command (FIG-3795
+        // §4.4): a replay that reads back another build's generation parks
+        // before it replays anything else, so no journal is ever replayed
+        // against code of another generation.
+        let recorded = crate::sentinel::record_generation!(&ctx, &self.build_generation)?;
+        if recorded != self.build_generation {
+            return Err(self
+                .park_retired_journal(payload.process_id(), &recorded)
+                .await);
+        }
+        // The input check (S6) follows it, before any other command: a
+        // generation lane serves only its own generation, and the stable lane
+        // holds a segment another build handed over to its successor window.
+        let input = self.admit_input(&ctx, payload).await?;
         let process_id = input.process_id.clone();
         // Admission is the handler's first journaled work: the verdict, then
         // the start marker, and only the proof the start returns can mint the
@@ -1352,12 +1325,13 @@ where
         let registry = &self.registry;
         let continuations = &self.continuations;
         let pid = &process_id;
-        // The route is data (FIG-3795 S3/S5): the service name the successor
-        // is sent under is recorded with the handover, and the external
-        // reference names that same route rather than recomputing one.
-        // Generation lanes are FIG-3795 part D; until then the route is the
-        // stable name.
-        let route = crate::LashService::ProcessWorkflow.name().to_string();
+        // The route is data (FIG-3795 S3/S5): the successor is sent under the
+        // stable lane — the next segment runs on the newest build — and that
+        // route is recorded with the handover, so the external reference, a
+        // forwarded cancel and a redrive all address the recorded route
+        // rather than recomputing one.
+        let successor_route = ServiceRoute::stable(LashService::ProcessWorkflow);
+        let route = successor_route.name().into_owned();
         let written_generation = Some(self.build_generation.clone());
         let reference_id = format!("{route}/{successor_key}");
         let Json(handed_over) = context
@@ -1413,19 +1387,21 @@ where
         // FIG-788: successor emission is unconditional. A cancellation
         // can land between attempts, so the recorded read below may
         // shape only commands after this deployed prefix.
-        let request = context
-            .workflow_client::<LashProcessWorkflowClient>(successor_key.clone())
-            .run(Json(
-                RestateProcessWorkflowInput {
-                    process_id: process_id.clone(),
-                    registration: input.registration,
-                    execution_context: input.execution_context,
-                    segment_ordinal: next_segment_ordinal,
-                    journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
-                }
-                .into(),
-            ));
-        request.send().await?;
+        routed_workflow::<_, _, RestateProcessWorkflowOutput>(
+            context,
+            &successor_route,
+            successor_key.clone(),
+            "run",
+            RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
+                process_id: process_id.clone(),
+                registration: input.registration,
+                execution_context: input.execution_context,
+                segment_ordinal: next_segment_ordinal,
+                sender_generation: Some(self.build_generation.clone()),
+            }),
+        )
+        .send()
+        .await?;
         // Cancellation can race the gap after the current segment
         // retires its promise but before the successor handover is
         // visible to the cancel endpoint. Forward that durable fact
@@ -1457,10 +1433,15 @@ where
         // The successor carries the process from the send on, so a failure
         // from here cannot strand it: it ends only this invocation.
         if let Some(cancel) = forward.map_err(TerminalError::new)? {
-            let deliver = context
-                .workflow_client::<LashProcessWorkflowClient>(successor_key)
-                .deliver_cancel(Json(cancel));
-            let Json(()) = deliver.call().await?;
+            let Json(()) = routed_workflow::<_, _, ()>(
+                context,
+                &successor_route,
+                successor_key,
+                "deliver_cancel",
+                cancel,
+            )
+            .call()
+            .await?;
         }
         // This segment has handed the process on and recorded the cancel it
         // forwards, so its handover is no longer anyone's to read: retire it,
@@ -1559,30 +1540,40 @@ where
         child_turn.map_err(TerminalError::new)?;
         // The segment that owns the process now is a recorded read: a live
         // one would decide on a redrive whether this handler forwards.
+        // The cancel goes to the recorded route of that segment (FIG-3795
+        // S3): its cancel promise lives on the instance it was sent under,
+        // whichever lane that is.
         let continuations = &self.continuations;
         let process_id = &request.process_id;
-        let Json(route) = ctx
-            .run_json_or_retry_send::<Result<Option<u64>, String>, _>(
+        let Json(target) = ctx
+            .run_json_or_retry_send::<Result<Option<CancelTarget>, String>, _>(
                 CANCEL_ROUTE_STEP.to_string(),
                 async move {
                     match continuations.latest_segment_handover(process_id).await {
                         Ok(handover) => Ok(Ok(handover
-                            .map(|handover| handover.segment_ordinal)
-                            .filter(|ordinal| *ordinal > 0))),
+                            .filter(|handover| handover.segment_ordinal > 0)
+                            .map(|handover| CancelTarget {
+                                segment_ordinal: handover.segment_ordinal,
+                                route: handover.route,
+                            }))),
                         Err(error) => step_fault(error),
                     }
                 },
             )
             .await
             .map_err(HandlerError::from)?;
-        if let Some(segment_ordinal) = route.map_err(TerminalError::new)? {
-            let deliver = ctx
-                .workflow_client::<LashProcessWorkflowClient>(process_segment_workflow_key(
-                    &request.process_id,
-                    segment_ordinal,
-                ))
-                .deliver_cancel(Json(request.clone()));
-            let Json(()) = deliver.call().await?;
+        if let Some(target) = target.map_err(TerminalError::new)? {
+            let Json(()) = ctx
+                .request::<Json<RestateProcessCancelRequest>, Json<()>>(
+                    restate_sdk::context::RequestTarget::workflow(
+                        target.route,
+                        process_segment_workflow_key(&request.process_id, target.segment_ordinal),
+                        "deliver_cancel",
+                    ),
+                    Json(request.clone()),
+                )
+                .call()
+                .await?;
         }
         Ok(Json(()))
     }

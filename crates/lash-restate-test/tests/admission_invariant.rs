@@ -145,7 +145,7 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
                     registration,
                     execution_context: lash_core::ProcessExecutionContext::default(),
                     segment_ordinal: 1,
-                    journal_version: lash_restate::RESTATE_PROCESS_JOURNAL_VERSION,
+                    sender_generation: Some(restate.restate().build_generation().clone()),
                 },
             ),
     )

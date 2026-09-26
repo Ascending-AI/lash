@@ -848,7 +848,19 @@ impl RestateIngressClient {
     }
 }
 
-fn restate_path_component(value: &str) -> String {
+/// The `sys_invocation` filter matching every lane of `service`: its stable
+/// name, or its name followed by a generation suffix `_g<G>` (FIG-3795).
+/// Restate's SQL reads `_` in a `LIKE` pattern as any one character, which
+/// only widens the match to names no lash or host service takes.
+fn service_lanes_sql(service: &str) -> String {
+    format!(
+        "(target_service_name = {} OR target_service_name LIKE {})",
+        sql_string_literal(service),
+        sql_string_literal(&format!("{service}_g%"))
+    )
+}
+
+pub(crate) fn restate_path_component(value: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -923,18 +935,22 @@ impl RestateAdminClient {
         Ok(rows.pop())
     }
 
+    /// The latest invocation of `workflow`'s `handler` under `workflow_key`,
+    /// on any of the workflow's lanes: its stable name or a generation name
+    /// `<workflow>_g<G>` (FIG-3795), so a lookup finds a segment a
+    /// generation lane runs as well as one the stable lane runs.
     pub async fn workflow_invocation_status(
         &self,
         workflow: &str,
         workflow_key: &str,
         handler: &str,
     ) -> Result<Option<RestateInvocationStatus>, RestateHttpError> {
-        let workflow = sql_string_literal(workflow);
+        let lanes = service_lanes_sql(workflow);
         let workflow_key = sql_string_literal(workflow_key);
         let handler = sql_string_literal(handler);
         let mut rows = self
             .query_json::<RestateInvocationStatus>(&format!(
-                "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE target_service_name = {workflow} AND target_service_key = {workflow_key} AND target_handler_name = {handler} ORDER BY modified_at DESC LIMIT 1"
+                "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {lanes} AND target_service_key = {workflow_key} AND target_handler_name = {handler} ORDER BY modified_at DESC LIMIT 1"
             ))
             .await?;
         Ok(rows.pop())
@@ -1015,17 +1031,18 @@ impl RestateAdminClient {
             .map(|response| response.rows)
     }
 
-    /// The paused invocations of `service`: each stopped after its handler's
-    /// retry policy spent its attempts, with the attempt count and the last
-    /// failure Restate recorded.
+    /// The paused invocations of `service` on any of its lanes (its stable
+    /// name or a generation name `<service>_g<G>`, FIG-3795): each stopped
+    /// after its handler's retry policy spent its attempts, with the attempt
+    /// count and the last failure Restate recorded.
     pub async fn paused_invocations(
         &self,
         service: &str,
     ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
-        let service = sql_string_literal(service);
+        let lanes = service_lanes_sql(service);
         let paused = RestateInvocationLifecycle::Paused.sql_literal();
         self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND target_service_name = {service}"
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {lanes}"
         ))
         .await
     }
@@ -1036,8 +1053,14 @@ impl RestateAdminClient {
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
         let after = sql_string_literal(after.unwrap_or(""));
+        // Every lane of each pinned service (FIG-3795): a drive, root or
+        // segment pinned to a generation lane pauses there, not under the
+        // stable name.
+        let drives = service_lanes_sql(crate::LashService::SessionDriver.name());
+        let roots = service_lanes_sql(crate::LashService::TurnDriver.name());
+        let segments = service_lanes_sql(crate::LashService::ProcessWorkflow.name());
         self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND ((target_service_name = 'LashSession' AND target_handler_name = 'drive') OR (target_service_name IN ('LashTurn', 'LashProcessWorkflow') AND target_handler_name = 'run')) ORDER BY id LIMIT {}", limit.get()
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({drives} AND target_handler_name = 'drive') OR (({roots} OR {segments}) AND target_handler_name = 'run')) ORDER BY id LIMIT {}", limit.get()
         )).await
     }
 

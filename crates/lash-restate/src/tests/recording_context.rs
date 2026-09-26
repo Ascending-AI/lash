@@ -554,6 +554,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
+        sender_generation: Option<lash_core::engine::BuildGeneration>,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -601,7 +602,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                         registration,
                         execution_context,
                         segment_ordinal: 0,
-                        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+                        sender_generation,
                     },
                     true,
                 )
@@ -2001,6 +2002,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         _process_id: lash_core::ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
+        _sender_generation: Option<lash_core::engine::BuildGeneration>,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -2295,6 +2297,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
+        _sender_generation: Option<lash_core::engine::BuildGeneration>,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
