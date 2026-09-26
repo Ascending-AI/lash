@@ -169,7 +169,9 @@ struct Walk {
 ///
 /// This is deliberately exhaustive over [`DurableFormat`]. A new durable
 /// format must choose a bounded surface, a carrier, an explicit unwalkable
-/// disposition or the non-persisted case before the preflight can compile.
+/// disposition or the non-persisted case before the preflight can compile;
+/// an engine-registered format carries its disposition on the row the
+/// engine declares (ADR 0104 §2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SurfaceRelation {
     /// The format is read directly from this surface. `primary` marks the
@@ -301,15 +303,7 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: one session-history record per provider exchange, refused at \
              decode rather than at rest",
         ),
-        DurableFormat::RestateDurableWaitRequest
-        | DurableFormat::RestateDurableWaitIndexEpoch
-        | DurableFormat::RestateProcessCommandJournal
-        | DurableFormat::RestateEffectGroupIndexProtocol
-        | DurableFormat::RestateProcessJournal
-        | DurableFormat::RestateEffectJournal => SurfaceRelation::Unwalkable(
-            "no bounded surface: Restate journal and object state live in the Restate \
-             deployment, outside lash's own store",
-        ),
+        DurableFormat::Engine(format) => SurfaceRelation::Unwalkable(format.unwalkable_reason),
         DurableFormat::VmAbi => SurfaceRelation::NotPersisted,
     }
 }
@@ -565,19 +559,17 @@ fn evidence_for(format: DurableFormat, probe: FormatProbe) -> FormatEvidence {
 ///
 /// Each lives either in one of the highest-cardinality tables in the store (one
 /// row per session, graph node, ledger row or journaled outcome), outside
-/// lash's store altogether (host-stored projections, Restate state), or is an
+/// lash's store altogether (host-stored projections, the engine's state), or is an
 /// identity recomputed on retry rather than a stamp read back. Naming them is
 /// the honest answer; walking the store-resident ones on every boot would make
 /// the preflight the outage it exists to prevent.
 fn unwalkable_formats() -> impl Iterator<Item = (DurableFormat, &'static str)> {
-    durable_formats()
-        .iter()
-        .filter_map(|entry| match format_surface(entry.format) {
-            SurfaceRelation::Unwalkable(reason) => Some((entry.format, reason)),
-            SurfaceRelation::Walk { .. }
-            | SurfaceRelation::CarriedBy(_)
-            | SurfaceRelation::NotPersisted => None,
-        })
+    durable_formats().filter_map(|entry| match format_surface(entry.format) {
+        SurfaceRelation::Unwalkable(reason) => Some((entry.format, reason)),
+        SurfaceRelation::Walk { .. }
+        | SurfaceRelation::CarriedBy(_)
+        | SurfaceRelation::NotPersisted => None,
+    })
 }
 
 /// How an item is named on a drain list.

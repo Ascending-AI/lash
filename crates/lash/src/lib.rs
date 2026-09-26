@@ -1018,6 +1018,10 @@ pub mod s3 {
 /// [`RestateEngine`]: lash_restate::RestateEngine
 #[cfg(feature = "restate")]
 pub mod restate {
+    use crate::formats::{
+        DurableFormat, DurableFormatEntry, EngineFormat, FormatProbe, FormatVersion,
+    };
+
     pub use lash_restate::*;
 
     /// A [`RestateConfig`] stamped with this build's drain generation
@@ -1036,6 +1040,27 @@ pub mod restate {
             crate::formats::build_generation(),
             queued_work,
         )
+    }
+
+    /// The durable-format rows this engine registers with the facade's
+    /// format table, projected onto the table's own row shape
+    /// (ADR 0104 §2). The engine owns its formats — [`durable_formats`] is
+    /// its registry — so the facade names them through the engine-neutral
+    /// `DurableFormat::Engine` handle rather than variants spelled for the
+    /// engine.
+    pub(crate) fn durable_format_entries() -> impl Iterator<Item = DurableFormatEntry> {
+        durable_formats().map(|format| DurableFormatEntry {
+            format: DurableFormat::Engine(EngineFormat {
+                id: format.id,
+                name: format.name,
+                unwalkable_reason: format.unwalkable_reason,
+                upgrade_policy: format.upgrade_policy,
+            }),
+            version: FormatVersion::Counter(format.version),
+            owning_crate: "lash-restate",
+            constant: format.constant,
+            probe: FormatProbe::Comparable,
+        })
     }
 }
 

@@ -62,6 +62,8 @@ FIXTURE_ENGINE_ID_FILE = "crates/lash-core/src/runtime/turn_loop/engine_ids.rs"
 FIXTURE_ENGINE_ID_LINE = "    let _ = context.restate_invocation_id();"
 FIXTURE_ENGINE_ERROR_FILE = "crates/lash-core-store/src/runtime_error.rs"
 FIXTURE_ENGINE_ERROR_LINE = "    RestateProcessAwait,"
+FIXTURE_ENGINE_FORMAT_FILE = "crates/lash/src/formats.rs"
+FIXTURE_ENGINE_FORMAT_LINE = "    RestateDurableWaitRequest,"
 
 
 class DriveDeterminismRatchetTests(unittest.TestCase):
@@ -195,6 +197,37 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             hit = root / "crates/lash-core-store/src/other.rs"
             hit.parent.mkdir(parents=True, exist_ok=True)
             hit.write_text("pub struct RestateBackend;\n")
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_engine_named_format_in_the_format_table_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            (root / FIXTURE_ENGINE_FORMAT_FILE).write_text(
+                "pub enum DurableFormat {\n" + FIXTURE_ENGINE_FORMAT_LINE + "\n}\n"
+            )
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 4 failed", result.stderr)
+
+    def test_engine_named_format_in_preflight_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            hit = root / "crates/lash/src/preflight/report.rs"
+            hit.parent.mkdir(parents=True, exist_ok=True)
+            hit.write_text("    format: DurableFormat::RestateProcessJournal,\n")
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 4 failed", result.stderr)
+
+    def test_engine_named_format_in_the_engine_module_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            hit = root / "crates/lash/src/restate.rs"
+            hit.write_text("pub enum EngineFormats {\n" + FIXTURE_ENGINE_FORMAT_LINE + "\n}\n")
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
 

@@ -65,7 +65,7 @@ constant = "DURABLE_WAIT_REQUEST_VERSION"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
 upgrade = "drain"
 description = "Restate durable-wait nested workflow request wire"
-manifest = "RestateDurableWaitRequest"
+manifest = "engine:restate.durable_wait_request"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -77,7 +77,7 @@ constant = "RESTATE_PROCESS_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/process/admission.rs"
 upgrade = "drain"
 description = "leading journaled commands of a Restate process-segment invocation (segment admission)"
-manifest = "RestateProcessJournal"
+manifest = "engine:restate.process_journal"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -2317,7 +2317,7 @@ constant = "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION"
 constant_path = "crates/lash-restate/src/controller/process_command.rs"
 upgrade = "drain"
 description = "Restate-journaled process-command admission payload"
-manifest = "RestateProcessCommandJournal"
+manifest = "engine:restate.process_command_journal"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -2329,7 +2329,7 @@ constant = "DURABLE_WAIT_INDEX_IDENTITY_EPOCH"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
 upgrade = "coexist"
 description = "identity epoch of the Restate durable-wait index object state"
-manifest = "RestateDurableWaitIndexEpoch"
+manifest = "engine:restate.durable_wait_index_epoch"
 
 # Object state survives a deployment and is refused at open under a foreign
 # epoch. The guard projects the state the index persists and the keys it
@@ -2356,7 +2356,7 @@ constant = "EFFECT_GROUP_INDEX_PROTOCOL_VERSION"
 constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
 upgrade = "coexist"
 description = "Restate effect-group protocol: the EffectGroupIndex handlers' request and response wire, the dispatch workflow's wire, and the index record Restate retains"
-manifest = "RestateEffectGroupIndexProtocol"
+manifest = "engine:restate.effect_group_index_protocol"
 
 # Index state survives a deployment, and an in-flight invocation replays the
 # journal of the handlers it called. Every index record carries the version
@@ -2392,7 +2392,7 @@ constant = "EFFECT_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/controller/effect_journal.rs"
 upgrade = "drain"
 description = "Restate effect journal: every recorded effect's `lash:{replay_key}` ctx.run entry (the canonical envelope, the outcome and its error, the give-up entry) and its position"
-manifest = "RestateEffectJournal"
+manifest = "engine:restate.effect_journal"
 
 # ADR 0105 section 12. Every entry a recorded effect journals is stamped with
 # the generation that wrote it, and the controller refuses an entry stamped

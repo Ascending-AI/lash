@@ -105,6 +105,25 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
 }
 """
 
+ENGINE_REGISTRY = """
+pub struct EngineDurableFormat {
+    pub id: &'static str,
+}
+
+pub fn durable_formats() -> &'static [EngineDurableFormat] {
+    &[
+        EngineDurableFormat {
+            id: "demo.engine_wire",
+            name: "demo engine wire",
+            version: ENGINE_WIRE_VERSION as u32,
+            constant: "ENGINE_WIRE_VERSION",
+            upgrade_policy: UpgradePolicy::Drain,
+            unwalkable_reason: "engine state",
+        },
+    ]
+}
+"""
+
 
 class FormatRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -243,6 +262,30 @@ class FormatRegistryTests(unittest.TestCase):
             ),
             problems,
         )
+
+    def test_an_engine_registered_row_satisfies_a_manifest_claim(self) -> None:
+        self.write("crates/lash-restate/src/formats.rs", ENGINE_REGISTRY)
+        self.write(
+            "crates/demo/src/engine.rs", "pub const ENGINE_WIRE_VERSION: u8 = 1;\n"
+        )
+        self.registry_text = REGISTRY + textwrap.dedent(
+            """
+            [[surface]]
+            constant = "ENGINE_WIRE_VERSION"
+            constant_path = "crates/demo/src/engine.rs"
+            upgrade = "drain"
+            description = "engine-registered fixture format"
+            manifest = "engine:demo.engine_wire"
+            """
+        )
+        self.assertEqual(self.problems(), [])
+
+    def test_an_engine_row_no_surface_claims_fails(self) -> None:
+        self.write("crates/lash-restate/src/formats.rs", ENGINE_REGISTRY)
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("engine format `demo.engine_wire`", problems[0])
+        self.assertIn("no registered surface claims", problems[0])
 
 
 class RealRepositoryTests(unittest.TestCase):

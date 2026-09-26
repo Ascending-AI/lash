@@ -28,8 +28,8 @@ use lash_core::{
 
 use super::*;
 use crate::formats::{
-    LASHLANG_SEGMENT_STATE_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, RLM_SNAPSHOT_VERSION,
-    SESSION_CHECKPOINT_SCHEMA_VERSION, VM_CONTINUATION_FORMAT_VERSION,
+    EngineFormat, LASHLANG_SEGMENT_STATE_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+    RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION, VM_CONTINUATION_FORMAT_VERSION,
 };
 
 /// A handle whose surfaces are exactly what a test declares.
@@ -263,12 +263,25 @@ fn component(report: &PreflightReport, format: DurableFormat) -> &ComponentReada
         .unwrap_or_else(|| panic!("the report has a row for {}", format.name()))
 }
 
+/// The facade handle one row of the engine's format registry carries,
+/// projected the way `crate::restate::durable_format_entries` projects it.
+/// The registry — not this table of expectations — owns which formats the
+/// engine declares (ADR 0104 §2).
+fn engine_format(row: &lash_restate::EngineDurableFormat) -> DurableFormat {
+    DurableFormat::Engine(EngineFormat {
+        id: row.id,
+        name: row.name,
+        unwalkable_reason: row.unwalkable_reason,
+        upgrade_policy: row.upgrade_policy,
+    })
+}
+
 const REQUEST_IDENTITY: &str = "identity, not a stamp: recomputed and compared when a retried \
                                 request replays, never read back at rest";
 const TOOL_JOURNAL: &str = "no bounded surface: journaled on runtime-effect outcomes, refused when \
                             replay decodes them rather than at rest";
-const RESTATE_STATE: &str = "no bounded surface: Restate journal and object state live in the \
-                             Restate deployment, outside lash's own store";
+const ENGINE_STATE: &str = "no bounded surface: Restate journal and object state live in the \
+                            Restate deployment, outside lash's own store";
 
 #[test]
 fn every_durable_format_has_one_explicit_surface_relation() {
@@ -460,26 +473,22 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
         ),
         (DurableFormat::VmAbi, SurfaceRelation::NotPersisted),
-        (
-            DurableFormat::RestateDurableWaitRequest,
-            SurfaceRelation::Unwalkable(RESTATE_STATE),
-        ),
-        (
-            DurableFormat::RestateDurableWaitIndexEpoch,
-            SurfaceRelation::Unwalkable(RESTATE_STATE),
-        ),
-        (
-            DurableFormat::RestateProcessCommandJournal,
-            SurfaceRelation::Unwalkable(RESTATE_STATE),
-        ),
-        (
-            DurableFormat::RestateEffectGroupIndexProtocol,
-            SurfaceRelation::Unwalkable(RESTATE_STATE),
-        ),
     ];
 
-    assert_eq!(relations.len(), 36);
-    for (format, expected) in relations {
+    // The engine's formats are its own registrations (ADR 0104 §2), so the
+    // facade expects one Unwalkable relation per row the registry declares,
+    // carrying the row's reason verbatim.
+    let engine_relations: Vec<(DurableFormat, SurfaceRelation)> = lash_restate::durable_formats()
+        .map(|row| {
+            (
+                engine_format(row),
+                SurfaceRelation::Unwalkable(ENGINE_STATE),
+            )
+        })
+        .collect();
+
+    assert_eq!(relations.len() + engine_relations.len(), 38);
+    for (format, expected) in relations.iter().copied().chain(engine_relations) {
         assert_eq!(
             format_surface(format),
             expected,
@@ -513,14 +522,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         DurableFormat::NativeRlmTransport,
     ];
     if cfg!(feature = "restate") {
-        expected.extend([
-            DurableFormat::RestateDurableWaitRequest,
-            DurableFormat::RestateDurableWaitIndexEpoch,
-            DurableFormat::RestateProcessCommandJournal,
-            DurableFormat::RestateEffectGroupIndexProtocol,
-            DurableFormat::RestateProcessJournal,
-            DurableFormat::RestateEffectJournal,
-        ]);
+        expected.extend(lash_restate::durable_formats().map(engine_format));
     }
     assert_eq!(
         unwalkable_formats()

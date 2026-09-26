@@ -44,14 +44,17 @@
 //! # Feature gating is honest, not incidental
 //!
 //! The Lashlang VM and RLM formats exist only when the `rlm` feature is on,
-//! and the Restate journal and object-state formats only when the `restate`
-//! feature is on, because the crates that define them are optional
-//! dependencies. A build without a feature writes none of its formats, so
+//! and the effect engine's journal and object-state formats only when the
+//! `restate` feature is on, because the crates that define them are optional
+//! dependencies — the engine contributes its own rows through
+//! `lash::restate` rather than being named here (ADR 0104 §2). A build
+//! without a feature writes none of its formats, so
 //! [`durable_formats`] does not list them. Module artifacts are different: their durable surface and
 //! semantic identity are owned by non-optional `lash-sansio`, so the format is
 //! listed in every build even when the optional verifier is absent.
 
 use lash_core::engine::BuildGeneration;
+pub use lash_core::engine::UpgradePolicy;
 use lash_sansio::core_support::Blake3DomainHasher;
 
 pub use lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
@@ -165,26 +168,35 @@ pub enum DurableFormat {
     /// The native RLM provider-call and repair envelopes recorded in session
     /// history.
     NativeRlmTransport,
-    /// The Restate durable-wait nested workflow request journaled by a
-    /// Restate deployment.
-    RestateDurableWaitRequest,
-    /// The identity epoch a Restate durable-wait index stamps into its object
-    /// state.
-    RestateDurableWaitIndexEpoch,
-    /// The Restate-journaled process-command admission payload.
-    RestateProcessCommandJournal,
-    /// The Restate effect-group protocol a group's index stamps into its
-    /// object state.
-    RestateEffectGroupIndexProtocol,
-    /// The leading commands every Restate process-segment invocation
-    /// journals: segment admission (FIG-3588).
-    RestateProcessJournal,
-    /// The generation stamped into every recorded effect's Restate journal
-    /// entry (ADR 0105 §12).
-    RestateEffectJournal,
+    /// A durable format the build's effect engine registers of its own
+    /// (ADR 0104 §2). The facade names no engine: a format whose bytes and
+    /// version are the engine's own — its journal, its object state — is
+    /// the engine's row to declare, so it arrives through the engine's
+    /// registry as this engine-neutral handle rather than as a variant
+    /// spelled for the engine.
+    Engine(EngineFormat),
     /// The Lashlang VM ABI this build implements. Never persisted — see
     /// [`FormatProbe::NotPersisted`].
     VmAbi,
+}
+
+/// A durable format an effect engine registered with the table
+/// (ADR 0104 §2) — the engine-neutral handle callers name it through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct EngineFormat {
+    /// The opaque id the engine registered the format under.
+    pub id: &'static str,
+    /// The operator-facing name used in preflight reports.
+    pub name: &'static str,
+    /// Why no bounded preflight surface enumerates the format, in the
+    /// engine's words: the engine's durable state lives outside lash's own
+    /// store.
+    pub unwalkable_reason: &'static str,
+    /// How the format's stored bytes move to a newer build (ADR 0106 §2) —
+    /// the engine's declaration, not a facade guess, because it is the
+    /// engine's bytes the policy describes.
+    pub upgrade_policy: UpgradePolicy,
 }
 
 impl DurableFormat {
@@ -222,12 +234,7 @@ impl DurableFormat {
             DurableFormat::WorkflowTypeFacet => "workflow type facet",
             DurableFormat::NativeRlmDriverState => "native RLM driver state",
             DurableFormat::NativeRlmTransport => "native RLM transport",
-            DurableFormat::RestateDurableWaitRequest => "Restate durable-wait request",
-            DurableFormat::RestateDurableWaitIndexEpoch => "Restate durable-wait index epoch",
-            DurableFormat::RestateProcessCommandJournal => "Restate process-command journal",
-            DurableFormat::RestateEffectGroupIndexProtocol => "Restate effect-group index protocol",
-            DurableFormat::RestateProcessJournal => "Restate process journal prefix",
-            DurableFormat::RestateEffectJournal => "Restate effect journal",
+            DurableFormat::Engine(format) => format.name,
             DurableFormat::VmAbi => "Lashlang VM ABI",
         }
     }
@@ -236,9 +243,9 @@ impl DurableFormat {
     ///
     /// The match is exhaustive — every durable format declares one of the
     /// three policies — and `scripts/check_format_registry.py` holds each
-    /// manifest row's arm equal to the `upgrade =` the surface's registry
-    /// entry declares, so the answer here cannot drift from the declared
-    /// upgrade path.
+    /// manifest row's answer equal to the `upgrade =` the surface's registry
+    /// entry declares (an engine row's field stands in for an arm), so the
+    /// answer here cannot drift from the declared upgrade path.
     pub fn upgrade_policy(self) -> UpgradePolicy {
         match self {
             DurableFormat::ModuleArtifact => UpgradePolicy::Coexist,
@@ -272,30 +279,10 @@ impl DurableFormat {
             DurableFormat::WorkflowTypeFacet => UpgradePolicy::Migrate,
             DurableFormat::NativeRlmDriverState => UpgradePolicy::Migrate,
             DurableFormat::NativeRlmTransport => UpgradePolicy::Migrate,
-            DurableFormat::RestateDurableWaitRequest => UpgradePolicy::Drain,
-            DurableFormat::RestateDurableWaitIndexEpoch => UpgradePolicy::Coexist,
-            DurableFormat::RestateProcessCommandJournal => UpgradePolicy::Drain,
-            DurableFormat::RestateEffectGroupIndexProtocol => UpgradePolicy::Coexist,
-            DurableFormat::RestateProcessJournal => UpgradePolicy::Drain,
-            DurableFormat::RestateEffectJournal => UpgradePolicy::Drain,
+            DurableFormat::Engine(format) => format.upgrade_policy,
             DurableFormat::VmAbi => UpgradePolicy::Drain,
         }
     }
-}
-
-/// How a durable format's stored bytes move to a newer build (ADR 0106 §2).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub enum UpgradePolicy {
-    /// Forward migration: schema DDL or a read upcaster, then writing at the
-    /// fleet format.
-    Migrate,
-    /// A journal replays only under the code that wrote it, so it finishes on
-    /// its own build; the drain generation carries these formats.
-    Drain,
-    /// Both versions live during the roll window: content addresses,
-    /// idempotency keys, namespaced object state and negotiated wire versions.
-    Coexist,
 }
 
 /// A format's version, which is a counter for most formats and a build string
@@ -355,11 +342,11 @@ pub struct DurableFormatEntry {
 /// Every durable format this build writes, with the version it writes.
 ///
 /// The order is stable and report-shaped: store-owned formats first, then the
-/// language substrate, then the protocol envelope above it, then the Restate
-/// adapter's journal and object state, so a rendered report reads outward from
-/// the store.
-pub fn durable_formats() -> &'static [DurableFormatEntry] {
-    &[
+/// language substrate, then the protocol envelope above it, then the formats
+/// the build's effect engine registers (ADR 0104 §2), so a rendered report
+/// reads outward from the store.
+pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
+    const FACADE_FORMATS: &[DurableFormatEntry] = &[
         DurableFormatEntry {
             format: DurableFormat::ModuleArtifact,
             version: FormatVersion::Identity(LASHLANG_SEMANTIC_HASH_VERSION),
@@ -595,55 +582,25 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
             constant: "LASHLANG_VM_ABI_VERSION",
             probe: FormatProbe::NotPersisted,
         },
-        #[cfg(feature = "restate")]
-        DurableFormatEntry {
-            format: DurableFormat::RestateDurableWaitRequest,
-            version: FormatVersion::Counter(DURABLE_WAIT_REQUEST_VERSION as u32),
-            owning_crate: "lash-restate",
-            constant: "DURABLE_WAIT_REQUEST_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        #[cfg(feature = "restate")]
-        DurableFormatEntry {
-            format: DurableFormat::RestateDurableWaitIndexEpoch,
-            version: FormatVersion::Counter(DURABLE_WAIT_INDEX_IDENTITY_EPOCH as u32),
-            owning_crate: "lash-restate",
-            constant: "DURABLE_WAIT_INDEX_IDENTITY_EPOCH",
-            probe: FormatProbe::Comparable,
-        },
-        #[cfg(feature = "restate")]
-        DurableFormatEntry {
-            format: DurableFormat::RestateProcessCommandJournal,
-            version: FormatVersion::Counter(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION),
-            owning_crate: "lash-restate",
-            constant: "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        #[cfg(feature = "restate")]
-        DurableFormatEntry {
-            format: DurableFormat::RestateEffectGroupIndexProtocol,
-            version: FormatVersion::Counter(EFFECT_GROUP_INDEX_PROTOCOL_VERSION),
-            owning_crate: "lash-restate",
-            constant: "EFFECT_GROUP_INDEX_PROTOCOL_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        #[cfg(feature = "restate")]
-        DurableFormatEntry {
-            format: DurableFormat::RestateProcessJournal,
-            version: FormatVersion::Counter(RESTATE_PROCESS_JOURNAL_VERSION),
-            owning_crate: "lash-restate",
-            constant: "RESTATE_PROCESS_JOURNAL_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        #[cfg(feature = "restate")]
-        DurableFormatEntry {
-            format: DurableFormat::RestateEffectJournal,
-            version: FormatVersion::Counter(EFFECT_JOURNAL_VERSION),
-            owning_crate: "lash-restate",
-            constant: "EFFECT_JOURNAL_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-    ]
+    ];
+    FACADE_FORMATS
+        .iter()
+        .copied()
+        .chain(engine_durable_formats())
+}
+
+/// The durable-format rows this build's effect engine registers
+/// (ADR 0104 §2): the `restate` module is the engine's registry, and a
+/// build that links no engine lists no engine formats.
+#[cfg(feature = "restate")]
+fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
+    crate::restate::durable_format_entries()
+}
+
+/// A build with no effect engine registers no engine formats.
+#[cfg(not(feature = "restate"))]
+fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
+    std::iter::empty()
 }
 
 /// The build's drain generation `G` (FIG-3795): the digest of the
@@ -681,9 +638,11 @@ fn journal_logic_epoch() -> Option<u32> {
 /// The hash behind [`build_generation`], over an explicit manifest and epoch
 /// so the tests below can move one row at a time instead of depending on
 /// which durable format next bumps.
-fn build_generation_of(entries: &[DurableFormatEntry], epoch: Option<u32>) -> BuildGeneration {
+fn build_generation_of(
+    entries: impl Iterator<Item = DurableFormatEntry>,
+    epoch: Option<u32>,
+) -> BuildGeneration {
     let mut rows: Vec<(String, String)> = entries
-        .iter()
         .filter(|entry| entry.format.upgrade_policy() == UpgradePolicy::Drain)
         .map(|entry| (entry.format.name().to_string(), entry.version.to_string()))
         .collect();
@@ -708,13 +667,11 @@ fn build_generation_of(entries: &[DurableFormatEntry], epoch: Option<u32>) -> Bu
 /// The manifest row for one format, when this build carries it.
 ///
 /// `None` means the format is not part of this build — the Lashlang and RLM
-/// rows are absent without the `rlm` feature and the Restate rows without
+/// rows are absent without the `rlm` feature and the engine's rows without
 /// `restate` — which is a different answer from
 /// "version zero" and is reported as such.
-pub fn durable_format(format: DurableFormat) -> Option<&'static DurableFormatEntry> {
-    durable_formats()
-        .iter()
-        .find(|entry| entry.format == format)
+pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
+    durable_formats().find(|entry| entry.format == format)
 }
 
 #[cfg(test)]
@@ -825,13 +782,13 @@ mod tests {
         // L0: every Drain row is in the preimage and every non-Drain row is
         // not — a migrate/coexist version move alone must not re-stamp the
         // build, and a drain one must.
-        for index in 0..durable_formats().len() {
-            let mut moved = durable_formats().to_vec();
+        for index in 0..durable_formats().count() {
+            let mut moved: Vec<DurableFormatEntry> = durable_formats().collect();
             moved[index].version = match moved[index].version {
                 FormatVersion::Counter(v) => FormatVersion::Counter(v + 1),
                 FormatVersion::Identity(_) => FormatVersion::Identity("moved-identity"),
             };
-            let generation = build_generation_of(&moved, journal_logic_epoch());
+            let generation = build_generation_of(moved.iter().copied(), journal_logic_epoch());
             if moved[index].format.upgrade_policy() == UpgradePolicy::Drain {
                 assert_ne!(
                     generation,

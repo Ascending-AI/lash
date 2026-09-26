@@ -131,6 +131,26 @@ impl<'de> Deserialize<'de> for BuildGeneration {
     }
 }
 
+/// How a durable format's stored bytes move to a newer build (ADR 0106 §2).
+///
+/// The type lives in the kernel rather than the facade's format table so an
+/// effect engine can declare the policy for the formats it registers
+/// (ADR 0104 §2): an engine's durable formats are its own to describe, and
+/// the drain generation that depends on the answer is kernel vocabulary too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum UpgradePolicy {
+    /// Forward migration: schema DDL or a read upcaster, then writing at the
+    /// fleet format.
+    Migrate,
+    /// A journal replays only under the code that wrote it, so it finishes on
+    /// its own build; the drain generation carries these formats.
+    Drain,
+    /// Both versions live during the roll window: content addresses,
+    /// idempotency keys, namespaced object state and negotiated wire versions.
+    Coexist,
+}
+
 /// One logical drive request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveRequest {
