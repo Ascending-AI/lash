@@ -74,6 +74,12 @@ enum RootScript {
     /// A queued run that finds nothing it can claim: it cedes, the item
     /// stays due, and admission mints a fresh root for it every time.
     Cede,
+    /// The run's first execution ends `DriveAbort::Refused` carrying a
+    /// retryable error, the shape a drive racing a lane release leaves: the
+    /// refusal's own code, not the variant it arrived in, decides whether
+    /// the attempt ends. The script fires once; the redelivery runs the
+    /// unscripted path.
+    RefusedRetryable,
 }
 
 #[derive(Default)]
@@ -254,6 +260,13 @@ impl SessionDriver for ScriptedDriver {
                     });
                 }
                 Some(RootScript::Cede) => return Ok(RootOutcome::Ceded { root }),
+                Some(RootScript::RefusedRetryable) => {
+                    self.scripts.lock().unwrap().remove(item_of(&root));
+                    return Err(DriveAbort::Refused(RuntimeError::new(
+                        RuntimeErrorCode::SessionExecutionLaneBusy,
+                        format!("root {root} met the session lane still held"),
+                    )));
+                }
                 None => {}
             }
             // Idempotent, like a commit fenced by its admission: a redrive of
@@ -699,6 +712,56 @@ async fn a_drive_scheduled_before_the_install_runs_once_a_driver_is_installed() 
     engine.install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>);
     let outcome = attach(&backend, &session, "r1").await;
     assert_eq!(committed_roots(&outcome), ["a"]);
+}
+
+/// A root run refused with a retryable-typed error — the shape a drive
+/// racing a lane release leaves — keeps the attempt open: `LashTurn`
+/// redelivers it instead of recording the run `Released`, so the drive's
+/// attacher never reads back a refusal for what is a retry (FIG-3831).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_retryable_refusal_of_a_root_run_redelivers_instead_of_releasing() {
+    let (backend, driver) = fixture(22).await;
+    let session = SessionId::from("drive-busy-lane");
+    driver.accept(&session, "a");
+    driver.script("a", RootScript::RefusedRetryable);
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    engine.schedule_drive(&session, request("r1"));
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(20),
+        engine.await_drive(&session, &request("r1")),
+    )
+    .await
+    .expect("the drive ends")
+    .expect("the refusal's redrive answers, not fails");
+    assert_eq!(committed_roots(&outcome), ["a"]);
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    assert!(
+        driver.ledger(&session).root_runs >= 2,
+        "the refused attempt was redelivered"
+    );
+    let runs: Vec<_> = backend
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|view| {
+            view.target.starts_with(TURN_DRIVER_SERVICE) && view.target.ends_with("/run")
+        })
+        .collect();
+    assert_eq!(runs.len(), 1, "one LashTurn run invocation");
+    assert!(
+        runs[0].attempts >= 2,
+        "the same invocation retried: {:?}",
+        runs[0]
+    );
+    assert!(
+        backend
+            .server()
+            .outcome(&runs[0].id)
+            .is_some_and(|outcome| outcome.is_ok()),
+        "the turn workflow completed, not failed: {:?}",
+        runs[0]
+    );
 }
 
 /// The journal points of both handlers in one reference drive: every

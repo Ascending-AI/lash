@@ -72,3 +72,17 @@ lash_conformance::queued_after_commit_redrive_tests!({
         Box::leak(format!("restate-queued-redrive-{}", harness.run_nonce()).into_boxed_str());
     (harness, prefix, effect_host, stores, turn_runner)
 });
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_redrive_racing_lane_release_answers_without_a_failed_row() {
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let prefix = format!("restate-lane-release-{}", harness.run_nonce());
+    lash_conformance::registration_macro_support::a_redrive_racing_lane_release_answers_without_a_failed_row(
+        &prefix,
+        harness.endpoint_host(),
+        harness.law_stores(),
+        harness.turn_runner(),
+    )
+    .await;
+}
