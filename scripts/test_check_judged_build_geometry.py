@@ -72,8 +72,8 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         manifest = self.root / "examples" / "agent-workbench" / "Cargo.toml"
         text = manifest.read_text(encoding="utf-8")
         text = text.replace(
-            'lash = { workspace = true, features = ["rlm"] }',
-            'lash = { workspace = true, features = ["rlm", "testing"] }',
+            'lash = { workspace = true, features = ["rlm", "restate"] }',
+            'lash = { workspace = true, features = ["rlm", "restate", "testing"] }',
             1,
         )
         manifest.write_text(text, encoding="utf-8")

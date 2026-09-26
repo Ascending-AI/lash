@@ -51,6 +51,7 @@
 [[surface]]
 constant = "REMOTE_PROTOCOL_VERSION"
 constant_path = "crates/lash-remote-protocol/src/lib.rs"
+upgrade = "coexist"
 description = "JSON wire structs and enums exchanged by Lash remote peers"
 outside_manifest = "wire protocol: gates a live remote peer, not bytes a store parks"
 
@@ -62,6 +63,7 @@ must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent", "Remo
 [[surface]]
 constant = "DURABLE_WAIT_REQUEST_VERSION"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
+upgrade = "drain"
 description = "Restate durable-wait nested workflow request wire"
 manifest = "RestateDurableWaitRequest"
 
@@ -73,6 +75,7 @@ symbols = ["RestateDurableWaitAwaitRequest", "RestateDurableWaitDeadline"]
 [[surface]]
 constant = "RESTATE_PROCESS_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/process/admission.rs"
+upgrade = "drain"
 description = "leading journaled commands of a Restate process-segment invocation (segment admission)"
 manifest = "RestateProcessJournal"
 
@@ -82,8 +85,26 @@ paths = ["crates/lash-restate/src/process/admission.rs"]
 symbols = ["ADMIT_STEP", "START_STEP", "AdmissionVerdict", "StartOutcome"]
 
 [[surface]]
+constant = "JOURNAL_LOGIC_EPOCH"
+constant_path = "crates/lash-restate/src/process/admission.rs"
+upgrade = "drain"
+description = "manual epoch of the Restate journal-bearing handlers' logic: step order, names, and verdict meaning, hashed into the build's drain generation (FIG-3795)"
+outside_manifest = "not a durable format version: it is an input to formats::build_generation, not a row in the durable-format manifest"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/process/admission.rs"]
+symbols = ["JOURNAL_LOGIC_EPOCH", "ADMIT_STEP", "START_STEP", "AdmissionVerdict", "StartOutcome"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/process/workflow.rs"]
+symbols = ["COMPLETE_STEP", "BOUNDARY_STEP", "HANDOVER_STEP", "CANCEL_FORWARD_STEP", "CANCEL_RECORD_STEP", "CANCEL_ROUTE_STEP", "CANCEL_CHILD_TURN_STEP", "RETIRE_STEP"]
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
+upgrade = "migrate"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
@@ -143,6 +164,7 @@ symbols = [
 [[surface]]
 constant = "TRACE_SCHEMA_VERSION"
 constant_path = "crates/lash-trace/src/lib.rs"
+upgrade = "coexist"
 description = "NDJSON trace records, event variants, contexts, and graph payloads"
 outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
 
@@ -218,6 +240,7 @@ must_cover = ["TraceLanguageExecutionFailure"]
 [[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
+upgrade = "migrate"
 description = "SQLite session-store DDL and stored blob envelopes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
@@ -266,6 +289,7 @@ symbols = [
 [[surface]]
 constant = "PROCESS_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
+upgrade = "migrate"
 description = "SQLite process-registry tables, columns, constraints, and unique indexes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
@@ -281,6 +305,7 @@ elide = "sql_idempotent_index"
 [[surface]]
 constant = "TRIGGER_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
+upgrade = "migrate"
 description = "SQLite trigger-store tables, columns, constraints, and unique indexes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
@@ -293,6 +318,7 @@ elide = "sql_idempotent_index"
 [[surface]]
 constant = "EFFECT_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
+upgrade = "migrate"
 description = "SQLite runtime-effect and await-event tables, columns, constraints, and unique indexes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
@@ -322,6 +348,7 @@ symbols = [
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
 constant_path = "crates/lash-core-store/src/process_identity.rs"
+upgrade = "migrate"
 description = "serialized ProcessWakeDelivery outbox payload"
 manifest = "ProcessWakeDelivery"
 
@@ -335,6 +362,7 @@ symbols = ["ProcessWakeDelivery"]
 [[surface]]
 constant = "TURN_INPUT_SUBMISSION_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/turn_input_vocabulary.rs"
+upgrade = "coexist"
 description = "stable pending turn-input submission digest compared by source-key replay (FIG-3544)"
 
 # Stored digests are compared for equality against fresh ones, so the preimage
@@ -348,6 +376,7 @@ symbols = ["turn_input_submission_preimage", "TurnInput", "InputItem"]
 [[surface]]
 constant = "LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
+upgrade = "drain"
 description = "journal grammar a code cell writes: the replay-key grammar plus the cell's ambient binding set, journaled before its first effect and linked against on redrive (FIG-3587)"
 outside_manifest = "a journal grammar, not a payload: the grammar a cell's journal was written under rides the execution-environment sync outcome, and a cell under any other grammar is refused before it runs"
 
@@ -368,6 +397,7 @@ symbols = ["ToolDispatchSurface", "tool_dispatch_surface"]
 [[surface]]
 constant = "INSTRUCTION_ACCOUNTING_VERSION"
 constant_path = "crates/lashlang/src/runtime/mod.rs"
+upgrade = "drain"
 description = "instruction accounting that places a code cell's journaled cancel checkpoints: compiler emission, builtin cost charges, the cooperative-yield granularity and the checkpoint schedule (FIG-3672 P9)"
 outside_manifest = "an accounting, not a payload: a cell replays by re-execution, so its checkpoint peeks land where this accounting puts them; it is pinned into LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION, which the execution-environment sync stamps and refuses on mismatch"
 
@@ -403,6 +433,7 @@ paths = ["crates/lashlang/src/runtime/compiler/*.rs"]
 [[surface]]
 constant = "LASHLANG_REPLAY_KEY_GRAMMAR_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
+upgrade = "drain"
 description = "issue-ordinal replay-key grammar lashlang cells and process bodies journal their nested effects under (FIG-3586)"
 outside_manifest = "a key grammar, not a payload: the grammar a journal was written under rides the execution-environment sync outcome and the ProcessStarted record, and a run under any other grammar is refused before it issues a command"
 
@@ -427,6 +458,7 @@ symbols = ["CommandReplayKey"]
 [[surface]]
 constant = "FRAME_KEY_VERSION"
 constant_path = "crates/lash-sansio/src/frame_key.rs"
+upgrade = "coexist"
 description = "stable agent-frame key hash preimage"
 outside_manifest = "hash-domain tag of the agent-frame key preimage: the *_FAMILY_VERSION class under another name (see [[excluded_class]])"
 
@@ -438,6 +470,7 @@ symbols = ["derive"]
 [[surface]]
 constant = "APPEND_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/commit_identity.rs"
+upgrade = "coexist"
 description = "stable append-request identity byte projection"
 manifest = "AppendRequestIdentity"
 
@@ -479,6 +512,7 @@ symbols = [
 [[surface]]
 constant = "RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
+upgrade = "coexist"
 description = "canonical record-config semantic-boundary request encoding (FIG-2480)"
 manifest = "RecordConfigRequestIdentity"
 
@@ -494,6 +528,7 @@ symbols = [
 [[surface]]
 constant = "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
+upgrade = "coexist"
 description = "canonical create-session semantic-boundary request encoding (FIG-2480)"
 manifest = "CreateSessionRequestIdentity"
 
@@ -509,6 +544,7 @@ symbols = [
 [[surface]]
 constant = "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
+upgrade = "coexist"
 description = "canonical usage-ledger semantic-boundary request encoding (FIG-2480)"
 manifest = "UsageLedgerRequestIdentity"
 
@@ -524,6 +560,7 @@ symbols = [
 [[surface]]
 constant = "PROCESS_REGISTRATION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/validation.rs"
+upgrade = "coexist"
 description = "stable process-registration definition fingerprint"
 
 [[surface.guard]]
@@ -545,6 +582,7 @@ symbols = [
 [[surface]]
 constant = "TRIGGER_COMMAND_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers.rs"
+upgrade = "coexist"
 description = "stable trigger-command fingerprint"
 
 [[surface.guard]]
@@ -572,6 +610,7 @@ symbols = [
 [[surface]]
 constant = "TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers.rs"
+upgrade = "coexist"
 description = "stable trigger operation-receipt address"
 
 [[surface.guard]]
@@ -587,6 +626,7 @@ symbols = ["project_trigger_owner"]
 [[surface]]
 constant = "TRIGGER_DEFINITION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
+upgrade = "coexist"
 description = "stable trigger-subscription definition fingerprint"
 
 [[surface.guard]]
@@ -609,6 +649,7 @@ symbols = [
 [[surface]]
 constant = "TRIGGER_LOOKUP_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
+upgrade = "coexist"
 description = "stable trigger subscription lookup address"
 
 [[surface.guard]]
@@ -619,6 +660,7 @@ symbols = ["trigger_subscription_address_preimage", "project_trigger_owner"]
 [[surface]]
 constant = "TRIGGER_SOURCE_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
+upgrade = "coexist"
 description = "stable default trigger-source key"
 
 [[surface.guard]]
@@ -632,6 +674,7 @@ symbols = ["trigger_source_preimage", "project_process_payload_leaf"]
 [[surface]]
 constant = "TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
+upgrade = "coexist"
 description = "stable trigger-delivery process identity"
 
 [[surface.guard]]
@@ -642,6 +685,7 @@ symbols = ["trigger_delivery_process_preimage"]
 [[surface]]
 constant = "DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
+upgrade = "coexist"
 description = "stable derived trigger-subscription key"
 
 [[surface.guard]]
@@ -652,6 +696,7 @@ symbols = ["derived_trigger_subscription_key"]
 [[surface]]
 constant = "DIRECT_EFFECT_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/causal.rs"
+upgrade = "coexist"
 description = "stable direct-effect replay key and discriminator"
 
 [[surface.guard]]
@@ -666,6 +711,7 @@ symbols = [
 [[surface]]
 constant = "TOOL_CHILD_REQUEST_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_child.rs"
+upgrade = "drain"
 description = "retained tool-child request of a durable effect group (ADR 0099 section 3)"
 manifest = "ToolChildRequest"
 
@@ -753,6 +799,7 @@ must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId"]
 [[surface]]
 constant = "TOOL_SETTLEMENT_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
+upgrade = "drain"
 description = "the semantic settlement a tool child of a durable effect group carries on its outcome (ADR 0099 sections 6 and 13)"
 manifest = "ToolSettlement"
 
@@ -852,6 +899,7 @@ must_cover = ["tool_intent_variants"]
 [[surface]]
 constant = "TOOL_PRESENTATION_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs"
+upgrade = "drain"
 description = "the journaled product of one tool result's ordered presentation chain — the model-facing return plus every retained artifact ref (ADR 0099 section 6, FIG-3420)"
 manifest = "ToolPresentation"
 
@@ -914,6 +962,7 @@ must_cover = ["string_identity!", "SessionId", "ProcessId"]
 [[surface]]
 constant = "TOOL_ATTEMPT_CAPTURE_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
+upgrade = "drain"
 description = "the semantic facts one atomic tool attempt journaled with its outcome (ADR 0099 section 13)"
 manifest = "ToolAttemptCapture"
 
@@ -980,6 +1029,7 @@ must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId", "InputId"]
 [[surface]]
 constant = "TOOL_CHILD_REBIND_VERSION"
 constant_path = "crates/lash-core-execution/src/tool_dispatch/context.rs"
+upgrade = "drain"
 description = "the tool-child rebind checklist: every ToolDispatchContext field's recorded/lent/fresh ruling (ADR 0099 section 3)"
 outside_manifest = "versions a reviewed in-process checklist (REBIND_FIELDS), not stored bytes: nothing durable carries it"
 
@@ -1003,6 +1053,7 @@ symbols = [
 [[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/effect_identity.rs"
+upgrade = "coexist"
 description = "stable process-transfer set identity"
 
 [[surface.guard]]
@@ -1013,6 +1064,7 @@ symbols = ["process_transfer_set_preimage"]
 [[surface]]
 constant = "AWAIT_EVENT_FAMILY_VERSION"
 constant_path = "crates/lash-core-effect/src/promise_semantics.rs"
+upgrade = "coexist"
 description = "stable await-event promise identity and authenticated material"
 
 [[surface.guard]]
@@ -1023,6 +1075,7 @@ symbols = ["promise_key_preimage", "sign_material"]
 [[surface]]
 constant = "PROCESS_CANCELLATION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/events.rs"
+upgrade = "coexist"
 description = "stable process-cancellation replay address"
 
 [[surface.guard]]
@@ -1033,6 +1086,7 @@ symbols = ["cancellation_replay_preimage"]
 [[surface]]
 constant = "PROCESS_WAKE_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/wake.rs"
+upgrade = "coexist"
 description = "stable process-wake identity"
 
 [[surface.guard]]
@@ -1043,6 +1097,7 @@ symbols = ["process_wake_identity_preimage"]
 [[surface]]
 constant = "TOOL_BATCH_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/session/tool_execution.rs"
+upgrade = "coexist"
 description = "stable tool-invocation batch identity"
 
 [[surface.guard]]
@@ -1053,6 +1108,7 @@ symbols = ["tool_invocation_batch_preimage"]
 [[surface]]
 constant = "USAGE_PAYLOAD_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
+upgrade = "coexist"
 description = "stable runtime-usage payload identity and persisted encoding tag"
 
 [[surface.guard]]
@@ -1063,6 +1119,7 @@ symbols = ["usage_payload_identity_bytes"]
 [[surface]]
 constant = "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
+upgrade = "migrate"
 description = "persisted runtime turn-commit receipt in runtime_turn_commits.result_json"
 manifest = "RuntimeCommitReceipt"
 
@@ -1119,6 +1176,7 @@ symbols = ["TurnCancelInputOutcome"]
 [[surface]]
 constant = "PRODUCT_EVENT_LOG_FORMAT_VERSION"
 constant_path = "examples/agent-workbench/src/main_sections/state.rs"
+upgrade = "migrate"
 description = "agent-workbench product-event log JSON snapshot"
 outside_manifest = "written by the agent-workbench example host, not by a lash build"
 
@@ -1130,6 +1188,7 @@ symbols = ["ProductEvent", "ProductEventHistory", "PersistedProductEventLog"]
 [[surface]]
 constant = "PROCESS_LEASE_SCHEMA_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/model/lease.rs"
+upgrade = "migrate"
 description = "persisted ProcessLease wire record"
 manifest = "ProcessLease"
 
@@ -1159,6 +1218,7 @@ symbols = [
 [[surface]]
 constant = "SESSION_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
+upgrade = "migrate"
 description = "persisted session checkpoint manifest"
 manifest = "SessionCheckpointManifest"
 
@@ -1170,6 +1230,7 @@ symbols = ["SessionCheckpoint"]
 [[surface]]
 constant = "TURN_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-sansio/src/sansio/machine_state.rs"
+upgrade = "drain"
 description = "serialized sans-IO turn checkpoint and pending host-effect vocabulary"
 manifest = "TurnCheckpoint"
 
@@ -1208,6 +1269,7 @@ symbols = ["Part", "FlatPart", "FlatPartRef", "PluginMessage", "ModelToolReturnP
 [[surface]]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
+upgrade = "migrate"
 description = "logical bytes stored behind checkpoint component descriptors"
 manifest = "CheckpointComponentEncoding"
 
@@ -1222,6 +1284,7 @@ symbols = ["CheckpointComponentDescriptor", "HydratedCheckpointComponent"]
 [[surface]]
 constant = "SESSION_HEAD_META_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/mod.rs"
+upgrade = "migrate"
 description = "persisted JSON session-head payload"
 manifest = "SessionHeadMeta"
 
@@ -1284,6 +1347,7 @@ symbols = [
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/session_graph.rs"
+upgrade = "migrate"
 description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
 manifest = "SessionNodeBody"
 
@@ -1443,6 +1507,7 @@ symbols = ["MediaType", "AttachmentRef"]
 [[surface]]
 constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/protocol_turn_options.rs"
+upgrade = "migrate"
 description = "persisted protocol-specific turn options envelope"
 manifest = "ProtocolTurnOptions"
 
@@ -1470,6 +1535,7 @@ symbols = [
 [[surface]]
 constant = "RLM_SNAPSHOT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
+upgrade = "migrate"
 description = "canonical typed MessagePack RLM execution snapshot: the Lashlang durable heap header, one durable fragment per global, and deferred resolutions"
 manifest = "RlmSnapshotEnvelope"
 
@@ -1525,6 +1591,7 @@ symbols = [
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/lib.rs"
+upgrade = "coexist"
 description = "compiled Lashlang instruction and durable VM-continuation contract"
 manifest = "Bytecode"
 
@@ -1611,6 +1678,7 @@ symbols = ["compile", "compile_main"]
 [[surface]]
 constant = "LASHLANG_SNAPSHOT_VERSION"
 constant_path = "crates/lashlang/src/runtime/state.rs"
+upgrade = "migrate"
 description = "canonical MessagePack Lashlang snapshot: globals, heap, and value leaves, whole or as a durable header and per-root fragments"
 manifest = "LashlangSnapshot"
 
@@ -1661,6 +1729,7 @@ symbols = ["ImageValue", "ResourceHandle"]
 [[surface]]
 constant = "VM_CONTINUATION_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/runtime/vm/continuation.rs"
+upgrade = "drain"
 description = "durable Lashlang VM continuation: frames, heap restore wire, and value leaves"
 manifest = "VmContinuation"
 
@@ -1758,6 +1827,7 @@ symbols = ["ImageValue", "ResourceHandle"]
 [[surface]]
 constant = "LASHLANG_VM_ABI_VERSION"
 constant_path = "crates/lashlang/src/artifact.rs"
+upgrade = "drain"
 version_regex = '\bLASHLANG_VM_ABI_VERSION\b\s*:\s*&str\s*=\s*"lashlang-vm-abi-v([0-9]+)"'
 description = "in-process VM-to-host ability contract: the ops a compiled program performs and the results a host returns"
 manifest = "VmAbi"
@@ -1783,6 +1853,7 @@ symbols = [
 [[surface]]
 constant = "LASHLANG_SEGMENT_STATE_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/process.rs"
+upgrade = "drain"
 description = "persisted Restate Lashlang segment handover JSON"
 manifest = "LashlangSegmentHandover"
 
@@ -1843,6 +1914,7 @@ must_cover = ["SegmentHandover", "PersistedSegmentHandover"]
 [[surface]]
 constant = "PROCESS_EVENT_VOCABULARY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/effect_summary.rs"
+upgrade = "migrate"
 description = "runtime-owned durable effect-summary kinds: event types, strict serde payloads, occurrence cap and failure-code mappings"
 manifest = "ProcessEffectSummary"
 
@@ -1888,6 +1960,7 @@ symbols = ["failure_code"]
 [[surface]]
 constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph.rs"
+upgrade = "migrate"
 description = "serialized Lashlang workflow graph document"
 manifest = "WorkflowGraphSchema"
 
@@ -2019,6 +2092,7 @@ symbols = ["WorkflowExecutionSite"]
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph/facets.rs"
+upgrade = "migrate"
 description = "serialized optional workflow type-facet projection"
 manifest = "WorkflowTypeFacet"
 
@@ -2060,6 +2134,7 @@ symbols = ["AstString"]
 [[surface]]
 constant = "LASHLANG_SEMANTIC_HASH_VERSION"
 constant_path = "crates/lash-sansio/src/lib.rs"
+upgrade = "coexist"
 version_regex = '\bLASHLANG_SEMANTIC_HASH_VERSION\b\s*:\s*&str\s*=\s*"lashlang-semantic-v([0-9]+)"'
 description = "identity-verified Lashlang and TypeScript module-artifact identity"
 manifest = "ModuleArtifact"
@@ -2132,6 +2207,7 @@ must_cover = ["impl Lowerer", "CollectionTransformParts"]
 [[surface]]
 constant = "NATIVE_DRIVER_STATE_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/state.rs"
+upgrade = "migrate"
 description = "native RLM parked driver state"
 manifest = "NativeRlmDriverState"
 
@@ -2143,6 +2219,7 @@ must_cover = ["RlmDriverState", "Envelope"]
 [[surface]]
 constant = "NATIVE_TRANSPORT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/transport.rs"
+upgrade = "migrate"
 description = "native RLM durable provider call and repair envelopes"
 manifest = "NativeRlmTransport"
 
@@ -2154,6 +2231,7 @@ must_cover = ["Envelope", "Transport"]
 [[surface]]
 constant = "CURRENT_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
+upgrade = "migrate"
 description = "complete session continuation generation including mediated plugin state"
 manifest = "SessionStateGeneration"
 
@@ -2165,6 +2243,7 @@ symbols = ["PluginState", "PluginNamespaceState"]
 [[surface]]
 constant = "DURABLE_READ_FIXTURE_SCHEMA_VERSION"
 constant_path = "crates/lash-core/tests/support/durable_read_fixture.rs"
+upgrade = "migrate"
 description = "checked-in durable-read fixture databases, dumps, and expectations"
 outside_manifest = "versions checked-in test fixtures, not bytes a lash build writes"
 
@@ -2187,6 +2266,7 @@ must_cover = [
 [[surface]]
 constant = "HEAP_SIZE_SCHEDULE_VERSION"
 constant_path = "crates/lashlang/src/runtime/heap.rs"
+upgrade = "migrate"
 description = "byte-charge schedule a persisted Lashlang heap's live_logical_bytes was computed under"
 manifest = "HeapSizeSchedule"
 
@@ -2201,6 +2281,7 @@ symbols = ["OBJECT_HEADER_BYTES", "VALUE_SLOT_BYTES", "value_logical_bytes"]
 [[surface]]
 constant = "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/model/lifecycle.rs"
+upgrade = "migrate"
 description = "versioned typed parent scope persisted beside a ledger row's (kind, id) index projection"
 manifest = "ParentScopeStoragePayload"
 
@@ -2217,6 +2298,7 @@ symbols = ["EffectOpener"]
 [[surface]]
 constant = "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION"
 constant_path = "crates/lash-restate/src/controller/process_command.rs"
+upgrade = "drain"
 description = "Restate-journaled process-command admission payload"
 manifest = "RestateProcessCommandJournal"
 
@@ -2228,6 +2310,7 @@ symbols = ["JournaledCancelCommandIdentity", "JournaledCancelAdmission"]
 [[surface]]
 constant = "DURABLE_WAIT_INDEX_IDENTITY_EPOCH"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
+upgrade = "coexist"
 description = "identity epoch of the Restate durable-wait index object state"
 manifest = "RestateDurableWaitIndexEpoch"
 
@@ -2254,6 +2337,7 @@ symbols = [
 [[surface]]
 constant = "EFFECT_GROUP_INDEX_PROTOCOL_VERSION"
 constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+upgrade = "coexist"
 description = "Restate effect-group protocol: the EffectGroupIndex handlers' request and response wire, the dispatch workflow's wire, and the index record Restate retains"
 manifest = "RestateEffectGroupIndexProtocol"
 
@@ -2289,6 +2373,7 @@ symbols = ["INDEX_STATE_KEY"]
 [[surface]]
 constant = "EFFECT_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/controller/effect_journal.rs"
+upgrade = "drain"
 description = "Restate effect journal: every recorded effect's `lash:{replay_key}` ctx.run entry (the canonical envelope, the outcome and its error, the give-up entry) and its position"
 manifest = "RestateEffectJournal"
 
@@ -2377,6 +2462,7 @@ reason = "lower bound of the admission window for the registered SCHEMA_VERSION,
 [[unregistered]]
 constant = "PROCESS_CURSOR_VERSION"
 constant_path = "crates/lash-sansio/src/process_cursor.rs"
+upgrade = "coexist"
 reason = "stamps the opaque live process cursor a host holds between reads; lash persists no cursor, a retired stamp is refused by name at parse, and its wire carriers are guarded by REMOTE_PROTOCOL_VERSION"
 
 [[unregistered]]
@@ -2387,6 +2473,7 @@ reason = "the reserved publisher-epoch value of a cursor minted with no live rou
 [[unregistered]]
 constant = "JOURNAL_IDENTITY_VERSION"
 constant_path = "crates/lash-sansio/src/effect_identity.rs"
+upgrade = "coexist"
 reason = "hash-domain tag of ExecutionScope journal keys: the *_FAMILY_VERSION class under another name"
 
 [[unregistered]]

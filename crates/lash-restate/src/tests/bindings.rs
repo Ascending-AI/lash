@@ -92,6 +92,7 @@ async fn backend_and_process_worker() -> (Arc<RestateEngine>, lash_core_worker::
         RestateConfig::new(
             "http://127.0.0.1:9",
             RestateAuthorityId::new("lash-restate-endpoint-builder").expect("valid authority"),
+            lash_core::engine::BuildGeneration::for_test("bindings"),
             RestateQueuedWork::Disabled,
         ),
     ));
@@ -133,6 +134,24 @@ fn every_lash_service_has_its_own_name() {
         "two lash services share a Restate name: {:?}",
         LASH_SERVICES
     );
+}
+
+/// FIG-3795 routes an older generation's journals to a deployment bound under
+/// `<service>_g<generation>`: the suffixed name must pass the SDK's service
+/// name grammar, which this test pins against the SDK rather than by
+/// inspection.
+#[test]
+fn a_generation_suffixed_service_name_is_valid_to_the_sdk() {
+    let generation = lash_core::engine::BuildGeneration::for_test("service-name");
+    let suffixed = format!("LashProcessWorkflow{}", generation.service_suffix());
+    assert!(restate_sdk::discovery::ServiceName::try_from(suffixed).is_ok());
+    for service in lash_service_names() {
+        let suffixed = format!("{service}{}", generation.service_suffix());
+        assert!(
+            restate_sdk::discovery::ServiceName::try_from(suffixed.clone()).is_ok(),
+            "{suffixed} is not a valid Restate service name"
+        );
+    }
 }
 
 /// The discovery document is what the Restate runtime registers, so this is

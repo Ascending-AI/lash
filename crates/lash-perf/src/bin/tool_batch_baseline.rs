@@ -440,6 +440,7 @@ async fn restate_deployment(
         lash_restate::RestateConfig::new(
             ingress_url,
             authority.clone(),
+            lash::formats::build_generation(),
             lash_restate::RestateQueuedWork::Disabled,
         ),
     ));

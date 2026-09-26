@@ -939,7 +939,7 @@ finish("done via Restate E2E");
             .expect("open the SQLite store set");
         let backend = Arc::new(lash_restate::RestateEngine::new(
             Arc::new(stores),
-            lash_restate::RestateConfig::new(
+            lash::restate::config(
                 ingress_url,
                 lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
                 // Turns run in the foreground under a handler-scoped controller;
@@ -954,16 +954,17 @@ finish("done via Restate E2E");
             .effect_host()
             .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
             .expect("register worked effect-group resolver");
+        let lash_backend = lash::Backend::new(backend.clone());
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &lash::Backend::new(backend.clone()),
+            &lash_backend,
         );
         let core = LashCore::rlm_builder(
-            lash::Backend::new(backend.clone()),
+            lash_backend,
             lash::TurnBudget::Unbounded,
             factory,
         )

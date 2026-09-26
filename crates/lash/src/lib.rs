@@ -98,6 +98,12 @@ pub use crate::turn::{
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
 pub use lash_core::async_trait;
+/// The one substrate a [`LashCore`] takes every persistence port and its
+/// effect host from: one [`EffectEngine`] over one store set (ADR 0104).
+/// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a
+/// SQLite or PostgreSQL store set, or `lash::sqlite::SqliteBackend` (file or
+/// memory) until FIG-3668 deletes the SQLite engine.
+pub use lash_core::engine::BuildGeneration;
 pub use lash_core::facade_support::{
     SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainOutcome, TurnCancelAffectedInput,
     TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
@@ -129,11 +135,6 @@ pub use lash_core::{
     facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
     facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
-/// The one substrate a [`LashCore`] takes every persistence port and its
-/// effect host from: one [`EffectEngine`] over one store set (ADR 0104).
-/// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a
-/// SQLite or PostgreSQL store set, or `lash::sqlite::SqliteBackend` (file or
-/// memory) until FIG-3668 deletes the SQLite engine.
 pub use lash_core::{Backend, BackendQueuedWork, EffectEngine, StoreBindingId};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
@@ -1011,6 +1012,24 @@ pub mod s3 {
 #[cfg(feature = "restate")]
 pub mod restate {
     pub use lash_restate::*;
+
+    /// A [`RestateConfig`] stamped with this build's drain generation
+    /// (FIG-3795): [`crate::formats::build_generation`]'s answer, filled in
+    /// here because lash-restate cannot see the format manifest that derives
+    /// it. Deployments that serve journals are configured through this so the
+    /// generation the engine reports is the build's, not a caller's guess.
+    pub fn config(
+        connection: impl Into<RestateConnection>,
+        authority: RestateAuthorityId,
+        queued_work: RestateQueuedWork,
+    ) -> RestateConfig {
+        RestateConfig::new(
+            connection,
+            authority,
+            crate::formats::build_generation(),
+            queued_work,
+        )
+    }
 }
 
 /// OpenAI model provider. Enable with `features = ["openai"]`.

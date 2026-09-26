@@ -2127,7 +2127,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .expect("reopen recovery session catalog");
     let driver = lash_restate::RestateEngine::new(
         Arc::clone(&stores.stores),
-        lash_restate::RestateConfig::new(
+        lash::restate::config(
             ingress_url,
             lash_restate::RestateAuthorityId::new(
                 std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),

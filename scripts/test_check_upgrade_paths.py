@@ -23,12 +23,14 @@ REGISTRY = """
 [[surface]]
 constant = "WIRE_VERSION"
 constant_path = "crates/demo/src/lib.rs"
+upgrade = "migrate"
 description = "fixture durable format"
 manifest = "Wire"
 
 [[surface]]
 constant = "JOURNAL_VERSION"
 constant_path = "crates/demo/src/journal.rs"
+upgrade = "drain"
 description = "fixture journal"
 manifest = "Journal"
 
@@ -38,23 +40,31 @@ constant_path = "crates/demo/src/lib.rs"
 reason = "mirrors the package version"
 """
 
+REGISTRY_WITH_LAWED_UNREGISTERED = REGISTRY + """
+[[unregistered]]
+constant = "CURSOR_VERSION"
+constant_path = "crates/demo/src/cursor.rs"
+upgrade = "coexist"
+reason = "live cursor; the ADR names its upgrade law"
+"""
+
 DECLARATIONS = """
 [[surface]]
 constant = "WIRE_VERSION"
 constant_path = "crates/demo/src/lib.rs"
-upgrade = "migrate"
+note = "upcast on read"
 
 [[surface]]
 constant = "JOURNAL_VERSION"
 constant_path = "crates/demo/src/journal.rs"
-upgrade = "drain"
+note = "drains by generation G"
 """
 
-DECLARED_UNREGISTERED = """
+DECLARED_LAWED_UNREGISTERED = """
 [[surface]]
-constant = "APP_VERSION"
-constant_path = "crates/demo/src/lib.rs"
-upgrade = "coexist"
+constant = "CURSOR_VERSION"
+constant_path = "crates/demo/src/cursor.rs"
+note = "peers accept [N-1, N]"
 """
 
 
@@ -83,7 +93,7 @@ class CheckTests(unittest.TestCase):
             [[surface]]
             constant = "WIRE_VERSION"
             constant_path = "crates/demo/src/lib.rs"
-            upgrade = "migrate"
+            note = "upcast on read"
             """
         )
         self.assertEqual(len(problems), 1)
@@ -96,27 +106,58 @@ class CheckTests(unittest.TestCase):
             [[surface]]
             constant = "RETIRED_VERSION"
             constant_path = "crates/demo/src/lib.rs"
-            upgrade = "drain"
+            note = "gone"
             """
         )
         self.assertEqual(len(problems), 1)
         self.assertIn("RETIRED_VERSION", problems[0])
 
-    def test_unregistered_constant_may_be_declared(self):
-        self.assertEqual(self.problems(DECLARATIONS + DECLARED_UNREGISTERED), [])
+    def test_lawed_unregistered_constant_needs_a_note(self):
+        self.registry.write_text(textwrap.dedent(REGISTRY_WITH_LAWED_UNREGISTERED))
+        problems = self.problems(DECLARATIONS)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("CURSOR_VERSION", problems[0])
+        self.assertEqual(
+            self.problems(DECLARATIONS + DECLARED_LAWED_UNREGISTERED), []
+        )
+
+    def test_a_plain_unregistered_constant_may_be_declared(self):
+        self.assertEqual(
+            self.problems(
+                DECLARATIONS
+                + """
+                [[surface]]
+                constant = "APP_VERSION"
+                constant_path = "crates/demo/src/lib.rs"
+                note = "noted anyway"
+                """
+            ),
+            [],
+        )
 
     def test_duplicate_entry_is_an_error(self):
         with self.assertRaises(gate.DeclarationError):
             self.problems(DECLARATIONS + DECLARATIONS)
 
-    def test_invalid_policy_is_an_error(self):
+    def test_restating_the_policy_is_an_error(self):
         with self.assertRaises(gate.DeclarationError):
             self.problems(
                 """
                 [[surface]]
                 constant = "WIRE_VERSION"
                 constant_path = "crates/demo/src/lib.rs"
-                upgrade = "ignore"
+                upgrade = "migrate"
+                note = "policy belongs to the registry"
+                """
+            )
+
+    def test_a_missing_note_is_an_error(self):
+        with self.assertRaises(gate.DeclarationError):
+            self.problems(
+                """
+                [[surface]]
+                constant = "WIRE_VERSION"
+                constant_path = "crates/demo/src/lib.rs"
                 """
             )
 

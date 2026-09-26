@@ -134,11 +134,12 @@ pub use ingress::{
     RestateInvocationLifecycle, RestateInvocationStatus, RestatePausedInvocation,
 };
 pub use process::{
-    PROCESS_HANDLER_MAX_ATTEMPTS, ProcessParkReconcileReport, RESTATE_PROCESS_JOURNAL_VERSION,
-    RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessCancelSignal,
-    RestateProcessCompleteRequest, RestateProcessDeployment, RestateProcessIngressRunner,
-    RestateProcessServing, RestateProcessWorkerSlot, RestateProcessWorkflowInput,
-    RestateProcessWorkflowOutput, SegmentStarted, reconcile_process_parks, resume_parked_process,
+    JOURNAL_LOGIC_EPOCH, PROCESS_HANDLER_MAX_ATTEMPTS, ProcessParkReconcileReport,
+    RESTATE_PROCESS_JOURNAL_VERSION, RestateProcessAwaitRequest, RestateProcessCancelRequest,
+    RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessDeployment,
+    RestateProcessIngressRunner, RestateProcessServing, RestateProcessWorkerSlot,
+    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, SegmentStarted,
+    reconcile_process_parks, resume_parked_process,
 };
 pub use process_attach::RestateProcessAttachRequest;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};

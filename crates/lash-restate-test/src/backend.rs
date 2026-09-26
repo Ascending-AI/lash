@@ -154,6 +154,7 @@ impl RestateTestBackend {
             RestateConfig::new(
                 connection.clone(),
                 authority.clone(),
+                server.config().build_generation.clone(),
                 RestateQueuedWork::Disabled,
             ),
         ));

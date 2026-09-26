@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use crate::engine::BuildGeneration;
 use crate::{
     AttachmentStore, Backend, BackendQueuedWork, Clock, EffectEngine, EffectHost,
     ModuleArtifactStore, ProcessContinuationStore, ProcessDefinitionRegistry,
@@ -167,6 +168,7 @@ impl LayeredBackend {
         Backend::new(Arc::new(LayeredEngine {
             stores,
             effect_host: self.effect_host,
+            build_generation: self.inner.build_generation().clone(),
             process_work: self.process_work,
             queued_work: self.queued_work,
         }))
@@ -176,6 +178,7 @@ impl LayeredBackend {
 struct LayeredEngine {
     stores: Arc<LayeredStoreSet>,
     effect_host: Arc<dyn EffectHost>,
+    build_generation: BuildGeneration,
     process_work: Option<ProcessWorkWiring>,
     queued_work: BackendQueuedWork,
 }
@@ -187,6 +190,12 @@ impl EffectEngine for LayeredEngine {
 
     fn effect_host(&self) -> Arc<dyn EffectHost> {
         Arc::clone(&self.effect_host)
+    }
+
+    fn build_generation(&self) -> &BuildGeneration {
+        // The layered backend is the inner backend's substrate with decorated
+        // ports: it reports the inner build's generation, not one of its own.
+        &self.build_generation
     }
 
     fn process_work(&self) -> Option<ProcessWorkWiring> {

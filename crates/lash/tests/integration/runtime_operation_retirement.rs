@@ -416,6 +416,10 @@ impl lash::EffectEngine for WithHost {
         Arc::clone(&self.host)
     }
 
+    fn build_generation(&self) -> &lash::BuildGeneration {
+        self.inner.build_generation()
+    }
+
     fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
         self.inner.process_work()
     }

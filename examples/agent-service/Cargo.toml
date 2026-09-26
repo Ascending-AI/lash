@@ -37,4 +37,4 @@ lash-sqlite-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 
 [features]
-restate = ["dep:lash-restate", "dep:reqwest", "dep:restate-sdk"]
+restate = ["dep:lash-restate", "dep:reqwest", "dep:restate-sdk", "lash/restate"]

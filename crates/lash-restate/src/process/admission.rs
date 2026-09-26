@@ -63,6 +63,17 @@ use std::sync::Arc;
 /// unstamped input is generation 1, the prefix before FIG-3588.
 pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 3;
 
+/// The manual epoch of the journal-bearing handlers' logic, hashed into the
+/// build's drain generation beside the drain-format versions (FIG-3795).
+///
+/// A handler change can move what a journal means without moving any format
+/// version: the order of journaled steps, a step's name, what a recorded
+/// verdict implies. Hashing the drain counters alone cannot see such a
+/// change, so one lands by bumping this epoch, which changes the build's
+/// generation and keeps the old journal replaying only under its own build.
+/// The bump guard pins the handler prefix steps below.
+pub const JOURNAL_LOGIC_EPOCH: u32 = 1;
+
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";
 /// The journal name of the start step.

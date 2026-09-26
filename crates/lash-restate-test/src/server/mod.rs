@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
+use lash_core::engine::BuildGeneration;
 use lash_http_transport::HttpTransport;
 use restate_sdk::endpoint::Endpoint;
 use tokio::sync::Notify;
@@ -115,6 +116,9 @@ pub struct ServerConfig {
     pub retry: RetryPolicy,
     /// The base URL clients address; any value works, nothing listens.
     pub ingress_url: String,
+    /// The drain generation the test backend's engine reports (FIG-3795):
+    /// `for_test("t0")` unless the fixture models another build.
+    pub build_generation: BuildGeneration,
 }
 
 impl Default for ServerConfig {
@@ -135,6 +139,7 @@ impl Default for ServerConfig {
                 on_max_attempts: OnMaxAttempts::Pause,
             },
             ingress_url: "http://restate.test".to_owned(),
+            build_generation: BuildGeneration::for_test("t0"),
         }
     }
 }

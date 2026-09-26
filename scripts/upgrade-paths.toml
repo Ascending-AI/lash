@@ -1,9 +1,16 @@
-# The upgrade path each versioned durable surface takes after the clean-slate
-# release: ADR 0106 section 2. `scripts/check_upgrade_paths.py` holds this file
-# exhaustive against the `[[surface]]` registry in `scripts/versioned-surfaces.toml`:
-# every registered surface constant appears here exactly once, and every entry
-# names a constant the registry knows (a surface, or an [[unregistered]] entry
-# the ADR still names a law for).
+# The prose upgrade path each versioned durable surface takes after the
+# clean-slate release: ADR 0106 section 2. The `upgrade` enum itself lives on
+# the surface's `[[surface]]` (or `[[unregistered]]`) entry in
+# `scripts/versioned-surfaces.toml` — the registry is the one place a policy
+# value is written, so a policy cannot drift between two TOML declarations.
+# This file carries the `note` beside it: the mechanism and the reason a
+# reviewer reads at upgrade time.
+#
+# `scripts/check_upgrade_paths.py` holds this file honest against the
+# registry: every `[[surface]]` and every `[[unregistered]]` entry that
+# carries a policy appears here exactly once, every entry names a constant the
+# registry knows, and no entry may restate `upgrade` — that value is read from
+# the registry.
 #
 # upgrade = "migrate": forward migration. Schemas take expand/contract DDL, and
 #   payloads go through an upcaster chain on read.
@@ -17,419 +24,354 @@
 [[surface]]
 constant = "REMOTE_PROTOCOL_VERSION"
 constant_path = "crates/lash-remote-protocol/src/lib.rs"
-upgrade = "coexist"
 note = "live wire: peers negotiate or accept [N-1, N]"
 
 [[surface]]
 constant = "DURABLE_WAIT_REQUEST_VERSION"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "RESTATE_PROCESS_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/process/admission.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
+
+[[surface]]
+constant = "JOURNAL_LOGIC_EPOCH"
+constant_path = "crates/lash-restate/src/process/admission.rs"
+note = "journal logic epoch: hashed into generation G so a handler change that moves no format version still drains by G (FIG-3795)"
 
 [[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
-upgrade = "migrate"
 note = "expand-only pre-deploy migration; contract one release later; stamp carries oldest_reader"
 
 [[surface]]
 constant = "TRACE_SCHEMA_VERSION"
 constant_path = "crates/lash-trace/src/lib.rs"
-upgrade = "coexist"
 note = "live wire: trace readers accept [N-1, N]"
 
 [[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-upgrade = "migrate"
 note = "migrates on open in one transaction after a backup; single-process store"
 
 [[surface]]
 constant = "PROCESS_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-upgrade = "migrate"
 note = "migrates on open in one transaction after a backup"
 
 [[surface]]
 constant = "TRIGGER_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-upgrade = "migrate"
 note = "migrates on open in one transaction after a backup"
 
 [[surface]]
 constant = "EFFECT_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-upgrade = "migrate"
 note = "migrates on open in one transaction after a backup"
 
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
 constant_path = "crates/lash-core-store/src/process_identity.rs"
-upgrade = "migrate"
 note = "upcast on read, then write at the fleet format version"
 
 [[surface]]
 constant = "TURN_INPUT_SUBMISSION_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/turn_input_vocabulary.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
-upgrade = "drain"
 note = "journal grammar: only the build that wrote the journal replays it; drains by generation G"
 
 [[surface]]
 constant = "INSTRUCTION_ACCOUNTING_VERSION"
 constant_path = "crates/lashlang/src/runtime/mod.rs"
-upgrade = "drain"
 note = "journal grammar input: checkpoint placement rides the generation that journaled it; drains by G"
 
 [[surface]]
 constant = "LASHLANG_REPLAY_KEY_GRAMMAR_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
-upgrade = "drain"
 note = "journal grammar: only the build that wrote the journal replays it; drains by generation G"
 
 [[surface]]
 constant = "FRAME_KEY_VERSION"
 constant_path = "crates/lash-sansio/src/frame_key.rs"
-upgrade = "coexist"
 note = "hash-domain identity tag: a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "APPEND_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/commit_identity.rs"
-upgrade = "coexist"
 note = "content address: a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
-upgrade = "coexist"
 note = "content address: a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
-upgrade = "coexist"
 note = "content address: a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
-upgrade = "coexist"
 note = "content address: a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "PROCESS_REGISTRATION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/validation.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TRIGGER_COMMAND_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TRIGGER_DEFINITION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TRIGGER_LOOKUP_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TRIGGER_SOURCE_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "DIRECT_EFFECT_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/causal.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TOOL_CHILD_REQUEST_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_child.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "TOOL_SETTLEMENT_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "TOOL_PRESENTATION_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "TOOL_ATTEMPT_CAPTURE_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "TOOL_CHILD_REBIND_VERSION"
 constant_path = "crates/lash-core-execution/src/tool_dispatch/context.rs"
-upgrade = "drain"
 note = "ADR 0106 lists this out of scope because nothing durable carries it; declared drain so that if it ever becomes durable it rides the tool-child journal's generation"
 
 [[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/effect_identity.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "AWAIT_EVENT_FAMILY_VERSION"
 constant_path = "crates/lash-core-effect/src/promise_semantics.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "PROCESS_CANCELLATION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/events.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "PROCESS_WAKE_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/wake.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "TOOL_BATCH_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/session/tool_execution.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "USAGE_PAYLOAD_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
-upgrade = "coexist"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]
 constant = "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "PRODUCT_EVENT_LOG_FORMAT_VERSION"
 constant_path = "examples/agent-workbench/src/main_sections/state.rs"
-upgrade = "migrate"
 note = "example-app durable log, not a fleet surface; migrate on read"
 
 [[surface]]
 constant = "PROCESS_LEASE_SCHEMA_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/model/lease.rs"
-upgrade = "migrate"
 note = "slated for deletion before the release (FIG-3667/3668); migrate if it survives the cut"
 
 [[surface]]
 constant = "SESSION_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "TURN_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-sansio/src/sansio/machine_state.rs"
-upgrade = "drain"
 note = "parked turns and handovers: the successor routes to its own generation G"
 
 [[surface]]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "SESSION_HEAD_META_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/mod.rs"
-upgrade = "migrate"
 note = "upcast on read, then write at the fleet format version"
 
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/session_graph.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/protocol_turn_options.rs"
-upgrade = "migrate"
 note = "upcast on read, then write at the fleet format version"
 
 [[surface]]
 constant = "RLM_SNAPSHOT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/lib.rs"
-upgrade = "coexist"
 note = "content address: stored identities are never re-derived; new identities mint under the new family after finalize"
 
 [[surface]]
 constant = "LASHLANG_SNAPSHOT_VERSION"
 constant_path = "crates/lashlang/src/runtime/state.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "VM_CONTINUATION_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/runtime/vm/continuation.rs"
-upgrade = "drain"
 note = "parked turns and handovers: the successor routes to its own generation G"
 
 [[surface]]
 constant = "LASHLANG_VM_ABI_VERSION"
 constant_path = "crates/lashlang/src/artifact.rs"
-upgrade = "drain"
 note = "journal grammar input: the VM ABI a journal was recorded under; drains by G"
 
 [[surface]]
 constant = "LASHLANG_SEGMENT_STATE_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/process.rs"
-upgrade = "drain"
 note = "parked turns and handovers: the successor routes to its own generation G"
 
 [[surface]]
 constant = "PROCESS_EVENT_VOCABULARY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/effect_summary.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph.rs"
-upgrade = "migrate"
 note = "derived projection: regenerate from the module"
 
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph/facets.rs"
-upgrade = "migrate"
 note = "derived projection: regenerate from the module"
 
 [[surface]]
 constant = "LASHLANG_SEMANTIC_HASH_VERSION"
 constant_path = "crates/lash-sansio/src/lib.rs"
-upgrade = "coexist"
 note = "content address: stored identities are never re-derived; new identities mint under the new family after finalize"
 
 [[surface]]
 constant = "NATIVE_DRIVER_STATE_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/state.rs"
-upgrade = "migrate"
 note = "upcast on read, then write at the fleet format version"
 
 [[surface]]
 constant = "NATIVE_TRANSPORT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/transport.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "CURRENT_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
-upgrade = "migrate"
 note = "migrate at rest: upcast at admission after finalize within [OLDEST_SUPPORTED, CURRENT]; in flight a claimed or parked turn drains on its generation"
 
 [[surface]]
 constant = "DURABLE_READ_FIXTURE_SCHEMA_VERSION"
 constant_path = "crates/lash-core/tests/support/durable_read_fixture.rs"
-upgrade = "migrate"
 note = "the frozen upgrade corpus itself: a bump freezes the previous capture under fixtures/release/, and readers for old fixture generations are permanent"
 
 [[surface]]
 constant = "HEAP_SIZE_SCHEDULE_VERSION"
 constant_path = "crates/lashlang/src/runtime/heap.rs"
-upgrade = "migrate"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
 constant = "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/model/lifecycle.rs"
-upgrade = "migrate"
 note = "upcast on read, then write at the fleet format version"
 
 [[surface]]
 constant = "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION"
 constant_path = "crates/lash-restate/src/controller/process_command.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "DURABLE_WAIT_INDEX_IDENTITY_EPOCH"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
-upgrade = "coexist"
 note = "shared Restate object state: keys namespaced by version, deliverers fan out until the old namespace drains"
 
 [[surface]]
 constant = "EFFECT_GROUP_INDEX_PROTOCOL_VERSION"
 constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
-upgrade = "coexist"
 note = "shared Restate object state: keys namespaced by version, deliverers fan out until the old namespace drains"
 
 [[surface]]
 constant = "EFFECT_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/controller/effect_journal.rs"
-upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "PROCESS_CURSOR_VERSION"
 constant_path = "crates/lash-sansio/src/process_cursor.rs"
-upgrade = "coexist"
 note = "live host cursor: peers accept [N-1, N]; [[unregistered]] in the registry, declared here because ADR 0106 names its upgrade law"
 
 [[surface]]
 constant = "JOURNAL_IDENTITY_VERSION"
 constant_path = "crates/lash-sansio/src/effect_identity.rs"
-upgrade = "coexist"
 note = "hash-domain identity tag (the *_FAMILY_VERSION class under another name); [[unregistered]] in the registry, declared here because ADR 0106 names its upgrade law"

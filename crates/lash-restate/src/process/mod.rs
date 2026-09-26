@@ -12,7 +12,7 @@ mod admission;
 mod park_reconcile;
 mod workflow;
 
-pub use admission::{RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
+pub use admission::{JOURNAL_LOGIC_EPOCH, RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
 pub(crate) use admission::{SegmentAdmission, admit_segment, handover_digest};
 pub use park_reconcile::{
     ProcessParkReconcileReport, reconcile_process_parks, resume_parked_process,

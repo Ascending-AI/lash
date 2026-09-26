@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use lash_core::engine::BuildGeneration;
 use lash_core::facade_support::{ProcessEventSink, TurnWorkDriver};
 use lash_core::{BackendQueuedWork, EffectHost as _, QueuedWorkSubstrate, StoreSet};
 
@@ -52,27 +53,37 @@ impl From<RestateQueuedWork> for BackendQueuedWork {
     }
 }
 
-/// How a [`RestateEngine`] reaches Restate and under which authority it
-/// journals.
+/// How a [`RestateEngine`] reaches Restate and under which authority and
+/// build it journals.
 #[derive(Clone)]
 pub struct RestateConfig {
     connection: RestateConnection,
     authority: RestateAuthorityId,
+    build_generation: BuildGeneration,
     queued_work: RestateQueuedWork,
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
 }
 
 impl RestateConfig {
-    /// Reach Restate at `connection` under `authority`, with `queued_work`
+    /// Reach Restate at `connection` under `authority` as a deployment of the
+    /// build whose drain generation is `build_generation`, with `queued_work`
     /// running the store set's queued session work.
+    ///
+    /// `build_generation` is the facade's `formats::build_generation()`
+    /// answer: lash-restate cannot compute it (the format manifest lives in
+    /// the facade), so the caller hands it in and the engine reports it as
+    /// its own. A test double stamps a [`BuildGeneration::for_test`] value
+    /// instead.
     pub fn new(
         connection: impl Into<RestateConnection>,
         authority: RestateAuthorityId,
+        build_generation: BuildGeneration,
         queued_work: RestateQueuedWork,
     ) -> Self {
         Self {
             connection: connection.into(),
             authority,
+            build_generation,
             queued_work,
             process_event_sink: None,
         }
@@ -97,6 +108,7 @@ impl RestateConfig {
 pub struct RestateEngine {
     stores: Arc<dyn StoreSet>,
     connection: RestateConnection,
+    build_generation: BuildGeneration,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
     queued_work: BackendQueuedWork,
@@ -108,6 +120,7 @@ impl RestateEngine {
         let RestateConfig {
             connection,
             authority,
+            build_generation,
             queued_work,
             process_event_sink,
         } = config;
@@ -125,6 +138,7 @@ impl RestateEngine {
         Self {
             stores,
             connection,
+            build_generation,
             effect_host,
             process,
             queued_work: queued_work.into(),
@@ -180,6 +194,13 @@ impl RestateEngine {
         &self.stores
     }
 
+    /// The drain generation of the build this engine runs on: the caller's
+    /// `formats::build_generation()` answer, reported through
+    /// [`EffectEngine::build_generation`](lash_core::EffectEngine::build_generation).
+    pub fn build_generation(&self) -> &BuildGeneration {
+        &self.build_generation
+    }
+
     /// Exact-turn control over this engine's sessions, usable from a
     /// process outside the turn's handler.
     pub fn turn_work_driver(&self) -> TurnWorkDriver {
@@ -202,6 +223,10 @@ impl lash_core::EffectEngine for RestateEngine {
 
     fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
         self.effect_host()
+    }
+
+    fn build_generation(&self) -> &BuildGeneration {
+        self.build_generation()
     }
 
     fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {

@@ -24,6 +24,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-append-request/v2",
     "lash-attachment/v2",
     "lash-blob/v2",
+    "lash-build-generation/v1",
     "lash-composition-tool/v2",
     "lash-create-session-request/v1",
     "lash-derived-trigger-subscription/v2",

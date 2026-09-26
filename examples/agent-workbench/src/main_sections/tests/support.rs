@@ -98,6 +98,7 @@ impl From<DecoratedBackend> for lash::Backend {
                 catalog: decorated.catalog,
                 trigger_store: decorated.trigger_store,
             }),
+            build_generation: decorated.inner.build_generation().clone(),
             effect_host: decorated.effect_host,
             process_work: decorated.process_work,
             queued_work: decorated.queued_work,
@@ -107,12 +108,17 @@ impl From<DecoratedBackend> for lash::Backend {
 
 struct DecoratedEngine {
     stores: Arc<DecoratedStoreSet>,
+    build_generation: lash::BuildGeneration,
     effect_host: Arc<dyn lash::durability::EffectHost>,
     process_work: Option<lash::process::ProcessWorkWiring>,
     queued_work: lash::BackendQueuedWork,
 }
 
 impl lash::EffectEngine for DecoratedEngine {
+    fn build_generation(&self) -> &lash::BuildGeneration {
+        &self.build_generation
+    }
+
     fn stores(&self) -> Arc<dyn lash::durability::StoreSet> {
         Arc::clone(&self.stores) as Arc<dyn lash::durability::StoreSet>
     }

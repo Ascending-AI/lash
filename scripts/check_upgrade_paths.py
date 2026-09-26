@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
-"""Hold the upgrade-path declaration exhaustive against the format registry.
+"""Hold the upgrade-path prose exhaustive against the format registry.
 
 ADR 0106 section 2 gives every versioned durable surface one of three upgrade
 policies once the clean-slate release lands: forward **migration** (schema DDL
 or a read upcaster), **drain** by deployment generation, or **coexistence**
-through the roll window. ``scripts/upgrade-paths.toml`` is where each surface
-declares its policy, keyed by the same ``<constant_path>:<constant>`` pair
-``scripts/versioned-surfaces.toml`` registers.
+through the roll window.
 
-This check holds that declaration honest in both directions:
+The policy value is declared exactly once, as ``upgrade = ...`` on the
+surface's ``[[surface]]`` entry in ``scripts/versioned-surfaces.toml`` (or on
+the ``[[unregistered]]`` entry for the two constants the ADR names a law for).
+``scripts/check_format_registry.py`` validates those values and holds each
+manifest surface's policy equal to its ``DurableFormat::upgrade_policy()``
+arm, so the TOML and the Rust cannot diverge. ``upgrade-paths.toml`` carries
+the prose beside the enum: the ``note`` that states the mechanism and the
+reason a reviewer reads at upgrade time.
 
-- every ``[[surface]]`` in the registry appears exactly once in
-  ``upgrade-paths.toml`` with ``upgrade = "migrate"|"drain"|"coexist"``; and
-- every declared entry names a constant the registry knows -- a registered
-  surface, or an ``[[unregistered]]`` entry the ADR still names a law for
-  (the live-cursor and journal-identity stamps). A stale entry fails, so the
-  file cannot rot into a list of surfaces that no longer exist.
+This check holds that prose honest in both directions:
+
+- every ``[[surface]]`` in the registry, and every ``[[unregistered]]`` entry
+  that carries a policy, appears exactly once in ``upgrade-paths.toml`` with a
+  non-empty ``note``; and
+- every declared entry names a constant the registry knows, and no entry
+  restates ``upgrade`` — a policy written here as well would be a second
+  source of truth. A stale entry fails, so the file cannot rot into a list of
+  surfaces that no longer exist.
 
 It reads sources only and uses the standard library alone, so it can run
 before the Rust toolchain is installed.
@@ -35,7 +43,7 @@ import check_format_registry  # noqa: E402
 
 DEFAULT_REGISTRY = Path(__file__).with_name("versioned-surfaces.toml")
 DEFAULT_DECLARATIONS = Path(__file__).with_name("upgrade-paths.toml")
-UPGRADE_POLICIES = ("migrate", "drain", "coexist")
+UPGRADE_POLICIES = check_format_registry.UPGRADE_POLICIES
 
 
 class DeclarationError(Exception):
@@ -58,12 +66,15 @@ def load_declarations(path: Path) -> dict[str, dict]:
         key = f"{constant_path}:{constant}"
         if key in declared:
             raise DeclarationError(f"{location} duplicates {key}")
-        upgrade = raw.get("upgrade")
-        if upgrade not in UPGRADE_POLICIES:
+        if "upgrade" in raw:
             raise DeclarationError(
-                f"{location} ({key}) needs upgrade = one of "
-                + "|".join(UPGRADE_POLICIES)
+                f"{location} ({key}) restates upgrade: the policy value is "
+                "declared once, on the registry's [[surface]] or "
+                "[[unregistered]] entry; delete it here"
             )
+        note = raw.get("note")
+        if not isinstance(note, str) or not note.strip():
+            raise DeclarationError(f"{location} ({key}) needs a non-empty note")
         declared[key] = raw
     if not declared:
         raise DeclarationError(f"{path}: no [[surface]] entries")
@@ -80,12 +91,12 @@ def check(
         raise DeclarationError(str(error)) from error
 
     problems: list[str] = []
-    for key in sorted(registry.surfaces):
+    needs_note = set(registry.surfaces) | set(registry.unregistered_upgrades)
+    for key in sorted(needs_note):
         if key not in declared:
             problems.append(
-                f"{key} is a registered surface with no upgrade declaration: "
-                f"add an entry with upgrade = {'|'.join(UPGRADE_POLICIES)} to "
-                f"{declarations_path}"
+                f"{key} is a versioned surface with no upgrade-path note: add "
+                f"an entry with a note to {declarations_path}"
             )
     known = set(registry.surfaces) | set(registry.unregistered)
     for key in sorted(declared):
@@ -117,12 +128,17 @@ def main(argv: list[str] | None = None) -> int:
         for problem in problems:
             print(f"- {problem}", file=sys.stderr)
         return 1
+    # The counts report the registry's policies, not the declaration file's.
+    registry = check_format_registry.load_registry(args.registry)
     by_policy = {policy: 0 for policy in UPGRADE_POLICIES}
-    for raw in declared.values():
+    for raw in registry.surfaces.values():
         by_policy[raw["upgrade"]] += 1
+    for policy in registry.unregistered_upgrades.values():
+        by_policy[policy] += 1
     print(
         "upgrade-path check passed: "
         + ", ".join(f"{count} {policy}" for policy, count in by_policy.items())
+        + f" ({len(declared)} noted)"
     )
     return 0
 

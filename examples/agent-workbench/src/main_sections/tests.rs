@@ -1623,7 +1623,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
     let backend = Arc::new(lash_restate::RestateEngine::new(
         store_set,
-        lash_restate::RestateConfig::new(
+        lash::restate::config(
             lash_restate::RestateConnection::with_client(
                 restate_ingress_url.clone(),
                 restate_http.clone(),

@@ -24,6 +24,7 @@ REGISTRY = """
 [[surface]]
 constant = "WIRE_VERSION"
 constant_path = "crates/demo/src/lib.rs"
+upgrade = "migrate"
 description = "fixture durable format"
 manifest = "Wire"
 
@@ -35,6 +36,7 @@ symbols = ["Wire"]
 [[surface]]
 constant = "PEER_PROTOCOL_VERSION"
 constant_path = "crates/demo/src/lib.rs"
+upgrade = "coexist"
 description = "fixture wire protocol"
 outside_manifest = "gates a live peer"
 
@@ -46,6 +48,7 @@ symbols = ["Peer"]
 [[surface]]
 constant = "KEY_FAMILY_VERSION"
 constant_path = "crates/demo/src/lib.rs"
+upgrade = "coexist"
 description = "fixture hash domain"
 
 [[surface.guard]]
@@ -79,6 +82,14 @@ mod tests {
 MANIFEST = """
 pub struct DurableFormatEntry {
     pub format: DurableFormat,
+}
+
+impl DurableFormat {
+    pub fn upgrade_policy(self) -> UpgradePolicy {
+        match self {
+            DurableFormat::Wire => UpgradePolicy::Migrate,
+        }
+    }
 }
 
 pub fn durable_formats() -> &'static [DurableFormatEntry] {
@@ -181,13 +192,57 @@ class FormatRegistryTests(unittest.TestCase):
     def test_a_claim_without_a_manifest_row_fails(self) -> None:
         self.manifest = MANIFEST.split("pub fn durable_formats")[0]
         problems = self.problems()
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("has no row reporting WIRE_VERSION", problems[0])
+        self.assertTrue(
+            any("has no row reporting WIRE_VERSION" in p for p in problems),
+            problems,
+        )
 
     def test_a_row_reporting_another_symbol_is_refused(self) -> None:
         self.manifest = MANIFEST.replace("Counter(WIRE_VERSION", "Counter(PEER_VERSION")
         with self.assertRaises(gate.RegistryError):
             self.problems()
+
+    def test_a_surface_without_an_upgrade_policy_fails(self) -> None:
+        self.registry_text = REGISTRY.replace('upgrade = "migrate"\n', "")
+        with self.assertRaises(gate.RegistryError):
+            self.problems()
+
+    def test_an_unknown_upgrade_policy_fails(self) -> None:
+        self.registry_text = REGISTRY.replace('upgrade = "migrate"', 'upgrade = "ignore"')
+        with self.assertRaises(gate.RegistryError):
+            self.problems()
+
+    def test_a_surface_policy_must_match_the_rust_arm(self) -> None:
+        self.registry_text = REGISTRY.replace('upgrade = "migrate"', 'upgrade = "drain"')
+        problems = self.problems()
+        self.assertTrue(
+            any("upgrade_policy() answers" in problem for problem in problems),
+            problems,
+        )
+
+    def test_a_claim_on_a_variant_without_an_arm_fails(self) -> None:
+        self.registry_text = REGISTRY.replace('manifest = "Wire"', 'manifest = "Other"')
+        problems = self.problems()
+        self.assertTrue(
+            any("upgrade_policy() has no arm" in problem for problem in problems),
+            problems,
+        )
+
+    def test_an_arm_without_a_manifest_row_fails(self) -> None:
+        self.manifest = MANIFEST.replace(
+            "DurableFormat::Wire => UpgradePolicy::Migrate,",
+            "DurableFormat::Wire => UpgradePolicy::Migrate,\n            "
+            "DurableFormat::Unlisted => UpgradePolicy::Drain,",
+        )
+        problems = self.problems()
+        self.assertTrue(
+            any(
+                "DurableFormat::Unlisted has an upgrade_policy() arm but no "
+                "manifest row" in problem
+                for problem in problems
+            ),
+            problems,
+        )
 
 
 class RealRepositoryTests(unittest.TestCase):

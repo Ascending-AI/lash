@@ -52,6 +52,15 @@ MANIFEST_ROW = re.compile(
     r"constant:\s*\"(?P<constant>\w+)\""
 )
 MANIFEST_ENTRY = re.compile(r"\bDurableFormatEntry\s*\{")
+UPGRADE_ARM = re.compile(
+    r"DurableFormat::(?P<variant>\w+)\s*=>\s*UpgradePolicy::(?P<policy>\w+)"
+)
+UPGRADE_POLICIES = ("migrate", "drain", "coexist")
+RUST_POLICY_NAME = {
+    "migrate": "Migrate",
+    "drain": "Drain",
+    "coexist": "Coexist",
+}
 TEST_ATTRIBUTE = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
 
 
@@ -64,6 +73,7 @@ class Registry:
     surfaces: dict[str, dict]
     classes: dict[str, str]
     unregistered: dict[str, str]
+    unregistered_upgrades: dict[str, str]
 
 
 def is_test_path(relative: str) -> bool:
@@ -129,6 +139,12 @@ def load_registry(path: Path) -> Registry:
     surfaces: dict[str, dict] = {}
     for index, raw in enumerate(document.get("surface", []), start=1):
         key = f"{raw.get('constant_path')}:{raw.get('constant')}"
+        upgrade = raw.get("upgrade")
+        if upgrade not in UPGRADE_POLICIES:
+            raise RegistryError(
+                f"{path}: surface {index} ({key}) needs upgrade = one of "
+                + "|".join(UPGRADE_POLICIES)
+            )
         surfaces[key] = raw
     if not surfaces:
         raise RegistryError(f"{path}: no [[surface]] entries")
@@ -142,6 +158,7 @@ def load_registry(path: Path) -> Registry:
         classes[suffix] = _reason(raw, "reason", location)
 
     unregistered: dict[str, str] = {}
+    unregistered_upgrades: dict[str, str] = {}
     for index, raw in enumerate(document.get("unregistered", []), start=1):
         location = f"{path}: unregistered {index}"
         constant = raw.get("constant")
@@ -151,8 +168,16 @@ def load_registry(path: Path) -> Registry:
         key = f"{constant_path}:{constant}"
         if key in unregistered:
             raise RegistryError(f"{location} duplicates {key}")
+        upgrade = raw.get("upgrade")
+        if upgrade is not None and upgrade not in UPGRADE_POLICIES:
+            raise RegistryError(
+                f"{location} ({key}) upgrade must be one of "
+                + "|".join(UPGRADE_POLICIES)
+            )
+        if upgrade is not None:
+            unregistered_upgrades[key] = upgrade
         unregistered[key] = _reason(raw, "reason", location)
-    return Registry(surfaces, classes, unregistered)
+    return Registry(surfaces, classes, unregistered, unregistered_upgrades)
 
 
 def class_of(registry: Registry, key: str) -> str | None:
@@ -161,6 +186,33 @@ def class_of(registry: Registry, key: str) -> str | None:
         if constant.endswith(suffix):
             return suffix
     return None
+
+
+def upgrade_arms(text: str) -> dict[str, str]:
+    """``DurableFormat`` variant -> ``migrate|drain|coexist``, parsed from the
+    exhaustive ``DurableFormat::upgrade_policy()`` match in the manifest."""
+    toml_of = {rust: toml for toml, rust in RUST_POLICY_NAME.items()}
+    arms: dict[str, str] = {}
+    for match in UPGRADE_ARM.finditer(text):
+        variant = match.group("variant")
+        policy = toml_of.get(match.group("policy"))
+        if policy is None:
+            raise RegistryError(
+                f"{MANIFEST}: DurableFormat::{variant} has an upgrade_policy() "
+                f"arm of {match.group('policy')}, which is not one of "
+                + "|".join(UPGRADE_POLICIES)
+            )
+        if variant in arms:
+            raise RegistryError(
+                f"{MANIFEST}: DurableFormat::{variant} has two upgrade_policy() arms"
+            )
+        arms[variant] = policy
+    if not arms:
+        raise RegistryError(
+            f"{MANIFEST}: no upgrade_policy() arms found; keep each arm in the "
+            "form `DurableFormat::<Variant> => UpgradePolicy::<Policy>`"
+        )
+    return arms
 
 
 def manifest_rows(text: str) -> dict[str, str]:
@@ -263,6 +315,34 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
             problems.append(
                 f"{MANIFEST} row DurableFormat::{variant} reports {constant}, which "
                 f"no registered surface claims with manifest = {variant!r}"
+            )
+
+    # The registry's `upgrade` is the one place a policy value is written;
+    # the Rust `upgrade_policy()` arm for the same variant must answer the
+    # same policy, and a variant with an arm but no manifest row is a hole in
+    # the manifest's exhaustiveness claim.
+    arms = upgrade_arms(manifest_text)
+    row_variants = set(rows.values())
+    for key, raw in sorted(registry.surfaces.items()):
+        variant = raw.get("manifest")
+        if not isinstance(variant, str) or not variant:
+            continue
+        arm = arms.get(variant)
+        if arm is None:
+            problems.append(
+                f"{key} declares manifest = {variant!r} but {MANIFEST} "
+                "upgrade_policy() has no arm for it"
+            )
+        elif arm != raw.get("upgrade"):
+            problems.append(
+                f"{key} declares upgrade = {raw.get('upgrade')!r} but "
+                f"DurableFormat::{variant}.upgrade_policy() answers {arm!r}"
+            )
+    for variant in sorted(arms):
+        if variant not in row_variants:
+            problems.append(
+                f"DurableFormat::{variant} has an upgrade_policy() arm but no "
+                f"manifest row; every durable format must be in {MANIFEST}"
             )
     return problems
 

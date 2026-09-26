@@ -468,7 +468,7 @@ pub fn e2e_backend(
             storage,
             attachment_store,
         )),
-        lash_restate::RestateConfig::new(
+        lash::restate::config(
             restate_ingress_url,
             restate_authority_id,
             // Restate turns must enter through an explicit handler-scoped effect
