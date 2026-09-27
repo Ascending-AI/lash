@@ -263,6 +263,56 @@ impl ObligationProbe for SessionDeleteProbe {
     }
 }
 
+/// Terminal processes whose terminal publication (ADR 0109 §3,
+/// `ProcessTerminal`) is still `due` or `claimed`: an engine waiter on their
+/// terminal promise may still be stranded. A `stalled` publication is typed.
+struct ProcessTerminalProbe;
+
+#[async_trait::async_trait]
+impl ObligationProbe for ProcessTerminalProbe {
+    fn kind(&self) -> &'static str {
+        "process_terminal"
+    }
+
+    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
+        let registry = world.backend().process_registry();
+        let processes = registry
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            })
+            .await
+            .map_err(|error| format!("list processes: {error}"))?;
+        let mut unsettled = Vec::new();
+        for record in processes.iter().filter(|record| record.is_terminal()) {
+            let publication = registry
+                .terminal_publication(&record.id)
+                .await
+                .map_err(|error| format!("read `{}`'s terminal publication: {error}", record.id))?;
+            match publication {
+                Some(publication)
+                    if matches!(
+                        publication.state,
+                        lash_core::store::ObligationState::Due
+                            | lash_core::store::ObligationState::Claimed
+                    ) =>
+                {
+                    unsettled.push(format!(
+                        "process `{}`'s terminal publication {} is {:?}",
+                        record.id, publication.id, publication.state
+                    ));
+                }
+                Some(_) => {}
+                None => unsettled.push(format!(
+                    "terminal process `{}` owes no terminal publication: its terminal transaction armed none",
+                    record.id
+                )),
+            }
+        }
+        Ok(unsettled)
+    }
+}
+
 /// The probes the settled-or-stalled invariant reads. An S8 slice lists its
 /// ledger's probe here when it lands.
 #[must_use]
@@ -272,6 +322,7 @@ pub fn obligation_probes() -> Vec<Box<dyn ObligationProbe>> {
         Box::new(ControlIntentProbe),
         Box::new(ParentEndPlanProbe),
         Box::new(SessionDeleteProbe),
+        Box::new(ProcessTerminalProbe),
     ]
 }
 

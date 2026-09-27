@@ -950,6 +950,21 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
         )
         .await
     }
+
+    /// A call to the root workflow's `complete_terminal`, which resolves the
+    /// process's terminal promise unless it already holds a terminal: the
+    /// first published terminal stands, so a repeat is a no-op and the
+    /// promise itself is the dedupe. No idempotency key is sent, so an
+    /// attempt never attaches to an earlier attempt's invocation that
+    /// stopped.
+    async fn publish_process_terminal(
+        &self,
+        process_id: &ProcessId,
+        output: &ProcessAwaitOutput,
+        _key: &str,
+    ) -> Result<(), PluginError> {
+        publish_process_terminal(&self.ingress, process_id, output).await
+    }
 }
 
 /// Wake `process_id`'s live segment to hand its wait over from `generation`
@@ -993,6 +1008,45 @@ pub(crate) async fn deliver_process_hand_over(
                      {segment_ordinal} failed: {error}"
                 ),
             ))
+        })
+}
+
+/// Publish `output` to `process_id`'s terminal promise through the stable
+/// root workflow's `complete_terminal`, whose promise outlives every
+/// segment's lane (FIG-3795) (the `ProcessTerminal` obligation's
+/// delivery on Restate, ADR 0109 §3).
+pub(crate) async fn publish_process_terminal(
+    ingress: &RestateIngressClient,
+    process_id: &ProcessId,
+    output: &ProcessAwaitOutput,
+) -> Result<(), PluginError> {
+    ingress
+        .call_workflow_json::<_, ()>(
+            &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow).name(),
+            process_id.as_str(),
+            "complete_terminal",
+            &RestateProcessCompleteRequest {
+                process_id: process_id.clone(),
+                output: output.clone(),
+            },
+        )
+        .await
+        .map_err(|error| {
+            if error.is_service_unregistered() {
+                PluginError::Runtime(RuntimeError::new(
+                    RuntimeErrorCode::EngineServiceUnregistered,
+                    crate::ingress::unresolvable_call_target_message(
+                        crate::LashService::ProcessWorkflow.name(),
+                        "complete_terminal",
+                        &error,
+                    ),
+                ))
+            } else {
+                PluginError::Runtime(RuntimeError::new(
+                    RuntimeErrorCode::EngineProcessAwait,
+                    format!("publishing process `{process_id}`'s terminal failed: {error}"),
+                ))
+            }
         })
 }
 

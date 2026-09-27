@@ -20,6 +20,8 @@ mod segment_handover;
 #[path = "process_registry/sql.rs"]
 pub(crate) mod sql;
 mod support;
+#[path = "process_registry/terminal_publication.rs"]
+mod terminal_publication;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
 mod wake_delivery;
@@ -725,6 +727,23 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         parent: &lash_core_execution::ScopeId,
     ) -> Result<(), lash_core_execution::PluginError> {
         parent_end::record(self, parent).await
+    }
+
+    async fn settle_terminal_publication(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<bool, lash_core_execution::PluginError> {
+        terminal_publication::settle(self, process_id).await
+    }
+
+    async fn terminal_publication(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<
+        Option<lash_core_execution::ProcessTerminalPublication>,
+        lash_core_execution::PluginError,
+    > {
+        terminal_publication::get(self, process_id).await
     }
 
     async fn list_pending_parent_end_plans(

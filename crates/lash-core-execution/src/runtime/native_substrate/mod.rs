@@ -212,6 +212,24 @@ pub trait ProcessWorkSubstrate: Send + Sync {
             generation.as_str()
         )))
     }
+
+    /// Publish `process`'s stored terminal `output` to the engine's waiters
+    /// under `key`: the delivery of its `ProcessTerminal` obligation (ADR
+    /// 0109 §3). `key` is the obligation's stable dedupe identity; a repeat
+    /// must be a no-op, and a terminal already published stays as it was.
+    ///
+    /// Native executions' waiters read the registry, so the native port's
+    /// publication is the terminal commit itself and sends nothing; an engine
+    /// whose waiters wait on the engine instead (Restate's in-journal awaits
+    /// on the process's terminal promise) resolves them here. A port that
+    /// wraps another forwards it, or the relay settles publications no
+    /// waiter ever saw.
+    async fn publish_process_terminal(
+        &self,
+        process_id: &crate::ProcessId,
+        output: &crate::ProcessAwaitOutput,
+        key: &str,
+    ) -> Result<(), PluginError>;
 }
 
 /// Outcome of one bounded terminal wait.

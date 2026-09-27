@@ -609,6 +609,17 @@ impl lash_core::ProcessWorkSubstrate for LosesFirstReply {
         }
         Ok(())
     }
+
+    async fn publish_process_terminal(
+        &self,
+        process_id: &lash_core::ProcessId,
+        output: &lash_core::ProcessAwaitOutput,
+        key: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner
+            .publish_process_terminal(process_id, output, key)
+            .await
+    }
 }
 
 /// A delivery whose reply is lost fails the close's attempt, the engine

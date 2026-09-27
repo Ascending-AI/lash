@@ -512,8 +512,7 @@ pub const MATRIX: &[CaseSpec] = &[
         DetectionBound::LostImmediateSqliteFailover,
         "a process workflow the deployment died inside publishes its terminal to its waiters once",
     ),
-    s8(
-        S8Slice::T,
+    today(
         Seam::ProcessTerminal,
         CrashPoint::InvocationLost,
         DetectionBound::LostImmediateSqliteFailover,

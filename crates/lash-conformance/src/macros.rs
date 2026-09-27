@@ -396,6 +396,7 @@ macro_rules! process_registry_tests {
                 (caller_departed_rows_are_reclaimed_by_retention, "caller-departed-retention"),
                 (terminal_completion_atomically_retains_parent_end_plan, "parent-end-plan"),
                 (settled_parent_end_plans_are_reclaimed_by_retention, "parent-end-plan-reclaim"),
+                (a_terminal_write_arms_its_publication_once, "process-terminal-publication"),
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),

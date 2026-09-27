@@ -74,7 +74,6 @@ crash_matrix! {
     session_delete_after_delivery_before_settle => (SessionDelete, AfterDeliveryBeforeSettle);
 
     process_terminal_mid_journal_step => (ProcessTerminal, MidJournalStep);
-    #[ignore = "FIG-3600 S8-T"]
     process_terminal_invocation_lost => (ProcessTerminal, InvocationLost);
 }
 

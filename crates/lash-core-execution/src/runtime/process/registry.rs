@@ -8,7 +8,8 @@ use super::model::{ProcessArtifactCleanupAck, ProcessChangeCursor, ProcessRecord
 pub use super::registry_concerns::{
     ProcessClockRebind, ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry,
     ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistryBinding,
-    ProcessRetention, ProcessScopeFenceHosts, ProcessToolIntents, ProcessWakeOutbox,
+    ProcessRetention, ProcessScopeFenceHosts, ProcessTerminalPublication, ProcessToolIntents,
+    ProcessWakeOutbox,
 };
 
 /// Outcome of process retention: how many terminal processes, events, and

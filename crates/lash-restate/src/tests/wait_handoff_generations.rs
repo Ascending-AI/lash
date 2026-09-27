@@ -1138,6 +1138,15 @@ impl lash_core::ProcessWorkSubstrate for RecordedWakes {
         Ok(())
     }
 
+    async fn publish_process_terminal(
+        &self,
+        _process_id: &ProcessId,
+        _output: &lash_core::ProcessAwaitOutput,
+        _key: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+
     async fn deliver_hand_over(
         &self,
         process_id: &ProcessId,

@@ -152,6 +152,20 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         .await
     }
 
+    async fn settle_terminal_publication(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<bool, PluginError> {
+        super::terminal_publication::settle(&self.pool, process_id, self.clock.timestamp_ms()).await
+    }
+
+    async fn terminal_publication(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<lash_core_execution::ProcessTerminalPublication>, PluginError> {
+        super::terminal_publication::get(&self.pool, process_id).await
+    }
+
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,

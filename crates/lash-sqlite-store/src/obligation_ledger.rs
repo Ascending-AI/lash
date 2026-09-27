@@ -151,7 +151,7 @@ impl SqliteObligationLedger {
 /// own transaction: the helper a slice's producer calls on its transaction.
 /// `None` when the row is missing or already carries an obligation.
 pub(crate) fn arm_obligation_tx(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     key: &ObligationKey,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {

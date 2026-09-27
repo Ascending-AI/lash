@@ -113,4 +113,15 @@ impl ProcessWorkSubstrate for NativeProcessWork {
         // which is the delivery itself.
         Ok(())
     }
+
+    async fn publish_process_terminal(
+        &self,
+        _process_id: &crate::ProcessId,
+        _output: &crate::ProcessAwaitOutput,
+        _key: &str,
+    ) -> Result<(), PluginError> {
+        // A native waiter reads the registry: the terminal commit it follows
+        // is the publication (ADR 0109 §3), so there is nothing to send.
+        Ok(())
+    }
 }

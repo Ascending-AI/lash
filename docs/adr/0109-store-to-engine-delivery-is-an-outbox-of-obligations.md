@@ -8,6 +8,14 @@ leader lease). The per-ledger slices under *Slice plan* build the rest, and
 each slice updates this status when it lands. Landed: S8-D, the two-phase
 session delete (§4).
 
+**S8-T (process terminal publication) is implemented.** Every transaction
+that makes a process terminal arms the row's `ProcessTerminal` obligation;
+the Restate segment that stored the terminal publishes it in its own journal
+and settles the row once the publication is durable, and the relay publishes
+through the root workflow's `complete_terminal` what no segment did. The
+process park pass kills a paused segment of a terminal process once its
+publication is delivered.
+
 Amends [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 O2 and O3 (the mechanism behind "reconcile every unacknowledged intent" and
 "retry needs an explicit attempt policy") and

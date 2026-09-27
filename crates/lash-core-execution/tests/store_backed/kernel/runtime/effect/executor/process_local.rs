@@ -797,6 +797,16 @@ mod tests {
         ) -> Result<(), crate::PluginError> {
             unreachable!("poke witness does not deliver cancels")
         }
+
+        async fn publish_process_terminal(
+            &self,
+            process_id: &crate::ProcessId,
+            output: &crate::ProcessAwaitOutput,
+            key: &str,
+        ) -> Result<(), crate::PluginError> {
+            let _ = (process_id, output, key);
+            Ok(())
+        }
     }
 
     /// FIG-2964, native tier: the worker poke after registration is advisory.

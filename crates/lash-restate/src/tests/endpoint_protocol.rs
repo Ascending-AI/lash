@@ -126,6 +126,29 @@ fn restate_message_frames(input: &[u8], expected_type: u16) -> Option<Vec<&[u8]>
     Some(frames)
 }
 
+/// The answer to the `PeekPromiseCommand` (0x040A) payload `peek`: its result
+/// completion id, and the value of the promise it names when a
+/// `CompletePromiseCommand` (0x040B) in one of `journals` completed that key.
+/// `None` when the promise was never completed there: a peek of an unresolved
+/// promise stays pending, as it would against a runtime that has not stored
+/// the resolution.
+fn peek_answer(peek: &[u8], journals: &[&[u8]]) -> Option<(u32, Vec<u8>)> {
+    let key = protobuf_len_field(peek, 1)?;
+    let completion_id = u32::try_from(protobuf_varint_field(peek, 11)?).ok()?;
+    journals.iter().find_map(|journal| {
+        restate_message_frames(journal, 0x040B)?
+            .into_iter()
+            .find_map(|frame| {
+                let payload = frame.get(8..)?;
+                if protobuf_len_field(payload, 1)? != key {
+                    return None;
+                }
+                let value = protobuf_len_field(protobuf_len_field(payload, 2)?, 1)?;
+                Some((completion_id, value.to_vec()))
+            })
+    })
+}
+
 pub(super) fn restate_error_message(input: &[u8]) -> Option<String> {
     let frame = restate_message_frame(input, 0x0002)?;
     String::from_utf8(protobuf_len_field(frame.get(8..)?, 2)?.to_vec()).ok()
@@ -1181,6 +1204,21 @@ async fn invoke_process_workflow_body_unbounded(
                         TerminalError::new(format!("workflow run completion failed: {err}"))
                     })?;
             }
+            if message_type == 0x040A
+                && let Some((completion_id, value)) =
+                    peek_answer(&output[decoded + 8..frame_end], &[&output[..decoded]])
+            {
+                // A peek of a promise this attempt already completed reads
+                // the value: the runtime stored the completion first.
+                input_sender
+                    .as_mut()
+                    .expect("workflow input remains open until the end message")
+                    .send_data(encode_peek_promise_completion(completion_id, Some(&value)))
+                    .await
+                    .map_err(|err| {
+                        TerminalError::new(format!("workflow peek completion failed: {err}"))
+                    })?;
+            }
             if message_type == 0x040D {
                 // The process scope's index answers the handler's effect
                 // recording (FIG-2499); every other call stays pending.
@@ -1975,6 +2013,7 @@ async fn invoke_endpoint_body_open_unbounded(
     invocation_body: Bytes,
 ) -> Result<Bytes, TerminalError> {
     let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(4);
+    let replayed = invocation_body.clone();
     input_sender
         .send_data(invocation_body)
         .await
@@ -2016,6 +2055,35 @@ async fn invoke_endpoint_body_open_unbounded(
             let frame_end = decoded + 8 + payload_len;
             if output.len() < frame_end {
                 break;
+            }
+            // A run proposed past the replayed journal is acknowledged with
+            // the value it proposed, and a peek of a promise the journal
+            // completed reads the value, as the runtime answers both.
+            if message_type == 0x0005
+                && let Some(sender) = input_sender.as_mut()
+            {
+                let (completion_id, value) =
+                    proposed_run_completion(&output[decoded + 8..frame_end]).ok_or_else(|| {
+                        TerminalError::new("endpoint returned an invalid run completion")
+                    })?;
+                let completion = encode_run_completion(completion_id, value);
+                sender.send_data(completion).await.map_err(|err| {
+                    TerminalError::new(format!("endpoint run completion failed: {err}"))
+                })?;
+            }
+            if message_type == 0x040A
+                && let Some(sender) = input_sender.as_mut()
+                && let Some((completion_id, value)) = peek_answer(
+                    &output[decoded + 8..frame_end],
+                    &[&replayed, &output[..decoded]],
+                )
+            {
+                sender
+                    .send_data(encode_peek_promise_completion(completion_id, Some(&value)))
+                    .await
+                    .map_err(|err| {
+                        TerminalError::new(format!("endpoint peek completion failed: {err}"))
+                    })?;
             }
             if matches!(message_type, 0x0002 | 0x0003) {
                 drop(input_sender.take());
