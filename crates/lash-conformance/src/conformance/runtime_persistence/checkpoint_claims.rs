@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use pretty_assertions::assert_eq;
 
 /// A backend must mint refs for checkpoint bodies and resolve those refs after
@@ -212,16 +213,14 @@ where
             },
         },
     );
-    let rejection_lease = claim_session_execution_lease_for_test(
+    let _rejection_lease = seal_claim_authority_for_test(
         &cold_reopen,
         &SessionId::from("checkpoint-component-refs"),
         "checkpoint-component-rejections",
     )
     .await;
     let unknown_error = cold_reopen
-        .commit_runtime_state(
-            unknown.releasing_session_execution_lease(rejection_lease.completion()),
-        )
+        .commit_runtime_state(unknown)
         .await
         .expect_err("arbitrary unknown ref must fail");
     assert!(matches!(
@@ -242,9 +241,7 @@ where
         },
     );
     let mismatch_error = cold_reopen
-        .commit_runtime_state(
-            mismatch.releasing_session_execution_lease(rejection_lease.completion()),
-        )
+        .commit_runtime_state(mismatch)
         .await
         .expect_err("arbitrary encoding-version mismatch must fail");
     assert!(matches!(
@@ -258,7 +255,6 @@ where
             .contains("remedy: drain affected sessions and recreate the store"),
         "typed mismatch must name the operator remedy: {mismatch_error}"
     );
-    release_session_execution_lease_for_test(&cold_reopen, &rejection_lease).await;
 }
 
 /// A ref-only checkpoint commit is valid only when every referenced component
@@ -353,9 +349,7 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
 ) {
     let session_id = "turn-input-application";
     let owner_id = "turn-input-application-owner";
-    let lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from(session_id), owner_id)
-            .await;
+    let lease = seal_claim_authority_for_test(&store, &SessionId::from(session_id), owner_id).await;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -397,9 +391,6 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
 
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
             .completing_turn_input_claim(claim.completion());
-        if turn_index == 1 {
-            commit = commit.releasing_session_execution_lease(lease.completion());
-        }
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
             session_id, turn_id, "final",
         ));
@@ -471,7 +462,7 @@ pub async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePer
         .await
         .expect("enqueue checkpoint queued work");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "checkpoint-work-claims-both-families-once-executor",
@@ -546,7 +537,7 @@ pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
         .await
         .expect("enqueue before-completion input");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "checkpoint-min-boundary-executor",
@@ -724,7 +715,7 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
         .await
         .expect("enqueue oversized checkpoint queued work");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "checkpoint-budget-refusal-executor",
@@ -790,7 +781,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
     let turn_id = crate::TurnId::from(format!("{session_id}:counter-turn"));
     let owner = lease_owner(&format!("{session_id}:checkpoint-counter-owner"));
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             session_id,
             &owner,
             "checkpoint-claim-probe-transaction-counts-executor",
@@ -1054,20 +1045,6 @@ pub(super) fn expect_cancelled_pending_input(
 
 pub(super) fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
     crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn release_session_execution_lease_for_test(
-    store: &Arc<dyn RuntimePersistence>,
-    lease: &crate::SessionExecutionLease,
-) {
-    store
-        .release_session_execution_lease(&lease.completion())
-        .await
-        .expect("release session execution lease");
 }
 
 #[expect(

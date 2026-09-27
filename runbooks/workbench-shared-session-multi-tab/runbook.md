@@ -427,7 +427,7 @@ receipt and failed-turn retirement are covered by its
 `workbench_ui_renders_queued_sends_and_failed_turn_reconciliation` test. The owner /
 incarnation / executor identity, typed head-CAS result, and concurrent append ordering
 are covered by `two_live_writers_rebase_appends_into_durable_graph_order` in that same
-deterministic suite and by Phase 3 of `runbooks/session-lease-triage/runbook.md`.
+deterministic suite.
 Those are companion coverage, not judged browser gates.
 
 ## Phase 7 — Teardown and score
@@ -454,7 +454,7 @@ port-derived Restate container are gone.
 | Final browser queue admission | B's enabled **queue next** control produces a `next_turn` receipt; `active_turns` stays at 1; no second workflow; B's marker is pending; no optimistic user row appears | | `06-queue-path.json`, `06-queued-midturn-both.png` |
 | Final queued send answered | the browser-queued marker runs as exactly one drained turn: 1 committed user row + 1 assistant row in **both** tabs; nothing is lost | | `06-truth.json`, `06-after-queued-both.png` |
 | Final convergence | the two tabs agree exactly, and neither holds a row durable truth lacks | | `06-dom-vs-dom.json`, `06-after-queued-both.png` |
-| Companion admission/CAS coverage | direct busy-send admission, failed-turn retirement, typed head-CAS results, and owner/incarnation/executor identity are covered by the named deterministic tests and lease runbook, not this browser row | | source tests, `runbooks/session-lease-triage` |
+| Companion admission/CAS coverage | direct busy-send admission, failed-turn retirement, typed head-CAS results, and drive epoch and head-CAS behavior are covered by the named deterministic tests, not this browser row | | source tests |
 | Three-layer cross-check | every conversation-changing step reconciles each tab's DOM vs the shared durable state vs the trace, pairwise | | all `*-truth.json` |
 | Divergence attribution | on any mismatch, both tabs' rows, the shared durable counts, and the dissenting tab are recorded | | `*-dom-vs-dom.json` |
 

@@ -786,7 +786,7 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
         matches!(
             report.settled.first(),
             Some(Disposition::Deferred {
-                reason: "session_admission_contended",
+                reason: "turn_not_settled",
                 ..
             })
         ),

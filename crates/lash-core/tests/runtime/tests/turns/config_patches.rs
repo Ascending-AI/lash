@@ -2,6 +2,63 @@ use super::*;
 
 const SEED: u64 = 0x5_f420;
 
+struct RefuseCommandEnqueue {
+    inner: Arc<RecordingStore>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::RuntimePersistenceDecorator for RefuseCommandEnqueue {
+    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn enqueue_queued_work(
+        &self,
+        _batch: lash_core::runtime::QueuedWorkBatchDraft,
+    ) -> Result<lash_core::runtime::QueuedWorkBatch, lash_core::StoreError> {
+        Err(lash_core::StoreError::SessionStateVersionNewerThanRuntime {
+            found: 13,
+            current: 12,
+        })
+    }
+}
+
+#[tokio::test]
+async fn command_enqueue_preserves_typed_session_state_version_refusal() {
+    let backend = memory_store_backend().await;
+    let inner = recording_unbound_store_on(&backend).await;
+    let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RefuseCommandEnqueue { inner });
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        test_host_config(&backend),
+        store,
+    )
+    .await;
+    let settlement = runtime
+        .submit_apply_config_patch_with_idempotency_key(
+            lash_core::runtime::ApplyConfigPatch::default(),
+            "generation-refusal",
+        )
+        .await
+        .expect("typed settlement result");
+    let lash_core::runtime::SessionCommandSettlement::Rejected(error) = settlement else {
+        panic!("enqueue must be rejected");
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
+    );
+    assert_eq!(
+        error.session_state_version_refusal(),
+        Some(lash_core::SessionStateVersionRefusal {
+            found: 13,
+            current: 12,
+        })
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -29,19 +86,11 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
         .await;
     }
     let commits_before = *store.runtime_commit_count.lock_recover();
-    let owner = lease_owner("config-patch-coalescing");
-    let lease = lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        store.as_ref(),
-        &SessionId::from("root"),
-        &owner,
-        "config-patch-coalescing-executor",
-        lash_core::facade_support::LeaseTimings::default().ttl_ms(),
-    )
-    .await
-    .expect("claim session execution lease")
-    .acquired()
-    .expect("session execution lease");
-
+    let request = lash_core::engine::DriveRequest {
+        session: SessionId::from("root"),
+        request: lash_core::engine::DriveRequestId::new("config-patch-coalescing"),
+        build_generation: runtime.host.core.backend().build_generation().clone(),
+    };
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             SessionId::from("root"),
@@ -49,16 +98,14 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
         ))
         .await
         .expect("open the drain's handler");
-    runtime
-        .drain_next_session_command_with_cancellation(
-            &lease.fence(),
-            CancellationToken::new(),
-            handler.scoped().controller(),
-        )
+    let drive = lash_core::drive::drive_session(&mut runtime, &handler.scoped(), &request)
         .await
-        .expect("drain coalesced config patches")
-        .expect("one receipt from the coalesced claim");
+        .expect("engine drive settles coalesced config patches");
     handler.close().await.expect("close the drain's handler");
+    assert!(
+        !drive.ran.is_empty(),
+        "engine must admit the queued command root"
+    );
 
     assert_eq!(
         *store.runtime_commit_count.lock_recover(),
@@ -159,8 +206,9 @@ pub(super) fn turn_budget_config_mutator(
 
 #[tokio::test]
 pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
-    let backend = memory_store_backend().await;
-    let store = recording_unbound_store_on(&backend).await;
+    let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let persisted_budget = lash_core::TurnBudget::bounded(7);
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -172,7 +220,7 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
     )
     .await;
 
-    runtime
+    let command = runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
             model: Some(
                 lash_core::ModelSpec::builder("turn-budget-mutation-trigger")
@@ -182,8 +230,14 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
             ),
             ..lash_core::facade_support::SessionConfigPatch::default()
         })
-        .await
-        .expect("plugin turn-budget mutation settles");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "plugin-budget-config",
+    )
+    .await;
     assert_eq!(runtime.session_policy().turn_budget, persisted_budget);
     drop(
         Box::pin(runtime.park())

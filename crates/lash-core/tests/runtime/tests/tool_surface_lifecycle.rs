@@ -9,6 +9,44 @@ use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_c402;
 
+async fn set_tool_access_through_drive(
+    runtime: &mut LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    access: lash_core::SessionToolAccess,
+    request: &str,
+) {
+    let receipt = match runtime.set_tool_access(access.clone()).await {
+        Err(SessionError::SessionCommandPending(receipt)) => receipt,
+        other => panic!("expected an accepted command awaiting its drive: {other:?}"),
+    };
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from(runtime.session_id()),
+            request,
+        ))
+        .await
+        .expect("open config drive handler");
+    runtime
+        .drive_next_root(
+            request,
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("engine drives config command");
+    handler.close().await.expect("close config drive handler");
+    assert!(matches!(
+        runtime
+            .settle_session_command(receipt)
+            .await
+            .expect("read config command settlement"),
+        lash_core::runtime::SessionCommandSettlement::Durable(_)
+    ));
+    runtime
+        .set_tool_access(access)
+        .await
+        .expect("settled config is current");
+}
+
 #[derive(Clone, Debug)]
 struct DynamicToolSpec {
     id: &'static str,
@@ -481,9 +519,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools([tool.name])
         .expect("valid hidden tool");
-    Box::pin(runtime.set_tool_access(narrowed))
-        .await
-        .expect("narrow persisted tool authority");
+    set_tool_access_through_drive(&mut runtime, &double, narrowed, "narrow-request-tools").await;
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("mutable-authority-requests").clone(),
@@ -500,9 +536,13 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .expect("run with narrowed authority");
     handler.close().await.expect("close the scope's handler");
 
-    Box::pin(runtime.set_tool_access(lash_core::SessionToolAccess::ambient()))
-        .await
-        .expect("widen persisted tool authority");
+    set_tool_access_through_drive(
+        &mut runtime,
+        &double,
+        lash_core::SessionToolAccess::ambient(),
+        "widen-request-tools",
+    )
+    .await;
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("mutable-authority-requests").clone(),
@@ -561,9 +601,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools([tool.name])
         .expect("valid hidden tool");
-    Box::pin(runtime.set_tool_access(narrowed))
-        .await
-        .expect("narrow persisted tool authority");
+    set_tool_access_through_drive(&mut runtime, &double, narrowed, "narrow-discovery").await;
     assert!(
         !plugin_catalog_names(&runtime).contains(&tool.name.to_string()),
         "live plugin discovery must immediately observe narrowed authority"
@@ -573,9 +611,13 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
         "host discovery must not retain its pre-update catalog cache"
     );
 
-    Box::pin(runtime.set_tool_access(lash_core::SessionToolAccess::ambient()))
-        .await
-        .expect("widen persisted tool authority");
+    set_tool_access_through_drive(
+        &mut runtime,
+        &double,
+        lash_core::SessionToolAccess::ambient(),
+        "widen-discovery",
+    )
+    .await;
     assert!(
         plugin_catalog_names(&runtime).contains(&tool.name.to_string()),
         "live plugin discovery must immediately observe widened authority"
@@ -613,9 +655,8 @@ async fn updated_tool_access_survives_park_and_resume() {
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools([hidden.name])
         .expect("valid hidden tool");
-    Box::pin(runtime.set_tool_access(narrowed.clone()))
-        .await
-        .expect("settle updated authority");
+    set_tool_access_through_drive(&mut runtime, &double, narrowed.clone(), "updated-authority")
+        .await;
 
     let parked = Box::pin(runtime.park())
         .await
@@ -650,9 +691,8 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools(["hidden-after-reload"])
         .expect("valid hidden tool");
-    Box::pin(runtime.set_tool_access(narrowed.clone()))
-        .await
-        .expect("settle initial authority");
+    set_tool_access_through_drive(&mut runtime, &double, narrowed.clone(), "initial-authority")
+        .await;
     let commits_after_change = *store.runtime_commit_count.lock_recover();
 
     Box::pin(runtime.set_tool_access(narrowed.clone()))

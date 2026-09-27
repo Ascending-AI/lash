@@ -186,7 +186,7 @@ pub(crate) fn write_run_conn(
 impl Store {
     pub(super) async fn begin_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         request: BeginQueuedRun,
     ) -> Result<QueuedRunAdmission, StoreError> {
         request.validate(fence)?;
@@ -272,7 +272,7 @@ impl Store {
     }
     pub(super) async fn settle_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         settlement: QueuedRunCommit,
     ) -> Result<QueuedRunAdmission, StoreError> {
         let fence = fence.clone();
@@ -372,7 +372,7 @@ impl Store {
     }
     pub(super) async fn select_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         scope: &lash_core_execution::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -446,11 +446,13 @@ impl Store {
                                 tx,
                                 &fence.session_id,
                                 fence.fencing_token,
+                                &owner,
                             )?,
                             super::claim_support::earliest_turn_candidate_seq_conn(
                                 tx,
                                 &fence.session_id,
                                 fence.fencing_token,
+                                &owner,
                             )?,
                         )
                     } else {
@@ -497,6 +499,7 @@ impl Store {
                                         &fence.session_id,
                                         now,
                                         fence.fencing_token,
+                                        &owner,
                                         QueuedWorkClaimBoundary::Idle,
                                         &policy,
                                     )? {
@@ -593,7 +596,7 @@ fn require_claim<T>(outcome: TxOutcome<T>, session_id: &SessionId) -> Result<T, 
 /// claim was released went back to the queue. Neither is retaken.
 fn open_assigned_members_conn(
     tx: &Connection,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     admission: &QueuedRunAdmission,
 ) -> Result<Vec<QueuedRunMember>, StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
@@ -632,7 +635,7 @@ fn open_assigned_members_conn(
 fn reclaim_run_members_conn(
     tx: &Connection,
     now: u64,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     members: &[QueuedRunMember],
 ) -> Result<
@@ -684,14 +687,19 @@ fn reclaim_run_members_conn(
     let mut remaining_inputs = inputs.into_iter().peekable();
     while let Some(first) = remaining_inputs.next() {
         let identity = |row: &PendingTurnInputRow| {
-            (row.claim_session_lease_generation == fence.fencing_token && row.claim_token.is_some())
-                .then(|| {
-                    (
-                        row.claim_id.clone(),
-                        row.claim_token.clone(),
-                        row.claim_owner.clone(),
-                    )
-                })
+            (row.claim_session_lease_generation == fence.fencing_token
+                && row.claim_token.is_some()
+                && row
+                    .claim_owner
+                    .as_ref()
+                    .is_some_and(|claim_owner| claim_owner.incarnation_id == owner.incarnation_id))
+            .then(|| {
+                (
+                    row.claim_id.clone(),
+                    row.claim_token.clone(),
+                    row.claim_owner.clone(),
+                )
+            })
         };
         let head_identity = identity(&first.0);
         let mut inputs = vec![first];
@@ -701,7 +709,10 @@ fn reclaim_run_members_conn(
         let input_claim = match inputs.first() {
             Some((head, _))
                 if head.claim_session_lease_generation == fence.fencing_token
-                    && head.claim_token.is_some() =>
+                    && head.claim_token.is_some()
+                    && head.claim_owner.as_ref().is_some_and(|claim_owner| {
+                        claim_owner.incarnation_id == owner.incarnation_id
+                    }) =>
             {
                 if inputs.iter().any(|(row, _)| {
                     row.claim_id != head.claim_id
@@ -753,8 +764,10 @@ fn reclaim_run_members_conn(
     let mut remaining_batches = batches.into_iter().zip(hydrated).peekable();
     while let Some((first_row, first_batch)) = remaining_batches.next() {
         let identity = |row: &QueuedBatchRow| {
-            (row.claim_session_lease_generation == fence.fencing_token && row.claim_token.is_some())
-                .then(|| (row.claim_id.clone(), row.claim_token.clone()))
+            (row.claim_session_lease_generation == fence.fencing_token
+                && row.claim_token.is_some()
+                && row.claim_owner_incarnation_id.as_deref() == Some(owner.incarnation_id.as_str()))
+            .then(|| (row.claim_id.clone(), row.claim_token.clone()))
         };
         let head_identity = identity(&first_row);
         let mut batches = vec![first_row];
@@ -768,7 +781,9 @@ fn reclaim_run_members_conn(
         let queued_claim = match batches.first() {
             Some(head)
                 if head.claim_session_lease_generation == fence.fencing_token
-                    && head.claim_token.is_some() =>
+                    && head.claim_token.is_some()
+                    && head.claim_owner_incarnation_id.as_deref()
+                        == Some(owner.incarnation_id.as_str()) =>
             {
                 if batches.iter().any(|row| {
                     row.claim_id != head.claim_id
@@ -825,7 +840,7 @@ fn reclaim_run_members_conn(
 
 pub(super) fn settle_run_members_conn(
     tx: &Connection,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     scope: &lash_core_execution::ExecutionScope,
 ) -> Result<(), StoreError> {
     tx.execute(
@@ -849,7 +864,7 @@ pub(super) fn settle_run_members_conn(
 
 pub(super) fn validate_run_members_conn(
     tx: &Connection,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     commit: &QueuedRunCommit,
 ) -> Result<(), StoreError> {
     let QueuedRunProgress::Advance {

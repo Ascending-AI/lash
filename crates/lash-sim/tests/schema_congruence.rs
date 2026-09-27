@@ -122,7 +122,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
             reason: "the `lash migrate` ledger records applied expand/backfill/contract steps; SQLite provisions from its schema text at open and runs no separate migrator (FIG-3816)",
         },
     },
-    pair("session_execution_leases", "lash_session_execution_leases"),
     pair("session_ingress_sequence", "lash_session_ingress_sequence"),
     pair("session_meta", "lash_session_meta"),
     pair(

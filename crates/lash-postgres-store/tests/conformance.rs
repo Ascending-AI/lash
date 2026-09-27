@@ -74,9 +74,11 @@ use lash_conformance::{
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
+use lash_core_execution::store::RuntimePersistenceDecorator;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
 use lash_core_execution::{
     ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, RuntimePersistence,
-    SessionExecutionLeaseStore, SessionStoreFactory, StoreError, TriggerStore,
+    SessionCommitStore, SessionStoreFactory, StoreError, TriggerStore,
 };
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
 
@@ -96,6 +98,28 @@ mod wake_delivery;
 use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
 use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;
 use support::{SharedDatabaseLock, database_url, reset};
+
+struct MultiSessionAdmissionStore {
+    inner: Arc<dyn RuntimePersistence>,
+    storage: Arc<PostgresStorage>,
+}
+
+#[async_trait::async_trait]
+impl RuntimePersistenceDecorator for MultiSessionAdmissionStore {
+    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn admit_and_bind_session(
+        &self,
+        binding: &lash_core_execution::SessionBinding,
+    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
+        self.storage
+            .session_store(binding.session_id.clone())
+            .admit_and_bind_session(binding)
+            .await
+    }
+}
 
 lash_conformance::lineage_tests!({
     let Some((database_lock, handles)) = postgres_lineage_handles().await else {
@@ -391,37 +415,6 @@ lash_conformance::signed_counter_write_domain_tests!({
 /// and a text match would have gone silently to zero waiters. The key is what
 /// the lock is: `pg_advisory_xact_lock(bigint)` splits its argument into
 /// `classid` (high 32 bits) and `objid` (low 32), with `objsubid = 1`.
-async fn wait_for_session_lease_advisory_waiters(
-    pool: &sqlx::PgPool,
-    session_id: &str,
-    at_least: i64,
-) {
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            let waiters: i64 = sqlx::query_scalar(
-                "WITH target AS (SELECT hashtextextended($1, 0) AS key)
-                 SELECT COUNT(*)
-                 FROM pg_locks AS waiting, target
-                 WHERE waiting.locktype = 'advisory'
-                   AND NOT waiting.granted
-                   AND waiting.objsubid = 1
-                   AND waiting.classid = ((target.key >> 32) & 4294967295)::oid
-                   AND waiting.objid = (target.key & 4294967295)::oid",
-            )
-            .bind(session_id)
-            .fetch_one(pool)
-            .await
-            .expect("inspect session-lease advisory-lock waiters");
-            if waiters >= at_least {
-                return;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("expected at least {at_least} session-lease advisory-lock waiters"));
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_graph_node_primary_key_is_global_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
@@ -495,6 +488,14 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .await
                     .expect("open explicit Postgres conformance store")
                     .expect("created Postgres conformance store exists");
+                let open = Arc::new(MultiSessionAdmissionStore {
+                    inner: open,
+                    storage: Arc::clone(&storage),
+                }) as Arc<dyn RuntimePersistence>;
+                let reopen = Arc::new(MultiSessionAdmissionStore {
+                    inner: reopen,
+                    storage: Arc::clone(&storage),
+                }) as Arc<dyn RuntimePersistence>;
                 ReopenableRuntimePersistence {
                     open,
                     reopen,
@@ -507,108 +508,6 @@ lash_conformance::runtime_persistence_reopenable_tests!({
         }),
     )
 });
-
-/// Pins the PostgreSQL-local hardening rule that claims and renewals join the
-/// same per-session advisory-lock queue before taking the lease-row lock. The
-/// claim is queued first, so it legally rotates token A to token B before the
-/// predecessor renewal runs and receives the named refusal.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres concurrent renewal regression: database is not configured");
-        return;
-    };
-    reset(storage.pool()).await;
-    let session_id = "postgres-concurrent-renewal-rotation";
-    let store = Arc::new(storage.session_store(session_id));
-    let owner =
-        lash_core_execution::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
-    let predecessor = store
-        .try_claim_session_execution_lease(
-            &SessionId::from(session_id),
-            &owner,
-            "renewal-executor",
-            120_000,
-        )
-        .await
-        .expect("claim renewal predecessor")
-        .acquired()
-        .expect("renewal predecessor acquired");
-
-    let mut blocker = storage
-        .pool()
-        .begin()
-        .await
-        .expect("begin advisory blocker");
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0::bigint))")
-        .bind(session_id)
-        .execute(&mut *blocker)
-        .await
-        .expect("hold session-lease advisory lock");
-
-    let claim_store = Arc::clone(&store);
-    let claim_owner = owner.clone();
-    let claim_executor_id = predecessor.executor_id.clone();
-    let claim = tokio::spawn(async move {
-        claim_store
-            .try_claim_session_execution_lease_with_token(
-                &SessionId::from(session_id),
-                &claim_owner,
-                &claim_executor_id,
-                &lash_core_execution::LeaseClaimNonce::for_testing(
-                    "postgres-concurrent-renewal-successor",
-                ),
-                120_000,
-            )
-            .await
-    });
-    wait_for_session_lease_advisory_waiters(storage.pool(), session_id, 1).await;
-
-    let renew_store = Arc::clone(&store);
-    let predecessor_fence = predecessor.fence();
-    let mut renewal = tokio::spawn(async move {
-        renew_store
-            .renew_session_execution_lease(&predecessor_fence, 120_000)
-            .await
-    });
-    tokio::select! {
-        result = &mut renewal => {
-            panic!("renewal did not wait on the shared session advisory lock: {result:?}")
-        }
-        () = wait_for_session_lease_advisory_waiters(storage.pool(), session_id, 2) => {}
-    }
-
-    blocker
-        .rollback()
-        .await
-        .expect("release session-lease advisory blocker");
-    let successor = claim
-        .await
-        .expect("join rotating claim")
-        .expect("rotating claim")
-        .acquired()
-        .expect("same-incarnation rotating claim acquired");
-    assert_ne!(successor.lease_token, predecessor.lease_token);
-    let renewal_error = renewal
-        .await
-        .expect("join stale renewal")
-        .expect_err("renewal queued after rotation must be refused");
-    assert!(matches!(
-        renewal_error,
-        StoreError::SessionExecutionLeaseRenewalRefused { .. }
-    ));
-    let durable = store
-        .get_session_execution_lease(&SessionId::from(session_id))
-        .await
-        .expect("read successor lease")
-        .lease
-        .expect("successor lease remains live");
-    assert_eq!(durable.lease_token, successor.lease_token);
-    store
-        .release_session_execution_lease(&successor.completion())
-        .await
-        .expect("release successor lease");
-}
 
 lash_conformance::store_recovery_tests!({
     let Some((database_lock, storage)) = storage().await else {
@@ -1021,23 +920,17 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .await
         .expect("enqueue original wake");
     let owner = lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
-    let lease = match store
-        .try_claim_session_execution_lease(
+    let lease = store
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "wake-executor-1",
             60_000,
         )
         .await
-        .expect("claim target session")
-    {
-        lash_core_execution::SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => {
-            acquisition.lease
-        }
-        lash_core_execution::SessionExecutionLeaseClaimOutcome::Busy { .. } => {
-            panic!("fresh source-lock target lease must be available")
-        }
-    };
+        .expect("seal target drive")
+        .acquired()
+        .expect("drive sealed");
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
             &SessionId::from(session_id),
@@ -1113,8 +1006,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         completion_store
             .commit_runtime_state(
                 lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
-                    .completing_queue_claim(claim.completion())
-                    .releasing_session_execution_lease(lease.completion()),
+                    .completing_queue_claim(claim.completion()),
             )
             .await
     });
@@ -1224,7 +1116,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let second_owner =
         lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
     let second_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id),
             &second_owner,
             "wake-executor-2",
@@ -1253,8 +1145,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     store
         .commit_runtime_state(
             lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(second_claim.completion())
-                .releasing_session_execution_lease(second_lease.completion()),
+                .completing_queue_claim(second_claim.completion()),
         )
         .await
         .expect("consume second wake sequence");
@@ -1498,8 +1389,8 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("stamp turn-owned upload");
     let owner =
         lash_core_execution::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
-    let lease = store
-        .try_claim_session_execution_lease(
+    let _lease = store
+        .seal_claim_epoch_for_test(
             &SessionId::from(SESSION_ID),
             &owner,
             "clock-executor",
@@ -1520,7 +1411,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation)
         .expect("stamp clock test commit");
-    let commit = commit.releasing_session_execution_lease(lease.completion());
+    let commit = commit;
     store
         .commit_runtime_state(commit)
         .await
@@ -1955,7 +1846,6 @@ mod root_control {
     (a_redrive_the_root_ran_past_is_never_applied_again, "s7b-17"),
     (a_stale_paused_listing_never_reparks_a_resumed_root, "s7b-18"),
     (a_parked_session_is_asked_to_drive_only_through_its_ingress_obligation, "s7b-19"),
-    (a_settlement_drain_is_refused_by_a_drive_that_seals_after_its_fence, "s8-command-drain-fence"),
     (a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles, "l2-1"),
     (a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted, "l2-2"),
     (a_failing_child_cancel_never_wedges_its_roots_cancel_or_fork, "s8c-1"),

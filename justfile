@@ -371,9 +371,6 @@ gate-worktree-concurrency-check peer:
 gate-stale-trace-regression:
   bash "{{repo}}/scripts/test-restate-workers-trace-scrub.sh"
 
-session-lease-triage-e2e:
-  bash "{{repo}}/scripts/session-lease-triage-e2e.sh"
-
 context-overflow-recovery-e2e:
   bash "{{repo}}/scripts/context-overflow-recovery-e2e.sh"
 

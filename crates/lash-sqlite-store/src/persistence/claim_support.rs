@@ -111,7 +111,7 @@ pub(crate) async fn claim_root_inputs_sqlite(
 pub(super) fn cancel_pending_turn_input_row_conn(
     conn: &Connection,
     row: PendingTurnInputRow,
-    now_epoch_ms: u64,
+    _now_epoch_ms: u64,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
     let mut input = pending_turn_input_from_row(row.clone())?;
     match input.state.kind() {
@@ -124,16 +124,10 @@ pub(super) fn cancel_pending_turn_input_row_conn(
         lash_core_execution::runtime::TurnInputStateKind::PendingActive
         | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
         | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
-            // A claim is live only while the session-execution-lease generation it
-            // pins still holds the session lease (ADR 0029).
+            // A claim is live only while its admitting drive epoch remains current.
             let live_claim = row.claim_token.is_some()
-                && load_session_execution_lease_row_conn(conn, &row.session_id)?.is_some_and(
-                    |lease| {
-                        lease.lease_token.is_some()
-                            && lease.expires_at_ms > now_epoch_ms
-                            && lease.fencing_token == row.claim_session_lease_generation
-                    },
-                );
+                && super::drive_epoch::drive_epoch_conn(conn, &row.session_id)?.epoch
+                    == row.claim_session_lease_generation;
             if live_claim {
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {
@@ -247,6 +241,7 @@ pub(super) fn sqlite_refusal_for_empty_scan(
     session_id: &SessionId,
     now: u64,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
 ) -> Result<TurnWorkEmptyScanDiagnostic, StoreError> {
@@ -259,7 +254,8 @@ pub(super) fn sqlite_refusal_for_empty_scan(
             .query_map(
                 params![
                     session_id.as_str(),
-                    sql_session_lease_generation(generation)?
+                    sql_session_lease_generation(generation)?,
+                    owner.incarnation_id.as_str(),
                 ],
                 queued_batch_row_from_sql,
             )
@@ -328,6 +324,7 @@ pub(super) fn claim_queued_work_rows_sqlite(
                 batch,
                 claim_token: row.claim_token.clone(),
                 claim_session_lease_generation: row.claim_session_lease_generation,
+                claim_owner_incarnation_id: row.claim_owner_incarnation_id.clone(),
             }
         })
         .collect::<Vec<_>>();
@@ -368,6 +365,7 @@ pub(super) fn claim_queued_work_rows_sqlite(
                         write.next_claim_fencing_token,
                     )?,
                     i64::try_from(now).unwrap_or(i64::MAX),
+                    plan.owner().incarnation_id.as_str(),
                 ],
             )
             .map_err(sqlite_error)?;
@@ -392,6 +390,7 @@ pub(super) fn scan_queued_work_candidates_sqlite(
     tx: &Connection,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     max_rows: usize,
 ) -> Result<QueuedWorkClaimScan, StoreError> {
@@ -404,7 +403,8 @@ pub(super) fn scan_queued_work_candidates_sqlite(
                 params![
                     session_id.as_str(),
                     sql_session_lease_generation(generation)?,
-                    claim_scan_limit(max_rows)
+                    claim_scan_limit(max_rows),
+                    owner.incarnation_id.as_str()
                 ],
                 queued_batch_row_from_sql,
             )
@@ -420,6 +420,7 @@ pub(super) fn scan_queued_work_candidates_sqlite(
             lash_core_execution::store_backend_support::queued_work_batch_claimability(
                 row.claim_facts(),
                 generation,
+                &owner.incarnation_id,
             )
             .is_claimable()
         })
@@ -439,6 +440,7 @@ pub(super) fn earliest_next_turn_candidate_seq_conn(
     tx: &Connection,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
 ) -> Result<Option<u64>, StoreError> {
     earliest_candidate_seq_conn(
         tx,
@@ -448,6 +450,7 @@ pub(super) fn earliest_next_turn_candidate_seq_conn(
             .sql(),
         session_id,
         generation,
+        owner,
     )
 }
 
@@ -457,6 +460,7 @@ pub(super) fn earliest_turn_candidate_seq_conn(
     tx: &Connection,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
 ) -> Result<Option<u64>, StoreError> {
     earliest_candidate_seq_conn(
         tx,
@@ -466,6 +470,7 @@ pub(super) fn earliest_turn_candidate_seq_conn(
             .sql(),
         session_id,
         generation,
+        owner,
     )
 }
 
@@ -474,13 +479,15 @@ fn earliest_candidate_seq_conn(
     sql: &str,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
 ) -> Result<Option<u64>, StoreError> {
     let seq: Option<i64> = tx
         .query_row(
             sql,
             params![
                 session_id.as_str(),
-                sql_session_lease_generation(generation)?
+                sql_session_lease_generation(generation)?,
+                owner.incarnation_id.as_str(),
             ],
             |row| row.get(0),
         )
@@ -493,7 +500,7 @@ pub(super) fn claim_ready_queued_work_sqlite_conn(
     tx: &Connection,
     now: u64,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     policy: QueuedWorkClaimPolicy,
@@ -502,12 +509,18 @@ pub(super) fn claim_ready_queued_work_sqlite_conn(
         return Ok(TxOutcome::Commit(None));
     }
     let generation = session_execution_lease.fencing_token;
-    let (candidate_rows, candidate_batches, candidates) =
-        scan_queued_work_candidates_sqlite(tx, session_id, generation, boundary, policy.max_rows)?;
+    let (candidate_rows, candidate_batches, candidates) = scan_queued_work_candidates_sqlite(
+        tx,
+        session_id,
+        generation,
+        owner,
+        boundary,
+        policy.max_rows,
+    )?;
     // ADR 0101 §5: queued work accepted after an unclaimed next-turn input
     // waits behind it, at idle and at a checkpoint alike.
     let admitted = TurnLaneStop::before(earliest_next_turn_candidate_seq_conn(
-        tx, session_id, generation,
+        tx, session_id, generation, owner,
     )?)
     .queued_prefix(&candidates);
     let candidates = &candidates[..admitted];
@@ -551,7 +564,7 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
     tx: &Connection,
     now: u64,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core_execution::TurnInputClaimMode,
@@ -611,6 +624,7 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
                 }
             }
         };
+        values.push(owner.incarnation_id.clone().into());
         let mut stmt = tx.prepare(statement).map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
@@ -641,7 +655,7 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
     tx: &Connection,
     now: u64,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     mode: lash_core_execution::TurnInputClaimMode,
     selected: Vec<(PendingTurnInputRow, lash_core_execution::PendingTurnInput)>,
@@ -656,6 +670,10 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
                 claim_fencing_token: row.claim_fencing_token,
                 claim_token: row.claim_token.clone(),
                 claim_session_lease_generation: row.claim_session_lease_generation,
+                claim_owner_incarnation_id: row
+                    .claim_owner
+                    .as_ref()
+                    .map(|owner| owner.incarnation_id.clone()),
             },
         )
         .collect();
@@ -723,7 +741,7 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
     conn: &SqliteConnection,
     now: u64,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core_execution::TurnInputClaimMode,
@@ -777,110 +795,6 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
     .map_err(sqlite_error)?
 }
 
-pub(super) fn load_session_execution_lease_row_conn(
-    conn: &Connection,
-    session_id: &SessionId,
-) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
-    let row = conn
-        .query_row(
-            crate::turn_ingress::turn_ingress_sql()
-                .leases
-                .select_by_session
-                .sql(),
-            params![session_id.as_str()],
-            |row| {
-                let owner_id: Option<String> = row.get(0)?;
-                let incarnation_id: Option<String> = row.get(5)?;
-                Ok(SessionExecutionLeaseRow {
-                    owner: lease_owner_from_columns(owner_id, incarnation_id).map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            0,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?,
-                    executor_id: row.get(6)?,
-                    lease_token: row.get(1)?,
-                    fencing_token: u64_from_sql(
-                        "SessionExecutionLease",
-                        "fencing_token",
-                        row.get(2)?,
-                    )?,
-                    claimed_at_ms: u64_from_sql(
-                        "SessionExecutionLease",
-                        "claimed_at_ms",
-                        row.get(3)?,
-                    )?,
-                    lease_term_ms: u64_from_sql(
-                        "SessionExecutionLease",
-                        "lease_term_ms",
-                        row.get(7)?,
-                    )?,
-                    expires_at_ms: u64_from_sql(
-                        "SessionExecutionLease",
-                        "expires_at_ms",
-                        row.get(4)?,
-                    )?,
-                })
-            },
-        )
-        .optional()
-        .map_err(sqlite_error)?;
-    Ok(row)
-}
-
-pub(super) fn acquire_session_execution_lease_conn(
-    conn: &Connection,
-    claim: lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity<'_>,
-    previous_fencing_token: u64,
-    now: u64,
-    lease_ttl_ms: u64,
-) -> Result<SessionExecutionLease, StoreError> {
-    let lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity {
-        session_id,
-        owner,
-        executor_id,
-        lease_token,
-    } = claim;
-    let fencing_token = StoreError::checked_monotonic_increment(
-        "session_execution_lease_fencing_token",
-        previous_fencing_token,
-    )?;
-    let sql_fencing_token = sql_monotonic_counter_value(
-        "session_execution_lease_fencing_token",
-        previous_fencing_token,
-        fencing_token,
-    )?;
-    let expires_at = now.saturating_add(lease_ttl_ms);
-    let sql_expires_at = sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
-    let sql_lease_term = sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
-    conn.execute(
-        crate::turn_ingress::turn_ingress_sql().leases.acquire.sql(),
-        params![
-            session_id.as_str(),
-            owner.owner_id.as_str(),
-            owner.incarnation_id.as_str(),
-            executor_id,
-            lease_token,
-            sql_fencing_token,
-            now as i64,
-            sql_expires_at,
-            sql_lease_term
-        ],
-    )
-    .map_err(sqlite_error)?;
-    Ok(SessionExecutionLease {
-        session_id: SessionId::from(session_id.to_string()),
-        owner: owner.clone(),
-        executor_id: executor_id.to_string(),
-        lease_token: lease_token.to_string(),
-        fencing_token,
-        claimed_at_epoch_ms: now,
-        lease_term_ms: lease_ttl_ms,
-        expires_at_epoch_ms: expires_at,
-    })
-}
-
 /// The follow-on the head of `session_id` owes (ADR 0101 §3), read inside
 /// the caller's transaction.
 pub(super) fn pending_follow_on_conn(
@@ -910,7 +824,7 @@ pub(super) fn pending_follow_on_conn(
 /// does not move.
 pub(super) fn raise_pending_follow_on_conn(
     conn: &Connection,
-    lease: &SessionExecutionLeaseAuthority,
+    lease: &ClaimAuthority,
     follow_on_turn_id: &lash_core_execution::TurnId,
     now: u64,
 ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
@@ -961,23 +875,13 @@ pub(super) fn follow_on_blocks_claim_conn(
 pub(super) fn ensure_session_execution_lease_conn(
     conn: &Connection,
     session_id: &SessionId,
-    fence: &SessionExecutionLeaseAuthority,
-    now: u64,
+    fence: &ClaimAuthority,
+    _now: u64,
 ) -> Result<(), StoreError> {
-    let current = load_session_execution_lease_row_conn(conn, session_id)?;
-    lash_core_execution::store_backend_support::require_current_session_execution_lease(
+    lash_core_execution::store::require_current_drive_fence(
         session_id,
-        current.as_ref().map(|current| {
-            lash_core_execution::store_backend_support::SessionExecutionLeaseFenceFacts {
-                owner: current.owner.as_ref(),
-                executor_id: current.executor_id.as_deref(),
-                lease_token: current.lease_token.as_deref(),
-                fencing_token: current.fencing_token,
-                expires_at_epoch_ms: current.expires_at_ms,
-            }
-        }),
-        fence,
-        now,
+        &fence.drive_fence(),
+        &super::drive_epoch::drive_epoch_conn(conn, session_id)?,
     )
 }
 
@@ -1351,25 +1255,6 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
     Ok(lash_core_execution::TurnCancelRepairResult::Applied(
         outcome,
     ))
-}
-
-pub(super) fn release_session_execution_lease_conn(
-    conn: &Connection,
-    completion: &SessionExecutionLeaseAuthority,
-) -> Result<bool, StoreError> {
-    let released = conn
-        .execute(
-            crate::turn_ingress::turn_ingress_sql().leases.release.sql(),
-            params![
-                completion.session_id.as_str(),
-                completion.owner.owner_id.as_str(),
-                completion.owner.incarnation_id.as_str(),
-                completion.executor_id.as_str(),
-                completion.lease_token
-            ],
-        )
-        .map_err(sqlite_error)?;
-    Ok(released == 1)
 }
 
 pub(super) fn requested_append_ancestor(

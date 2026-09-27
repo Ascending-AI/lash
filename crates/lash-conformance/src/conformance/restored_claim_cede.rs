@@ -411,26 +411,6 @@ impl JournaledRun {
     }
 }
 
-/// Wait until the dead worker's dropped lease guard has released the lane.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn until_lane_released(store: &Arc<dyn crate::RuntimePersistence>) {
-    let session_id = SessionId::from(SESSION_ID);
-    for _ in 0..1_000 {
-        let observed = store
-            .get_session_execution_lease(&session_id)
-            .await
-            .expect("observe the dead worker's lease");
-        if observed.lease.is_none() {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
-    panic!("the dead worker's lease was never released");
-}
-
 /// A fresh worker with no journal, over `store`, answering through
 /// [`recovery_provider`].
 async fn fresh_worker(
@@ -507,7 +487,6 @@ async fn peer_is_refused(
         crate::RuntimeErrorCode::QueuedRunPending,
         "the peer's input waits behind the follow-on: {held}"
     );
-    until_lane_released(store).await;
 }
 
 /// How many committed message parts of the session's current frame carry
@@ -589,7 +568,6 @@ async fn redrive_after_recovery(
         result = first => panic!("a dead worker's turn never returns: {result:?}"),
         () = died.notified() => {}
     }
-    until_lane_released(store).await;
     let row_id = admitted.get().expect("the follow-on admitted its row");
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
     let first_requests = first_requests.lock().expect("request lock").clone();
@@ -670,7 +648,6 @@ async fn redrive_after_recovery(
 
     // 4. The input the refused peer left queued is answered by the next drain.
     if recovery == Recovery::PeerRefused {
-        until_lane_released(store).await;
         drain(
             &format!("{prefix}-final-drain"),
             backend,

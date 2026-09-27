@@ -3,19 +3,18 @@
 
 use super::run_shape::Counter;
 use super::*;
-use crate::StoreError::SessionExecutionLeaseRenewalRefused as RenewalRefused;
 use crate::store::{
     EXECUTION_STATE_CHECKPOINT_COMPONENT, PLUGIN_STATE_CHECKPOINT_COMPONENT,
     TOOL_STATE_CHECKPOINT_COMPONENT,
 };
 use crate::{
-    LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
-    PluginNamespaceState, PluginState, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
-    RuntimeUsageDeltaIdentity, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    StoreError, ToolState, TurnInput, TurnInputClaim, TurnInputIngress,
-    facade_support::ToolStateFacadeOps,
+    ClaimAuthority, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
+    PendingTurnInputDraft, PluginNamespaceState, PluginState, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeCommit,
+    RuntimePersistence, RuntimeSessionState, RuntimeUsageDeltaIdentity, StoreError, ToolState,
+    TurnInput, TurnInputClaim, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestRunner};
@@ -59,9 +58,6 @@ const MAX_OPS: usize = 96;
 pub enum RuntimePersistenceOp {
     ClaimLease {
         owner: u8,
-    },
-    RenewLease {
-        stale: bool,
     },
     Crash,
     EnqueueWork {
@@ -158,8 +154,8 @@ struct ComponentModel {
 struct ReferenceModel {
     head_revision: u64,
     has_session: bool,
-    current_lease: Option<SessionExecutionLease>,
-    stale_leases: Vec<SessionExecutionLease>,
+    current_lease: Option<ClaimAuthority>,
+    stale_leases: Vec<ClaimAuthority>,
     work: BTreeMap<String, ModeledWork>,
     inputs: BTreeMap<String, ModeledInput>,
     input_receipts: BTreeMap<String, PendingTurnInputDraft>,
@@ -468,7 +464,6 @@ async fn apply_operation(
     use RuntimePersistenceOp::*;
     match operation {
         ClaimLease { owner } => claim_lease(store, model, shape, *owner).await?,
-        RenewLease { stale } => renew_lease(store, model, shape, *stale).await?,
         Crash => crash_between_claim_and_commit(store, model, shape).await?,
         EnqueueWork {
             slot,
@@ -781,7 +776,7 @@ async fn claim_work_with_stale_lease(
             crate::testing::queued_work_claim_policy(64),
         )
         .await;
-    if !matches!(result, Err(StoreError::SessionExecutionLeaseExpired { .. })) {
+    if !matches!(result, Err(StoreError::StaleDriveFence { .. })) {
         return Err(format!(
             "superseded lease generation claimed queued work: {result:?}"
         ));
@@ -808,7 +803,7 @@ async fn claim_turn_inputs_with_stale_lease(
     let result = store
         .claim_next_turn_inputs(&session_id(), &stale.fence(), &stale.owner, 1)
         .await;
-    if !matches!(result, Err(StoreError::SessionExecutionLeaseExpired { .. })) {
+    if !matches!(result, Err(StoreError::StaleDriveFence { .. })) {
         return Err(format!(
             "superseded lease generation claimed turn inputs: {result:?}"
         ));
@@ -825,94 +820,30 @@ async fn claim_lease(
     owner_index: u8,
 ) -> Result<(), String> {
     let owner = owner(owner_index);
-    let s = SESSION_ID;
-    let e = format!("state-machine-executor-{owner_index}");
-    let n = crate::LeaseClaimNonce::new();
+    let executor = format!("state-machine-executor-{owner_index}");
     let outcome = store
-        .try_claim_session_execution_lease_with_token(&SessionId::from(s), &owner, &e, &n, 60_000)
+        .seal_claim_epoch_for_test(&session_id(), &owner, &executor, 0)
         .await
         .map_err(|error| error.to_string())?;
-    match (&model.current_lease, outcome) {
-        (Some(current), SessionExecutionLeaseClaimOutcome::Busy { holder }) => {
-            if current.owner.same_incarnation(&owner) {
-                return Err("same incarnation unexpectedly received Busy".to_string());
-            }
-            if holder.fencing_token != current.fencing_token {
-                return Err("Busy reported a different live generation".to_string());
-            }
+    let authority = outcome
+        .acquired()
+        .ok_or_else(|| "drive epoch seal lost concurrent admission".to_string())?;
+    if let Some(previous) = model.current_lease.replace(authority) {
+        model.stale_leases.push(previous);
+        for claim in model.active_work_claims.drain(..) {
+            model
+                .crashed_work
+                .extend(claim.batches.iter().map(|batch| batch.batch_id.clone()));
+            model.stale_work_claims.push(claim);
         }
-        (Some(current), SessionExecutionLeaseClaimOutcome::Acquired(acquisition)) => {
-            if !current.owner.same_incarnation(&owner)
-                || acquisition.lease.fencing_token != current.fencing_token
-            {
-                return Err("competing owner acquired an unexpired lease".to_string());
-            }
-            if acquisition.displaced.is_some() {
-                return Err("same-incarnation reentry reported a displaced holder".to_string());
-            }
-            model.current_lease = Some(acquisition.lease);
-        }
-        (None, SessionExecutionLeaseClaimOutcome::Acquired(acquisition)) => {
-            if model
-                .stale_leases
-                .last()
-                .is_some_and(|stale| acquisition.lease.fencing_token <= stale.fencing_token)
-            {
-                return Err("successor lease did not advance the fencing generation".to_string());
-            }
-            if let Some(displaced) = acquisition.displaced.as_ref() {
-                if displaced.fencing_token >= acquisition.lease.fencing_token {
-                    return Err(
-                        "displaced generation was not below the acquired generation".to_string()
-                    );
-                }
-                if displaced.owner.same_incarnation(&owner) {
-                    return Err("a claim reported displacing its own incarnation".to_string());
-                }
-            }
-            model.current_lease = Some(acquisition.lease);
-            shape[RunShapeCounter::LeaseAcquisitions] += 1;
-        }
-        (None, SessionExecutionLeaseClaimOutcome::Busy { .. }) => {
-            return Err("released/absent lease remained busy".to_string());
+        for claim in model.active_input_claims.drain(..) {
+            model
+                .crashed_inputs
+                .extend(claim.inputs.iter().map(|input| input.input_id.clone()));
+            model.stale_input_claims.push(claim);
         }
     }
-    Ok(())
-}
-
-async fn renew_lease(
-    store: &dyn RuntimePersistence,
-    model: &mut ReferenceModel,
-    shape: &mut RunShape,
-    stale: bool,
-) -> Result<(), String> {
-    let lease = if stale {
-        model.stale_leases.last()
-    } else {
-        model.current_lease.as_ref()
-    };
-    let Some(lease) = lease else {
-        return Ok(());
-    };
-    let before = session_snapshot(store).await?;
-    let result = store
-        .renew_session_execution_lease(&lease.fence(), 60_000)
-        .await;
-    if stale {
-        if !matches!(result, Err(RenewalRefused { .. })) {
-            return Err(format!(
-                "superseded lease renewal was not fenced: {result:?}"
-            ));
-        }
-        assert_snapshot_unchanged(store, before, "superseded lease renewal").await?;
-        shape[RunShapeCounter::LeaseFenceRejections] += 1;
-    } else {
-        let renewed = result.map_err(|error| error.to_string())?;
-        if renewed.fencing_token != lease.fencing_token {
-            return Err("renewal changed the fencing generation".to_string());
-        }
-        model.current_lease = Some(renewed);
-    }
+    shape[RunShapeCounter::LeaseAcquisitions] += 1;
     Ok(())
 }
 
@@ -925,7 +856,7 @@ async fn crash_between_claim_and_commit(
         return Ok(());
     };
     store
-        .release_session_execution_lease(&lease.completion())
+        .supersede_claim_epoch_for_test(&lease.completion())
         .await
         .map_err(|error| error.to_string())?;
     model.stale_leases.push(lease);
@@ -1583,7 +1514,7 @@ fn select_modeled_input(model: &ReferenceModel, selection: u8) -> Option<Modeled
 
 fn validate_work_claim(
     model: &ReferenceModel,
-    lease: &SessionExecutionLease,
+    lease: &ClaimAuthority,
     claim: &QueuedWorkClaim,
     selected_id: Option<&str>,
 ) -> Result<(), String> {
@@ -1611,7 +1542,7 @@ fn validate_work_claim(
 }
 
 fn validate_input_claim(
-    lease: &SessionExecutionLease,
+    lease: &ClaimAuthority,
     claim: &TurnInputClaim,
     expected: &[PendingTurnInput],
     max_inputs: usize,

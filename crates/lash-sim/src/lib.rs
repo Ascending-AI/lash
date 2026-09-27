@@ -41,7 +41,6 @@ pub mod runtime_boundaries;
 pub mod runtime_contracts;
 pub mod runtime_providers;
 pub mod scheduler;
-pub mod slow_alive;
 pub mod sqlite_faults;
 pub mod stack_policy;
 pub mod state_checker;

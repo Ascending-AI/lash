@@ -18,7 +18,7 @@ impl TurnInputStore for Store {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         binding_id: &str,
         admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -88,7 +88,7 @@ impl TurnInputStore for Store {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         authorization: &lash_core_execution::TurnCancelClosureAuthorization,
     ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
@@ -240,7 +240,7 @@ impl TurnInputStore for Store {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         binding_id: &str,
         admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
@@ -559,7 +559,6 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
-        let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
                 let outcome: Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> =
@@ -575,7 +574,7 @@ impl TurnInputStore for Store {
                                 .map_err(sqlite_error)?;
                             let rows = stmt
                                 .query_map(
-                                    params![session_id.as_str(), now as i64],
+                                    params![session_id.as_str()],
                                     pending_turn_input_read_row_from_sql,
                                 )
                                 .map_err(sqlite_error)?;
@@ -789,7 +788,7 @@ impl TurnInputStore for Store {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core_execution::TurnId,
         checkpoint: lash_core_execution::CheckpointKind,
@@ -813,7 +812,7 @@ impl TurnInputStore for Store {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
@@ -860,7 +859,7 @@ impl TurnInputStore for Store {
     async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         scope: lash_core_execution::OrphanedTurnInputScope<'_>,
     ) -> Result<Vec<lash_core_execution::TurnId>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
@@ -896,7 +895,7 @@ impl TurnInputStore for Store {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         turn_id: &lash_core_execution::TurnId,
         observed: &lash_core_execution::TurnCancelIntentSnapshot,
         settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,

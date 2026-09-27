@@ -24,7 +24,7 @@ where
             .map_err(|error| error.to_string())?;
         let stale_owner = owner(0);
         let stale_lease = store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &SessionId::from(SESSION_ID),
                 &stale_owner,
                 "run-executor",
@@ -47,12 +47,12 @@ where
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "queued work absent".to_string())?;
         store
-            .release_session_execution_lease(&stale_lease.completion())
+            .supersede_claim_epoch_for_test(&stale_lease.completion())
             .await
             .map_err(|error| error.to_string())?;
         let successor_owner = owner(1);
         let _successor_lease = store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &SessionId::from(SESSION_ID),
                 &successor_owner,
                 "run-executor-2",
@@ -69,8 +69,7 @@ where
         state.set_tool_state_snapshot(Some(
             ToolState::default().with_generation_for_conformance(61),
         ));
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .releasing_session_execution_lease(stale_lease.completion());
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         if carrying_claim {
             commit = commit.completing_queue_claim(claim.completion());
         }
@@ -136,7 +135,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let predecessor_owner = owner(0);
     let predecessor_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(SESSION_ID),
             &predecessor_owner,
             "law-reclaimed-predecessor-rejection-survives-successor-head-advance-executor",
@@ -159,13 +158,13 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("predecessor queued work absent"))?;
     store
-        .release_session_execution_lease(&predecessor_lease.completion())
+        .supersede_claim_epoch_for_test(&predecessor_lease.completion())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
 
     let successor_owner = owner(1);
     let successor_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(SESSION_ID),
             &successor_owner,
             "law-reclaimed-predecessor-rejection-survives-successor-head-advance-executor-2",

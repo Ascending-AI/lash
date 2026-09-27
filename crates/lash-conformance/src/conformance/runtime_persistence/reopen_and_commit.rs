@@ -349,8 +349,6 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimePersistence) {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
-    session_execution_lease_first_claim_excludes_concurrent_reopen_handles(&factory).await;
-
     let meta = SessionMeta {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -378,7 +376,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     .expect("commit state");
     state.head_revision = initial_commit.head_revision;
 
-    let application_lease = claim_session_execution_lease_for_test(
+    let application_lease = seal_claim_authority_for_test(
         &factory.open,
         &SessionId::from("root"),
         "reopen-applications",
@@ -419,9 +417,6 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
 
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
             .completing_turn_input_claim(claim.completion());
-        if turn_index == 1 {
-            commit = commit.releasing_session_execution_lease(application_lease.completion());
-        }
         commit.turn_commit =
             RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", turn_id, "final"));
         let result = factory
@@ -517,68 +512,6 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn session_execution_lease_first_claim_excludes_concurrent_reopen_handles(
-    factory: &ReopenableRuntimePersistence,
-) {
-    let barrier = Arc::new(tokio::sync::Barrier::new(3));
-    let open = Arc::clone(&factory.open);
-    let reopen = Arc::clone(&factory.reopen);
-    let open_barrier = Arc::clone(&barrier);
-    let reopen_barrier = Arc::clone(&barrier);
-    let open_owner = lease_owner("owner-a");
-    let reopen_owner = lease_owner("owner-b");
-
-    let open_claim = crate::task::spawn(async move {
-        open_barrier.wait().await;
-        open.try_claim_session_execution_lease(
-            &SessionId::from("first-claim-race"),
-            &open_owner,
-            "session-execution-lease-first-claim-excludes-concurrent-reopen-handles-executor",
-            60_000,
-        )
-        .await
-    });
-    let reopen_claim = crate::task::spawn(async move {
-        reopen_barrier.wait().await;
-        reopen
-            .try_claim_session_execution_lease(
-                &SessionId::from("first-claim-race"),
-                &reopen_owner,
-                "session-execution-lease-first-claim-excludes-concurrent-reopen-handles-executor-2",
-                60_000,
-            )
-            .await
-    });
-
-    barrier.wait().await;
-    let open_claim = open_claim
-        .await
-        .expect("join open first-claim race")
-        .expect("open first-claim race");
-    let reopen_claim = reopen_claim
-        .await
-        .expect("join reopen first-claim race")
-        .expect("reopen first-claim race");
-    let open_lease = open_claim.acquired();
-    let reopen_lease = reopen_claim.acquired();
-    let claim_count = usize::from(open_lease.is_some()) + usize::from(reopen_lease.is_some());
-    assert_eq!(
-        claim_count, 1,
-        "exactly one concurrent first claim may acquire a session execution lease"
-    );
-    if let Some(lease) = open_lease.as_ref().or(reopen_lease.as_ref()) {
-        factory
-            .open
-            .release_session_execution_lease(&lease.completion())
-            .await
-            .expect("release first-claim race winner");
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -620,8 +553,7 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     );
 
     let session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "wake-owner")
-            .await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "wake-owner").await;
     let claim = store
         .claim_ready_queued_work(
             &SessionId::from("root"),
@@ -647,7 +579,6 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(session_lease.completion())
                 .completing_queue_claim(claim.completion()),
         )
         .await
@@ -795,17 +726,12 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .turn_commit_hash()
         .expect("first commit hash");
 
-    let session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "provider-turn")
-            .await;
+    let _session_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "provider-turn").await;
     let first = store
-        .commit_runtime_state(
-            stamped_commit
-                .clone()
-                .releasing_session_execution_lease(session_lease.completion()),
-        )
+        .commit_runtime_state(stamped_commit.clone())
         .await
-        .expect("first final commit requires a live session execution lease");
+        .expect("first final commit uses the sealed drive epoch");
     let mut replay_state = state.clone();
     let replay_graph_data = replay_state.session_graph.data_mut();
     std::sync::Arc::make_mut(&mut replay_graph_data.nodes[0]).timestamp =

@@ -9,7 +9,7 @@ pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
-    let meta = store.load_session_meta().await?.ok_or_else(|| {
+    let meta = store.load_session_meta_for_commit().await?.ok_or_else(|| {
         StoreError::SessionBindingNotMaterialized {
             session_id: commit.session_id.clone(),
         }
@@ -117,7 +117,7 @@ mod tests {
 
         async fn raise_pending_follow_on_attempts(
             &self,
-            lease: &super::super::SessionExecutionLeaseAuthority,
+            lease: &super::super::ClaimAuthority,
             follow_on_turn_id: &crate::TurnId,
         ) -> Result<super::super::PendingFollowOn, StoreError> {
             Err(StoreError::FollowOnNotPending {

@@ -4,6 +4,7 @@
 //! head's current frame on every head write.
 
 use super::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use pretty_assertions::assert_eq;
 
 const SESSION: &str = "follow-on";
@@ -150,7 +151,7 @@ pub async fn pending_follow_on_blocks_every_claim_but_its_own(store: Arc<dyn Run
         ))
         .await
         .expect("enqueue a session command");
-    let lease = claim_session_execution_lease_for_test(&store, &session(), "follow-on-owner").await;
+    let lease = seal_claim_authority_for_test(&store, &session(), "follow-on-owner").await;
     let owner = lease_owner("follow-on-owner");
 
     assert!(
@@ -297,7 +298,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
 ) {
     let (state, owed) = commit_switch(&store).await;
     let revision = state.head_revision;
-    let lease = claim_session_execution_lease_for_test(&store, &session(), "recovering").await;
+    let lease = seal_claim_authority_for_test(&store, &session(), "recovering").await;
     for expected in 1..=2 {
         let raised = store
             .raise_pending_follow_on_attempts(&lease.authority(), &owed.follow_on_turn_id)
@@ -319,7 +320,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
         Err(StoreError::FollowOnNotPending { .. })
     ));
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .expect("release the recovering lane");
     assert!(
@@ -351,7 +352,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
         .commit_runtime_state(terminal_commit(&stale, FOLLOW_ON_TURN, None))
         .await
         .expect("the follow-on's terminal clears its fact");
-    let successor = claim_session_execution_lease_for_test(&store, &session(), "after").await;
+    let successor = seal_claim_authority_for_test(&store, &session(), "after").await;
     assert!(matches!(
         store
             .raise_pending_follow_on_attempts(&successor.authority(), &owed.follow_on_turn_id)

@@ -25,7 +25,7 @@ pub(super) enum FollowOnAdmission {
     /// run owns a follow-on whose recovery bound is spent: the run commits it
     /// as its failed terminal instead of running it.
     Continue {
-        lease: SessionExecutionLeaseGuard,
+        lease: Box<DriveClaimGuard>,
         exhausted: Option<crate::store::PendingFollowOn>,
     },
     /// The drive recovered a follow-on no queued run owns and answered it;
@@ -47,13 +47,13 @@ impl LashRuntime {
     pub(super) async fn admit_pending_follow_on(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
-        lease: SessionExecutionLeaseGuard,
+        lease: DriveClaimGuard,
         queued_opts: &QueuedTurnOptions<'_>,
         selected: bool,
     ) -> Result<FollowOnAdmission, RuntimeError> {
         let Some(owed) = self.state.pending_follow_on.as_deref().cloned() else {
             return Ok(FollowOnAdmission::Continue {
-                lease,
+                lease: Box::new(lease),
                 exhausted: None,
             });
         };
@@ -85,7 +85,7 @@ impl LashRuntime {
         };
         if owned_by_run {
             return Ok(FollowOnAdmission::Continue {
-                lease,
+                lease: Box::new(lease),
                 exhausted: match recovery {
                     crate::store::FollowOnRecovery::Exhausted(owed) => Some(owed),
                     crate::store::FollowOnRecovery::Run(_) => None,
@@ -111,7 +111,7 @@ impl LashRuntime {
     async fn recover_pending_follow_on(
         &mut self,
         store: &dyn crate::store::RuntimePersistence,
-        fence: &crate::SessionExecutionLeaseAuthority,
+        fence: &crate::ClaimAuthority,
         recorded: Option<u32>,
     ) -> Result<crate::store::FollowOnRecovery, RuntimeError> {
         let owed = self
@@ -171,10 +171,7 @@ impl LashRuntime {
         follow_on: &TurnId,
         recorded: u32,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
-        let Some(lease) = self
-            .claim_session_execution_lease_for_queued_work(&opts)
-            .await?
-        else {
+        let Some(lease) = self.claim_drive_authority_for_queued_work(&opts).await? else {
             return Ok(QueuedTurnDrain::Empty(
                 EmptyQueuedDrainReason::ExecutionLaneBusy,
             ));
@@ -232,7 +229,7 @@ impl LashRuntime {
         &mut self,
         recovery: crate::store::FollowOnRecovery,
         queued_opts: &QueuedTurnOptions<'_>,
-        lease: SessionExecutionLeaseGuard,
+        lease: DriveClaimGuard,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         let (start, owed) = match recovery {
             crate::store::FollowOnRecovery::Run(owed) => {
@@ -272,9 +269,7 @@ impl LashRuntime {
                 TurnStopwatch::start(self.host.core.clock.as_ref()),
             )
             .await;
-        let run = self
-            .settle_session_execution_lease(lease.as_ref(), result)
-            .await?;
+        let run = self.settle_drive_authority(lease.as_ref(), result).await?;
         Ok(match run.into_final_turn() {
             Some(turn) => QueuedTurnDrain::Ran(turn),
             None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(

@@ -79,7 +79,6 @@ pub mod sync {
 mod send;
 mod session;
 mod session_binding;
-mod session_lease;
 mod support;
 #[cfg(test)]
 mod tests;
@@ -357,13 +356,6 @@ pub mod direct {
 
 /// Session persistence types and services.
 pub mod persistence {
-    /// Diagnostic read over a session's execution lease: holder identity,
-    /// generation, expiry, and renewal state. Snapshot only: the commit CAS is
-    /// the authority (ADR 0029). Entry point:
-    /// [`LashCore::session_lease_diagnostics`](crate::LashCore::session_lease_diagnostics).
-    pub use crate::session_lease::{
-        SessionLeaseDiagnostics, SessionLeaseHolder, SessionLeaseRenewal,
-    };
     pub use lash_core::CheckpointKind;
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
@@ -459,23 +451,19 @@ pub mod persistence {
         facade_support::SessionAttachmentStore, facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
-        BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,
-        DurableScanPage, DurableSurface, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord,
-        FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
-        LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
-        MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+        BlobRef, CURRENT_SESSION_STATE_VERSION, ClaimAuthority, DurableItem, DurablePayload,
+        DurableScan, DurableScanPage, DurableSurface, ExecutedCall, ExecutedCallOutcome,
+        ExecutedCallRecord, FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore,
+        GcReport, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
+        MaintenanceResult, MaintenanceStop, MaintenanceSweep,
         OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
         ProtocolEvent, QueuedWorkStore, RetentionBound, RetentionReport, RuntimePersistence,
         ScanCoverage, SessionAdmission, SessionBinding, SessionBlobReclaimReport,
-        SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-        SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-        SessionExecutionLeaseDisplacement, SessionExecutionLeaseObservation,
-        SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionGraph,
-        SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
-        SessionRelation, SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError,
-        StoreMaintenance, StorePreflight, StoreReleaseStamp, StoreReleaseState,
-        StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
-        TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+        SessionCommitStore, SessionGraph, SessionHistoryRecord, SessionMeta, SessionNodePayload,
+        SessionNodeRecord, SessionReadView, SessionRelation, SessionStateAdmission, StoreBackend,
+        StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
+        StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
+        StoreSchemaVerdict, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
         facade_support::SessionNodeProjection,
     };
     pub use lash_core::{
@@ -944,18 +932,16 @@ pub mod runtime {
         EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
         GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord, LoserPolicy, NoSessionWork,
         NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
-        QueuedLaneProbe, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
-        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
-        RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
-        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelWait,
-        TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
-        effect_groups_unsupported,
+        RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+        RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
+        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
+        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        SessionWorkEngine, SleepSpec, ToolIntentOutcomeSink, ToolIntentPreparation,
+        ToolIntentSubmissionGuard, TurnCancelWait, TurnContext, TurnControlBinding,
+        WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

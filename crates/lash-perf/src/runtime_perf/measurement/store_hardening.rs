@@ -4,11 +4,10 @@ use lash_sansio::SessionId;
 const HARDENING_IDENTITY_ITERATIONS: usize = 64;
 const HARDENING_OCCURRENCE_ITERATIONS: usize = 256;
 const HARDENING_PRUNE_BATCH: usize = 16;
-const HARDENING_LEASE_TTL_MS: u64 = 60_000;
 
 #[derive(Clone, Copy)]
 struct StoreHardeningPhaseNames {
-    claim_session_lease: &'static str,
+    seal_drive_epoch: &'static str,
     claim_queued_work: &'static str,
     complete_queued_work: &'static str,
     attachment_intent: &'static str,
@@ -18,7 +17,7 @@ struct StoreHardeningPhaseNames {
 }
 
 const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    claim_session_lease: "store_hardening.memory.claim_session_lease",
+    seal_drive_epoch: "store_hardening.memory.seal_drive_epoch",
     claim_queued_work: "store_hardening.memory.claim_queued_work",
     complete_queued_work: "store_hardening.memory.complete_queued_work",
     attachment_intent: "store_hardening.memory.attachment_intent",
@@ -28,7 +27,7 @@ const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 };
 
 const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    claim_session_lease: "store_hardening.sqlite.claim_session_lease",
+    seal_drive_epoch: "store_hardening.sqlite.seal_drive_epoch",
     claim_queued_work: "store_hardening.sqlite.claim_queued_work",
     complete_queued_work: "store_hardening.sqlite.complete_queued_work",
     attachment_intent: "store_hardening.sqlite.attachment_intent",
@@ -38,7 +37,7 @@ const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 };
 
 const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    claim_session_lease: "store_hardening.postgres.claim_session_lease",
+    seal_drive_epoch: "store_hardening.postgres.seal_drive_epoch",
     claim_queued_work: "store_hardening.postgres.claim_queued_work",
     complete_queued_work: "store_hardening.postgres.complete_queued_work",
     attachment_intent: "store_hardening.postgres.attachment_intent",
@@ -345,17 +344,8 @@ async fn measure_store_hardening_backend_turn(
     names: StoreHardeningPhaseNames,
 ) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
     let mut phases = BTreeMap::new();
-    let (lease, phase) = measure_runtime_perf_async_phase(names.claim_session_lease, async {
-        store
-            .try_claim_session_execution_lease(
-                session_id,
-                owner,
-                "measure-store-hardening-backend-turn-executor",
-                HARDENING_LEASE_TTL_MS,
-            )
-            .await?
-            .acquired()
-            .ok_or_else(|| anyhow::anyhow!("store-hardening session lease was busy"))
+    let (lease, phase) = measure_runtime_perf_async_phase(names.seal_drive_epoch, async {
+        seal_perf_claim(store.as_ref(), session_id).await
     })
     .await?;
     phases.insert(phase.0, phase.1);

@@ -509,12 +509,12 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "durable_contention.claim_attempts",
         "durable_contention.claim_refusals",
         "durable_contention.successful_claims",
-        "durable_contention.renewals",
+        "durable_contention.epoch_checks",
         "durable_contention.abandons",
         "durable_contention.reclaims",
         "durable_contention.reclaim_conflicts",
         "durable_contention.store_contention_retries",
-        "durable_contention.lease_probe_busy",
+        "durable_contention.epoch_probe_current",
         "durable_contention.cas_failures",
         "durable_contention.cas_backoff_sleeps",
     ] {
@@ -576,7 +576,7 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
     );
 
     let successful_claims = result.extra_counters["durable_contention.successful_claims"];
-    let renewals = result.extra_counters["durable_contention.renewals"];
+    let epoch_checks = result.extra_counters["durable_contention.epoch_checks"];
     let abandons = result.extra_counters["durable_contention.abandons"];
     let reclaims = result.extra_counters["durable_contention.reclaims"];
     let reclaim_conflicts = result.extra_counters["durable_contention.reclaim_conflicts"];
@@ -586,9 +586,9 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "every abandon must end in a reclaim or reclaim conflict"
     );
     assert_eq!(
-        renewals,
+        epoch_checks,
         successful_claims / 3,
-        "renewals must follow every third successful claim"
+        "epoch checks must follow every third successful claim"
     );
     assert_eq!(
         abandons,
@@ -596,8 +596,8 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "abandons must follow every second successful claim"
     );
     assert_eq!(
-        result.extra_counters["durable_contention.lease_probe_busy"], workers as u64,
-        "each worker must witness the controller fence rejecting a foreign owner"
+        result.extra_counters["durable_contention.epoch_probe_current"], workers as u64,
+        "each worker must observe the controller drive epoch"
     );
 
     let claim_wait = &result.metric_samples_ms["durable_contention.claim_wait_ms"];

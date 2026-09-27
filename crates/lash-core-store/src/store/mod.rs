@@ -53,8 +53,8 @@ pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
     root_snapshot_config_from_state,
 };
+pub mod claim_authority;
 pub mod session_delete;
-pub mod session_execution_lease;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
@@ -74,6 +74,7 @@ pub use attachment_manifest::{
     AttachmentWritePermit, AttachmentWriteToken, decode_attachment_condemnation_record,
     decode_attachment_owner,
 };
+pub use claim_authority::{ClaimAuthority, LeaseOwnerIdentity};
 pub use claim_plan::{
     ClaimPlanDecision, QueuedWorkClaimPlan, QueuedWorkClaimRow, QueuedWorkClaimWrite,
     QueuedWorkSettlementPlan, QueuedWorkSettlementRow, QueuedWorkSettlementRowClaim,
@@ -100,15 +101,14 @@ pub use drive_fence::{
     InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, close_admission,
     current_drive_fence, decide_drive_epoch_seal, require_current_drive_fence,
 };
-pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
+pub use error::StoreError;
 pub use fencing::{
-    FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FenceTimeAuthority, FencedWrite,
-    HeadPublicationVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
-    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
-    fenced_write_applied, head_publication_verdict, queued_work_batch_claimability,
-    require_fenced_write_applied, require_releasable_session_execution_lease,
-    require_renewable_session_execution_lease, require_settleable_queued_work,
-    require_settleable_turn_input, require_single_writer_head_publication, turn_input_claimability,
+    FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FencedWrite, HeadPublicationVerdict,
+    QueuedWorkSettlementFacts, TurnInputSettlementFacts, WakeDeliveryClaimFacts,
+    WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability, fenced_write_applied,
+    head_publication_verdict, queued_work_batch_claimability, require_fenced_write_applied,
+    require_settleable_queued_work, require_settleable_turn_input,
+    require_single_writer_head_publication, turn_input_claimability,
     unclaimed_turn_input_is_settleable, wake_delivery_claim_verdict,
 };
 pub use fleet_format::{
@@ -183,11 +183,7 @@ pub use semantic_boundary::{
     RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
     USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
 };
-pub use session_execution_lease::{
-    LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseDisplacement, SessionExecutionLeaseObservation,
-};
+
 pub use state_version::{
     CURRENT_SESSION_STATE_VERSION, OLDEST_SUPPORTED_SESSION_STATE_VERSION, SessionStateAdmission,
     resolve_session_state_version,
@@ -603,7 +599,6 @@ impl RuntimeCommit {
             drive_fence: _,
             root_terminal,
             park_root,
-            release_session_execution_lease: _,
             config: _,
             execution_config: _,
             current_frame_node_id: _,
@@ -806,7 +801,6 @@ impl RuntimeCommit {
             drive_fence: None,
             root_terminal: None,
             park_root: None,
-            release_session_execution_lease: None,
             config,
             execution_config,
             current_frame_node_id,
@@ -845,21 +839,8 @@ impl RuntimeCommit {
         Ok((self, node_id_mapping))
     }
 
-    /// Adds exact lease-completion evidence for store implementors to release atomically with the
-    /// runtime commit rather than in a separate raceable write.
-    pub fn releasing_session_execution_lease(
-        mut self,
-        completion: SessionExecutionLeaseAuthority,
-    ) -> Self {
-        self.release_session_execution_lease = Some(completion);
-        self
-    }
-
     /// Requires the caller's current authority without changing lane ownership.
-    pub fn borrowing_session_execution_lease(
-        mut self,
-        fence: SessionExecutionLeaseAuthority,
-    ) -> Self {
+    pub fn borrowing_session_execution_lease(mut self, fence: ClaimAuthority) -> Self {
         self.session_execution_lease_fence = Some(fence);
         self
     }
@@ -1064,7 +1045,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// Revalidate `lease`, then classify the independently read session-state marker.
     async fn admit_session_state(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
     ) -> Result<SessionStateAdmission, StoreError> {
         let version = self.read_session_state_version().await?;
         Ok(SessionStateAdmission {
@@ -1134,7 +1115,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// default.
     async fn retain_admission_base(
         &self,
-        _lease: &SessionExecutionLeaseAuthority,
+        _lease: &ClaimAuthority,
         _base: &SessionHeadRef,
     ) -> Result<(), StoreError> {
         Ok(())
@@ -1256,7 +1237,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// Returns the raised fact.
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
         follow_on_turn_id: &crate::TurnId,
     ) -> Result<PendingFollowOn, StoreError>;
 
@@ -1307,6 +1288,13 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// so all backends answer identically.
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
+
+    /// Commit preflight distinguishes a retired session from a session that
+    /// was never materialized. SQL stores check their deletion tombstone here;
+    /// the commit transaction repeats that check before any write.
+    async fn load_session_meta_for_commit(&self) -> Result<Option<SessionMeta>, StoreError> {
+        self.load_session_meta().await
+    }
 
     /// Record that the session's turn parked (FIG-3586, FIG-3600, FIG-3659).
     ///
@@ -1360,7 +1348,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         binding_id: &str,
         admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), StoreError>;
@@ -1373,7 +1361,7 @@ pub trait TurnInputStore: Send + Sync {
     /// Final publication additionally requires the session-head CAS.
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         authorization: &crate::TurnCancelClosureAuthorization,
     ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
 
@@ -1383,7 +1371,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         binding_id: &str,
         admitted_scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
@@ -1601,7 +1589,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
@@ -1612,7 +1600,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError>;
@@ -1649,7 +1637,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn orphaned_active_turn_ids(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _scope: OrphanedTurnInputScope<'_>,
     ) -> Result<Vec<crate::TurnId>, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
@@ -1669,7 +1657,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _turn_id: &crate::TurnId,
         _observed: &crate::TurnCancelIntentSnapshot,
         _settlement: Option<&crate::TurnCancelClosureSettlement>,
@@ -1738,110 +1726,6 @@ pub enum OrphanedTurnInputScope<'a> {
     },
 }
 
-/// Durable single-writer execution-lane capability, fenced by monotonic
-/// fencing tokens.
-#[async_trait::async_trait]
-pub trait SessionExecutionLeaseStore: Send + Sync {
-    /// Try to claim the durable single-writer execution lane for `session_id`.
-    /// Returns [`SessionExecutionLeaseClaimOutcome::Busy`] when another owner
-    /// holds an unexpired lease. Expired or released leases may be reclaimed
-    /// and receive a higher fencing token. A live claim reenters only when its
-    /// owner id, boot incarnation, and runtime-minted executor id all match;
-    /// reentry rotates the lease token but preserves the fencing generation.
-    /// Renewal never rotates either token. Any live mismatch is busy.
-    ///
-    /// A granted claim must carry
-    /// [`SessionExecutionLeaseAcquisition::displaced`] naming the lapsed holder
-    /// it took the lane from, read inside the same atomic operation. This is the
-    /// only truthful report of a takeover: the displaced runner is frequently
-    /// dead or frozen (that is why its lease lapsed), so nothing it would have
-    /// logged is guaranteed to happen. A claim that displaced nobody, including
-    /// exact owner/incarnation/executor reentry and a reclaim of a released row,
-    /// reports `None`.
-    /// `executor_id` is the caller's own runtime-open discriminator and must be
-    /// supplied: it is identity, and a default that minted one per call would
-    /// make reentry unreachable through this method while silently changing the
-    /// claimant on every retry. Only the claim nonce - a per-attempt
-    /// capability, not identity - is minted here, so a caller that needs one
-    /// nonce across an ambiguous-outcome retry uses
-    /// [`try_claim_session_execution_lease_with_token`](Self::try_claim_session_execution_lease_with_token)
-    /// directly.
-    async fn try_claim_session_execution_lease(
-        &self,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        executor_id: &str,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        let claim_nonce = LeaseClaimNonce::new();
-        self.try_claim_session_execution_lease_with_token(
-            session_id,
-            owner,
-            executor_id,
-            &claim_nonce,
-            lease_ttl_ms,
-        )
-        .await
-    }
-
-    /// Try one retry-safe claim attempt using an opaque claim nonce.
-    ///
-    /// The caller mints [`LeaseClaimNonce::new`] once for the logical claim and
-    /// borrows it again only for an ambiguous-outcome retry. With no value-taking
-    /// constructor, stable host identity cannot accidentally be
-    /// reused as claim identity. Backends persist the nonce bytes as the lease
-    /// token so a retry observes one settled rotation instead of rotating again.
-    async fn try_claim_session_execution_lease_with_token(
-        &self,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        executor_id: &str,
-        claim_nonce: &LeaseClaimNonce,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError>;
-
-    /// Extend a live session execution lease owned by the caller.
-    ///
-    /// Backends reject expired authority with [`StoreError::SessionExecutionLeaseExpired`];
-    /// stale, released, or superseded owner/token authority uses
-    /// [`StoreError::SessionExecutionLeaseRenewalRefused`] with structured decision evidence.
-    /// Granted renewals echo the presented session and owner, never rotate either
-    /// token, and return expiry at least as late; core refuses install otherwise.
-    async fn renew_session_execution_lease(
-        &self,
-        fence: &SessionExecutionLeaseAuthority,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLease, StoreError>;
-
-    /// Release a session execution lease predicated on its owner and lease token.
-    ///
-    /// A stale, repeated, released, or superseded completion is refused with
-    /// [`StoreError::SessionExecutionLeaseReleaseRefused`] and must not clear a
-    /// successor lease. The fencing token remains generation evidence; lock
-    /// lifecycle uses owner plus lease token. Named refusals record structured evidence.
-    async fn release_session_execution_lease(
-        &self,
-        completion: &SessionExecutionLeaseAuthority,
-    ) -> Result<(), StoreError>;
-
-    /// Read the current session-execution-lease row without claiming it.
-    ///
-    /// Returns the store-clock instant sampled alongside the optional persisted
-    /// lease. The lease is `None` when the row is absent, unleased, or released.
-    /// A returned lease may already be expired: expiry is a raw fact exposed
-    /// read-side, so callers classify staleness themselves. This never mutates the lease
-    /// and never advances a generation. Unknown session ids return an
-    /// observation whose lease is `None`.
-    ///
-    /// This read is diagnostics only. The commit CAS is the single authority on
-    /// who may publish (ADR 0029); a backend must never let a caller substitute
-    /// this snapshot for the fence it presents on claim, renew, or release.
-    async fn get_session_execution_lease(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionExecutionLeaseObservation, StoreError>;
-}
-
 /// Durable queued-work capability: ingress, ordered claiming, and claim leases
 /// for non-input work (process wakes and session commands).
 ///
@@ -1853,7 +1737,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// current lane fence. Retry preserves identity and physical position.
     async fn begin_or_resume_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         request: BeginQueuedRun,
     ) -> Result<QueuedRunAdmission, StoreError>;
 
@@ -1861,7 +1745,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// membership under the successor lane. Selection and claims are atomic.
     async fn select_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         scope: &crate::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -1892,7 +1776,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// Fenced disposition for an empty run or a failure before physical commit.
     async fn settle_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         settlement: QueuedRunCommit,
     ) -> Result<QueuedRunAdmission, StoreError>;
 
@@ -1925,7 +1809,7 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
 
@@ -1946,7 +1830,7 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_ready_queued_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         policy: crate::QueuedWorkClaimPolicy,
@@ -1961,7 +1845,7 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_checkpoint_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
@@ -1992,7 +1876,7 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[crate::BatchId],
@@ -2162,7 +2046,6 @@ pub trait FleetFormatStore: Send + Sync {
 /// [`SessionCommitStore`] (atomic graph/head commits, reads, metadata, and the
 /// attachment write-ahead manifest), [`TurnInputStore`] (pending turn-input
 /// lifecycle), [`QueuedWorkStore`] (queued-work ingress and claiming),
-/// [`SessionExecutionLeaseStore`] (single-writer execution lane),
 /// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600),
 /// [`RootStore`] (logical roots' terminal evidence and input bindings, FIG-3600
 /// S7) and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
@@ -2182,7 +2065,6 @@ pub trait RuntimePersistence:
     FleetFormatStore
     + SessionCommitStore
     + TurnInputStore
-    + SessionExecutionLeaseStore
     + QueuedWorkStore
     + DriveEpochStore
     + RootStore
@@ -2194,7 +2076,6 @@ impl<T> RuntimePersistence for T where
     T: FleetFormatStore
         + SessionCommitStore
         + TurnInputStore
-        + SessionExecutionLeaseStore
         + QueuedWorkStore
         + DriveEpochStore
         + RootStore

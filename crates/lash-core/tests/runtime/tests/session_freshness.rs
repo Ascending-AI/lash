@@ -64,13 +64,19 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         .context_window_tokens(123_456)
         .build()
         .expect("changed model");
-    runtime
+    let command = runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
             model: Some(changed_model.clone()),
             ..Default::default()
         })
-        .await
-        .expect("change the live policy on the second frame");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "changed-frame-model",
+    )
+    .await;
     assert_eq!(runtime.state.effective_policy().model, changed_model);
 
     let resident_policy_before_refusal = runtime.state.effective_policy().clone();
@@ -219,13 +225,19 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
-    runtime
+    let command = runtime
         .add_prompt_contribution(lash_core::PromptContribution::guidance(
             "Settled host change",
             "COMMITTED THROUGH THE COMMANDED WRITE",
         ))
-        .await
-        .expect("apply prompt change through the commanded write");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "settled-prompt",
+    )
+    .await;
 
     let head_prompt = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
@@ -261,13 +273,19 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
     .await;
     runtime.invalidate_resident_session_state();
 
-    runtime
+    let command = runtime
         .add_prompt_contribution(lash_core::PromptContribution::guidance(
             "Live edit",
             "KEEP THE LIVE EDIT",
         ))
-        .await
-        .expect("apply prompt edit after resident reload");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "live-prompt-edit",
+    )
+    .await;
 
     assert_eq!(
         runtime.state.effective_policy().prompt,
@@ -295,13 +313,19 @@ async fn resident_refresh_adopts_the_durable_head_model() {
         .context_window_tokens(123_456)
         .build()
         .expect("settled model");
-    runtime
+    let command = runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
             model: Some(settled_model.clone()),
             ..Default::default()
         })
-        .await
-        .expect("apply model change through the commanded write");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "settled-model",
+    )
+    .await;
 
     let head_model = lash_core::ModelSpec::builder("advanced-durable-model")
         .context_window_tokens(65_536)
@@ -339,13 +363,19 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
         .build()
         .into_handle();
     serve_runtime_providers(&mut runtime, [settled_provider.clone()]);
-    runtime
+    let command = runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
             provider_id: Some(settled_provider.kind().to_string()),
             ..Default::default()
         })
-        .await
-        .expect("apply provider change through the commanded write");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "settled-provider",
+    )
+    .await;
 
     advance_session_head(store.as_ref(), &[], |state| {
         state.policy.provider_id = "advanced-durable-provider".to_string();
@@ -466,10 +496,14 @@ async fn protocol_turn_options_settle_through_the_commanded_write() {
     let (mut runtime, store) = freshness_runtime(&double).await;
     let options = commanded_turn_options("commanded-durable");
 
-    runtime
-        .set_protocol_turn_options(options.clone())
-        .await
-        .expect("settle protocol turn options durably");
+    let command = runtime.set_protocol_turn_options(options.clone()).await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "protocol-options",
+    )
+    .await;
 
     assert_eq!(
         runtime.protocol_turn_options(),
@@ -498,10 +532,14 @@ async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_he
     Box::pin(append_history(&mut runtime, 2)).await;
     let options = commanded_turn_options("survives-invalidation-reload");
 
-    runtime
-        .set_protocol_turn_options(options.clone())
-        .await
-        .expect("settle protocol turn options durably");
+    let command = runtime.set_protocol_turn_options(options.clone()).await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "reload-protocol-options",
+    )
+    .await;
     runtime.invalidate_resident_session_state();
     runtime
         .reload_invalidated_resident_session_state_for_session()
@@ -532,10 +570,16 @@ async fn protocol_turn_options_all_frames_setter_settles_durably() {
     let (mut runtime, store) = freshness_runtime(&double).await;
     let options = commanded_turn_options("all-frames-commanded");
 
-    runtime
+    let command = runtime
         .set_protocol_turn_options_all_frames(options.clone())
-        .await
-        .expect("settle all-frames protocol turn options durably");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "all-frames-options",
+    )
+    .await;
 
     assert_eq!(runtime.protocol_turn_options(), &options);
     let head = store
@@ -560,20 +604,32 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
         .context_window_tokens(123_456)
         .build()
         .expect("override model");
-    runtime
+    let command = runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
             model: Some(overridden_model),
             ..Default::default()
         })
-        .await
-        .expect("apply the live override through the commanded write");
-    runtime
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "model-override",
+    )
+    .await;
+    let command = runtime
         .add_prompt_contribution(lash_core::PromptContribution::guidance(
             "Live override",
             "SETTLED THROUGH THE COMMANDED WRITE",
         ))
-        .await
-        .expect("apply the live prompt override");
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "prompt-override",
+    )
+    .await;
 
     let head_model = lash_core::ModelSpec::builder("advanced-head-model")
         .context_window_tokens(65_536)
@@ -611,9 +667,8 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
 }
 
 /// FIG-1875 pin (b): a successful invalidation reload settles the freshness
-/// facts — `Valid` plus `graph_loaded_from_store` — so the turn that
-/// triggered it issues no second durable probe (`load_session_head_meta`)
-/// on top of the full reload it already performed.
+/// facts — `Valid` plus `graph_loaded_from_store`. The turn still reads one
+/// bounded head projection to verify the admitted drive epoch.
 #[tokio::test(flavor = "multi_thread")]
 async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
     let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
@@ -670,8 +725,8 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
     );
     assert_eq!(
         store.load_session_head_meta_count() - head_probes_before,
-        0,
-        "a successful reload settles freshness; no bounded head probe may follow it"
+        1,
+        "the drive verifies its epoch once after the full freshness reload"
     );
     assert_eq!(
         *runtime.resident_session.validity(),
@@ -700,12 +755,18 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
         .settle_reopen_seeded_config(&base.config)
         .await
         .unwrap();
-    runtime
+    let command = runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch::with_prompt(
             reopen_prompt("newer"),
         ))
-        .await
-        .unwrap();
+        .await;
+    crate::runtime_support::settle_pending_session_command(
+        &mut runtime,
+        &double,
+        command,
+        "newer-reopen-prompt",
+    )
+    .await;
     let newer = store.load_session_head_meta().await.unwrap().unwrap();
     runtime.state = retry;
     runtime

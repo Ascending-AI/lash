@@ -71,7 +71,7 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
     async fn claim_checkpoint_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        session_execution_lease: &crate::ClaimAuthority,
         owner: &crate::LeaseOwnerIdentity,
         turn_id: &TurnId,
         checkpoint: crate::CheckpointKind,

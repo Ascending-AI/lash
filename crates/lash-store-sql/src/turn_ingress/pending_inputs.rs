@@ -156,28 +156,22 @@ crate::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?3
                )";
 
-        /// Session `?1`'s undelivered inputs at `?2`, each with the expiry of
-        /// the session-execution lease its claim is pinned to, or NULL when no
-        /// live lease holds that claim.
-        ///
-        /// The lease lookup is a correlated subquery rather than a second read
-        /// because "is this claim live?" must be answered against the same
-        /// snapshot the row came from (ADR 0029).
+        /// Undelivered inputs with the epoch of a currently held claim.
         list_undelivered = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
                     claim_token, claim_session_lease_generation, run_spec_hash,
-                    (SELECT sel.lease_expires_at_ms
-                     FROM session_execution_leases sel
+                    (SELECT meta.drive_epoch
+                     FROM session_meta meta
                      WHERE pending_turn_inputs.claim_token IS NOT NULL
-                       AND sel.session_id = ?1
-                       AND sel.lease_token IS NOT NULL
-                       AND sel.lease_expires_at_ms > ?2
-                       AND sel.lease_fencing_token
+                       AND meta.session_id = ?1
+                       AND meta.drive_admission_id IS NOT NULL
+                       AND meta.drive_epoch
                            = pending_turn_inputs.claim_session_lease_generation)
-                        AS live_lease_expires_at_ms
+                        AS live_claim_drive_epoch
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -253,6 +247,7 @@ crate::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?8
+                    OR claim_owner_incarnation_id <> ?6
                )";
 
         /// Settle claimed input `?2` of session `?1` into `?3`, under claim

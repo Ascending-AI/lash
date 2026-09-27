@@ -68,13 +68,12 @@ mod runtime {
 
         mod assembler;
         mod core_contracts;
+        mod drive_claim_observability;
         mod kernel_door;
         mod language_runtime_value;
         mod projection;
         mod replay_origin;
         mod session_freshness;
-        mod session_lease_guard;
-        mod session_lease_observability;
         mod stream_accumulator;
         mod stream_evidence;
         mod tracing;

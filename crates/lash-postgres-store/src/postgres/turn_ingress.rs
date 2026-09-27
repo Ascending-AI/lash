@@ -14,7 +14,6 @@ use lash_store_sql::turn_ingress::{
     closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements, run_specs::RunSpecStatements,
-    session_execution_leases::SessionExecutionLeaseStatements,
     tool_intent_submissions::ToolIntentSubmissionStatements,
     turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
@@ -24,8 +23,6 @@ use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 // their own files too.
 #[path = "turn_ingress/family.rs"]
 mod family;
-#[path = "turn_ingress/leases.rs"]
-mod leases;
 #[path = "turn_ingress/pending_inputs.rs"]
 mod pending_inputs;
 #[path = "turn_ingress/queued_work.rs"]
@@ -36,7 +33,6 @@ mod turn_cancel;
 mod turn_parks;
 
 pub(crate) use family::TurnIngressPostgresStatements;
-pub(crate) use leases::SessionExecutionLeasePostgresStatements;
 pub(crate) use pending_inputs::PendingInputPostgresStatements;
 pub(crate) use queued_work::{QueuedBatchPostgresStatements, QueuedItemPostgresStatements};
 pub(crate) use turn_cancel::{
@@ -107,10 +103,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) queued_items: QueuedItemStatements,
     /// `queued_work_items`, PostgreSQL only.
     pub(crate) queued_items_postgres: QueuedItemPostgresStatements,
-    /// `session_execution_leases`, shared.
-    pub(crate) leases: SessionExecutionLeaseStatements,
-    /// `session_execution_leases`, PostgreSQL only.
-    pub(crate) leases_postgres: SessionExecutionLeasePostgresStatements,
     /// `turn_cancel_requests`, shared.
     pub(crate) cancel_requests: CancelRequestStatements,
     /// `turn_cancel_requests`, PostgreSQL only.
@@ -156,8 +148,6 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         queued_batches_postgres: QueuedBatchPostgresStatements::render(dialect),
         queued_items: QueuedItemStatements::render(dialect),
         queued_items_postgres: QueuedItemPostgresStatements::render(dialect),
-        leases: SessionExecutionLeaseStatements::render(dialect),
-        leases_postgres: SessionExecutionLeasePostgresStatements::render(dialect),
         cancel_requests: CancelRequestStatements::render(dialect),
         cancel_requests_postgres: CancelRequestPostgresStatements::render(dialect),
         cancel_affected_inputs_postgres: CancelAffectedInputPostgresStatements::render(dialect),

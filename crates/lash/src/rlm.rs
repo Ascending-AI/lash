@@ -170,36 +170,57 @@ impl RlmSessionExt for crate::LashSession {
         &self,
         requested: lash_rlm_types::RlmSessionConfig,
     ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigError> {
-        let writer = self.runtime.writer();
-        let mut runtime = writer.lock().await;
-        let mut resolved = None;
-        Box::pin(runtime.update_protocol_turn_options(|current| {
-            let recorded = lash_protocol_rlm::rlm_session_config(current).map_err(|err| {
-                RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
-                    err.to_string(),
-                )))
-            })?;
-            let next = lash_protocol_rlm::apply_rlm_session_config_if_unset(&recorded, &requested)
-                .map_err(RlmSessionConfigError::Conflict)?;
-            let mut options = lash_protocol_rlm::rlm_session_config_options(&next)
-                .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
-            if let Some(channel) = current.payload.get("channel") {
-                options.payload["channel"] = channel.clone();
+        for _ in 0..3 {
+            let writer = self.runtime.writer();
+            let mut runtime = writer.lock().await;
+            let mut resolved = None;
+            let update = Box::pin(runtime.update_protocol_turn_options(|current| {
+                let recorded = lash_protocol_rlm::rlm_session_config(current).map_err(|err| {
+                    RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
+                        err.to_string(),
+                    )))
+                })?;
+                let next =
+                    lash_protocol_rlm::apply_rlm_session_config_if_unset(&recorded, &requested)
+                        .map_err(RlmSessionConfigError::Conflict)?;
+                let mut options = lash_protocol_rlm::rlm_session_config_options(&next)
+                    .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
+                if let Some(channel) = current.payload.get("channel") {
+                    options.payload["channel"] = channel.clone();
+                }
+                resolved = Some(next);
+                Ok::<ProtocolTurnOptions, RlmSessionConfigError>(options)
+            }))
+            .await;
+            if !matches!(update, Err(SessionError::SessionCommandPending(_))) {
+                self.runtime.publish_from(&runtime);
             }
-            resolved = Some(next);
-            Ok::<ProtocolTurnOptions, RlmSessionConfigError>(options)
-        }))
-        .await
-        .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))??;
-        self.runtime.publish_from(&runtime);
-        #[expect(
-            clippy::expect_used,
-            reason = "the closure above assigns `resolved` on its only successful exit, \
-                      and every other exit already returned an error"
-        )]
-        let resolved =
-            resolved.expect("a successful protocol-options update resolves the RLM config");
-        Ok(resolved)
+            drop(runtime);
+            match update {
+                Ok(Ok(_)) => {
+                    return resolved.ok_or_else(|| {
+                        RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
+                            "RLM config update did not resolve its value".into(),
+                        )))
+                    });
+                }
+                Ok(Err(error)) => return Err(error),
+                Err(SessionError::SessionCommandPending(receipt)) => {
+                    self.admin()
+                        .await_command_drive(receipt)
+                        .await
+                        .map_err(RlmSessionConfigError::Session)?;
+                }
+                Err(error) => {
+                    return Err(RlmSessionConfigError::Session(EmbedError::Session(error)));
+                }
+            }
+        }
+        Err(RlmSessionConfigError::Session(EmbedError::Session(
+            SessionError::Protocol(
+                "RLM config kept enqueuing after its engine drive settled".into(),
+            ),
+        )))
     }
 }
 

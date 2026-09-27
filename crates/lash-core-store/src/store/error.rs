@@ -1,37 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
 use crate::{BatchId, InputId, NodeId};
-/// The returned renewal field that made a resident lease unsafe to replace.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SessionExecutionLeaseRenewalInstallMismatch {
-    Session,
-    OwnerIncarnation,
-    Executor,
-    LeaseToken,
-    FencingToken,
-    ExpiryRegressed,
-}
-
-impl SessionExecutionLeaseRenewalInstallMismatch {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Session => "session",
-            Self::OwnerIncarnation => "owner_incarnation",
-            Self::Executor => "executor",
-            Self::LeaseToken => "lease_token",
-            Self::FencingToken => "fencing_token",
-            Self::ExpiryRegressed => "expiry",
-        }
-    }
-}
-
-impl std::fmt::Display for SessionExecutionLeaseRenewalInstallMismatch {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.label())
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
@@ -286,10 +255,6 @@ pub enum StoreError {
         /// passes the operation storage key the conflicting retry reused.
         operation_key: String,
     },
-    #[error(
-        "runtime commit for session `{session_id}` cannot both borrow and release the session execution lease"
-    )]
-    RuntimeCommitLeaseAuthorityConflict { session_id: SessionId },
     /// One append operation id was reused for different semantic request content.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -682,21 +647,6 @@ pub enum StoreError {
     #[error("session execution lease for session `{session_id}` is missing or expired")]
     SessionExecutionLeaseExpired { session_id: SessionId },
     #[error(
-        "session execution lease renewal for session `{session_id}` was refused because owner or lease token is no longer current"
-    )]
-    SessionExecutionLeaseRenewalRefused { session_id: SessionId },
-    #[error(
-        "session execution lease renewal response for session `{session_id}` was refused because its {mismatch} field did not preserve the presented lease"
-    )]
-    SessionExecutionLeaseRenewalInstallRefused {
-        session_id: SessionId,
-        mismatch: SessionExecutionLeaseRenewalInstallMismatch,
-    },
-    #[error(
-        "session execution lease release for session `{session_id}` was refused because owner or lease token is no longer current"
-    )]
-    SessionExecutionLeaseReleaseRefused { session_id: SessionId },
-    #[error(
         "session head publication for session `{session_id}` on backend `{backend}` read its head revision outside the backend's single-writer transaction"
     )]
     UnfencedHeadPublication {
@@ -925,9 +875,6 @@ impl StoreError {
             Self::UnknownAttachment { .. } => "UnknownAttachment",
             Self::StaleWritePermit { .. } => "StaleWritePermit",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
-            Self::RuntimeCommitLeaseAuthorityConflict { .. } => {
-                "RuntimeCommitLeaseAuthorityConflict"
-            }
             Self::AppendOperationIdentityConflict { .. } => "AppendOperationIdentityConflict",
             Self::SemanticBoundaryIdentityConflict { .. } => "SemanticBoundaryIdentityConflict",
             Self::AppendReceiptRequestedNodeCountCorrupt { .. } => {
@@ -985,15 +932,6 @@ impl StoreError {
             Self::RunSpecMissing { .. } => "RunSpecMissing",
             Self::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
             Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
-            Self::SessionExecutionLeaseRenewalRefused { .. } => {
-                "SessionExecutionLeaseRenewalRefused"
-            }
-            Self::SessionExecutionLeaseRenewalInstallRefused { .. } => {
-                "SessionExecutionLeaseRenewalInstallRefused"
-            }
-            Self::SessionExecutionLeaseReleaseRefused { .. } => {
-                "SessionExecutionLeaseReleaseRefused"
-            }
             Self::UnfencedHeadPublication { .. } => "UnfencedHeadPublication",
             Self::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
             Self::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",

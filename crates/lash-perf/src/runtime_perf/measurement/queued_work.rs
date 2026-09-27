@@ -4,7 +4,6 @@ use lash_sansio::SessionId;
 
 const QUEUED_WORK_JOIN_BATCHES_PER_TURN: usize = 32;
 const QUEUED_WORK_SEED_OTHER_SESSION_BATCHES: usize = 64;
-pub(super) const QUEUED_WORK_CLAIM_TTL_MS: u64 = 30_000;
 const TURN_INPUT_INGRESS_ACTIVE_PER_TURN: usize = 32;
 const TURN_INPUT_INGRESS_ACCEPTED_PER_TURN: usize = 16;
 const TURN_INPUT_INGRESS_NEXT_PER_TURN: usize = 8;
@@ -60,17 +59,8 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 let mut phase_profile = BTreeMap::new();
 
                 let (lease, phase) =
-                    measure_runtime_perf_async_phase("queued_work.claim_session_lease", async {
-                        store
-                            .try_claim_session_execution_lease(
-                                &session_id,
-                                &owner,
-                                "run-once-queued-work-claim-stress-executor",
-                                QUEUED_WORK_CLAIM_TTL_MS,
-                            )
-                            .await?
-                            .acquired()
-                            .ok_or_else(|| anyhow::anyhow!("queued-work stress lease was busy"))
+                    measure_runtime_perf_async_phase("queued_work.seal_drive_epoch", async {
+                        seal_perf_claim(store.as_ref(), &session_id).await
                     })
                     .await?;
                 phase_profile.insert(phase.0, phase.1);
@@ -473,19 +463,8 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 let turn_id = lash_core::TurnId::from(format!("turn-input-ingress-{turn_index}"));
 
                 let (lease, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.claim_session_lease",
-                    async {
-                        store
-                            .try_claim_session_execution_lease(
-                                &session_id,
-                                &owner,
-                                "run-once-turn-input-ingress-interrupt-executor",
-                                QUEUED_WORK_CLAIM_TTL_MS,
-                            )
-                            .await?
-                            .acquired()
-                            .ok_or_else(|| anyhow::anyhow!("turn-input ingress lease was busy"))
-                    },
+                    "turn_input_ingress.seal_drive_epoch",
+                    async { seal_perf_claim(store.as_ref(), &session_id).await },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);

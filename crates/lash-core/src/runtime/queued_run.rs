@@ -22,20 +22,6 @@ impl<'a> QueuedEffectSource<'a> {
         }
     }
 
-    pub(crate) async fn acquire_lane(
-        &self,
-        lane: Arc<dyn crate::QueuedLaneProbe>,
-        cancel: CancellationToken,
-    ) -> Result<crate::QueuedLaneAcquisition, RuntimeError> {
-        match self {
-            Self::Host { host, .. } => host.acquire_queued_lane(lane, cancel).await,
-            Self::Controller { controller, .. } => {
-                controller.acquire_queued_lane(lane, cancel).await
-            }
-            Self::Scoped(scoped) => scoped.controller().acquire_queued_lane(lane, cancel).await,
-        }
-    }
-
     fn scoped(
         &self,
         scope: crate::ExecutionScope,

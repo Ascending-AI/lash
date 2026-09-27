@@ -564,6 +564,7 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_batches (
     claim_token text,
     claim_fencing_token bigint DEFAULT 0 NOT NULL,
     claim_session_lease_generation bigint DEFAULT 0 NOT NULL,
+    claim_owner_incarnation_id text,
     obligation_id text,
     obligation_state text,
     obligation_attempts integer DEFAULT 0 NOT NULL,
@@ -574,6 +575,7 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_batches (
     obligation_settled_at_ms bigint,
     CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((((claim_id IS NULL) AND (claim_token IS NULL)) OR ((claim_id IS NOT NULL) AND (claim_token IS NOT NULL)))),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK ((delivery_policy = ANY (ARRAY['earliest_safe_boundary'::text, 'after_current_turn_commit'::text]))),
+    CONSTRAINT ck_queued_work_batches_live_claim_owner CHECK (((claim_token IS NULL) OR (claim_session_lease_generation = 0) OR (claim_owner_incarnation_id IS NOT NULL))),
     CONSTRAINT ck_queued_work_batches_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_queued_work_batches_work_kind CHECK ((work_kind = ANY (ARRAY['turn'::text, 'control'::text])))
 );
@@ -642,24 +644,6 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_turn_commits (
 CREATE TABLE lash_durable_read_fixture.lash_schema_versions (
     component text NOT NULL,
     version integer NOT NULL
-);
-
-
---
--- Name: lash_session_execution_leases; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_session_execution_leases (
-    session_id text NOT NULL,
-    lease_owner_id text,
-    lease_owner_incarnation_id text,
-    lease_executor_id text,
-    lease_token text,
-    lease_fencing_token bigint DEFAULT 0 NOT NULL,
-    lease_claimed_at_ms bigint DEFAULT 0 NOT NULL,
-    lease_term_ms bigint DEFAULT 0 NOT NULL,
-    lease_expires_at_ms bigint DEFAULT 0 NOT NULL,
-    CONSTRAINT ck_session_execution_leases_identity_all_or_none CHECK ((((lease_owner_id IS NULL) AND (lease_owner_incarnation_id IS NULL) AND (lease_executor_id IS NULL) AND (lease_token IS NULL)) OR ((lease_owner_id IS NOT NULL) AND (lease_owner_incarnation_id IS NOT NULL) AND (lease_executor_id IS NOT NULL) AND (lease_token IS NOT NULL))))
 );
 
 
@@ -1299,7 +1283,7 @@ INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('p_0000000000007000
 -- Data for Name: lash_queued_work_batches; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48', 'durable-read-fixture', 'process:p_69d943393ff87a56a6f44a7f58b2d465:event:1:wake', 'earliest_safe_boundary', 'turn', '{}', 'lash.process_wake', 1700000000000, NULL, NULL, 0, 0, 'ingress:qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48', 'durable-read-fixture', 'process:p_69d943393ff87a56a6f44a7f58b2d465:event:1:wake', 'earliest_safe_boundary', 'turn', '{}', 'lash.process_wake', 1700000000000, NULL, NULL, 0, 0, NULL, 'ingress:qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1340,13 +1324,6 @@ INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgre
 
 
 --
--- Data for Name: lash_session_execution_leases; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('durable-read-fixture', 'durable-read-session-owner', 'durable-read-session-incarnation', 'durable-read-retained-executor', 'durable-read-retained-session-lease', 2, 1700000000000, 100, 1700000000100);
-
-
---
 -- Data for Name: lash_session_ingress_sequence; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1357,7 +1334,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_ingress_sequence VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 2, 'durable-read-retained-admission', 'durable-read-retained-admission', NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1859,14 +1836,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_turn_commits
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_schema_versions
     ADD CONSTRAINT lash_schema_versions_pkey PRIMARY KEY (component);
-
-
---
--- Name: lash_session_execution_leases lash_session_execution_leases_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_execution_leases
-    ADD CONSTRAINT lash_session_execution_leases_pkey PRIMARY KEY (session_id);
 
 
 --
@@ -2504,6 +2473,13 @@ CREATE UNIQUE INDEX idx_lash_session_roots_obligation_id ON lash_durable_read_fi
 --
 
 CREATE INDEX idx_lash_session_roots_obligation_stalled ON lash_durable_read_fixture.lash_session_roots USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
+
+
+--
+-- Name: idx_lash_session_roots_open; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_roots_open ON lash_durable_read_fixture.lash_session_roots USING btree (session_id, root) WHERE (terminal_kind IS NULL);
 
 
 --

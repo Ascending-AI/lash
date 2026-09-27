@@ -12,17 +12,15 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    AdmissionId, CheckpointKind, DriveEpochSeal, DriveEpochStore, GcReport, GraphAppend,
-    LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceResult,
+    AdmissionId, CheckpointKind, ClaimAuthority, DriveEpochSeal, DriveEpochStore, GcReport,
+    GraphAppend, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceResult,
     OperationId, OrphanedTurnInputScope, PendingFollowOn, PendingTurnInputBatch,
     PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
     QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RootStore, RootTerminal,
     RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SelectedQueuedWorkClaimOutcome, SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta,
+    SelectedQueuedWorkClaimOutcome, SessionCheckpoint, SessionCommitStore, SessionHeadMeta,
     SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError, StoreMaintenance,
     StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
@@ -66,7 +64,7 @@ impl SessionCommitStore for FacadeStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        _lease: &SessionExecutionLeaseAuthority,
+        _lease: &ClaimAuthority,
         follow_on_turn_id: &TurnId,
     ) -> Result<PendingFollowOn, StoreError> {
         Err(StoreError::FollowOnNotPending {
@@ -127,65 +125,6 @@ impl SessionCommitStore for FacadeStore {
     }
 }
 
-#[async_trait]
-impl SessionExecutionLeaseStore for FacadeStore {
-    async fn try_claim_session_execution_lease_with_token(
-        &self,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        executor_id: &str,
-        claim_nonce: &LeaseClaimNonce,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
-                session_id: session_id.clone(),
-                owner: owner.clone(),
-                executor_id: executor_id.to_string(),
-                lease_token: claim_nonce.as_str().to_string(),
-                fencing_token: 1,
-                claimed_at_epoch_ms: 0,
-                lease_term_ms: lease_ttl_ms,
-                expires_at_epoch_ms: lease_ttl_ms,
-            }),
-        ))
-    }
-
-    async fn renew_session_execution_lease(
-        &self,
-        fence: &SessionExecutionLeaseAuthority,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLease, StoreError> {
-        Ok(SessionExecutionLease {
-            session_id: fence.session_id.clone(),
-            owner: fence.owner.clone(),
-            executor_id: fence.executor_id.clone(),
-            lease_token: fence.lease_token.clone(),
-            fencing_token: fence.fencing_token,
-            claimed_at_epoch_ms: 0,
-            lease_term_ms: lease_ttl_ms,
-            expires_at_epoch_ms: lease_ttl_ms,
-        })
-    }
-
-    async fn release_session_execution_lease(
-        &self,
-        _completion: &SessionExecutionLeaseAuthority,
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn get_session_execution_lease(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<lash::persistence::SessionExecutionLeaseObservation, StoreError> {
-        Ok(lash::persistence::SessionExecutionLeaseObservation {
-            observed_at_epoch_ms: 0,
-            lease: None,
-        })
-    }
-}
-
 // Compile-only store: these segments exist to prove every capability trait
 // (and its signature vocabulary) is nameable through the facade.
 #[async_trait]
@@ -193,7 +132,7 @@ impl TurnInputStore for FacadeStore {
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _binding_id: &str,
         _admitted_scope: &lash::runtime::ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -202,7 +141,7 @@ impl TurnInputStore for FacadeStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _authorization: &lash::TurnCancelClosureAuthorization,
     ) -> Result<lash::TurnCancelClosureAuthorizationOutcome, StoreError> {
         unreachable!("compile-only facade store")
@@ -211,7 +150,7 @@ impl TurnInputStore for FacadeStore {
     async fn pending_turn_cancel_closures(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _binding_id: &str,
         _admitted_scope: &lash::runtime::ExecutionScope,
     ) -> Result<Vec<lash::TurnCancelClosureAuthorization>, StoreError> {
@@ -255,7 +194,7 @@ impl TurnInputStore for FacadeStore {
     async fn claim_active_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _owner: &LeaseOwnerIdentity,
         _turn_id: &TurnId,
         _checkpoint: CheckpointKind,
@@ -267,7 +206,7 @@ impl TurnInputStore for FacadeStore {
     async fn claim_next_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _owner: &LeaseOwnerIdentity,
         _max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -281,7 +220,7 @@ impl TurnInputStore for FacadeStore {
     async fn orphaned_active_turn_ids(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _scope: OrphanedTurnInputScope<'_>,
     ) -> Result<Vec<TurnId>, StoreError> {
         Ok(Vec::new())
@@ -290,7 +229,7 @@ impl TurnInputStore for FacadeStore {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _turn_id: &TurnId,
         _observed: &lash::TurnCancelIntentSnapshot,
         _settlement: Option<&lash::TurnCancelClosureSettlement>,
@@ -356,7 +295,7 @@ impl RootStore for FacadeStore {
 impl QueuedWorkStore for FacadeStore {
     async fn select_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _scope: &lash_core::ExecutionScope,
         _owner: &lash_core::LeaseOwnerIdentity,
         _max_inputs: usize,
@@ -381,14 +320,14 @@ impl QueuedWorkStore for FacadeStore {
     }
     async fn settle_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _settlement: lash_core::store::QueuedRunCommit,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         unreachable!("fixture does not serve queued runs")
     }
     async fn begin_or_resume_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _request: lash_core::store::BeginQueuedRun,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         unreachable!("FacadeStore does not serve queued runs")
@@ -404,7 +343,7 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_leading_ready_session_command(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         Ok(None)
@@ -413,7 +352,7 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_ready_queued_work(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
         _policy: QueuedWorkClaimPolicy,
@@ -426,7 +365,7 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_checkpoint_work(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _owner: &LeaseOwnerIdentity,
         _turn_id: &TurnId,
         _checkpoint: CheckpointKind,
@@ -439,7 +378,7 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _session_execution_lease: &ClaimAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
         _batch_ids: &[BatchId],
@@ -523,7 +462,6 @@ fn persistence_types_are_nameable(
         drive_fence: None,
         root_terminal: None,
         park_root: None,
-        release_session_execution_lease: None,
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         execution_config: None,
         current_frame_node_id: None,

@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::store::{BeginQueuedRun, QueuedRunRequest};
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 
 /// A continuation owns its active-turn member across lease generations.
 #[expect(
@@ -17,7 +18,7 @@ pub async fn queued_run_active_turn_member_reclaims_after_lane_rotation(
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "first").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "first").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -83,11 +84,29 @@ pub async fn queued_run_active_turn_member_reclaims_after_lane_rotation(
         },
     }));
     store.commit_runtime_state(advance).await.unwrap();
+    let mut restarted = lease.authority();
+    restarted.owner =
+        crate::LeaseOwnerIdentity::opaque(lease.owner.owner_id.clone(), "replacement-incarnation");
+    let same_epoch_replay = store
+        .select_queued_run(
+            &restarted,
+            &admission.scope,
+            &restarted.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .expect("a restarted executor reclaims a queued run member in the same drive epoch");
+    assert_eq!(
+        same_epoch_replay.inputs[0].inputs[0].input_id,
+        input.input_id
+    );
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .unwrap();
-    let successor = claim_session_execution_lease_for_test(&store, &session_id, "successor").await;
+    let successor = seal_claim_authority_for_test(&store, &session_id, "successor").await;
     let replay = store
         .select_queued_run(
             &successor.authority(),
@@ -118,7 +137,7 @@ pub async fn queued_run_repaired_checkpoint_input_remains_deferred_after_settle(
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "repair").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "repair").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -277,7 +296,7 @@ async fn queued_run_advance_repair_case(store: Arc<dyn RuntimePersistence>, host
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "repair").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "repair").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -534,8 +553,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
         ))
         .await
         .expect("enqueue head-blocking command work");
-    let lease =
-        claim_session_execution_lease_for_test(&store, &session_id, "refused-selection").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "refused-selection").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -578,11 +596,10 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
         "a refused selection must be settleable instead of leaving an unselected pending run"
     );
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .expect("release the first lane after the frozen empty selection");
-    let successor =
-        claim_session_execution_lease_for_test(&store, &session_id, "refused-successor").await;
+    let successor = seal_claim_authority_for_test(&store, &session_id, "refused-successor").await;
     let resumed = store
         .select_queued_run(
             &successor.authority(),
@@ -734,8 +751,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let selected_lease =
-        claim_session_execution_lease_for_test(&store, &selected_session, "selected-retention")
-            .await;
+        seal_claim_authority_for_test(&store, &selected_session, "selected-retention").await;
     let selected_request = BeginQueuedRun {
         session_id: selected_session.clone(),
         identity: None,
@@ -859,7 +875,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
         session_id: input_session.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let first = claim_session_execution_lease_for_test(&store, &input_session, "input-first").await;
+    let first = seal_claim_authority_for_test(&store, &input_session, "input-first").await;
     let admission = store
         .begin_or_resume_queued_run(
             &first.authority(),
@@ -892,7 +908,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
         Some(vec![QueuedRunMember::Input(input.input_id.clone())])
     );
     store
-        .release_session_execution_lease(&first.authority())
+        .supersede_claim_epoch_for_test(&first.authority())
         .await
         .expect("old lane expires");
     let cancelled = store
@@ -924,7 +940,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
         [crate::PendingTurnInputCancelOutcome::AlreadyClaimed { input: held, .. }]
             if held.input_id == input.input_id
     ));
-    let next = claim_session_execution_lease_for_test(&store, &input_session, "input-next").await;
+    let next = seal_claim_authority_for_test(&store, &input_session, "input-next").await;
     let resumed = store
         .select_queued_run(
             &next.authority(),
@@ -955,7 +971,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
         session_id: batch_session.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let first = claim_session_execution_lease_for_test(&store, &batch_session, "batch-first").await;
+    let first = seal_claim_authority_for_test(&store, &batch_session, "batch-first").await;
     let admission = store
         .begin_or_resume_queued_run(
             &first.authority(),
@@ -988,7 +1004,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
         Some(vec![QueuedRunMember::Batch(batch.batch_id.clone())])
     );
     store
-        .release_session_execution_lease(&first.authority())
+        .supersede_claim_epoch_for_test(&first.authority())
         .await
         .expect("old batch lane expires");
     assert!(
@@ -998,7 +1014,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
             .expect("host batch cancellation returns a refusal")
             .is_none()
     );
-    let next = claim_session_execution_lease_for_test(&store, &batch_session, "batch-next").await;
+    let next = seal_claim_authority_for_test(&store, &batch_session, "batch-next").await;
     let resumed = store
         .select_queued_run(
             &next.authority(),
@@ -1040,7 +1056,7 @@ pub async fn queued_run_identity_survives_lane_rotation(store: Arc<dyn RuntimePe
         generation: None,
         admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
-    let first_fence = claim_session_execution_lease_for_test(&store, &session_id, "first")
+    let first_fence = seal_claim_authority_for_test(&store, &session_id, "first")
         .await
         .authority();
     let admitted = store
@@ -1048,10 +1064,10 @@ pub async fn queued_run_identity_survives_lane_rotation(store: Arc<dyn RuntimePe
         .await
         .expect("admit run");
     store
-        .release_session_execution_lease(&first_fence)
+        .supersede_claim_epoch_for_test(&first_fence)
         .await
         .expect("release physical owner");
-    let next_fence = claim_session_execution_lease_for_test(&store, &session_id, "successor")
+    let next_fence = seal_claim_authority_for_test(&store, &session_id, "successor")
         .await
         .authority();
     let resumed = store
@@ -1101,7 +1117,7 @@ pub async fn queued_run_selection_excludes_later_input_after_takeover(
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "first"))
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "first").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "first").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -1166,10 +1182,10 @@ pub async fn queued_run_selection_excludes_later_input_after_takeover(
         .await
         .unwrap();
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .unwrap();
-    let successor = claim_session_execution_lease_for_test(&store, &session_id, "second").await;
+    let successor = seal_claim_authority_for_test(&store, &session_id, "second").await;
     let resumed = store
         .select_queued_run(
             &successor.authority(),
@@ -1209,7 +1225,7 @@ pub async fn queued_run_commit_receipt_precedes_revisions_but_not_lane_fence(
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "receipt").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "receipt").await;
     let request = BeginQueuedRun {
         session_id: session_id.clone(),
         identity: Some(crate::ExecutionScope::queue_drain(&session_id, "explicit")),
@@ -1269,10 +1285,10 @@ pub async fn queued_run_commit_receipt_precedes_revisions_but_not_lane_fence(
         "receipt cannot accept conflicting terminal evidence"
     );
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .unwrap();
-    let successor = claim_session_execution_lease_for_test(&store, &session_id, "successor").await;
+    let successor = seal_claim_authority_for_test(&store, &session_id, "successor").await;
     assert!(
         store.commit_runtime_state(commit.clone()).await.is_err(),
         "receipt cannot bypass a stale lane fence"
@@ -1313,7 +1329,7 @@ pub async fn queued_run_terminal_disposition_preserves_unassigned_work(
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "assigned"))
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "dispose").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "dispose").await;
     let request = BeginQueuedRun {
         session_id: session_id.clone(),
         identity: Some(crate::ExecutionScope::queue_drain(&session_id, "disposed")),
@@ -1483,7 +1499,7 @@ pub async fn queued_run_cancelled_follow_on_receipt_retains_withheld_members(
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "cancelled").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "cancelled").await;
     let request = BeginQueuedRun {
         session_id: session_id.clone(),
         identity: Some(crate::ExecutionScope::queue_drain(&session_id, "cancelled")),
@@ -1655,7 +1671,7 @@ pub async fn queued_run_frozen_batches_survive_takeover_and_changed_limits(
         ))
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "first").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "first").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -1696,10 +1712,10 @@ pub async fn queued_run_frozen_batches_survive_takeover_and_changed_limits(
         .await
         .unwrap();
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .unwrap();
-    let successor = claim_session_execution_lease_for_test(&store, &session_id, "second").await;
+    let successor = seal_claim_authority_for_test(&store, &session_id, "second").await;
     let selected = store
         .select_queued_run(
             &successor.authority(),
@@ -1745,7 +1761,7 @@ pub async fn queued_run_continuation_advances_and_retains_receipts(
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "initial"))
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "continuation").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "continuation").await;
     let request = BeginQueuedRun {
         session_id: session_id.clone(),
         identity: Some(crate::ExecutionScope::queue_drain(&session_id, "original")),
@@ -1821,10 +1837,10 @@ pub async fn queued_run_continuation_advances_and_retains_receipts(
         "admission progress publishes atomically with the physical commit"
     );
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .unwrap();
-    let successor = claim_session_execution_lease_for_test(&store, &session_id, "successor").await;
+    let successor = seal_claim_authority_for_test(&store, &session_id, "successor").await;
     let selected = store
         .select_queued_run(
             &successor.authority(),
@@ -1920,7 +1936,7 @@ pub async fn queued_run_exact_selection_never_commits_a_partial_claim(
         ))
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "exact").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "exact").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -1985,10 +2001,10 @@ pub async fn queued_run_exact_selection_never_commits_a_partial_claim(
     for takeover in [false, true] {
         let retry_lease = if takeover {
             store
-                .release_session_execution_lease(&lease.authority())
+                .supersede_claim_epoch_for_test(&lease.authority())
                 .await
                 .unwrap();
-            claim_session_execution_lease_for_test(&store, &session_id, "exact-successor").await
+            seal_claim_authority_for_test(&store, &session_id, "exact-successor").await
         } else {
             lease.clone()
         };
@@ -2065,7 +2081,7 @@ pub async fn queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "provenance").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "provenance").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),

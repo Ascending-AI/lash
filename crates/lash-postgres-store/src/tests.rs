@@ -10,6 +10,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use crate::runtime_persistence::complete_turn_input_claims_tx;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{Layer, Registry};
 
@@ -709,21 +711,21 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         .expect("analyze selected-drain plan fixture");
 
     let store = storage.session_store(&session_id);
-    let owner = LeaseOwnerIdentity::opaque(
-        "selected-plan-owner",
-        format!("selected-plan-owner:{nonce}"),
-    );
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &session_id,
-            &owner,
+            &LeaseOwnerIdentity::opaque(
+                "selected-plan-owner",
+                format!("selected-plan-owner:{nonce}"),
+            ),
             "schema-congruence-test-executor",
             60_000,
         )
         .await
-        .expect("claim selected-drain plan lease")
+        .expect("seal selected-drain plan drive")
         .acquired()
-        .expect("selected-drain plan lane is free");
+        .expect("selected-drain plan drive sealed");
+    let owner = lease.owner.clone();
     sqlx::query(
         "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
     )
@@ -771,10 +773,6 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         .abandon_queued_work_claim(&claim)
         .await
         .expect("abandon selected-drain plan claim");
-    store
-        .release_session_execution_lease(&lease.completion())
-        .await
-        .expect("release selected-drain plan lease");
     sqlx::query("DELETE FROM lash_queued_work_batches WHERE session_id = $1")
         .bind(session_id.as_str())
         .execute(storage.pool())
@@ -1629,7 +1627,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
             "txn-clock-ms"
         }
         q if q.starts_with("SELECT pg_advisory_xact_lock(") => "advisory-lock",
-        q if q.contains("FROM lash_session_execution_leases") => "session-lease-lock",
+        q if q.starts_with("SELECT drive_epoch, drive_admission_id") => "drive-epoch-read",
         q if q.contains("FROM lash_pending_turn_inputs") => "pending-inputs-lock",
         q if q.starts_with("UPDATE lash_pending_turn_inputs") => "pending-input-claim-update",
         // pg_stat_statements stores this statement's own text when the row is
@@ -1717,16 +1715,21 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         ))
         .await
         .expect("admit statement-pin session");
-    let owner = LeaseOwnerIdentity::opaque(
-        "statement-pin-owner",
-        format!("statement-pin-owner:{nonce}"),
-    );
     let lease = store
-        .try_claim_session_execution_lease(&session_id, &owner, "statement-pin-executor", 60_000)
+        .seal_claim_epoch_for_test(
+            &session_id,
+            &LeaseOwnerIdentity::opaque(
+                "statement-pin-owner",
+                format!("statement-pin-owner:{nonce}"),
+            ),
+            "statement-pin-executor",
+            60_000,
+        )
         .await
-        .expect("claim statement-pin session lease")
+        .expect("seal statement-pin session drive")
         .acquired()
-        .expect("statement-pin lane is free");
+        .expect("statement-pin drive sealed");
+    let owner = lease.owner.clone();
     store
         .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
             &session_id,
@@ -1769,18 +1772,16 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         .expect("statement-pin input is claimable");
     assert_eq!(claim.inputs.len(), 1);
     let claim_statements = postgres_statement_calls_by_name(storage.pool()).await;
-    // FIG-3412: production claim is 8 round trips, one of them the pending
-    // follow-on gate (ADR 0101 §3, FIG-3542); the testing build adds two
-    // `current_setting('lash.test_lease_epoch_ms')` probes inside the same
-    // transaction.
+    // The claim reads the sealed drive epoch in its transaction. The pending
+    // follow-on gate remains a separate read (ADR 0101 §3).
     assert_eq!(
         claim_statements,
         std::collections::BTreeMap::from([
             ("begin", 1),
             ("commit", 1),
-            ("testing-lease-epoch-probe", 2),
-            ("txn-clock-ms", 2),
-            ("session-lease-lock", 1),
+            ("testing-lease-epoch-probe", 1),
+            ("txn-clock-ms", 1),
+            ("drive-epoch-read", 1),
             ("pending-inputs-lock", 1),
             ("pending-input-claim-update", 1),
             ("pending-follow-on-read", 1),

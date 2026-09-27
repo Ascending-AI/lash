@@ -366,7 +366,7 @@ impl TurnBoundary {
         session: Option<&mut Session>,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         claim_settlement: TurnClaimSettlement,
-        current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
+        current_session_lease_fence: Option<crate::ClaimAuthority>,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
         queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
@@ -375,7 +375,7 @@ impl TurnBoundary {
         turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
         turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-        session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
+        session_execution_lease_completion: Option<crate::ClaimAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
         // Record the outcome before capturing execution state: a second author
         // that conflicts refuses here, with nothing captured and nothing
@@ -693,7 +693,7 @@ impl TurnBoundary {
         failure_evidence: &[crate::TurnFailureEvidence],
         operation: crate::OperationId,
         mut claim_settlement: TurnClaimSettlement,
-        current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
+        current_session_lease_fence: Option<crate::ClaimAuthority>,
         queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
@@ -702,7 +702,7 @@ impl TurnBoundary {
         _turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
-        session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
+        _session_execution_lease_completion: Option<crate::ClaimAuthority>,
         drive_commit: Option<DriveCommit>,
         park_root: Option<TurnId>,
     ) -> FinalCommitResult {
@@ -740,14 +740,6 @@ impl TurnBoundary {
         let current_session_lease_generation = current_session_lease_fence
             .as_ref()
             .map(|fence| fence.fencing_token);
-        // ADR 0029: final settlement is authorized by head CAS and durable
-        // cancellation facts, even after expiry or takeover. A retained lease
-        // is not a borrowed append-lane fence. Its release remains ancillary.
-        if queued_run.is_none()
-            && let Some(completion) = session_execution_lease_completion
-        {
-            commit = commit.releasing_session_execution_lease(completion);
-        }
         commit.completed_queue_claims = claim_settlement.queued.completions.clone();
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
         commit.undelivered_turn_input_claims =

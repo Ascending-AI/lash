@@ -1,6 +1,7 @@
 use super::*;
 use crate::testing::TestClock;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
@@ -526,7 +527,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         "wake-authority-owner:incarnation",
     );
     let authority_lease = authority_target
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(authority_target_session_id),
             &authority_owner,
             "wake-authority-target-executor",
@@ -564,7 +565,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         )
     );
     authority_target
-        .release_session_execution_lease(&authority_lease.completion())
+        .supersede_claim_epoch_for_test(&authority_lease.completion())
         .await
         .expect("release authority target execution lease");
     let after = serde_json::to_vec(
@@ -1334,12 +1335,7 @@ async fn settle_queued_batch(
         format!("{batch_id}:incarnation"),
     );
     let lease = target
-        .try_claim_session_execution_lease(
-            session_id,
-            &owner,
-            "settle-queued-batch-executor",
-            60_000,
-        )
+        .seal_claim_epoch_for_test(session_id, &owner, "settle-queued-batch-executor", 60_000)
         .await
         .expect("claim target session lease")
         .acquired()
@@ -1377,11 +1373,7 @@ async fn settle_queued_batch(
     ))
     .expect("stamp unique wake-settlement operation");
     target
-        .commit_runtime_state(
-            commit
-                .releasing_session_execution_lease(lease.completion())
-                .completing_queue_claim(claim.completion()),
-        )
+        .commit_runtime_state(commit.completing_queue_claim(claim.completion()))
         .await
         .expect("settle target wake batch");
 }

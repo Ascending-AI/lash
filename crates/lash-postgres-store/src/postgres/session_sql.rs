@@ -951,11 +951,6 @@ lash_store_sql::statements! {
              WHERE session_id = ANY(?1)
              RETURNING session_id
          ),
-         deleted_session_execution_leases AS (
-             DELETE FROM session_execution_leases
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
          deleted_fork_lineage AS (
              DELETE FROM fork_lineage
              WHERE session_id = ANY(?1)
@@ -995,7 +990,6 @@ lash_store_sql::statements! {
               + (SELECT count(*) FROM deleted_session_ingress_sequence)
               + (SELECT count(*) FROM deleted_turn_cancel_closures)
               + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
-              + (SELECT count(*) FROM deleted_session_execution_leases)
               + (SELECT count(*) FROM deleted_fork_lineage)
               + (SELECT count(*) FROM deleted_session_meta)
               + (SELECT count(*) FROM deleted_session_roots)

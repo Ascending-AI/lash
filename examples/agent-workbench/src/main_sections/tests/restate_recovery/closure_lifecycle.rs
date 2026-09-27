@@ -13,7 +13,7 @@ async fn authorize_restate_completion_closure(
     physical_scope: &lash::runtime::ExecutionScope,
 ) -> (
     Arc<dyn lash::persistence::RuntimePersistence>,
-    lash::persistence::SessionExecutionLease,
+    lash::persistence::ClaimAuthority,
     lash::TurnCancelClosureAuthorization,
 ) {
     use lash::persistence::SessionStoreFactory as _;
@@ -29,20 +29,12 @@ async fn authorize_restate_completion_closure(
         })
         .await
         .expect("create live Restate catalog session");
-    let lease = store
-        .try_claim_session_execution_lease(
-            &address.session_id,
-            &lash::persistence::LeaseOwnerIdentity::opaque(
-                session,
-                format!("{session}:incarnation"),
-            ),
-            &format!("{session}:executor"),
-            60_000,
-        )
-        .await
-        .expect("claim live Restate closure lane")
-        .acquired()
-        .expect("live Restate closure lane is free");
+    let lease = lash::testing::store_fixtures::seal_claim_authority_for_test(
+        &store,
+        &address.session_id,
+        session,
+    )
+    .await;
     let scoped = host
         .scoped(live_restate_admission(physical_scope))
         .expect("scope live Restate effect owner");
@@ -102,7 +94,7 @@ async fn settle_and_release_restate_completion_closure(
     factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     scope: &lash::runtime::ExecutionScope,
     store: Arc<dyn lash::persistence::RuntimePersistence>,
-    lease: lash::persistence::SessionExecutionLease,
+    lease: lash::persistence::ClaimAuthority,
     authorization: lash::TurnCancelClosureAuthorization,
 ) {
     use lash::persistence::SessionStoreFactory as _;
@@ -564,17 +556,12 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 })
                 .await
                 .expect("create late live Restate catalog session");
-            let late_lease = late_store
-                .try_claim_session_execution_lease(
-                    &late_address.session_id,
-                    &lash::persistence::LeaseOwnerIdentity::opaque("late", "late:incarnation"),
-                    "late:executor",
-                    60_000,
-                )
-                .await
-                .expect("claim late live Restate lane")
-                .acquired()
-                .expect("late live Restate lane is free");
+            let late_lease = lash::testing::store_fixtures::seal_claim_authority_for_test(
+                &late_store,
+                &late_address.session_id,
+                "late",
+            )
+            .await;
             let late_scoped = host
                 .scoped(live_restate_admission(&late_scope))
                 .expect("scope late owner");

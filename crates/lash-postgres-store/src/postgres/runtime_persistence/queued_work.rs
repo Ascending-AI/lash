@@ -4,14 +4,14 @@ use super::*;
 impl QueuedWorkStore for PostgresSessionStore {
     async fn begin_or_resume_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         request: lash_core_execution::store::BeginQueuedRun,
     ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
         self.begin_run(fence, request).await
     }
     async fn select_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         scope: &lash_core_execution::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -35,7 +35,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     }
     async fn settle_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         settlement: lash_core_execution::store::QueuedRunCommit,
     ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
         self.settle_run(fence, settlement).await
@@ -81,7 +81,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -110,6 +110,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 &mut tx,
                 session_id,
                 generation,
+                owner,
                 QueuedWorkClaimBoundary::Idle,
                 MAX_SESSION_COMMAND_BATCHES_PER_CLAIM,
             )
@@ -147,7 +148,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     async fn claim_ready_queued_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: QueuedWorkClaimPolicy,
@@ -182,6 +183,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 &mut tx,
                 session_id,
                 generation,
+                owner,
                 boundary,
                 policy.max_rows,
             )
@@ -196,7 +198,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 // every other one names.
                 let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
                     postgres_refusal_for_empty_scan(
-                        &mut tx, session_id, generation, boundary, &policy,
+                        &mut tx, session_id, generation, owner, boundary, &policy,
                     )
                     .await?
                     .into_refusal()
@@ -240,7 +242,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core_execution::TurnId,
         checkpoint: lash_core_execution::CheckpointKind,
@@ -341,7 +343,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[lash_core_execution::BatchId],
@@ -482,12 +484,10 @@ impl QueuedWorkStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let sql = crate::turn_ingress::turn_ingress_sql();
         let row = sqlx::query(sql.queued_batches_postgres.select_cancelable.sql())
             .bind(session_id.as_str())
             .bind(batch_id)
-            .bind(now as i64)
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -594,7 +594,6 @@ impl QueuedWorkStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let (command_at, command_seq, input_at, input_seq): (
             Option<i64>,
             Option<i64>,
@@ -607,7 +606,6 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .bind(now as i64)
         .bind(QueuedWorkKind::Control.as_str())
         .fetch_one(&mut *tx)
         .await
@@ -648,7 +646,6 @@ impl QueuedWorkStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
@@ -656,7 +653,6 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .bind(now as i64)
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;

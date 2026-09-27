@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
 
 fn new_arrival_wake() -> lash_core_execution::ProcessWakeDelivery {
     let process_id = || lash_core_execution::ProcessId::fixture("refusal-probe-process");
@@ -41,11 +42,10 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         .await
         .unwrap();
     let store = storage.session_store("refusal-probe");
-    let owner = LeaseOwnerIdentity::opaque("probe", "probe-incarnation");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from("refusal-probe"),
-            &owner,
+            &LeaseOwnerIdentity::opaque("probe", "probe-incarnation"),
             "probe-executor",
             60_000,
         )
@@ -53,20 +53,18 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         .unwrap()
         .acquired()
         .unwrap();
+    let owner = lease.owner.clone();
     let mut tx = storage.pool().begin().await.unwrap();
     ensure_session_execution_lease_tx(&mut tx, &SessionId::from("refusal-probe"), &lease.fence())
         .await
         .unwrap();
-    // The candidate scan binds its ready cutoff now (FIG-3383), from the
-    // transaction timestamp the claim path samples once per transaction.
-    let now = postgres_transaction_epoch_ms(&mut tx).await.unwrap();
     let rows = sqlx::query(postgres_queued_work_claim_candidates_sql(
         QueuedWorkClaimBoundary::Idle,
     ))
     .bind("refusal-probe")
-    .bind(now as i64)
     .bind(sql_session_lease_generation(lease.fencing_token).unwrap())
     .bind(10_i64)
+    .bind(&owner.incarnation_id)
     .fetch_all(&mut *tx)
     .await
     .unwrap();
@@ -84,6 +82,7 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         &mut tx,
         &SessionId::from("refusal-probe"),
         lease.fencing_token,
+        &owner,
         QueuedWorkClaimBoundary::Idle,
         &lash_core_execution::testing::queued_work_claim_policy(10),
     )

@@ -22,16 +22,16 @@ use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary};
 use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_core::{
     AttachmentId, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy, EffectAddress,
-    ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint, LeaseClaimNonce,
-    LeaseOwnerIdentity, PendingTurnInputDraft, PluginNamespaceState, PluginState,
-    ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority,
-    QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeTurnCommitStamp,
-    SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
-    ToolState, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress,
-    TurnInputStateKind,
+    ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity,
+    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessEventLog as _,
+    ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit,
+    RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
+    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput,
+    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -935,16 +935,6 @@ type AttachmentRow = (
     Option<String>,
     Option<String>,
 );
-type LeaseRow = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    i64,
-    i64,
-    i64,
-    i64,
-);
 type QueuedWorkBatchRow = (
     i64,
     String,
@@ -1047,8 +1037,8 @@ struct BackendRunner {
     lifecycle_backend: lash::Backend,
     lifecycle_core: Option<lash::LashCore>,
     reopened_postgres_pool: Option<PgPool>,
-    first_lease: Option<lash_core::SessionExecutionLease>,
-    successor_lease: Option<lash_core::SessionExecutionLease>,
+    first_lease: Option<lash_core::ClaimAuthority>,
+    successor_lease: Option<lash_core::ClaimAuthority>,
     stale_turn_input_claim: Option<TurnInputClaim>,
     retained_stale_turn_input_claim: Option<TurnInputClaim>,
     queued_work_claim: Option<QueuedWorkClaim>,
@@ -1145,7 +1135,7 @@ impl BackendRunner {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    fn lease(&self, slot: LeaseSlot) -> &lash_core::SessionExecutionLease {
+    fn lease(&self, slot: LeaseSlot) -> &lash_core::ClaimAuthority {
         match slot {
             LeaseSlot::First => self.first_lease.as_ref(),
             LeaseSlot::Successor => self.successor_lease.as_ref(),
@@ -1153,7 +1143,7 @@ impl BackendRunner {
         .expect("generated sequence acquired lease before use")
     }
 
-    fn put_lease(&mut self, slot: LeaseSlot, lease: lash_core::SessionExecutionLease) {
+    fn put_lease(&mut self, slot: LeaseSlot, lease: lash_core::ClaimAuthority) {
         match slot {
             LeaseSlot::First => self.first_lease = Some(lease),
             LeaseSlot::Successor => self.successor_lease = Some(lease),
@@ -1375,39 +1365,34 @@ impl BackendRunner {
                 .await
                 .map(|_| None),
             StoreOperation::AcquireSessionLease { slot, owner } => {
-                let owner = LeaseOwnerIdentity::opaque(*owner, format!("{owner}:incarnation"));
-                // The executor and the claim nonce are caller-supplied bytes, so
-                // every backend must persist and return exactly these. Deriving
-                // them from the generated operation keeps them identical across
-                // the compared backends while staying distinct per slot, so a
-                // live holder is still observed as Busy rather than reentered.
-                let executor_id = format!("{}:{slot:?}-executor", owner.owner_id);
-                let claim_nonce =
-                    LeaseClaimNonce::for_testing(format!("{}:{slot:?}-token", owner.owner_id));
-                let lease = self
+                use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
+                let stored = self.store().drive_epoch(&self.session_id).await?;
+                let admission = AdmissionId::new(format!("{owner}:{slot:?}-admission"));
+                let seal = self
                     .store()
-                    .try_claim_session_execution_lease_with_token(
+                    .seal_drive_epoch(
                         &self.session_id,
-                        &owner,
-                        &executor_id,
-                        &claim_nonce,
-                        SESSION_LEASE_TTL_MS,
+                        &admission,
+                        stored.epoch,
+                        &RootStartNonce::new(admission.as_str()),
                     )
-                    .await?
-                    .acquired()
-                    .ok_or_else(|| {
-                        StoreError::Backend(format!(
-                            "{} unexpectedly found the generated session lease busy",
+                    .await?;
+                let fence = match seal {
+                    DriveEpochSeal::Sealed(fence) => fence,
+                    other => {
+                        return Err(StoreError::Backend(format!(
+                            "{} failed to seal generated drive: {other:?}",
                             self.name
-                        ))
-                    })?;
+                        )));
+                    }
+                };
+                let lease = lash_core::ClaimAuthority::from_drive_fence(&fence);
                 if matches!(slot, LeaseSlot::Successor) {
                     let first = self.lease(LeaseSlot::First);
                     assert!(
                         lease.fencing_token > first.fencing_token,
-                        "{} reused session-lease generation {} for the successor",
-                        self.name,
-                        lease.fencing_token
+                        "{} reused drive epoch",
+                        self.name
                     );
                 }
                 self.put_lease(*slot, lease);
@@ -1505,7 +1490,7 @@ impl BackendRunner {
             }
             StoreOperation::ReleaseSessionLease { lease } => self
                 .store()
-                .release_session_execution_lease(&self.lease(*lease).completion())
+                .supersede_claim_epoch_for_test(self.lease(*lease))
                 .await
                 .map(|_| None),
             StoreOperation::CommitStaleTurnInputClaim {

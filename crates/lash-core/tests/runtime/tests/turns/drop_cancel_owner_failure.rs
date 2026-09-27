@@ -30,7 +30,7 @@ impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        lease: &lash_core::SessionExecutionLeaseAuthority,
+        lease: &lash_core::ClaimAuthority,
         authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {

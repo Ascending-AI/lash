@@ -105,6 +105,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?4
                )
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
@@ -116,6 +117,7 @@ lash_store_sql::statements! {
                       AND (
                            turn_work.claim_token IS NULL
                            OR turn_work.claim_session_lease_generation <> ?2
+                           OR turn_work.claim_owner_incarnation_id <> ?4
                       )
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
@@ -142,6 +144,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?4
                )
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
@@ -154,6 +157,7 @@ lash_store_sql::statements! {
                       AND (
                            turn_work.claim_token IS NULL
                            OR turn_work.claim_session_lease_generation <> ?2
+                           OR turn_work.claim_owner_incarnation_id <> ?4
                       )
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
@@ -177,6 +181,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?5
                )
                AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                AND ingress_json::jsonb ->> 'turn_id' = ?4
@@ -198,6 +203,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?5
                )
                AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                AND ingress_json::jsonb ->> 'turn_id' = ?4

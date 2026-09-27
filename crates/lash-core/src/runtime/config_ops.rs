@@ -234,7 +234,7 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = super::commit_runtime_state_with_fresh_session_execution_lease(
+        let result = super::commit_runtime_state_without_session_lease(
             store,
             commit,
             &self.runtime_lease_owner,

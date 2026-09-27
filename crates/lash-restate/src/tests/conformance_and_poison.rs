@@ -256,21 +256,6 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
     )
 }
 
-lash_conformance::durable_queued_drain_wait_resolver_tests!({
-    (
-        (),
-        || {
-            Arc::new(RestateRuntimeEffectController::new_for_test(Arc::new(
-                RecordingContext::default(),
-            ))) as Arc<dyn lash_core::AwaitEventResolver>
-        },
-        || {
-            Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:8080"))
-                as Arc<dyn lash_core::AwaitEventResolver>
-        },
-    )
-});
-
 // The turn runs inside a live handler: its tool call opens a real Restate
 // effect group whose child runs in the endpoint's dispatch invocation, which
 // the recording contexts cannot serve (FIG-3397).

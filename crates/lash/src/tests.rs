@@ -26,13 +26,15 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
-use lash_core::{
-    LlmOutputPart, SessionExecutionLeaseObservation, SessionProcessEventKind, StoreError,
-    ToolDefinitionBindingExt,
-};
+use lash_core::{LlmOutputPart, SessionProcessEventKind, StoreError, ToolDefinitionBindingExt};
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
-static TEST_SESSION_LEASE_TOKEN: AtomicUsize = AtomicUsize::new(1);
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before epoch")
+        .as_millis() as u64
+}
 
 /// Create a session's durable metadata without building a runtime.
 ///
@@ -43,56 +45,6 @@ static TEST_SESSION_LEASE_TOKEN: AtomicUsize = AtomicUsize::new(1);
 pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) -> Result<()> {
     core.session(session_id).create().await?;
     Ok(())
-}
-
-fn now_epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before epoch")
-        .as_millis() as u64
-}
-
-fn test_session_execution_lease(
-    session_id: &SessionId,
-    owner: &lash_core::LeaseOwnerIdentity,
-    executor_id: &str,
-    lease_ttl_ms: u64,
-    fencing_token: u64,
-) -> lash_core::SessionExecutionLease {
-    let claimed_at_epoch_ms = now_epoch_ms();
-    lash_core::SessionExecutionLease {
-        session_id: SessionId::from(session_id.to_string()),
-        owner: owner.clone(),
-        executor_id: executor_id.to_string(),
-        lease_token: format!(
-            "test-session-lease-{}",
-            TEST_SESSION_LEASE_TOKEN.fetch_add(1, Ordering::Relaxed)
-        ),
-        fencing_token,
-        claimed_at_epoch_ms,
-        lease_term_ms: lease_ttl_ms,
-        expires_at_epoch_ms: claimed_at_epoch_ms.saturating_add(lease_ttl_ms),
-    }
-}
-
-fn session_fence_matches(
-    lease: &lash_core::SessionExecutionLease,
-    fence: &lash_core::SessionExecutionLeaseAuthority,
-) -> bool {
-    lease.session_id == fence.session_id
-        && lease.owner == fence.owner
-        && lease.executor_id == fence.executor_id
-        && lease.lease_token == fence.lease_token
-}
-
-fn session_completion_matches(
-    lease: &lash_core::SessionExecutionLease,
-    completion: &lash_core::SessionExecutionLeaseAuthority,
-) -> bool {
-    lease.session_id == completion.session_id
-        && lease.owner == completion.owner
-        && lease.executor_id == completion.executor_id
-        && lease.lease_token == completion.lease_token
 }
 
 #[derive(Default)]
@@ -114,8 +66,6 @@ struct SnapshotStore {
     >,
     usage_delta_identities:
         std::sync::Mutex<std::collections::HashSet<lash_core::store::RuntimeUsageDeltaIdentity>>,
-    session_execution_leases:
-        std::sync::Mutex<HashMap<SessionId, lash_core::SessionExecutionLease>>,
     /// Accepted-but-unsettled turn inputs, in enqueue order.
     ///
     /// Every turn — direct or queued — is admitted here before it is driven
@@ -123,14 +73,6 @@ struct SnapshotStore {
     /// tests never enqueue input of their own.
     pending_turn_inputs: std::sync::Mutex<Vec<lash_core::PendingTurnInput>>,
     pending_turn_input_seq: std::sync::Mutex<u64>,
-    /// Highest generation ever minted per session, retained across release.
-    ///
-    /// `SessionExecutionLeaseStore` is a fencing trait: ADR 0029 requires every
-    /// fresh acquisition after release or expiry to mint `previous + 1`, and a
-    /// double is not exempt. This store drops the live lease row on release, so
-    /// generation authority has to live somewhere that survives it, or a stale
-    /// generation would be reissued and fencing would silently stop working.
-    session_execution_lease_generations: std::sync::Mutex<HashMap<SessionId, u64>>,
 }
 
 impl SnapshotStore {
@@ -187,10 +129,8 @@ impl SnapshotStore {
             session_meta: std::sync::Mutex::new(Some(session_meta)),
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
             usage_delta_identities: std::sync::Mutex::new(std::collections::HashSet::new()),
-            session_execution_leases: std::sync::Mutex::new(HashMap::new()),
             pending_turn_inputs: std::sync::Mutex::new(Vec::new()),
             pending_turn_input_seq: std::sync::Mutex::new(0),
-            session_execution_lease_generations: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -224,7 +164,7 @@ lash_core::impl_current_fleet_format!(SnapshotStore);
 impl lash_core::SessionCommitStore for SnapshotStore {
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &lash_core::SessionExecutionLeaseAuthority,
+        lease: &lash_core::ClaimAuthority,
         follow_on_turn_id: &lash_core::TurnId,
     ) -> std::result::Result<lash_core::store::PendingFollowOn, lash_core::store::StoreError> {
         Err(lash_core::store::StoreError::FollowOnNotPending {
@@ -449,15 +389,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             (session_id, completed.operation.storage_key()?),
             (turn_commit_hash, result.clone()),
         );
-        if let Some(completion) = &commit.release_session_execution_lease {
-            let mut leases = self.session_execution_leases.lock_recover();
-            if leases
-                .get(&completion.session_id)
-                .is_some_and(|lease| session_completion_matches(lease, completion))
-            {
-                leases.remove(&completion.session_id);
-            }
-        }
         Ok(result)
     }
 
@@ -502,7 +433,7 @@ impl lash_core::store::DriveEpochStore for SnapshotStore {
 impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn select_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _scope: &lash_core::ExecutionScope,
         _owner: &lash_core::LeaseOwnerIdentity,
         _max_inputs: usize,
@@ -527,14 +458,14 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     }
     async fn settle_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _settlement: lash_core::store::QueuedRunCommit,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         unreachable!("fixture does not serve queued runs")
     }
     async fn begin_or_resume_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _request: lash_core::store::BeginQueuedRun,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         unreachable!("SnapshotStore does not serve queued runs")
@@ -555,7 +486,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_leading_ready_session_command(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
@@ -567,7 +498,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_ready_queued_work(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _policy: lash_core::QueuedWorkClaimPolicy,
@@ -580,7 +511,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_checkpoint_work(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
@@ -599,7 +530,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[lash_core::BatchId],
@@ -833,7 +764,7 @@ lash_core::impl_current_fleet_format!(BoundSessionStore);
 impl lash_core::SessionCommitStore for BoundSessionStore {
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &lash_core::SessionExecutionLeaseAuthority,
+        lease: &lash_core::ClaimAuthority,
         follow_on_turn_id: &lash_core::TurnId,
     ) -> std::result::Result<lash_core::store::PendingFollowOn, lash_core::store::StoreError> {
         Err(lash_core::store::StoreError::FollowOnNotPending {
@@ -916,62 +847,6 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
 }
 
 #[async_trait]
-impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
-    async fn try_claim_session_execution_lease_with_token(
-        &self,
-        session_id: &SessionId,
-        owner: &lash_core::LeaseOwnerIdentity,
-        executor_id: &str,
-        claim_nonce: &lash_core::LeaseClaimNonce,
-        lease_ttl_ms: u64,
-    ) -> std::result::Result<
-        lash_core::SessionExecutionLeaseClaimOutcome,
-        lash_core::store::StoreError,
-    > {
-        let mut lease =
-            test_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms, 1);
-        lease.lease_token = claim_nonce.as_str().to_string();
-        Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
-        ))
-    }
-
-    async fn renew_session_execution_lease(
-        &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
-        lease_ttl_ms: u64,
-    ) -> std::result::Result<lash_core::SessionExecutionLease, lash_core::store::StoreError> {
-        Ok(test_session_execution_lease(
-            &fence.session_id,
-            &fence.owner,
-            &fence.executor_id,
-            lease_ttl_ms,
-            fence.fencing_token,
-        ))
-    }
-
-    async fn release_session_execution_lease(
-        &self,
-        _completion: &lash_core::SessionExecutionLeaseAuthority,
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
-        Ok(())
-    }
-
-    async fn get_session_execution_lease(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<SessionExecutionLeaseObservation, StoreError> {
-        Ok(SessionExecutionLeaseObservation {
-            observed_at_epoch_ms: now_epoch_ms(),
-            lease: None,
-        })
-    }
-}
-
-// The reuse test fails before any turn runs, so this double serves neither
-// pending turn input nor queued work.
-
-#[async_trait]
 impl lash_core::store::DriveEpochStore for BoundSessionStore {
     async fn seal_drive_epoch(
         &self,
@@ -997,7 +872,7 @@ impl lash_core::store::DriveEpochStore for BoundSessionStore {
 impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn select_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _scope: &lash_core::ExecutionScope,
         _owner: &lash_core::LeaseOwnerIdentity,
         _max_inputs: usize,
@@ -1022,14 +897,14 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     }
     async fn settle_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _settlement: lash_core::store::QueuedRunCommit,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         unreachable!("fixture does not serve queued runs")
     }
     async fn begin_or_resume_queued_run(
         &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _fence: &lash_core::ClaimAuthority,
         _request: lash_core::store::BeginQueuedRun,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         unreachable!("BoundSessionStore does not serve queued runs")
@@ -1048,7 +923,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_leading_ready_session_command(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
@@ -1060,7 +935,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_ready_queued_work(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _policy: lash_core::QueuedWorkClaimPolicy,
@@ -1073,7 +948,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_checkpoint_work(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
@@ -1092,7 +967,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[lash_core::BatchId],
@@ -2231,24 +2106,9 @@ mod turn_streaming;
 #[cfg(feature = "rlm")]
 mod usage_durability;
 
-/// `SnapshotStore` backs the facade tests, so it owes the displacement contract
-/// too: a double that reports no displacement would let a facade-level regression
-/// in the takeover event pass unnoticed.
-#[tokio::test]
-async fn snapshot_store_reports_the_holder_a_claim_displaces() {
-    let store = SnapshotStore::default();
-    lash_conformance::session_execution_lease_displacement(
-        &store,
-        &SessionId::from("snapshot-lease-displacement"),
-    )
-    .await;
-}
-
 #[path = "tests/control_intent_doubles.rs"]
 mod control_intent_doubles;
 #[path = "tests/root_stores.rs"]
 mod root_stores;
-#[path = "tests/snapshot_store_lease.rs"]
-mod snapshot_store_lease;
 #[path = "tests/turn_input_stores.rs"]
 mod turn_input_stores;

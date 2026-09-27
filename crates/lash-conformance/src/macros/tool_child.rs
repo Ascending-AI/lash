@@ -93,7 +93,7 @@ macro_rules! admitted_head_redrive_tests {
 macro_rules! turn_config_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_committed_root_redriven_after_a_model_change_replays_its_recorded_config, "turn-config-recorded-replay"));
+            (a_committed_root_redriven_after_a_model_change_refuses_its_stale_epoch, "turn-config-stale-redrive"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (an_input_sent_after_a_config_command_runs_on_the_new_model, "turn-config-after-command"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
@@ -166,7 +166,6 @@ macro_rules! drive_admission_tests {
     (a_redrive_the_root_ran_past_is_never_applied_again, "s7b-17"),
     (a_stale_paused_listing_never_reparks_a_resumed_root, "s7b-18"),
     (a_parked_session_is_asked_to_drive_only_through_its_ingress_obligation, "s7b-19"),
-    (a_settlement_drain_is_refused_by_a_drive_that_seals_after_its_fence, "s8-command-drain-fence"),
     (a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles, "l2-1"),
     (a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted, "l2-2"),
     (a_failing_child_cancel_never_wedges_its_roots_cancel_or_fork, "s8c-1"),

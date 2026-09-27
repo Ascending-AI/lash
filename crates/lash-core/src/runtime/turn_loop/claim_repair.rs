@@ -1,19 +1,8 @@
-//! Session-execution lane custody and the claim hand-backs that follow a
-//! local abort.
-//!
-//! Every turn phase runs under the lane this module acquires: the lease guard
-//! itself, the fence a claim is written under, and the repairs a turn owes when
-//! it dies before its commit could settle the rows it claimed.
+//! Claim handbacks and orphan repair under drive admission.
 
 use super::*;
 use crate::TurnId;
 
-/// Whether `candidate` is part of the logical execution recovered under
-/// `resumable_turn_id`.
-///
-/// Keep this aligned with the active-input exclusion in
-/// `store_backend_support::orphaned_active_turn_input_is_repairable`: closure
-/// pins and the input they protect must make the same recovery decision.
 pub(super) fn is_resumable_turn_or_follow_on(
     candidate: &TurnId,
     resumable_turn_id: &TurnId,
@@ -24,52 +13,10 @@ pub(super) fn is_resumable_turn_or_follow_on(
         .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
 }
 
-struct SessionExecutionLaneProbe {
-    store: Arc<dyn crate::store::RuntimePersistence>,
-    session_id: SessionId,
-    owner: crate::LeaseOwnerIdentity,
-    executor_id: String,
-    timings: crate::LeaseTimings,
-    clock: Arc<dyn crate::Clock>,
-}
-
-#[async_trait::async_trait]
-impl crate::QueuedLaneProbe for SessionExecutionLaneProbe {
-    async fn try_acquire(&self) -> Result<crate::QueuedLaneAttempt, RuntimeError> {
-        match SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
-            Arc::clone(&self.store),
-            &self.session_id,
-            &self.owner,
-            &self.executor_id,
-            self.timings,
-            Arc::clone(&self.clock),
-        )
-        .await
-        .map_err(super::runtime_error_from_store_commit)?
-        {
-            SessionExecutionLeaseGuardAcquisition::Acquired(guard) => Ok(
-                crate::QueuedLaneAttempt::Acquired(crate::QueuedLaneGuard::new(guard)),
-            ),
-            SessionExecutionLeaseGuardAcquisition::Busy(holder) => Ok(
-                crate::QueuedLaneAttempt::Busy(crate::QueuedLaneHolder::new(holder)),
-            ),
-        }
-    }
-
-    async fn pause(&self, slice: std::time::Duration) {
-        self.clock.sleep(slice).await;
-    }
-}
-
 impl LashRuntime {
-    /// Claim and complete session-state admission before this turn starts.
-    ///
-    /// ADR 0077 makes this stricter than the CAS-only fallback: a busy lane may
-    /// not hydrate or execute while another generation can migrate the complete
-    /// mutable continuation.
-    pub(in crate::runtime) async fn claim_session_execution_lease(
+    pub(in crate::runtime) async fn claim_drive_authority(
         &mut self,
-    ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
+    ) -> Result<Option<DriveClaimGuard>, RuntimeError> {
         let Some(store) = self
             .session
             .as_ref()
@@ -77,8 +24,8 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        match SessionExecutionLeaseGuard::try_acquire_for_executor(
-            Arc::clone(&store),
+        let guard = DriveClaimGuard::try_acquire_for_executor(
+            store,
             &self.state.session_id,
             &self.runtime_lease_owner,
             &self.runtime_lease_executor_id,
@@ -86,109 +33,29 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
         )
         .await
-        .map_err(super::runtime_error_from_store_commit)?
-        {
-            Some(guard) => {
-                if store
-                    .pending_queued_run(&self.state.session_id)
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?
-                    .is_some()
-                {
-                    guard
-                        .release_if_live()
-                        .await
-                        .map_err(super::runtime_error_from_store_commit)?;
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::QueuedRunPending,
-                        "unfinished queued run owns this session",
-                    ));
-                }
-                Ok(Some(guard))
-            }
-            None => Err(RuntimeError::new(
-                RuntimeErrorCode::SessionExecutionLaneBusy,
-                format!(
-                    "session `{}` cannot start a turn until execution admission acquires its lease",
-                    self.state.session_id
-                ),
-            )),
-        }
+        .map_err(super::runtime_error_from_store_commit)?;
+        Ok(guard)
     }
 
-    /// Acquire the authoritative lane required to claim durable queued work.
-    ///
-    /// Ordinary controllers retain the public one-shot drain contract: Busy is
-    /// reported as `None` and the durable row stays pending. A durable workflow
-    /// controller instead applies the aliveness-aware policy in
-    /// [`queued_lane_wait`](lash_core_effect::queued_lane_wait):
-    /// wait out a crashed-looking holder's TTL and retry, but report the typed
-    /// retryable [`RuntimeErrorCode::SessionExecutionLaneBusy`] the moment the
-    /// holder proves it is alive or the wait budget elapses, so the engine's
-    /// retry policy - not a sleep inside one invocation - paces the next
-    /// attempt. Either way the foreign executor's lease authority is never
-    /// bypassed or forged.
-    ///
-    /// The controller's [`acquire_queued_lane`](crate::AwaitEventResolver::acquire_queued_lane)
-    /// operation owns that distinction: store-backed durable effect hosts keep
-    /// the one-shot default, while an engine-re-driven handler overrides with
-    /// the provided aliveness-aware wait.
-    pub(super) async fn claim_session_execution_lease_for_queued_work(
+    pub(super) async fn claim_drive_authority_for_queued_work(
         &mut self,
-        opts: &QueuedTurnOptions<'_>,
-    ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
-            return Ok(None);
-        };
-        let lane: Arc<dyn crate::QueuedLaneProbe> = Arc::new(SessionExecutionLaneProbe {
-            store,
-            session_id: self.state.session_id.clone(),
-            owner: self.runtime_lease_owner.clone(),
-            executor_id: self.runtime_lease_executor_id.clone(),
-            timings: self.host.core.control.lease_timings,
-            clock: Arc::clone(&self.host.core.clock),
-        });
-        match opts
-            .source
-            .acquire_lane(lane, opts.local_stop.immediate_token())
-            .await?
-        {
-            crate::QueuedLaneAcquisition::Acquired(guard) => Ok(Some(guard.into_inner())),
-            crate::QueuedLaneAcquisition::NotAcquired => Ok(None),
-        }
+        _opts: &QueuedTurnOptions<'_>,
+    ) -> Result<Option<DriveClaimGuard>, RuntimeError> {
+        Ok(self.drive_root.as_ref().map(|root| {
+            DriveClaimGuard::from_drive_fence(
+                &root.fence,
+                self.runtime_lease_owner.clone(),
+                self.runtime_lease_executor_id.clone(),
+            )
+        }))
     }
 
-    pub(in crate::runtime) async fn settle_session_execution_lease<T>(
+    pub(in crate::runtime) async fn settle_drive_authority<T>(
         &self,
-        guard: Option<&SessionExecutionLeaseGuard>,
+        _guard: Option<&DriveClaimGuard>,
         result: Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
-        match result {
-            Ok(value) => {
-                if let Some(guard) = guard {
-                    guard.release_if_live().await.map_err(|err| {
-                        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
-                    })?;
-                }
-                Ok(value)
-            }
-            Err(err) => {
-                if err.code != RuntimeErrorCode::StoreCommitFailed
-                    && let Some(guard) = guard
-                    && let Err(release_err) = guard.release_if_live().await
-                {
-                    tracing::warn!(
-                        error = %release_err,
-                        "failed to release session execution lease after runtime error"
-                    );
-                }
-                Err(err)
-            }
-        }
+        result
     }
 
     // Prompt handback after an operation observes lease loss or an unambiguous
@@ -327,7 +194,7 @@ impl LashRuntime {
 
     pub(in crate::runtime) async fn defer_orphaned_turn_inputs_before_drain(
         store: &Arc<dyn crate::store::RuntimePersistence>,
-        fence: &crate::SessionExecutionLeaseAuthority,
+        fence: &crate::ClaimAuthority,
         resumable_turn_id: &TurnId,
         scoped_effect_controller: &crate::ScopedEffectController<'_>,
         session_id: &SessionId,
@@ -524,7 +391,7 @@ impl LashRuntime {
     pub(in crate::runtime) async fn defer_orphaned_turn_inputs_after_teardown(
         &self,
         trace_turn_id: &TurnId,
-        session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        session_execution_lease: Option<&crate::ClaimAuthority>,
         scoped_effect_controller: &crate::ScopedEffectController<'_>,
     ) {
         let Some(store) = self
@@ -603,7 +470,7 @@ impl LashRuntime {
                         }
                         return;
                     }
-                    Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                    Err(crate::store::StoreError::StaleDriveFence { .. }) => {
                         tracing::debug!(
                             session_id = %self.state.session_id,
                             turn_id = %trace_turn_id,
@@ -718,7 +585,7 @@ impl LashRuntime {
                     }
                     // A fence refusal is the ordinary outcome for a turn whose lane was
                     // taken over: the repair is the new holder's, not ours.
-                    Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                    Err(crate::store::StoreError::StaleDriveFence { .. }) => {
                         tracing::debug!(
                         session_id = %self.state.session_id,
                         turn_id = %trace_turn_id,

@@ -32,7 +32,7 @@ impl LashRuntime {
         head: &crate::InputId,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &TurnInput)>,
-        lease: Option<crate::runtime::SessionExecutionLeaseGuard>,
+        lease: Option<crate::runtime::DriveClaimGuard>,
     ) -> Result<RootRun, DriveAbort> {
         use futures_util::FutureExt;
 
@@ -76,7 +76,7 @@ impl LashRuntime {
         head: &crate::InputId,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &TurnInput)>,
-        lease: &mut Option<crate::runtime::SessionExecutionLeaseGuard>,
+        lease: &mut Option<crate::runtime::DriveClaimGuard>,
         stopwatch: TurnStopwatch,
     ) -> Result<RootRun, DriveAbort> {
         let root = admitted.root().clone();
@@ -84,7 +84,7 @@ impl LashRuntime {
         let store = self.drive_store()?;
         let fence = lease
             .as_ref()
-            .map(crate::runtime::SessionExecutionLeaseGuard::fence)
+            .map(crate::runtime::DriveClaimGuard::fence)
             .ok_or_else(|| {
                 abort(RuntimeError::new(
                     RuntimeErrorCode::QueuedWork,
@@ -129,7 +129,7 @@ impl LashRuntime {
                         effect_host: Arc::clone(&self.host.core.control.effect_host),
                         scope: root_controller.admitted_scope().clone(),
                         fence: fence.clone(),
-                        owner: self.runtime_lease_owner.clone(),
+                        owner: fence.owner.clone(),
                         session_id: self.state.session_id.clone(),
                         head: head.clone(),
                         root: root.clone(),
@@ -296,7 +296,7 @@ impl LashRuntime {
         self.journaled_drive_claims.remove(&drive_claim.claim_id);
         self.admitted_turn_index = None;
         let run = self
-            .settle_session_execution_lease(lease.as_ref(), result)
+            .settle_drive_authority(lease.as_ref(), result)
             .await
             .map_err(abort)?;
         let outcome = match run.final_turn() {
@@ -420,10 +420,7 @@ impl LashRuntime {
         })
     }
 
-    pub(super) async fn release_root_lease(
-        &self,
-        lease: Option<&crate::runtime::SessionExecutionLeaseGuard>,
-    ) {
+    pub(super) async fn release_root_lease(&self, lease: Option<&crate::runtime::DriveClaimGuard>) {
         if let Some(lease) = lease
             && let Err(error) = lease.release_if_live().await
         {
@@ -645,7 +642,7 @@ struct RootInputClaimRunner {
     store: Arc<dyn crate::store::RuntimePersistence>,
     effect_host: Arc<dyn crate::EffectHost>,
     scope: crate::AdmittedScope,
-    fence: crate::SessionExecutionLeaseAuthority,
+    fence: crate::ClaimAuthority,
     owner: crate::LeaseOwnerIdentity,
     session_id: crate::SessionId,
     head: crate::InputId,

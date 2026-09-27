@@ -4,14 +4,14 @@ use super::*;
 impl QueuedWorkStore for Store {
     async fn begin_or_resume_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         request: lash_core_execution::store::BeginQueuedRun,
     ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
         self.begin_run(fence, request).await
     }
     async fn select_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         scope: &lash_core_execution::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -35,7 +35,7 @@ impl QueuedWorkStore for Store {
     }
     async fn settle_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         settlement: lash_core_execution::store::QueuedRunCommit,
     ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
         self.settle_run(fence, settlement).await
@@ -90,7 +90,7 @@ impl QueuedWorkStore for Store {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
@@ -122,6 +122,7 @@ impl QueuedWorkStore for Store {
                             tx,
                             &session_id,
                             generation,
+                            &owner,
                             QueuedWorkClaimBoundary::Idle,
                             MAX_SESSION_COMMAND_BATCHES_PER_CLAIM,
                         )?;
@@ -156,7 +157,7 @@ impl QueuedWorkStore for Store {
     async fn claim_ready_queued_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: QueuedWorkClaimPolicy,
@@ -194,6 +195,7 @@ impl QueuedWorkStore for Store {
                             tx,
                             &session_id,
                             generation,
+                            &owner,
                             boundary,
                             policy.max_rows,
                         )?;
@@ -213,6 +215,7 @@ impl QueuedWorkStore for Store {
                                     &session_id,
                                     now,
                                     generation,
+                                    &owner,
                                     boundary,
                                     &policy,
                                 )?
@@ -262,7 +265,7 @@ impl QueuedWorkStore for Store {
     async fn claim_checkpoint_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core_execution::TurnId,
         checkpoint: lash_core_execution::CheckpointKind,
@@ -377,7 +380,7 @@ impl QueuedWorkStore for Store {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[lash_core_execution::BatchId],
@@ -500,7 +503,6 @@ impl QueuedWorkStore for Store {
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let batch_id = batch_id.to_string();
-        let now = self.clock.timestamp_ms() as i64;
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<Option<QueuedWorkBatch>, StoreError> = (|| {
@@ -508,7 +510,7 @@ impl QueuedWorkStore for Store {
                     let row = tx
                         .query_row(
                             sql.queued_batches_sqlite.select_cancelable.sql(),
-                            params![session_id.as_str(), batch_id.as_str(), now],
+                            params![session_id.as_str(), batch_id.as_str()],
                             queued_batch_row_from_sql,
                         )
                         .optional()
@@ -543,7 +545,7 @@ impl QueuedWorkStore for Store {
                     }
                     tx.execute(
                         sql.queued_batches_sqlite.delete_cancelled.sql(),
-                        params![session_id.as_str(), batch_id.as_str(), now],
+                        params![session_id.as_str(), batch_id.as_str()],
                     )
                     .map_err(sqlite_error)?;
                     Ok(Some(batch))
@@ -630,7 +632,6 @@ impl QueuedWorkStore for Store {
         session_id: &SessionId,
     ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
-        let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
                 let outcome: Result<
@@ -648,11 +649,7 @@ impl QueuedWorkStore for Store {
                                 .family
                                 .pending_session_work_ordering
                                 .sql(),
-                            params![
-                                session_id.as_str(),
-                                now as i64,
-                                QueuedWorkKind::Control.as_str()
-                            ],
+                            params![session_id.as_str(), QueuedWorkKind::Control.as_str()],
                             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                         )
                         .map_err(sqlite_error)?;
@@ -684,7 +681,6 @@ impl QueuedWorkStore for Store {
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
-        let now = self.clock.timestamp_ms();
         #[cfg(feature = "testing")]
         let hydration_pause = self.conn.fault_injector();
         // One snapshot for the batch rows and their item rows: see
@@ -702,10 +698,7 @@ impl QueuedWorkStore for Store {
                             )
                             .map_err(sqlite_error)?;
                         let rows = stmt
-                            .query_map(
-                                params![session_id.as_str(), now as i64],
-                                queued_batch_row_from_sql,
-                            )
+                            .query_map(params![session_id.as_str()], queued_batch_row_from_sql)
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };

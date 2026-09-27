@@ -40,13 +40,12 @@ impl LashRuntime {
     /// nothing is restored.
     pub(in crate::runtime) async fn refresh_resident_head_under_lease(
         &mut self,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<(), RuntimeError> {
         let resolved_run = self.state.authority.resolved_run.clone();
         self.reload_invalidated_resident_session_state_under_lease(session_execution_lease)
             .await?;
-        let lease_continuity =
-            session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
+        let lease_continuity = session_execution_lease.and_then(DriveClaimGuard::continuity);
         let resident_graph_is_current = self
             .resident_session
             .graph_is_current_under(lease_continuity);

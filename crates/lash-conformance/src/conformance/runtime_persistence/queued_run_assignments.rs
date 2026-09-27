@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::store::{BeginQueuedRun, QueuedRunRequest};
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 
 #[expect(
     clippy::unwrap_used,
@@ -18,7 +19,7 @@ pub async fn queued_run_checkpoint_assignment_survives_lane_rotation(
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "assigned"))
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "dispose").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "dispose").await;
     let request = BeginQueuedRun {
         session_id: session_id.clone(),
         identity: Some(crate::ExecutionScope::queue_drain(&session_id, "disposed")),
@@ -115,10 +116,10 @@ pub async fn queued_run_checkpoint_assignment_survives_lane_rotation(
     );
     assert_eq!(assigned.assigned_members.len(), 3);
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "host-abandon").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "host-abandon").await;
     let unrelated_batch = store
         .enqueue_queued_work(checkpoint_claims::queued_draft(
             &session_id,
@@ -325,7 +326,7 @@ pub async fn queued_run_resume_retakes_its_open_checkpoint_assignments(
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "member"))
         .await
         .unwrap();
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "first").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "first").await;
     let request = BeginQueuedRun {
         session_id: session_id.clone(),
         identity: Some(crate::ExecutionScope::queue_drain(&session_id, "retakes")),
@@ -384,12 +385,12 @@ pub async fn queued_run_resume_retakes_its_open_checkpoint_assignments(
     let checkpoint_inputs = checkpoint_inputs.unwrap();
     let checkpoint_batches = checkpoint_batches.unwrap();
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .unwrap();
 
     // A peer takes the assigned batch under its own generation and dies.
-    let peer = claim_session_execution_lease_for_test(&store, &session_id, "peer").await;
+    let peer = seal_claim_authority_for_test(&store, &session_id, "peer").await;
     let peer_claim = store
         .claim_ready_queued_work_by_batch_ids(
             &session_id,
@@ -404,11 +405,11 @@ pub async fn queued_run_resume_retakes_its_open_checkpoint_assignments(
         .claim
         .unwrap();
     store
-        .release_session_execution_lease(&peer.authority())
+        .supersede_claim_epoch_for_test(&peer.authority())
         .await
         .unwrap();
 
-    let successor = claim_session_execution_lease_for_test(&store, &session_id, "successor").await;
+    let successor = seal_claim_authority_for_test(&store, &session_id, "successor").await;
     let resumed = store
         .select_queued_run(
             &successor.authority(),

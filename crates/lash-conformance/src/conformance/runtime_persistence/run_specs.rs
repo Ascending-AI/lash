@@ -158,8 +158,7 @@ pub async fn a_next_turn_claim_never_mixes_run_specs(store: Arc<dyn RuntimePersi
                 .input_id,
         );
     }
-    let lease =
-        claim_session_execution_lease_for_test(&store, &session_id, "run-spec-claim-owner").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "run-spec-claim-owner").await;
     let owner = lease_owner("run-spec-claim-owner");
     let mut compositions = Vec::new();
     loop {
@@ -483,7 +482,7 @@ pub async fn a_steering_spec_must_match_a_queued_run_positions_shape(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let configuration = RuntimeCommit::persisted_state_for_test(&state, &[]).config;
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "queued-owner").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "queued-owner").await;
     let admitted = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -550,8 +549,7 @@ pub async fn a_steering_spec_must_match_a_queued_run_positions_shape(
     // A position whose selection committed no input members runs under the
     // default spec: a non-default spec is refused.
     let second_session = SessionId::from("run-spec-queued-default");
-    let second_lease =
-        claim_session_execution_lease_for_test(&store, &second_session, "queued-owner").await;
+    let second_lease = seal_claim_authority_for_test(&store, &second_session, "queued-owner").await;
     let second = store
         .begin_or_resume_queued_run(
             &second_lease.authority(),

@@ -42,6 +42,10 @@ impl PendingTurnInputRow {
         lash_core_execution::store_backend_support::WorkRowClaimFacts {
             claim_token: self.claim_token.as_deref(),
             claim_session_lease_generation: self.claim_session_lease_generation,
+            claim_owner_incarnation_id: self
+                .claim_owner
+                .as_ref()
+                .map(|owner| owner.incarnation_id.as_str()),
         }
     }
 
@@ -123,15 +127,13 @@ pub(crate) fn pending_turn_input_from_row(
 pub(crate) fn pending_turn_input_read_from_row(
     row: PgRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
-    let lease_expires_at_ms = row
-        .get::<Option<i64>, _>("live_lease_expires_at_ms")
-        .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
+    let drive_epoch = row
+        .get::<Option<i64>, _>("live_claim_drive_epoch")
+        .map(|value| u64_from_sql("PendingTurnInputRead", "drive_epoch", value))
         .transpose()?;
     let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-    Ok(match lease_expires_at_ms {
-        Some(lease_expires_at_ms) => {
-            lash_core_execution::PendingTurnInputRead::held(input, lease_expires_at_ms)
-        }
+    Ok(match drive_epoch {
+        Some(drive_epoch) => lash_core_execution::PendingTurnInputRead::held(input, drive_epoch),
         None => lash_core_execution::PendingTurnInputRead::pending(input),
     })
 }
@@ -255,7 +257,7 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
 pub(crate) async fn cancel_pending_turn_input_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: PendingTurnInputRow,
-    now_epoch_ms: u64,
+    _now_epoch_ms: u64,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
     let mut input = pending_turn_input_from_row(row.clone())?;
     match input.state.kind() {
@@ -268,16 +270,12 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
         lash_core_execution::runtime::TurnInputStateKind::PendingActive
         | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
         | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
-            // A claim is live only while the session-execution-lease generation it
-            // pins still holds the session lease (ADR 0029).
+            // A claim is live only while its admitting drive epoch remains current.
             let live_claim = row.claim_token.is_some()
-                && load_session_execution_lease_tx(tx, &row.session_id)
+                && crate::runtime_persistence::drive_epoch::drive_epoch_tx(tx, &row.session_id)
                     .await?
-                    .is_some_and(|lease| {
-                        lease.lease_token.is_some()
-                            && lease.expires_at_ms > now_epoch_ms
-                            && lease.fencing_token == row.claim_session_lease_generation
-                    });
+                    .epoch
+                    == row.claim_session_lease_generation;
             if live_claim {
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {

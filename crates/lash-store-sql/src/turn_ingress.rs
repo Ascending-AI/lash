@@ -6,7 +6,7 @@
 //! * **ingress** — [`pending_inputs`] holds the turn inputs a caller submitted
 //!   and [`queued_batches`]/[`queued_items`] the work batches enqueued against
 //!   a session.
-//! * **authority** — [`session_execution_leases`] is the lane lease whose
+//! * **authority** — the sealed drive epoch is the claim authority.
 //!   fencing token every claim on the two ingress tables pins itself to
 //!   (ADR 0029), so "is this claim still live?" is one question about that
 //!   lease rather than a per-row timer.
@@ -30,7 +30,6 @@ pub mod queued_run_members;
 pub mod queued_runs;
 pub mod retired_scopes;
 pub mod run_specs;
-pub mod session_execution_leases;
 pub mod tool_intent_submissions;
 pub mod turn_park_clock;
 pub mod turn_park_events;
@@ -127,28 +126,18 @@ crate::statements! {
                   AND {{deferred_next_turn_turn_input_state(pti.state)}}
              )";
 
-        /// The earliest unclaimed session command and the earliest deferred
-        /// turn input of session `?1`, as of `?2`, with `?3` naming the
-        /// control work kind.
+        /// The earliest open session command and deferred turn input of
+        /// session `?1`, with `?2` naming the control work kind.
         ///
         /// Both lanes are projected from one snapshot, so the command-first
         /// decision and the input position describe the same boundary.
-        /// "Unclaimed" is a join against the lease row, because a claim
-        /// pinned to a superseded lease generation is not a live claim
-        /// (ADR 0029).
+        /// A current-epoch claim still precedes work behind it. A successor
+        /// must admit that head before sealing the next epoch, then reclaim it.
         pending_session_work_ordering = "WITH earliest_command AS (
                 SELECT enqueued_at_ms, enqueue_seq
                 FROM queued_work_batches AS queued
                 WHERE session_id = ?1
-                  AND work_kind = ?3
-                  AND (claim_token IS NULL OR NOT EXISTS (
-                       SELECT 1 FROM session_execution_leases AS lease
-                       WHERE lease.session_id = ?1
-                         AND lease.lease_token IS NOT NULL
-                         AND lease.lease_expires_at_ms > ?2
-                         AND lease.lease_fencing_token
-                             = queued.claim_session_lease_generation
-                  ))
+                  AND work_kind = ?2
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
              ), earliest_input AS (
@@ -156,14 +145,6 @@ crate::statements! {
                 FROM pending_turn_inputs AS input
                 WHERE session_id = ?1
                   AND {{deferred_next_turn_turn_input_state(input.state)}}
-                  AND (claim_token IS NULL OR NOT EXISTS (
-                       SELECT 1 FROM session_execution_leases AS lease
-                       WHERE lease.session_id = ?1
-                         AND lease.lease_token IS NOT NULL
-                         AND lease.lease_expires_at_ms > ?2
-                         AND lease.lease_fencing_token
-                             = input.claim_session_lease_generation
-                  ))
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
              )

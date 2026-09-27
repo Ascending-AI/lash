@@ -67,9 +67,7 @@ async fn a_no_summary_response_is_established_before_execution_evidence_on_the_d
     );
 }
 
-/// A queued input drained on the double: `stream_next_queued_work` runs in an
-/// open handler under a queue-drain scope, over an unbound store of the
-/// double's store set.
+/// A queued input driven on the double under an open queue-drain handler.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_queued_input_drains_in_an_open_handler_on_the_double() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
@@ -113,10 +111,14 @@ async fn a_queued_input_drains_in_an_open_handler_on_the_double() {
         .await
         .expect("open the drain's handler");
     let drained = runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_next_root(
+            "queued-drain-on-the-double",
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
         .await
         .expect("the queued input drains")
-        .ran()
+        .expect("the drive admitted queued input")
+        .into_final_turn()
         .expect("the drain ran the queued input");
     handler.close().await.expect("close the drain's handler");
     assert_eq!(drained.assistant_output.safe_text, "drained");

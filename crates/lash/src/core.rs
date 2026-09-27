@@ -939,17 +939,15 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure the lease timing capability for every durable single-writer
-    /// lease lane this deployment renews: session execution leases and durable
-    /// effect-replay leases. Queued-work and turn-input
-    /// claims are not leases and carry no TTL.
+    /// Configure the timing of durable effect-replay leases. Session drive
+    /// admission and queued-work claims are fenced by an epoch, without a TTL.
     ///
-    /// This is the failover-latency vs false-takeover-risk knob.
+    /// This controls effect-replay failover latency and false-takeover risk.
     /// It is an operational deployment decision, so it lives on the main
     /// builder tier rather than behind [`advanced`](Self::advanced).
     /// Effect hosts accept the same type at construction (e.g.
     /// SQLite/Postgres effect-replay options), so a host can share one timing decision across
-    /// both boundaries.
+    /// that boundary.
     pub fn lease_timings(mut self, lease_timings: facade_support::LeaseTimings) -> Self {
         self.lease_timings = Some(lease_timings);
         self

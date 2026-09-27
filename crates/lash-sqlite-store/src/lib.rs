@@ -70,20 +70,16 @@ use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core_execution::store_backend_support::{
-    SessionExecutionLeaseRow, lease_owner_from_columns, row_to_session_execution_lease,
-};
+use lash_core_execution::store_backend_support::lease_owner_from_columns;
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
+    AttachmentOwnerKind, BlobRef, ClaimAuthority, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessListFilter,
     ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
     ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
+    RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance,
     TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
     facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,

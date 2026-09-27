@@ -27,7 +27,6 @@ pub use lash_core_execution::runtime::effect;
 pub(crate) use lash_core_execution::runtime::effect;
 mod claim_settlement;
 #[doc(hidden)]
-mod command_settlement;
 mod environment;
 mod error;
 mod observation_publisher;
@@ -37,6 +36,7 @@ pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
 pub mod drive;
+pub(crate) mod drive_claim;
 mod durable_queue;
 mod lifecycle;
 pub mod process_terminal;
@@ -57,10 +57,6 @@ mod session_administration;
 mod session_api;
 pub mod session_close;
 pub mod session_delete;
-#[cfg(feature = "testing")]
-pub use lash_core_effect::session_execution_lease;
-#[cfg(not(feature = "testing"))]
-pub(crate) use lash_core_effect::session_execution_lease;
 use lash_core_store::session_catalog;
 pub use session_administration::{
     SessionAdministration, SessionDeleteContext, SessionDeleteExecution,
@@ -150,8 +146,8 @@ use crate::{
 };
 use crate::{Effect, TurnMachine};
 
+use drive_claim::*;
 use host::*;
-use session_execution_lease::*;
 use session_manager::*;
 use turn_boundary::*;
 use turn_commit_draft::*;
@@ -204,7 +200,6 @@ pub use effect::{
     GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, IndependentEffectWork,
     LlmRequestSpec, LlmStreamRecord, LoserPolicy, ProcessCommand, ProcessDriveStep,
     ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
     RankedGroupSettlement, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
     RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome,
     RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,

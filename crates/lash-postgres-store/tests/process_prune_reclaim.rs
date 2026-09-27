@@ -6,6 +6,7 @@
 //! This lives in its own test target rather than the conformance suite, which is
 //! at its line budget.
 
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
 use std::sync::Arc;
 
 use lash_core_execution::{
@@ -191,14 +192,21 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
         ))
         .await
         .expect("enqueue pending input");
-    let owner =
-        lash_core_execution::LeaseOwnerIdentity::opaque("prune-run-owner", "prune-run-incarnation");
     let lease = store
-        .try_claim_session_execution_lease(&session_id, &owner, "prune-run-executor", 60_000)
+        .seal_claim_epoch_for_test(
+            &session_id,
+            &lash_core_execution::LeaseOwnerIdentity::opaque(
+                "prune-run-owner",
+                "prune-run-incarnation",
+            ),
+            "prune-run-executor",
+            60_000,
+        )
         .await
-        .expect("claim lane")
+        .expect("seal drive")
         .acquired()
-        .expect("lane is free");
+        .expect("drive sealed");
+    let owner = lease.owner.clone();
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
@@ -236,10 +244,6 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
             input.input_id
         )])
     );
-    store
-        .release_session_execution_lease(&lease.authority())
-        .await
-        .expect("release lane before prune");
     for table in ["lash_queued_runs", "lash_queued_run_members"] {
         let count: i64 = sqlx::query_scalar(&format!(
             "SELECT count(*) FROM {table} WHERE session_id = $1"

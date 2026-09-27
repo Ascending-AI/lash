@@ -1087,11 +1087,17 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
         .await
         .expect("open the owner's handler");
     let error = first
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
         .await
         .expect_err("dirty capture aborts before commit");
     handler.close().await.expect("close the owner's handler");
-    assert_eq!(error.code, lash_core::RuntimeErrorCode::QueuedRunPending);
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed
+    );
 
     executor.fail_capture.store(false, Ordering::SeqCst);
     executor.dirty.store(false, Ordering::SeqCst);
@@ -1114,18 +1120,20 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     .await;
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain("root", "capture-abort-owner"))
+        .open_handler(AdmittedScope::queue_drain("root", "capture-abort-peer"))
         .await
         .expect("open the peer's handler");
     let reclaimed = peer
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
         .await
-        .expect("peer reclaim must not wait for the lease TTL")
+        .expect("a new drive can reclaim after capture failure")
         .ran()
         .expect("peer immediately resumes the admitted input");
     handler.close().await.expect("close the peer's handler");
-    // The failed owner released the lease and claim, so a peer can drive the
-    // admitted input immediately with its own handler.
+    // A new drive epoch can resume the admitted input immediately.
     assert_eq!(
         reclaimed.assistant_output.safe_text,
         "peer reclaimed after abort"
@@ -1203,7 +1211,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         executor: Arc::clone(&executor),
         committed_turns: AtomicUsize::new(0),
     }));
-    enqueue_idle_turn_input(
+    let inbound = enqueue_idle_turn_input(
         store.as_ref(),
         &SessionId::from("root"),
         "switch then fail capture",
@@ -1218,26 +1226,27 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         .await
         .expect("open the drain's handler");
     let committed = runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
         .await
-        .expect_err("failed follow-on remains a recoverable admission");
+        .expect("the engine returns the committed frame")
+        .ran()
+        .expect("the frame switch committed before follow-on capture failed");
     handler.close().await.expect("close the drain's handler");
-    assert_eq!(
-        committed.code,
-        lash_core::RuntimeErrorCode::QueuedRunPending
-    );
-    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("pending admission")
-    .expect("retained continuation");
-    assert_eq!(pending.position.physical_ordinal, 1);
-    assert_eq!(
-        pending.position.turn_id,
-        TurnId::from("follow-on-capture-failure:agent-frame:1")
-    );
+    assert!(matches!(
+        committed.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    let pending = lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
+        .await
+        .expect("load the head")
+        .expect("head")
+        .pending_follow_on
+        .expect("the failed follow-on remains owed");
+    assert_eq!(pending.physical_index(), 1);
+    assert_eq!(pending.root_turn_id().as_str(), inbound.input_id.as_str());
     let durable = lash_core::store::SessionCommitStore::load_session(store.as_ref())
         .await
         .expect("load committed frame")
@@ -1249,12 +1258,15 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             SessionId::from("root"),
-            "follow-on-capture-failure",
+            "follow-on-capture-retry",
         ))
         .await
         .expect("open the drain's handler");
     let recovered = runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
         .await
         .expect("retrying the logical queue call is safe")
         .ran()
@@ -1540,11 +1552,6 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterPromptBuild {
     }
 }
 
-pub(super) struct ExpireLeaseAfterRetainedCommit {
-    clock: Arc<lash_core::testing::TestClock>,
-    expired: AtomicBool,
-}
-
 pub(super) struct ExpireLeaseAtSecondTurnFinalizedHook {
     clock: Arc<lash_core::testing::TestClock>,
     finalized_hooks: AtomicUsize,
@@ -1610,28 +1617,6 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PauseAfterEffectLoop {
             std::thread::yield_now();
         }
     }
-}
-
-impl ExpireLeaseAfterRetainedCommit {
-    pub(super) fn new(clock: Arc<lash_core::testing::TestClock>) -> Self {
-        Self {
-            clock,
-            expired: AtomicBool::new(false),
-        }
-    }
-}
-
-impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterRetainedCommit {
-    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
-        if phase == lash_core::runtime::RuntimeTurnPhase::PostCommitDelivery
-            && !self.expired.swap(true, Ordering::SeqCst)
-        {
-            self.clock
-                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
-        }
-    }
-
-    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
 pub(super) async fn standard_runtime_with_transport_and_queue_store(
@@ -1776,15 +1761,14 @@ impl lash_core::store::RuntimePersistenceDecorator for JournalRedriveStore {
     }
 }
 
-/// Lets a foreign driver claim every open next-turn row under the live lease
-/// generation right before this runtime's own claim, so the accepted row is
-/// held by someone else when the drive probes it.
-pub(super) struct ForeignClaimBeforeDriveStore {
+/// Claims an open next-turn row under the drive's incarnation just before
+/// its root claim, so a repeated claim still finds the accepted row held.
+pub(super) struct HeldClaimBeforeDriveStore {
     pub(super) inner: Arc<RecordingStore>,
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for ForeignClaimBeforeDriveStore {
+impl lash_core::store::RuntimePersistenceDecorator for HeldClaimBeforeDriveStore {
     fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
         self.inner.as_ref()
     }
@@ -1793,13 +1777,11 @@ impl lash_core::store::RuntimePersistenceDecorator for ForeignClaimBeforeDriveSt
         &self,
         request: &lash_core::store::RootInputClaimRequest,
     ) -> Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
-        let foreign =
-            lash_core::LeaseOwnerIdentity::opaque("foreign-driver", "foreign-incarnation");
         lash_core::store::TurnInputStore::claim_next_turn_inputs(
             self.inner.as_ref(),
             &request.session_id,
             &request.lease,
-            &foreign,
+            &request.lease.owner,
             request.max_inputs,
         )
         .await?;
@@ -1809,17 +1791,15 @@ impl lash_core::store::RuntimePersistenceDecorator for ForeignClaimBeforeDriveSt
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core::TurnInputClaim>, lash_core::StoreError> {
-        let foreign =
-            lash_core::LeaseOwnerIdentity::opaque("foreign-driver", "foreign-incarnation");
         lash_core::store::TurnInputStore::claim_next_turn_inputs(
             self.inner.as_ref(),
             session_id,
             session_execution_lease,
-            &foreign,
+            owner,
             max_inputs,
         )
         .await?;

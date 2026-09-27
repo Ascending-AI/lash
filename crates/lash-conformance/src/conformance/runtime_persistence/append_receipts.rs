@@ -1063,14 +1063,11 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePe
         chain_depth: 1,
         attempts: 0,
     });
-    let failing_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from("root"),
-        "atomic-append-failing",
-    )
-    .await;
+    let _failing_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "atomic-append-failing")
+            .await;
     let error = store
-        .commit_runtime_state(failing.releasing_session_execution_lease(failing_lease.completion()))
+        .commit_runtime_state(failing)
         .await
         .expect_err("a refused follow-on write rolls back append and receipt");
     assert!(matches!(error, StoreError::FollowOnHeadInvariant { .. }));
@@ -1081,7 +1078,6 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePe
             .expect("load failed append")
             .is_none()
     );
-    release_session_execution_lease_for_test(&store, &failing_lease).await;
 
     commit_runtime_state_for_test(&store, clean, "atomic-append-retry")
         .await

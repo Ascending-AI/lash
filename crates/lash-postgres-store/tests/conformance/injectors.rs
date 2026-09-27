@@ -140,16 +140,6 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                     .execute(self.storage.pool())
                     .await
             }
-            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => {
-                sqlx::query(
-                    "UPDATE lash_session_execution_leases
-                 SET lease_fencing_token = $1 WHERE session_id = $2",
-                )
-                .bind(value)
-                .bind(session_id.as_str())
-                .execute(self.storage.pool())
-                .await
-            }
             FenceIntegrityTarget::TriggerRevision { subscription_id } => {
                 sqlx::query(
                     "UPDATE lash_trigger_subscriptions
@@ -214,27 +204,6 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                 FenceIntegrityObservation {
                     value,
                     mutation_fingerprint: format!("{head_json}:{leaf:?}:{checkpoint:?}"),
-                }
-            }
-            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => {
-                let (value, owner, token, claimed, expires): (
-                    i64,
-                    Option<String>,
-                    Option<String>,
-                    i64,
-                    i64,
-                ) = sqlx::query_as(
-                    "SELECT lease_fencing_token, lease_owner_id, lease_token,
-                            lease_claimed_at_ms, lease_expires_at_ms
-                     FROM lash_session_execution_leases WHERE session_id = $1",
-                )
-                .bind(session_id.as_str())
-                .fetch_one(self.storage.pool())
-                .await
-                .expect("observe Postgres session-lease fence");
-                FenceIntegrityObservation {
-                    value,
-                    mutation_fingerprint: format!("{owner:?}:{token:?}:{claimed}:{expires}"),
                 }
             }
             FenceIntegrityTarget::TriggerRevision { subscription_id } => {

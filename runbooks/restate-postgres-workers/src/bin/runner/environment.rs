@@ -232,31 +232,6 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
         eprintln!("workers-e2e TIMEOUT process state/events: no matching process ids");
     }
 
-    match sqlx::query_as::<
-        _,
-        (
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            i64,
-            i64,
-            i64,
-        ),
-    >(
-        "SELECT session_id, lease_owner_id, lease_owner_incarnation_id, lease_token,
-                lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
-         FROM lash_session_execution_leases
-         WHERE session_id = $1",
-    )
-    .bind(session_id)
-    .fetch_all(pool)
-    .await
-    {
-        Ok(rows) => eprintln!("workers-e2e TIMEOUT session lease row:\n{rows:#?}"),
-        Err(err) => eprintln!("workers-e2e TIMEOUT session-lease query failed: {err:#}"),
-    }
-
     let admin = RestateAdminClient::new(admin_url);
     let mut invocation_predicates = vec![
         format!(

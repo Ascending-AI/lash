@@ -238,39 +238,26 @@ they are the ones that can hold that window open.
    Require the PID to change and the run log to gain a fresh `starting agent-workbench` line,
    while the session and turn address remain exact.
 
-   Record the dead worker's lane row on both sides of the restart:
-   `session_execution_leases` in `<data-dir>/lash-sessions/durable-core.db`, columns
-   `lease_owner_id`, `lease_owner_incarnation_id`, `lease_executor_id`,
-   `lease_fencing_token`, and `lease_expires_at_ms`. Copy the database together with its
-   `-wal` and `-shm` files before querying; reading the main file alone reports empty tables.
-   Do not gate on that row changing, and do not gate on the commit time. The
-   replacement worker does not claim the lane: it commits under the CAS fence
-   (ADR 0029), not under lease liveness. Each arm proves the fence instead:
-   **exactly one** `runtime_turn_commits` row with `key: "final"` for the arm's turn,
-   and no duplicate node append for it. The lease row after a clean settlement
-   releases its owner columns (`lease_owner_id`, `lease_owner_incarnation_id`,
-   `lease_executor_id`, `lease_token` all null, `lease_term_ms` and
-   `lease_expires_at_ms` zero) with a monotonically advanced `lease_fencing_token`;
-   that release, together with the single commit, is the observable evidence that no
-   second writer ever held the lane. A second `final` commit row for one turn id is
-   the failure.
+   Record `session_meta.drive_epoch` in `<data-dir>/lash-sessions/durable-core.db`
+   on both sides of the restart. Copy the database together with its `-wal` and
+   `-shm` files before querying. Require the replacement drive to seal a newer
+   epoch. Each arm also requires **exactly one** `runtime_turn_commits` row with
+   `key: "final"` for its turn and no duplicate node append. A second `final`
+   commit row for one turn id is the failure.
 2. **Same-turn successor arm:** allow Restate to redrive that exact turn. Require its user and
    assistant nodes to commit exactly once, the UI/API/store projections to agree, and a second
    `turn_started` for that exact turn id after the restart. Its single `runtime_turn_commits`
-   row carries the fence evidence. Do not gate on `session_execution_lease.*`: those are
-   `tracing` events and the Workbench installs no `tracing` subscriber, so they reach neither
-   `trace.jsonl` nor the process log. Save `06a-same-turn-{state,store,trace}.json` and report this arm separately.
+   row carries the commit evidence. Save `06a-same-turn-{state,store,trace}.json`
+   and report this arm separately.
 3. **New-turn arm:** immediately submit a fresh marker turn through the replacement
    worker. Require its
    distinct turn id and ordered user/assistant nodes to commit exactly once, with UI/API/store
-   agreement. A busy-lease error is a failure; a typed `HeadRevisionConflict` is acceptable
+   agreement. A typed `HeadRevisionConflict` is acceptable
    only for an actual overlapping writer and must carry complete loser evidence. Save
    `06b-new-turn-{state,store,trace}.json` and report this arm separately.
 
-The deterministic companions are
-`same_turn_successor_within_dead_lease_ttl_commits_under_head_cas` and
-`new_turn_within_dead_lease_ttl_commits_under_head_cas`. Restoring the former busy-holder
-refusal must make the new-turn arm fail; record that RED proof with the run.
+The deterministic companions verify that a restarted drive seals a newer
+epoch and stale claims refuse before effects.
 
 ## Phase 6 — Teardown and score
 

@@ -217,7 +217,6 @@ must_cover = [
   "CREATE TABLE IF NOT EXISTS lash_graph_nodes",
   "CREATE TABLE IF NOT EXISTS lash_session_meta",
   "CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits",
-  "CREATE TABLE IF NOT EXISTS lash_session_execution_leases",
   "CREATE TABLE IF NOT EXISTS lash_queued_work_batches",
   "CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs",
   "CREATE TABLE IF NOT EXISTS lash_attachment_manifest",

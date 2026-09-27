@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use lash_core_execution::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
 use lash_core_execution::testing::TestClock;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
 use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
@@ -13,7 +14,6 @@ use lash_core_execution::{
     facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
-use sqlx::Connection as _;
 
 // Keep subsequent lines stable for machine-checked public API evidence anchors.
 // Shared test support now lives at the grouped integration-harness root.
@@ -162,7 +162,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn claim_pending_turn_inputs_postgres(",
-            "pub(crate) async fn read_session_execution_lease_unlocked(",
+            "pub(super) async fn pending_follow_on_tx(",
         ),
         (
             RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE,
@@ -261,7 +261,7 @@ fn clock_contract_wake(session_id: &SessionId) -> lash_core_execution::ProcessWa
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock() {
+async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock() {
     let Some((_lock, storage)) =
         configured_storage("queued-work/pending-input PostgreSQL clock contract").await
     else {
@@ -285,23 +285,18 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         })
         .await
         .expect("create skewed-clock session store");
-    let owner = LeaseOwnerIdentity::opaque("clock-contract-owner", "clock-contract-owner:i");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id.clone()),
-            &owner,
-            "queued-work-and-pending-input-lease-decisions-follow-the-postgres-clock-executor",
+            &LeaseOwnerIdentity::opaque("clock-contract-owner", "clock-contract-owner:i"),
+            "queued-work-and-pending-input-claim-decisions-follow-the-postgres-clock-executor",
             60_000,
         )
         .await
-        .expect("claim session lease")
+        .expect("seal session drive")
         .acquired()
-        .expect("session lease acquired");
-    let server_after = db_now_ms(&storage).await;
-    assert!(
-        (server_before..=server_after).contains(&lease.claimed_at_epoch_ms),
-        "session lease claim timestamp must come from PostgreSQL: server={server_before}..={server_after}, lease={lease:?}"
-    );
+        .expect("session drive sealed");
+    let owner = lease.owner.clone();
 
     let command = store
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
@@ -509,136 +504,4 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     .await
     .expect("read persisted final-turn commit timestamp");
     assert_eq!(committed_at_ms, INJECTED_COMMIT_MS as i64);
-}
-
-/// The diagnostic lease read must not take the lease row's lock.
-///
-/// The mutation paths take `FOR UPDATE` deliberately, because check-then-act on
-/// this row is not atomic under READ COMMITTED. If the *diagnostic* read joined
-/// them, an operator polling a stuck session would queue behind (and make wait)
-/// the very holder or claimant they are trying to observe: watching the lease
-/// would delay the lane. This proves both halves: the query plans no `LockRows`,
-/// and the read completes promptly while another connection holds the row locked.
-#[tokio::test]
-async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
-    let Some(database_url) = database_url() else {
-        eprintln!(
-            "skipping PostgreSQL diagnostic-read lock contract: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    let _lock = SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect PostgreSQL storage");
-    let session_id = unique_id("diagnostic-read-lock");
-    let host_clock = Arc::new(TestClock::new(
-        db_now_ms(&storage).await.saturating_add(CLOCK_SKEW_MS),
-    ));
-    let factory = storage
-        .session_store_factory_with_shared_process_registry()
-        .with_clock(host_clock as Arc<dyn Clock>);
-    let store = factory
-        .create_store(&SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.clone()),
-            relation: SessionRelation::Root,
-            policy: lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-            ),
-        })
-        .await
-        .expect("create the session store");
-    let owner = LeaseOwnerIdentity::opaque("diagnostic-read-holder", "boot-1");
-    let held = store
-        .try_claim_session_execution_lease(
-            &SessionId::from(session_id.clone()),
-            &owner,
-            "diagnostic-lease-read-neither-locks-the-row-nor-waits-for-a-holder-executor",
-            60_000,
-        )
-        .await
-        .expect("claim the lane")
-        .acquired()
-        .expect("an unheld lane is acquirable");
-
-    // 1. The plan carries no row-locking node.
-    let plan_rows: Vec<String> = sqlx::query_scalar(
-        "EXPLAIN (FORMAT TEXT)
-         SELECT lease_owner_id, lease_token, lease_fencing_token,
-                lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id
-         FROM lash_session_execution_leases
-         WHERE session_id = $1",
-    )
-    .bind(&session_id)
-    .fetch_all(storage.pool())
-    .await
-    .expect("explain the diagnostic read");
-    let plan = plan_rows.join("\n");
-    assert!(
-        !plan.contains("LockRows"),
-        "the diagnostic read must not plan a row lock:\n{plan}"
-    );
-
-    // 2. It also does not wait on one. Hold the row under `FOR UPDATE` in an open
-    //    transaction on a separate connection, then read diagnostics.
-    let mut locker = sqlx::PgConnection::connect(&database_url)
-        .await
-        .expect("connect the row-lock holder");
-    sqlx::query("BEGIN")
-        .execute(&mut locker)
-        .await
-        .expect("begin the locking transaction");
-    let locked: Option<String> = sqlx::query_scalar(
-        "SELECT lease_owner_id FROM lash_session_execution_leases
-         WHERE session_id = $1 FOR UPDATE",
-    )
-    .bind(&session_id)
-    .fetch_optional(&mut locker)
-    .await
-    .expect("take the row lock");
-    assert_eq!(
-        locked.as_deref(),
-        Some("diagnostic-read-holder"),
-        "the locking transaction must actually hold this session's lease row"
-    );
-
-    let server_before_read = db_now_ms(&storage).await;
-    let observation = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        store.get_session_execution_lease(&SessionId::from(session_id.clone())),
-    )
-    .await
-    .expect("the diagnostic read must not wait for the row lock")
-    .expect("diagnostic read succeeds");
-    let server_after_read = db_now_ms(&storage).await;
-    assert!(
-        (server_before_read..=server_after_read).contains(&observation.observed_at_epoch_ms),
-        "diagnostic observation must use the PostgreSQL transaction clock: \
-         server={server_before_read}..={server_after_read}, observation={observation:?}"
-    );
-    let observed = observation.lease.expect("a held lane is reported");
-    assert_eq!(observed.fencing_token, held.fencing_token);
-    assert_eq!(observed.owner, held.owner);
-
-    // For contrast: the same read through a locking path would block here. Prove
-    // the lock really was contended by showing a `FOR UPDATE NOWAIT` fails.
-    let contended = sqlx::query(
-        "SELECT 1 FROM lash_session_execution_leases
-         WHERE session_id = $1 FOR UPDATE NOWAIT",
-    )
-    .bind(&session_id)
-    .fetch_optional(storage.pool())
-    .await;
-    assert!(
-        contended.is_err(),
-        "the row lock must still be held, or this test proved nothing"
-    );
-
-    sqlx::query("ROLLBACK")
-        .execute(&mut locker)
-        .await
-        .expect("release the row lock");
 }

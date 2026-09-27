@@ -38,20 +38,6 @@ impl LashRuntime {
                     release_policy: session_execution_lease_release_policy,
                 },
         } = context;
-        if queued_claims.is_empty()
-            && turn_input_claims.is_empty()
-            && let Some(lease) = session_execution_lease
-        {
-            while self
-                .drain_next_session_command_with_cancellation(
-                    &lease.fence(),
-                    local_stop.immediate_token(),
-                    scoped_effect_controller.controller(),
-                )
-                .await?
-                .is_some()
-            {}
-        }
         let turn_id = input
             .trace_turn_id
             .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()))
@@ -128,7 +114,7 @@ impl LashRuntime {
             .and_then(|session| session.history_store())
         else {
             let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-            let mut session_execution_lease = self.claim_session_execution_lease().await?;
+            let mut session_execution_lease = self.claim_drive_authority().await?;
             let result = Box::pin(self.drive_logical_turn(
                 LogicalTurnStart::Input(input, None),
                 opts.events_or_noop(),
@@ -141,7 +127,7 @@ impl LashRuntime {
             ))
             .await;
             return self
-                .settle_session_execution_lease(session_execution_lease.as_ref(), result)
+                .settle_drive_authority(session_execution_lease.as_ref(), result)
                 .await;
         };
 

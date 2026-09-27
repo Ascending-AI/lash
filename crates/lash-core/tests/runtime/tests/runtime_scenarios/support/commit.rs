@@ -3,7 +3,6 @@ use super::*;
 impl RuntimeScenarioContext {
     pub(super) async fn commit(&mut self, phase: RuntimeCommitPhase) {
         self.ensure_lease().await;
-        let (_, lease) = self.owner_and_lease();
         let persisted_node_ids = self
             .state
             .pending_graph_commit()
@@ -11,7 +10,6 @@ impl RuntimeScenarioContext {
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
         let final_commit = RuntimeCommit::persisted_state_for_test(&self.state, &[])
-            .releasing_session_execution_lease(lease.completion())
             .completing_queue_claims(
                 self.command_claim
                     .iter()

@@ -39,7 +39,6 @@ pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;
 pub mod session_catalog;
-pub mod session_execution_lease;
 pub mod session_graph;
 pub(crate) mod session_graph_cache;
 pub(crate) mod session_graph_integrity;
@@ -104,11 +103,9 @@ pub(crate) use session_graph::{
 };
 pub(crate) use store::{
     AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
-    CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, LeaseOwnerIdentity,
-    OperationId, QueuedWorkClaimOutcome, RuntimePersistence, SelectedQueuedWorkClaimOutcome,
-    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseObservation, SessionMeta, StoreError,
-    WorkClaim,
+    CheckpointComponentDescriptor, ClaimAuthority, GraphAppend, HydratedCheckpointComponent,
+    LeaseOwnerIdentity, OperationId, QueuedWorkClaimOutcome, RuntimePersistence,
+    SelectedQueuedWorkClaimOutcome, SessionMeta, StoreError, WorkClaim,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 pub(crate) use usage::{LedgerUsageDisposition, TokenLedgerEntry, UnreportedLedgerAttempt};
@@ -186,7 +183,6 @@ pub(crate) mod session_model {
 
 /// Path shim: the durable half of what `lash-core` exposes as `crate::runtime`.
 pub(crate) mod runtime {
-    pub(crate) use crate::session_execution_lease;
     pub(crate) use crate::session_state as state;
     pub(crate) use crate::{
         QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimData, TurnInputClaimData,

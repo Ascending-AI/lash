@@ -41,7 +41,7 @@ fn queued_run_configuration(session_id: &SessionId) -> crate::PersistedSessionCo
 /// began under, its scope, and the admission itself.
 struct QueuedRun {
     store: Arc<dyn crate::store::RuntimePersistence>,
-    lease: crate::SessionExecutionLease,
+    lease: crate::ClaimAuthority,
     scope: crate::ExecutionScope,
     admission: crate::store::QueuedRunAdmission,
 }
@@ -67,7 +67,7 @@ impl QueuedRun {
             })
             .await
             .expect("create the law's session");
-        let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
+        let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
             &store,
             &session_id,
             &format!("{}-{name}", fixture.prefix),

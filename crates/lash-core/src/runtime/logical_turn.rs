@@ -469,7 +469,7 @@ impl LashRuntime {
         scoped_effect_controller: ScopedEffectController<'_>,
         local_stop: LocalTurnStop,
         claims: LogicalTurnClaims,
-        session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
+        session_execution_lease: &mut Option<DriveClaimGuard>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
         let (observer, mut observations) = TurnObserver::open(events, turn_events);
@@ -496,7 +496,7 @@ impl LashRuntime {
         scoped_effect_controller: ScopedEffectController<'_>,
         local_stop: LocalTurnStop,
         mut claims: LogicalTurnClaims,
-        session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
+        session_execution_lease: &mut Option<DriveClaimGuard>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
         // FIG-3353: the shared funnel for every logical turn — an open that
@@ -826,11 +826,12 @@ impl LashRuntime {
                         "committed queued continuation awaits the next drain",
                     ));
                 }
+                let fence = lease.fence();
                 let selection = store
                     .select_queued_run(
-                        &lease.fence(),
+                        &fence,
                         &pending.scope,
-                        &self.runtime_lease_owner,
+                        &fence.owner,
                         self.host
                             .core
                             .durability
@@ -885,7 +886,7 @@ impl LashRuntime {
                 // recovers it (ADR 0101 §3).
                 if session_execution_lease
                     .as_ref()
-                    .is_some_and(SessionExecutionLeaseGuard::is_lost)
+                    .is_some_and(DriveClaimGuard::is_lost)
                 {
                     self.record_follow_on_failure(
                         &mut turns,
@@ -907,6 +908,30 @@ impl LashRuntime {
                     });
                 }
                 turn_trace_turn_id = owed.follow_on_turn_id.clone();
+                // A late crash may replay this root after its follow-on has
+                // committed. In that case the first frame's recorded commit
+                // fixes the follow-on index; loading the newer head would
+                // rename its earlier recorded effects. An uncommitted
+                // follow-on still refreshes the head, including graph writes
+                // made after the first frame's commit.
+                if let (Some(previous), Some(store)) = (
+                    turns.last(),
+                    self.session
+                        .as_ref()
+                        .and_then(|session| session.history_store()),
+                ) && store
+                    .committed_turn_exists(&owed.follow_on_turn_id)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?
+                {
+                    self.admitted_turn_index =
+                        Some(previous.state.turn_index.checked_add(1).ok_or_else(|| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::StoreCommitFailed,
+                                "follow-on turn index exceeds platform range",
+                            )
+                        })?);
+                }
                 let (input, options) = follow_on_input(&owed, follow_turn_context.clone());
                 start = LogicalTurnStart::Input(input, options);
                 claims = LogicalTurnClaims::new(Vec::new(), Vec::new());

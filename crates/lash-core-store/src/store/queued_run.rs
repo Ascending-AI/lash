@@ -1,6 +1,6 @@
 //! Durable admission of one queued logical run.
 
-use super::{SessionExecutionLeaseAuthority, StoreError};
+use super::{ClaimAuthority, StoreError};
 use crate::{BatchId, ExecutionScope, InputId, PersistedSessionConfig, SessionId, TurnId};
 
 /// The selection named by the host. Automatic retries resume the pending run;
@@ -140,7 +140,7 @@ pub struct BeginQueuedRun {
 }
 
 impl BeginQueuedRun {
-    pub fn validate(&self, fence: &SessionExecutionLeaseAuthority) -> Result<(), StoreError> {
+    pub fn validate(&self, fence: &ClaimAuthority) -> Result<(), StoreError> {
         if self.session_id != fence.session_id {
             return Err(StoreError::SessionExecutionLeaseExpired {
                 session_id: self.session_id.clone(),

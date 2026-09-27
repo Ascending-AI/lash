@@ -1,6 +1,5 @@
-use lash_core_execution::{
-    QueuedWorkStore, RuntimePersistence, SessionExecutionLeaseStore, StoreError,
-};
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
+use lash_core_execution::{QueuedWorkStore, RuntimePersistence, StoreError};
 use lash_sansio::SessionId;
 use std::sync::Arc;
 #[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
@@ -60,11 +59,10 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
     let store = storage.session_store(session_id);
     let owner = lash_core_execution::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
     let lease = store
-        .try_claim_session_execution_lease_with_token(
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "postgres-conformance-executor",
-            &lash_core_execution::LeaseClaimNonce::new(),
             120_000,
         )
         .await

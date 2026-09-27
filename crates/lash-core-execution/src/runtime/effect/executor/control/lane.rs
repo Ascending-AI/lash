@@ -6,10 +6,7 @@
 
 use super::*;
 
-pub use lash_core_effect::queued_lane::{
-    CompletionKeyPreparation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
-    QueuedLaneHolder, QueuedLaneProbe,
-};
+pub use lash_core_effect::CompletionKeyPreparation;
 
 /// Opaque guard holding one facade tool-intent submission gate.
 #[allow(dead_code)]

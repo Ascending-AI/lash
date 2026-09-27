@@ -150,14 +150,6 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_session_execution_leases (session_id, lease_token)
-         VALUES ('partial-identity', 'token-without-executor')",
-        "ck_session_execution_leases_identity_all_or_none",
-    )
-    .await;
-
     // Any strict subset of the four-column claim identity must be rejected —
     // including a claim id/token pair with no owner.
     for fields in [

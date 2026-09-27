@@ -1,15 +1,17 @@
 use crate::core_internal::await_event_scope_not_retirable;
-use crate::queued_lane::{
-    CompletionKeyPreparation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneProbe,
-};
-use crate::queued_lane_wait;
 use crate::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome,
     RuntimeError, SessionId,
 };
-use std::sync::Arc;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
+
+/// Result of preparing an externally routable tool completion key.
+pub enum CompletionKeyPreparation {
+    NotNeeded,
+    Unsupported,
+    Issued(AwaitEventKey),
+}
 
 /// Shared AwaitEvent contract for effect boundaries.
 ///
@@ -25,120 +27,6 @@ pub trait AwaitEventResolver: Send + Sync {
     /// completion refuse a resolver that names no authority, so a forwarding
     /// layer must pass its inner answer through rather than inherit `None`.
     fn await_event_authority_binding_id(&self) -> Option<String>;
-
-    /// Acquire the authoritative session-execution lane a durable queued drain
-    /// needs before it may claim work.
-    ///
-    /// The default is the one-shot contract every non-re-driven boundary owes:
-    /// one attempt, `Busy` reported as `NotAcquired`, the durable row left
-    /// pending. A boundary whose *invocation* is re-driven by a durable engine
-    /// overrides with [`wait_out_crashed_lane_holder`](Self::wait_out_crashed_lane_holder):
-    /// it waits out a crashed-looking holder and otherwise fails with the typed
-    /// retryable `RuntimeErrorCode::SessionExecutionLaneBusy` so the engine's
-    /// retry policy — not a sleep inside one invocation — paces the next
-    /// attempt. Neither path bypasses or forges the holder's lease.
-    ///
-    /// Arguments are owned so this can be proxied across
-    /// `EffectControllerTaskRequest`.
-    async fn acquire_queued_lane(
-        &self,
-        lane: Arc<dyn QueuedLaneProbe>,
-        _cancel: CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        match lane.try_acquire().await? {
-            QueuedLaneAttempt::Acquired(guard) => Ok(QueuedLaneAcquisition::Acquired(guard)),
-            QueuedLaneAttempt::Busy(_) => Ok(QueuedLaneAcquisition::NotAcquired),
-        }
-    }
-
-    /// Bounded, aliveness-aware wait for engine-re-driven boundaries. Provided
-    /// so `lash-restate` adopts the policy without lash-core exporting the
-    /// policy types or a second free function.
-    async fn wait_out_crashed_lane_holder(
-        &self,
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        let mut wait = queued_lane_wait::QueuedLaneWait::default();
-        #[cfg(feature = "otel-trace")]
-        let mut contention_started: Option<tokio::time::Instant> = None;
-        loop {
-            let acquisition = match lane.try_acquire().await {
-                Ok(acquisition) => acquisition,
-                Err(error) => {
-                    #[cfg(feature = "otel-trace")]
-                    if let Some(started) = contention_started {
-                        crate::operational_metrics::record_session_lane_contention_wait(
-                            started.elapsed(),
-                            "error",
-                        );
-                    }
-                    return Err(error);
-                }
-            };
-            match acquisition {
-                QueuedLaneAttempt::Acquired(guard) => {
-                    #[cfg(feature = "otel-trace")]
-                    if let Some(started) = contention_started {
-                        crate::operational_metrics::record_session_lane_contention_wait(
-                            started.elapsed(),
-                            "acquired",
-                        );
-                    }
-                    return Ok(QueuedLaneAcquisition::Acquired(guard));
-                }
-                QueuedLaneAttempt::Busy(holder) => {
-                    #[cfg(feature = "otel-trace")]
-                    let started = *contention_started.get_or_insert_with(tokio::time::Instant::now);
-                    let slice_ms = match wait.observe(&holder) {
-                        queued_lane_wait::QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
-                        queued_lane_wait::QueuedLaneWaitStep::GiveUp(give_up) => {
-                            let waited_ms = wait.waited_ms();
-                            #[cfg(feature = "otel-trace")]
-                            crate::operational_metrics::record_session_lane_contention_wait(
-                                started.elapsed(),
-                                "gave_up",
-                            );
-                            crate::operational_metrics::record_session_lane_give_up(
-                                give_up.as_str(),
-                            );
-                            queued_lane_wait::trace_busy_gave_up(&holder, give_up, waited_ms);
-                            return Err(queued_lane_wait::lane_busy_error(
-                                &holder, give_up, waited_ms,
-                            ));
-                        }
-                    };
-                    queued_lane_wait::trace_busy_wait(&holder, slice_ms, wait.waited_ms());
-                    let sleep = lane.pause(std::time::Duration::from_millis(slice_ms));
-                    tokio::select! {
-                        () = sleep => {}
-                        () = cancel.cancelled() => {
-                            let give_up = queued_lane_wait::QueuedLaneGiveUp::CancelledWhileWaiting;
-                            let waited_ms = wait.waited_ms();
-                            #[cfg(feature = "otel-trace")]
-                            crate::operational_metrics::record_session_lane_contention_wait(
-                                started.elapsed(),
-                                "gave_up",
-                            );
-                            crate::operational_metrics::record_session_lane_give_up(
-                                give_up.as_str(),
-                            );
-                            queued_lane_wait::trace_busy_gave_up(
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            );
-                            return Err(queued_lane_wait::lane_busy_error(
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            ));
-                        },
-                    }
-                }
-            }
-        }
-    }
 
     async fn prepare_completion_key(
         &self,

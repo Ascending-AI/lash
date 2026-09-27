@@ -1,5 +1,5 @@
 //! The [`RuntimePersistence`] capability-segment implementations for
-//! [`Store`]: [`SessionCommitStore`], [`SessionExecutionLeaseStore`],
+//! [`Store`]: [`SessionCommitStore`],
 //! [`QueuedWorkStore`], [`TurnInputStore`], and [`StoreMaintenance`].
 //!
 //! This is the tokio-rusqlite port of the prior store's `persistence.rs`. The
@@ -210,7 +210,6 @@ use queued_run::*;
 use queued_run_selection::*;
 mod drive_epoch;
 mod session_commit;
-mod session_execution_lease;
 mod turn_input;
 pub(crate) mod turn_park;
 pub(crate) mod turn_park_feed;

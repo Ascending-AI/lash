@@ -339,7 +339,7 @@ turn leaves exactly one committed assistant copy.
 
 ### One turn at a time, admitted honestly
 
-A session runs one turn at a time — the session execution lease and the
+A session runs one turn at a time — drive epoch admission and the
 commit-CAS fence enforce that durably — so `POST /api/turn` cannot start a turn
 on a session that already has one running. It admits the send as the next turn's
 input instead and says so: `{"accepted":true,"queued":true,"queued_input":{…}}`

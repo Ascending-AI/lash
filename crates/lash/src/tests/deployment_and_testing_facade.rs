@@ -507,18 +507,12 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         })
         .await
         .expect("create the in-flight turn's session");
-    let lease = session_store
-        .try_claim_session_execution_lease_with_token(
-            &turn_session,
-            &crate::testing::runtime_lease_owner(),
-            "generation-drain-status-executor",
-            &lash_core::LeaseClaimNonce::for_testing("generation-drain-status-token"),
-            60_000,
-        )
-        .await
-        .expect("claim the session lease")
-        .acquired()
-        .expect("a fresh session's lease is free");
+    let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
+        &(session_store.clone() as Arc<dyn lash_core::RuntimePersistence>),
+        &turn_session,
+        "generation-drain-status",
+    )
+    .await;
     let expected_head_revision = session_store
         .load_session_head_meta()
         .await

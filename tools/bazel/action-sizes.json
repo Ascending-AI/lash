@@ -769,13 +769,6 @@
     "peak_bytes": 1591029760,
     "samples": 717
   },
-  "lash-restate-postgres-workers-e2e/lash_e2e_session_lease_triage": {
-    "cpu_count": 2,
-    "memory_kb": 2621440,
-    "p95_cores": 1.94,
-    "peak_bytes": 1703936000,
-    "samples": 143
-  },
   "lash-restate-postgres-workers-e2e/lash_e2e_version_bump": {
     "cpu_count": 2,
     "memory_kb": 2621440,

@@ -2216,14 +2216,6 @@ jobs:
             bazel: false
             restate: false
             runner: ubuntu-24.04
-          - name: session-lease-triage
-            recipe: session-lease-triage-e2e
-            node: false
-            artifact: session-lease-triage
-            browser: false
-            bazel: false
-            restate: false
-            runner: ubuntu-24.04
           - name: slack-clone-full-host
             recipe: slack-clone-full-host-e2e
             node: false
@@ -2321,7 +2313,6 @@ jobs:
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
           LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
-          LASH_SESSION_LEASE_ARTIFACT_DIR: target/functional-e2e-artifacts/session-lease-triage
           LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
           AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
@@ -2438,7 +2429,6 @@ jobs:
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
           LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
-          LASH_SESSION_LEASE_ARTIFACT_DIR: target/functional-e2e-artifacts/session-lease-triage
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
 

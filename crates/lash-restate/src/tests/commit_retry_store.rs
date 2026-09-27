@@ -1,18 +1,18 @@
 //! A pass-through store over the shared in-memory recovery store that counts
-//! lease claims, for the laws that probe a commit retry.
+//! drive seals, for the laws that probe a commit retry.
 
 use super::*;
 
 pub(super) struct CommitRetryStore {
     pub(super) inner: Arc<dyn lash_core::RuntimePersistence>,
-    pub(super) lease_claim_count: Arc<AtomicUsize>,
+    pub(super) drive_seal_count: Arc<AtomicUsize>,
 }
 
 impl CommitRetryStore {
     pub(super) fn new(inner: Arc<dyn lash_core::RuntimePersistence>) -> Self {
         Self {
             inner,
-            lease_claim_count: Arc::new(AtomicUsize::new(0)),
+            drive_seal_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -31,7 +31,7 @@ impl lash_core::FleetFormatStore for CommitRetryStore {
 impl lash_core::SessionCommitStore for CommitRetryStore {
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &lash_core::SessionExecutionLeaseAuthority,
+        lease: &lash_core::ClaimAuthority,
         follow_on_turn_id: &lash_core::TurnId,
     ) -> Result<lash_core::store::PendingFollowOn, lash_core::StoreError> {
         self.inner
@@ -87,53 +87,6 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
-    async fn try_claim_session_execution_lease_with_token(
-        &self,
-        session_id: &SessionId,
-        owner: &lash_core::LeaseOwnerIdentity,
-        executor_id: &str,
-        claim_nonce: &lash_core::LeaseClaimNonce,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, lash_core::StoreError> {
-        self.lease_claim_count.fetch_add(1, Ordering::SeqCst);
-        self.inner
-            .try_claim_session_execution_lease_with_token(
-                session_id,
-                owner,
-                executor_id,
-                claim_nonce,
-                lease_ttl_ms,
-            )
-            .await
-    }
-
-    async fn renew_session_execution_lease(
-        &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::SessionExecutionLease, lash_core::StoreError> {
-        self.inner
-            .renew_session_execution_lease(fence, lease_ttl_ms)
-            .await
-    }
-
-    async fn release_session_execution_lease(
-        &self,
-        completion: &lash_core::SessionExecutionLeaseAuthority,
-    ) -> Result<(), lash_core::StoreError> {
-        self.inner.release_session_execution_lease(completion).await
-    }
-
-    async fn get_session_execution_lease(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<lash_core::SessionExecutionLeaseObservation, lash_core::StoreError> {
-        self.inner.get_session_execution_lease(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
 impl lash_core::store::DriveEpochStore for CommitRetryStore {
     async fn seal_drive_epoch(
         &self,
@@ -142,6 +95,7 @@ impl lash_core::store::DriveEpochStore for CommitRetryStore {
         observed_epoch: u64,
         root_start: &lash_core::store::RootStartNonce,
     ) -> Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
+        self.drive_seal_count.fetch_add(1, Ordering::SeqCst);
         self.inner
             .seal_drive_epoch(session_id, admission, observed_epoch, root_start)
             .await
@@ -201,7 +155,7 @@ impl lash_core::store::RootStore for CommitRetryStore {
 impl lash_core::QueuedWorkStore for CommitRetryStore {
     async fn select_queued_run(
         &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
+        fence: &lash_core::ClaimAuthority,
         scope: &lash_core::ExecutionScope,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -228,14 +182,14 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
     }
     async fn settle_queued_run(
         &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
+        fence: &lash_core::ClaimAuthority,
         settlement: lash_core::store::QueuedRunCommit,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         self.inner.settle_queued_run(fence, settlement).await
     }
     async fn begin_or_resume_queued_run(
         &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
+        fence: &lash_core::ClaimAuthority,
         request: lash_core::store::BeginQueuedRun,
     ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
         self.inner.begin_or_resume_queued_run(fence, request).await
@@ -251,7 +205,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
     ) -> Result<Option<lash_core::runtime::QueuedWorkClaim>, lash_core::StoreError> {
         self.inner
@@ -262,7 +216,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
     async fn claim_ready_queued_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         policy: lash_core::QueuedWorkClaimPolicy,
@@ -275,7 +229,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
@@ -304,7 +258,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         batch_ids: &[lash_core::BatchId],
@@ -376,7 +330,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         binding_id: &str,
         admitted_scope: &lash_core::ExecutionScope,
     ) -> Result<(), lash_core::StoreError> {
@@ -392,7 +346,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
         self.inner
@@ -403,7 +357,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         binding_id: &str,
         admitted_scope: &lash_core::ExecutionScope,
     ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
@@ -514,7 +468,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
@@ -535,7 +489,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core::runtime::TurnInputClaim>, lash_core::StoreError> {
@@ -554,7 +508,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
     async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> Result<Vec<lash_core::TurnId>, lash_core::StoreError> {
         self.inner
@@ -565,7 +519,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         turn_id: &lash_core::TurnId,
         observed: &lash_core::TurnCancelIntentSnapshot,
         settlement: Option<&lash_core::TurnCancelClosureSettlement>,

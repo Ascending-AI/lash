@@ -1592,8 +1592,6 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     std::fs::create_dir_all(&data_dir).expect("create turn ingress E2E data dir");
     let sessions = WorkbenchSessions::fresh();
     let session_id = sessions.current();
-    let admission_gate = Arc::new(SessionOpenAdmissionGate::new(&session_id));
-    register_session_open_admission_gate(Arc::clone(&admission_gate));
 
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let requests_for_provider = Arc::clone(&requests);
@@ -1730,74 +1728,6 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    // The engine-started root's follower settles it through its own open,
-    // and the engine's drive opens the session once more for its last
-    // admission pass: the gate counts every claim on the session, so it arms
-    // once that follower is done and the engine runs nothing on the session.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    while harness.state.active_turns.follows.follows_any(&session_id) {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the queued root's follower did not finish"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    wait_for_session_engine_idle(&admin_url, &session_id, Duration::from_secs(30)).await;
-    admission_gate.arm();
-    let state_for_holder = harness.state.clone();
-    let session_id_for_holder = session_id.clone();
-    let held_open = tokio::spawn(async move {
-        state_for_holder
-            .open_session(&session_id_for_holder, "test")
-            .await
-    });
-    admission_gate.wait_until_admitted().await;
-    // The page's reads answer from the durable head and never claim the session
-    // execution lease (FIG-3144, FIG-3151), so `/api/state` answers *through* a
-    // held admitted open rather than queueing behind it.
-    let Json(held_read) = Box::pin(app_state(
-        State(harness.state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect("a lease-free read must answer while an admitted open is held");
-    drop(held_read);
-    // The bounded-retry refusal belongs to the surfaces that still take the
-    // lease. `DELETE /api/queued-work/<batch>` opens the session before it can
-    // look at the batch, so it is the live surface that still answers 503 while
-    // the lane is held; the page's reads no longer reach this path at all.
-    let exhausted = Box::pin(cancel_queued_work_batch(
-        AxumPath("no-such-batch".to_string()),
-        State(harness.state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect_err("a held admitted open must exhaust the bounded retry policy");
-    assert_eq!(exhausted.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(exhausted.verdict, AppErrorVerdict::Retryable);
-    assert_eq!(
-        exhausted.message,
-        "session is temporarily busy; retry the request"
-    );
-    let (attempts, acquisitions, admissions, contentions) = admission_gate.counts();
-    assert!(
-        (1..=SESSION_OPEN_MAX_ATTEMPTS).contains(&contentions),
-        "the logical read must stop at the host deadline or attempt cap; contentions={contentions}"
-    );
-    // Either finite bound may win; both must leave the observed attempts fenced.
-    assert_eq!(attempts, contentions + acquisitions);
-    assert_eq!(acquisitions, 1, "only the held open may acquire the lane");
-    assert_eq!(
-        acquisitions, admissions,
-        "the held claim must pass admit_session_state and no retry may bypass admission"
-    );
-    admission_gate.release();
-    held_open
-        .await
-        .expect("join held session open")
-        .expect("held admitted open completes after release");
-    admission_gate.finish();
-
     let settled_session = harness
         .state
         .open_session(&session_id, "test")
@@ -1921,7 +1851,6 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         snapshot.pending_turn_inputs.is_empty(),
         "both ingress claims must settle"
     );
-    unregister_session_open_admission_gate(&session_id);
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
@@ -2034,42 +1963,16 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     )
     .await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let first_generation = session_lease_generation(&data_dir, backend, &session_id).await;
+    let first_generation = session_drive_epoch(&data_dir, backend, &session_id).await;
 
     first.stop_and_reap();
 
-    let restart_started = tokio::time::Instant::now();
     let mut replacement = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
     let _replacement_pid = replacement.id();
     wait_for_endpoint_socket(endpoint_bind).await;
     // This is a process restart of the same configuration and storage at the
     // same immutable endpoint. Keep the original Restate deployment identity;
     // re-registering would turn the crash-recovery probe into a deployment update.
-    wait_for_session_lease_generation(
-        &data_dir,
-        backend,
-        &session_id,
-        first_generation + 1,
-        Duration::from_secs(10),
-    )
-    .await;
-    // The dead owner's lease has to *expire* before anything may supersede it,
-    // so this elapsed time is a direct reading of the configured TTL. Stock
-    // timings would hold the turn hostage for the full 30s default; dropping
-    // `lease_timings` from the workbench core reddens this line.
-    let takeover_latency = restart_started.elapsed();
-    let default_ttl = lash::durability::LeaseTimings::default().ttl();
-    assert!(
-        takeover_latency < default_ttl,
-        "the configured {:?} session-lease TTL must recover the turn faster \
-         than the stock {default_ttl:?} default; takeover took {takeover_latency:?}",
-        recovery_e2e_lease_timings().ttl(),
-    );
-    assert!(
-        session_lease_generation(&data_dir, backend, &session_id).await > first_generation,
-        "replacement must resume under a superseding session-lease generation"
-    );
-
     let recovered_active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))
         .expect("reopen recovered active-turn routing");
     assert_eq!(
@@ -2123,6 +2026,10 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         .await_terminal_with_timeout(&address, Duration::from_secs(20))
         .await
         .expect("recovered turn must commit a cancellation terminal");
+    assert!(
+        session_drive_epoch(&data_dir, backend, &session_id).await >= first_generation,
+        "replacement must preserve the durable drive epoch through recovery"
+    );
     let lash::TurnTerminal::Committed { outcome, .. } = terminal else {
         panic!("recovered turn returned non-committed terminal: {terminal:#?}");
     };
@@ -2400,14 +2307,14 @@ async fn wait_for_active_turns_empty(state: &AppState, session_id: &SessionId, t
     }
 }
 
-async fn session_lease_generation(
+async fn session_drive_epoch(
     data_dir: &std::path::Path,
     backend: &str,
     session_id: &SessionId,
 ) -> i64 {
     match backend {
         "sqlite" => {
-            // The backend keeps session leases in its durable core, one of
+            // The backend keeps session metadata in its durable core, one of
             // several databases under the sessions root; name it rather than
             // take whichever `.db` the directory lists first.
             let database_path = data_dir
@@ -2419,11 +2326,11 @@ async fn session_lease_generation(
             )
             .expect("open recovery E2E SQLite durable core")
             .query_row(
-                "SELECT lease_fencing_token FROM session_execution_leases WHERE session_id = ?1",
+                "SELECT drive_epoch FROM session_meta WHERE session_id = ?1",
                 [session_id.as_str()],
                 |row| row.get(0),
             )
-            .expect("read recovery E2E SQLite session lease generation")
+            .expect("read recovery E2E SQLite drive epoch")
         }
         "postgres" => {
             let database_url = std::env::var("AGENT_WORKBENCH_E2E_DATABASE_URL")
@@ -2432,37 +2339,14 @@ async fn session_lease_generation(
                 .await
                 .expect("connect to recovery E2E Postgres");
             sqlx::query_scalar(
-                "SELECT lease_fencing_token FROM lash_session_execution_leases
+                "SELECT drive_epoch FROM lash_session_meta
                  WHERE session_id = $1",
             )
             .bind(session_id.as_str())
             .fetch_one(&pool)
             .await
-            .expect("read recovery E2E Postgres session lease generation")
+            .expect("read recovery E2E Postgres drive epoch")
         }
         other => panic!("unsupported recovery E2E backend `{other}`"),
-    }
-}
-
-async fn wait_for_session_lease_generation(
-    data_dir: &std::path::Path,
-    backend: &str,
-    session_id: &SessionId,
-    expected: i64,
-    timeout: Duration,
-) {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        // Admission and execution each take a lease-fenced continuation read. Both
-        // acquisitions may become visible before this poll observes the first one,
-        // and fencing generations are monotonic rather than gap-free.
-        if session_lease_generation(data_dir, backend, session_id).await >= expected {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "replacement did not supersede the dead session-lease generation within {timeout:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }

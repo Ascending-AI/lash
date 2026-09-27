@@ -4,24 +4,12 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "claim_session_execution_lease"
+          "kind": "pending_queued_run"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "No lease was acquired; a successor claims immediately and completes the durable turn once."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "claim_session_execution_lease"
-        }
-      },
-      "placement": "inside_call"
-    },
-    "outcome": "The lost lease result expires; a successor polls, reclaims a higher generation, and completes once."
+    "outcome": "The final commit settled the admission and ingress. The successor returns its receipt without repeating the committed turn."
   },
   {
     "point": {
@@ -40,30 +28,6 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "begin_queued_run"
-        }
-      },
-      "placement": "boundary"
-    },
-    "outcome": "No admission has committed. The successor admits the run before selecting any input or executing an effect."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "begin_queued_run"
-        }
-      },
-      "placement": "inside_call"
-    },
-    "outcome": "The admission committed but its response was lost. The successor resumes its durable identity and position before freezing the initial selection."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
           "kind": "defer_orphaned_active_turn_inputs"
         }
       },
@@ -76,36 +40,24 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "select_queued_run"
+          "kind": "claim_next_turn_inputs"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "The admitted run has no frozen selection. The successor atomically selects its initial input and queued work."
+    "outcome": "The recovered drive uses its recorded admission and input prefix; the claim is fenced by the drive epoch and the turn completes once."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "select_queued_run"
+          "kind": "claim_next_turn_inputs"
         }
       },
       "placement": "inside_call"
     },
-    "outcome": "The ordered selection and claims committed before the response was lost. The successor resumes those exact members with rotated physical claims."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "load_session_head_meta"
-        }
-      },
-      "placement": "boundary"
-    },
-    "outcome": "No runtime progress was durable; the successor probes the same head and reclaims ingress."
+    "outcome": "The recovered drive uses its recorded admission and input prefix; the claim is fenced by the drive epoch and the turn completes once."
   },
   {
     "point": {
@@ -138,30 +90,6 @@
         }
       }
     }
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "renew_session_execution_lease"
-        }
-      },
-      "placement": "boundary"
-    },
-    "outcome": "The current lease remains valid but unrenewed; after expiry a successor reclaims it and executes the effect once."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "renew_session_execution_lease"
-        }
-      },
-      "placement": "inside_call"
-    },
-    "outcome": "The renewed lease result was lost; the renewed deadline eventually expires and a successor reclaims the turn without duplicating pre-effect work."
   },
   {
     "point": {
@@ -455,72 +383,6 @@
         }
       }
     }
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "pending_queued_run"
-        }
-      },
-      "placement": "boundary"
-    },
-    "outcome": "The final commit settled the admission and ingress. The successor returns its receipt without repeating the committed turn."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "commit_final_head",
-          "settles_queue": false,
-          "settles_turn_input": false,
-          "releases_lease": false
-        }
-      },
-      "placement": "boundary"
-    },
-    "outcome": "The final commit settled the admission and ingress; only the drain-end receipt is missing. The successor resumes the settled run and returns its receipt without executing another effect; this drain owns no children, so its replay has no end to write."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "commit_final_head",
-          "settles_queue": false,
-          "settles_turn_input": false,
-          "releases_lease": false
-        }
-      },
-      "placement": "inside_call"
-    },
-    "outcome": "The drain-end receipt committed but its response was lost; the owner still holds the lane. After reclaiming it, the successor resumes the settled run and returns the terminal receipt without executing another effect."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "release_session_execution_lease"
-        }
-      },
-      "placement": "boundary"
-    },
-    "outcome": "The terminal receipt is durable but the owner still holds the lane. After reclaiming it, the successor returns the same receipt without executing another effect."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "release_session_execution_lease"
-        }
-      },
-      "placement": "inside_call"
-    },
-    "outcome": "The lane release committed but its response was lost. The successor acquires the free lane and returns the durable terminal receipt."
   },
   {
     "scenario": "checkpoint_execute_finalize",

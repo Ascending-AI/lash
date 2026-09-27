@@ -6,6 +6,7 @@
 use super::drive_admission::{DriveParts, on_tier};
 use lash_core::engine::*;
 use lash_core::store::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::{SessionId, TurnId};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -209,7 +210,7 @@ impl Fixture {
         let parts = DriveParts::new(prefix, name, host, stores, 8).await;
         let root = TurnId::from(format!("{name}-root"));
         let input = parts.enqueue("first", Some(root.as_str())).await;
-        let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
+        let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
             &parts.store,
             &parts.session_id,
             "parked-execution",
@@ -266,7 +267,7 @@ impl Fixture {
             .expect("park");
         parts
             .store
-            .release_session_execution_lease(&lease.completion())
+            .supersede_claim_epoch_for_test(&lease.completion())
             .await
             .expect("execution stopped while the park holds the root");
         assert!(matches!(

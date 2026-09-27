@@ -31,9 +31,8 @@ pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildCancelWatch,
-    IndependentEffectWork, ProcessDriveStep, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal, RecordedKeyFence,
-    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
+    IndependentEffectWork, ProcessDriveStep, RecordedJournal, RecordedKeyFence, RefusedWriteRange,
+    Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };

@@ -1,89 +1,61 @@
 use super::*;
 
-const STALE_HOLDER_TTL_MS: u64 = 50;
-
 impl RuntimeScenarioContext {
     pub(super) async fn lease_phase(&mut self, phase: RuntimeLeasePhase) {
         match phase {
             RuntimeLeasePhase::ExpireStaleHolder {
                 assert_successor_busy,
-            } => self.expire_stale_holder(assert_successor_busy).await,
+            } => self.supersede_stale_drive(assert_successor_busy).await,
         }
     }
 
-    async fn expire_stale_holder(&mut self, assert_successor_busy: bool) {
-        if self.lease.is_some() {
-            panic!(
-                "{} stale-holder expiry must run before any other session lease claim",
-                self.name
-            );
-        }
-        let stale_owner = lease_owner("runtime-scenario-stale-holder");
-        let holder = self
-            .store()
-            .try_claim_session_execution_lease(
-                &self.session_id,
-                &stale_owner,
-                "expire-stale-holder-executor",
-                STALE_HOLDER_TTL_MS,
-            )
-            .await
-            .expect("claim stale-holder session execution lease")
-            .acquired()
-            .expect("stale-holder session execution lease");
-        let claimant = local_lease_owner(self.host_behavior.lease_owner_id, "claimant-start");
-        self.clock.advance(STALE_HOLDER_TTL_MS - 1);
-        let busy = self
-            .store()
-            .try_claim_session_execution_lease(
-                &self.session_id,
-                &claimant,
-                "expire-stale-holder-executor-2",
-                60_000,
-            )
-            .await
-            .expect("claimant observes busy stale-holder lease");
+    async fn supersede_stale_drive(&mut self, assert_stale_refused: bool) {
         assert!(
-            matches!(busy, SessionExecutionLeaseClaimOutcome::Busy { .. }),
-            "{} expected the stale-holder lease to remain busy before TTL",
+            self.lease.is_none(),
+            "{} stale drive phase must precede a claim phase",
             self.name
         );
-        self.clock.advance(1);
-        let reclaimed = self
+        let stale_owner = lease_owner("runtime-scenario-stale-drive");
+        let stale = self
             .store()
-            .try_claim_session_execution_lease(
-                &self.session_id,
-                &claimant,
-                "expire-stale-holder-executor-3",
-                60_000,
-            )
+            .seal_claim_epoch_for_test(&self.session_id, &stale_owner, "stale-drive", 0)
             .await
-            .expect("claim session execution lease after stale-holder TTL")
+            .expect("seal stale drive")
             .acquired()
-            .expect("stale-holder session execution lease should expire by TTL");
+            .expect("stale drive sealed");
+        self.store()
+            .supersede_claim_epoch_for_test(&stale)
+            .await
+            .expect("seal successor drive");
+        let refusal = self
+            .store()
+            .claim_next_turn_inputs(&self.session_id, &stale, &stale_owner, 1)
+            .await
+            .expect_err("stale drive cannot claim turn inputs");
         assert!(
-            reclaimed.fencing_token > holder.fencing_token,
-            "{} TTL successor session lease should advance the fencing token",
+            matches!(refusal, StoreError::StaleDriveFence { .. }),
+            "{} stale drive must be refused typed: {refusal:?}",
             self.name
         );
-        if assert_successor_busy {
-            let stale = self
+
+        let owner = local_lease_owner(self.host_behavior.lease_owner_id, "successor");
+        let current = self
+            .store()
+            .seal_claim_epoch_for_test(&self.session_id, &owner, "current-drive", 0)
+            .await
+            .expect("seal current drive")
+            .acquired()
+            .expect("current drive sealed");
+        assert!(current.fencing_token > stale.fencing_token);
+        if assert_stale_refused {
+            let refusal = self
                 .store()
-                .try_claim_session_execution_lease(
-                    &self.session_id,
-                    &local_lease_owner("runtime-scenario-late-claimant", "late-claimant-start"),
-                    "expire-stale-holder-executor-4",
-                    60_000,
-                )
+                .claim_next_turn_inputs(&self.session_id, &stale, &stale_owner, 1)
                 .await
-                .expect("late claimant observes successor");
-            assert!(
-                matches!(stale, SessionExecutionLeaseClaimOutcome::Busy { .. }),
-                "{} late claimant should not clear the newer lease",
-                self.name
-            );
+                .expect_err("older drive must remain fenced out");
+            assert!(matches!(refusal, StoreError::StaleDriveFence { .. }));
         }
-        self.owner = Some(claimant);
-        self.lease = Some(reclaimed);
+        self.owner = Some(owner);
+        self.lease = Some(current);
     }
 }

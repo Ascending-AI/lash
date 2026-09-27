@@ -484,7 +484,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          DROP TABLE IF EXISTS lash_await_event_waits CASCADE;
          DROP TABLE IF EXISTS lash_await_event_revoked_sessions CASCADE;
          DROP TABLE IF EXISTS lash_effect_scope_retirements CASCADE;
-         DROP TABLE IF EXISTS lash_turn_cancel_closure_participants CASCADE;",
+         DROP TABLE IF EXISTS lash_turn_cancel_closure_participants CASCADE;
+         DROP TABLE IF EXISTS lash_session_execution_leases CASCADE;",
     )
     .execute(&pool)
     .await
@@ -511,6 +512,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .expect("recreate the attachment condemnation table from the authoritative DDL");
     sqlx::raw_sql(
         "DROP TABLE IF EXISTS lash_process_artifact_cleanup;
+         DROP TABLE IF EXISTS lash_process_leases CASCADE;
          DROP TABLE lash_parent_end_plans;
          DROP TABLE lash_process_segment_handovers;
          DROP TABLE lash_process_observers;
@@ -1066,9 +1068,9 @@ fn schema_turn_park_ddl() -> &'static str {
         .find("CREATE TABLE IF NOT EXISTS lash_turn_parks (")
         .expect("schema DDL must declare the turn-park catalog");
     let end = ddl[start..]
-        .find("CREATE TABLE IF NOT EXISTS lash_session_execution_leases (")
+        .find("CREATE TABLE IF NOT EXISTS lash_queued_work_batches (")
         .map(|offset| start + offset)
-        .expect("turn-park DDL must precede session execution leases");
+        .expect("turn-park DDL must precede queued work batches");
     &ddl[start..end]
 }
 
@@ -1398,18 +1400,6 @@ async fn normalize_fixture_rows(storage: &PostgresStorage) {
         1,
         "the fixture seeds one first-started event"
     );
-    sqlx::query(
-        "UPDATE lash_session_execution_leases
-         SET lease_claimed_at_ms = $2, lease_expires_at_ms = $3, lease_term_ms = $4
-         WHERE session_id = $1",
-    )
-    .bind(fixture::SESSION_ID)
-    .bind(fixture::FIXTURE_WRITE_MS as i64)
-    .bind((fixture::FIXTURE_WRITE_MS + 100) as i64)
-    .bind(100_i64)
-    .execute(storage.pool())
-    .await
-    .expect("normalize server-authoritative fixture session lease");
     // The release stamp records `clock_timestamp()` on the server, so it is
     // server-authoritative in exactly the sense this function exists for:
     // without the rewrite every regeneration would emit a different dump.

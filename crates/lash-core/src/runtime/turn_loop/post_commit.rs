@@ -23,7 +23,7 @@ impl LashRuntime {
         returned_turn: &AssembledTurn,
         scoped_effect_controller: &ScopedEffectController<'_>,
         trace_turn_id: &TurnId,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<Option<crate::PluginError>, RuntimeError> {
         let Some(session) = self.session.as_ref() else {
             return Ok(None);

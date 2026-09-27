@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn commit_in_lane_context(
-    held_session_execution_lease: Option<&super::session_execution_lease::BorrowedLaneAuthority>,
+    held_session_execution_lease: Option<&super::drive_claim::BorrowedDriveAuthority>,
     store: std::sync::Arc<dyn crate::RuntimePersistence>,
     commit: crate::RuntimeCommit,
     runtime_lease_owner: &crate::LeaseOwnerIdentity,
@@ -24,7 +24,7 @@ pub(crate) async fn commit_in_lane_context(
     // lane-less host services. Select authority from the explicit context,
     // never from scheduling or elapsed time.
     if let Some(lease) = held_session_execution_lease {
-        let result = super::session_execution_lease::commit_runtime_state_with_borrowed_lease(
+        let result = super::drive_claim::commit_runtime_state_with_borrowed_drive(
             lease,
             store,
             commit,
@@ -40,7 +40,7 @@ pub(crate) async fn commit_in_lane_context(
         }
         result
     } else {
-        super::session_execution_lease::commit_runtime_state_with_fresh_session_execution_lease(
+        super::drive_claim::commit_runtime_state_without_session_lease(
             store,
             commit,
             runtime_lease_owner,

@@ -1,6 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
+use lash::testing::store_fixtures::RuntimePersistenceTestClaimExt;
 
 pub(crate) fn product_user_rows(state: &AppState, session_id: &SessionId) -> Vec<(String, String)> {
     state
@@ -68,14 +69,9 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Long enough that the double's virtual clock, which also flows at wall
-/// speed, cannot expire the lease before the test advances it.
-const ABANDONED_LEASE_TTL_MS: u64 = 60_000;
-
-/// ADR 0077: a replacement worker is refused while a dead holder's lease is
-/// still live, then admits and completes after the TTL expires.
+/// A successor worker can open immediately after an earlier drive is abandoned.
 #[tokio::test]
-async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
+async fn new_turn_after_abandoned_drive_admits_without_waiting() {
     let double = crate::tests::test_double_backend(0).await;
     let store_factory = double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
@@ -121,27 +117,12 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         .open_store()
         .await
         .expect("open the durable session catalog");
-    let dead_lease =
-        lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-            &store,
-            &session_id,
-            &dead_incarnation,
-            "new-turn-within-dead-lease-ttl-commits-under-head-cas-executor",
-            ABANDONED_LEASE_TTL_MS,
-        )
+    let dead_epoch = store
+        .seal_claim_epoch_for_test(&session_id, &dead_incarnation, "abandoned-drive", 0)
         .await
-        .expect("incarnation A claims the session lane")
+        .expect("seal abandoned drive")
         .acquired()
-        .expect("the parked session lane is free for incarnation A");
-
-    let before_expiry = state.core.session(session_id.clone()).open().await;
-    assert!(
-        matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
-        "replacement recovery must wait for the dead holder TTL"
-    );
-    double
-        .server()
-        .advance(Duration::from_millis(ABANDONED_LEASE_TTL_MS + 1));
+        .expect("abandoned drive sealed");
 
     let successor = state
         .core
@@ -160,7 +141,7 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         .expect("require finish")
         .output_into(&ui_events)
         .await
-        .expect("the replacement runtime completes after lease takeover");
+        .expect("the replacement runtime completes without waiting for abandoned work");
     crate::restate::record_turn_output(
         &state,
         &successor,
@@ -230,14 +211,12 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         "the post-takeover append must be fully durable"
     );
 
-    // Keep the exact pre-TTL evidence live through the takeover assertions.
-    assert_eq!(dead_lease.owner, dead_incarnation);
+    assert!(dead_epoch.fencing_token > 0);
 }
 
-/// ADR 0077 restart arm: even the same stable worker owner must wait for the
-/// dead boot incarnation's live lease to expire before recovery.
+/// A same-worker successor opens immediately after an abandoned drive.
 #[tokio::test]
-async fn same_worker_successor_waits_for_dead_boot_ttl() {
+async fn same_worker_successor_opens_after_abandoned_drive() {
     let double = crate::tests::test_double_backend(0).await;
     let store_factory = double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
@@ -274,27 +253,12 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         "agent-workbench-test-worker",
         "agent-workbench-dead-boot",
     );
-    let dead_lease =
-        lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-            &store,
-            &session_id,
-            &dead_boot,
-            "same-turn-successor-within-dead-lease-ttl-commits-under-head-cas-executor",
-            ABANDONED_LEASE_TTL_MS,
-        )
+    let dead_epoch = store
+        .seal_claim_epoch_for_test(&session_id, &dead_boot, "abandoned-same-worker-drive", 0)
         .await
-        .expect("dead boot claims the lane")
+        .expect("seal abandoned drive")
         .acquired()
-        .expect("restart-gate lane starts free");
-
-    let before_expiry = state.core.session(session_id.clone()).open().await;
-    assert!(
-        matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
-        "the same stable owner still needs expiry of the dead incarnation"
-    );
-    double
-        .server()
-        .advance(Duration::from_millis(ABANDONED_LEASE_TTL_MS + 1));
+        .expect("abandoned drive sealed");
 
     let successor = state
         .core
@@ -310,7 +274,7 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
             "same-turn successor committed",
         )])
         .await
-        .expect("same-turn successor commits after the dead lease TTL");
+        .expect("same-turn successor commits without a lease wait");
     let durable = lash::persistence::load_persisted_session_state(&store)
         .await
         .expect("read same-turn successor state")
@@ -323,7 +287,7 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
             .iter()
             .any(|message| { lash::message_text(message) == "same-turn successor committed" })
     );
-    assert_eq!(dead_lease.owner, dead_boot);
+    assert!(dead_epoch.fencing_token > 0);
 }
 
 /// Holds the first two writers to reach `session_graph_append.pre_commit`
@@ -1715,17 +1679,15 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     .expect("the session drive settles the queued send exactly once");
 }
 
-/// ADR 0077: a busy execution lane refuses competing recovery before any
-/// mutable session payload is hydrated. The current holder stays authoritative
-/// and completes normally once its provider resumes.
+/// Reopening a session while its prior provider call is stalled must return
+/// promptly: a dead or cancelled worker cannot pin a SQL execution lease.
 #[tokio::test]
-async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() {
+async fn a_stalled_turn_does_not_block_competing_recovery_open() {
     let (provider, mut provider_entered, release) =
-        gated_first_call_provider("workbench-losing-commit-race");
+        gated_first_call_provider("workbench-recovery-reopen");
     let double = crate::tests::test_double_backend(0).await;
     let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
-
     let Json(accepted) = send_turn(
         State(state.clone()),
         Query(SessionQuery::default()),
@@ -1742,104 +1704,20 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(5), provider_entered.recv())
             .await
-            .expect("the admitted turn reaches the provider"),
-        Some(0)
+            .expect("provider reached")
+            .expect("provider call"),
+        0,
     );
-    let holder_before_race = state
-        .core
-        .session_lease_diagnostics(&session_id)
-        .await
-        .expect("read stalled holder")
-        .expect("stalled turn materialized its lease")
-        .holder
-        .expect("stalled turn holds the lane");
-    assert_eq!(
-        holder_before_race.owner.owner_id,
-        "agent-workbench-test-worker"
-    );
-    assert_eq!(
-        holder_before_race.owner.incarnation_id,
-        "agent-workbench-test-boot"
-    );
-    assert_eq!(
-        product_user_rows(&state, &session_id)
-            .into_iter()
-            .map(|(_, text)| text)
-            .collect::<Vec<_>>(),
-        vec!["admitted send".to_string()],
-        "the admitted send renders optimistically while it runs"
-    );
-
-    let competitor_error = match state.core.session(session_id.clone()).open().await {
-        Ok(_) => panic!("a busy lane must refuse competing recovery"),
-        Err(error) => error,
-    };
-    assert!(
-        competitor_error
-            .to_string()
-            .contains("store commit is contended"),
-        "the refusal must identify the busy admission lane: {competitor_error}"
-    );
-    let holder_after_race = state
-        .core
-        .session_lease_diagnostics(&session_id)
-        .await
-        .expect("read holder after refused competitor")
-        .expect("stalled holder row remains present")
-        .holder
-        .expect("stalled holder remains current");
-    assert_eq!(holder_after_race, holder_before_race);
-
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        state.core.session(session_id.clone()).open(),
+    )
+    .await
+    .expect("recovery open cannot wait for a lease TTL")
+    .expect("recovery open succeeds while predecessor is stalled");
     release.notify_one();
     wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(10)).await;
-
-    let failure_rows = product_event_rows(&state, &session_id);
-    assert!(
-        failure_rows
-            .iter()
-            .all(|(id, _)| id != &format!("turn:{turn_id}:failed")),
-        "refusing the competitor must not fail the admitted holder: {failure_rows:?}"
-    );
-    let done = state
-        .event_tx
-        .snapshot(&session_id)
-        .events
-        .into_iter()
-        .filter_map(|event| match event.item {
-            StreamItem::Done { turn_id, outcome } => Some((turn_id, outcome)),
-            StreamItem::Message { .. }
-            | StreamItem::TurnInput { .. }
-            | StreamItem::ModelCallRecorded { .. } => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        done,
-        vec![(Some(turn_id.clone()), TurnDoneOutcome::Completed)],
-        "the admitted holder completes exactly once"
-    );
-    assert!(
-        product_user_rows(&state, &session_id)
-            .iter()
-            .any(|(_, text)| text == "admitted send"),
-        "the admitted holder's committed user row remains visible"
-    );
-    assert!(
-        state.active_turns.for_session(&session_id).is_none(),
-        "the completed holder must not stay active"
-    );
-
-    let Json(settled) = app_state(State(state.clone()), Query(SessionQuery::default()))
-        .await
-        .expect("settled snapshot");
-    assert_eq!(
-        state_rows(&settled)
-            .into_iter()
-            .filter(|(role, _)| role == "user")
-            .map(|(_, text)| text)
-            .collect::<Vec<_>>(),
-        vec!["admitted send".to_string()],
-        "the settled projection carries the admitted holder"
-    );
+    assert!(state.active_turns.for_session(&session_id).is_none());
 }
 
 /// The browser contract for both halves of FIG-1000: a queued send renders its

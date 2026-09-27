@@ -634,10 +634,39 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                 assert!(String::from_utf8_lossy(&bytes).contains("short uncut"));
                 bytes
             };
-            runtime
-                .set_protocol_turn_options(render_options(120))
-                .await
-                .expect("options command");
+            let command = runtime.set_protocol_turn_options(render_options(120)).await;
+            let receipt = match command {
+                Ok(()) => None,
+                Err(lash_core::SessionError::SessionCommandPending(receipt)) => Some(receipt),
+                Err(error) => panic!("options command: {error}"),
+            };
+            if let Some(receipt) = receipt {
+                let handler = double
+                    .open_handler(lash_core::AdmittedScope::queue_drain(
+                        &session_id,
+                        "render-options-command",
+                    ))
+                    .await
+                    .expect("open command drive handler");
+                runtime
+                    .drive_next_root(
+                        "render-options-command",
+                        lash_core::facade_support::TurnOptions::new(
+                            tokio_util::sync::CancellationToken::new(),
+                            handler.scoped(),
+                        ),
+                    )
+                    .await
+                    .expect("drive render options command");
+                handler.close().await.expect("close command drive handler");
+                assert!(matches!(
+                    runtime
+                        .settle_session_command(receipt)
+                        .await
+                        .expect("read settled render options command"),
+                    lash_core::runtime::SessionCommandSettlement::Durable(_)
+                ));
+            }
             renderer.mode.store(1, Ordering::SeqCst);
             drive(&mut runtime, &double, &session_id, "second").await;
             assert_eq!(renderer.first.load(Ordering::SeqCst), 2);

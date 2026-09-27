@@ -48,7 +48,7 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn admit_session_state(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -84,7 +84,7 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn retain_admission_base(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -105,7 +105,7 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
         follow_on_turn_id: &lash_core_execution::TurnId,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -381,12 +381,7 @@ impl SessionCommitStore for PostgresSessionStore {
                         self.fleet_format,
                     )
                     .await?;
-                    if let Some(completion) = replay.release_session_execution_lease() {
-                        let _release_was_current =
-                            release_session_execution_lease_tx(&mut tx, completion).await?;
-                        // FIG-884: ancillary stale release must never veto a
-                        // replayed commit or clear a successor claim.
-                    }
+
                     if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
                         && settlement.authorization().session_id() == commit.session_id
                         && commit.interrupted_turn_input_turn_id.as_ref()
@@ -1073,11 +1068,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .map_err(store_sqlx_error)?;
         }
         // A plain-commit receipt writes three NULL append-identity columns.
-        if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-            let _release_was_current =
-                release_session_execution_lease_tx(&mut tx, completion).await?;
-            // FIG-884: head CAS is commit authority; release is ancillary.
-        }
+
         pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
         pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -1164,6 +1155,14 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         crate::session_meta::load_session_meta(&self.pool, Some(&self.session_id)).await
+    }
+
+    async fn load_session_meta_for_commit(&self) -> Result<Option<SessionMeta>, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, &self.session_id).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        self.load_session_meta().await
     }
 
     async fn record_turn_park(

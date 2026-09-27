@@ -43,44 +43,8 @@
 //!   embedded database has exactly one host and that host's injected clock is
 //!   what the simulator steers.
 //!
-//! The consequence, stated once so no store author has to rediscover it: a
-//! simulated or frozen clock steers SQLite lease expiry and does **not** steer
-//! PostgreSQL lease expiry. The PostgreSQL store's `testing` feature exists to
-//! bridge exactly that gap (`lash.test_lease_epoch_ms`), and it is a test seam,
-//! not a production authority.
-
 use super::StoreError;
-use super::session_execution_lease::{
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseRefusalFacts,
-    SessionExecutionLeaseRefusalOperation, SessionExecutionLeaseRow,
-    trace_session_execution_lease_refusal,
-};
 use crate::SessionId;
-
-/// The clock whose reading a caller passed as `now_epoch_ms`.
-///
-/// Verdict functions never read a clock; this names which one the caller did
-/// read, so a refusal's trace evidence says whose time decided it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FenceTimeAuthority {
-    /// The database server's transaction clock. PostgreSQL's authority: every
-    /// host writing one database compares against one clock.
-    DatabaseTransaction,
-    /// The store's injected host `Clock`. SQLite's authority: an embedded
-    /// database has one host, and that host's clock is what a simulation
-    /// steers.
-    EmbeddedHost,
-}
-
-impl FenceTimeAuthority {
-    /// Stable label for diagnostics and tests.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::DatabaseTransaction => "database_transaction_clock",
-            Self::EmbeddedHost => "embedded_host_clock",
-        }
-    }
-}
 
 /// Tracing target every fencing-verdict diagnostic is emitted under.
 ///
@@ -98,10 +62,6 @@ pub const FENCED_WRITE_DISAGREEMENT_EVENT: &str = "fencing.backstop_disagreed_wi
 /// backstop predicate disagreed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FencedWrite {
-    /// Session-execution lease renewal (`D1`).
-    SessionExecutionLeaseRenewal,
-    /// Session-execution lease release (`D1`).
-    SessionExecutionLeaseRelease,
     /// Turn-input claim acquisition (`D2`).
     TurnInputClaimAcquisition,
     /// Turn-input claim settlement on commit (`D3`).
@@ -122,8 +82,6 @@ impl FencedWrite {
     /// Stable label for diagnostics and tests.
     pub fn label(self) -> &'static str {
         match self {
-            Self::SessionExecutionLeaseRenewal => "session_execution_lease.renew",
-            Self::SessionExecutionLeaseRelease => "session_execution_lease.release",
             Self::TurnInputClaimAcquisition => "turn_input_claim.acquire",
             Self::TurnInputClaimSettlement => "turn_input_claim.settle",
             Self::UnclaimedTurnInputSettlement => "turn_input_claim.settle_unclaimed",
@@ -198,115 +156,6 @@ pub fn require_fenced_write_applied<E>(
 }
 
 // ---------------------------------------------------------------------------
-// D1 — "is this session-execution lease still mine?"
-// ---------------------------------------------------------------------------
-
-/// Whether the locked row still names the presenter as its holder.
-///
-/// Lifecycle operations (renew, release) fence on owner, executor and lease
-/// token and deliberately **not** on the fencing generation: the lease token
-/// rotates on every distinct claim and scopes lock lifecycle only, while the
-/// stable generation is commit authority (CONTEXT, *Session Execution Lease
-/// Authority*). The execution fence in
-/// [`require_current_session_execution_lease`](super::session_execution_lease::require_current_session_execution_lease)
-/// consults the generation and the expiry as well, because it guards writes.
-fn row_names_holder(
-    current: &SessionExecutionLeaseRow,
-    presented: &SessionExecutionLeaseAuthority,
-) -> bool {
-    current
-        .owner
-        .as_ref()
-        .is_some_and(|owner| owner.same_incarnation(&presented.owner))
-        && current.executor_id.as_deref() == Some(presented.executor_id.as_str())
-        && current.lease_token.as_deref() == Some(presented.lease_token.as_str())
-}
-
-fn lifecycle_refusal_facts(
-    current: Option<&SessionExecutionLeaseRow>,
-) -> SessionExecutionLeaseRefusalFacts<'_> {
-    SessionExecutionLeaseRefusalFacts::lifecycle(
-        current.and_then(|row| row.owner.as_ref()),
-        current.and_then(|row| row.executor_id.as_deref()),
-        current.and_then(|row| row.lease_token.as_deref()),
-    )
-}
-
-/// The one verdict for "may this holder renew its session-execution lease?".
-///
-/// `now_epoch_ms` is the caller's sampled instant and `authority` names whose
-/// clock it came from; this function reads no clock. The authorized row is
-/// returned so the caller reaches its retained generation and claim instant
-/// without unwrapping the option a second time.
-pub fn require_renewable_session_execution_lease<'a>(
-    current: Option<&'a SessionExecutionLeaseRow>,
-    presented: &SessionExecutionLeaseAuthority,
-    now_epoch_ms: u64,
-    authority: FenceTimeAuthority,
-    observation_freshness: &'static str,
-) -> Result<&'a SessionExecutionLeaseRow, StoreError> {
-    let Some(current) = current else {
-        return Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: presented.session_id.clone(),
-        });
-    };
-    if !row_names_holder(current, presented) {
-        trace_session_execution_lease_refusal(
-            SessionExecutionLeaseRefusalOperation::Renewal,
-            "owner_or_token_mismatch",
-            observation_freshness,
-            presented,
-            lifecycle_refusal_facts(Some(current)),
-        );
-        return Err(StoreError::SessionExecutionLeaseRenewalRefused {
-            session_id: presented.session_id.clone(),
-        });
-    }
-    if current.expires_at_ms <= now_epoch_ms {
-        tracing::warn!(
-            target: "lash_core::fencing",
-            event = "fencing.session_execution_lease_renewal_expired",
-            session_id = presented.session_id.as_str(),
-            expires_at_epoch_ms = current.expires_at_ms,
-            now_epoch_ms,
-            time_authority = authority.label(),
-            observation_freshness,
-            outcome = "refused",
-        );
-        return Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: presented.session_id.clone(),
-        });
-    }
-    Ok(current)
-}
-
-/// The one verdict for "may this holder release its session-execution lease?".
-///
-/// Release is token-scoped and never consults expiry: a holder whose lease has
-/// lapsed but whose row still names it may still hand the lane back, and doing
-/// so is strictly better than leaving a dead row for the next claimant to
-/// displace.
-pub fn require_releasable_session_execution_lease(
-    current: Option<&SessionExecutionLeaseRow>,
-    completion: &SessionExecutionLeaseAuthority,
-    observation_freshness: &'static str,
-) -> Result<(), StoreError> {
-    if current.is_some_and(|current| row_names_holder(current, completion)) {
-        return Ok(());
-    }
-    trace_session_execution_lease_refusal(
-        SessionExecutionLeaseRefusalOperation::Release,
-        "token_scoped_release_did_not_match",
-        observation_freshness,
-        completion,
-        lifecycle_refusal_facts(current),
-    );
-    Err(StoreError::SessionExecutionLeaseReleaseRefused {
-        session_id: completion.session_id.clone(),
-    })
-}
-
-// ---------------------------------------------------------------------------
 // D2 / D5 — "is this work row claimable by my lease generation?"
 // ---------------------------------------------------------------------------
 
@@ -318,6 +167,7 @@ pub fn require_releasable_session_execution_lease(
 pub struct WorkRowClaimFacts<'a> {
     pub claim_token: Option<&'a str>,
     pub claim_session_lease_generation: u64,
+    pub claim_owner_incarnation_id: Option<&'a str>,
 }
 
 /// The one answer to "may my generation take this row?".
@@ -325,8 +175,7 @@ pub struct WorkRowClaimFacts<'a> {
 pub enum WorkRowClaimability {
     /// Unclaimed, or claimed under a superseded generation: take it.
     Claimable,
-    /// Already claimed under the claiming generation itself. Re-claiming would
-    /// hand one generation two claims over one row (ADR 0029).
+    /// Already claimed by this incarnation under the claiming drive epoch.
     HeldByThisGeneration,
 }
 
@@ -341,8 +190,12 @@ impl WorkRowClaimability {
 fn generation_claimability(
     facts: WorkRowClaimFacts<'_>,
     claiming_generation: u64,
+    claiming_incarnation_id: &str,
 ) -> WorkRowClaimability {
-    if facts.claim_token.is_none() || facts.claim_session_lease_generation != claiming_generation {
+    if facts.claim_token.is_none()
+        || facts.claim_session_lease_generation != claiming_generation
+        || facts.claim_owner_incarnation_id != Some(claiming_incarnation_id)
+    {
         WorkRowClaimability::Claimable
     } else {
         WorkRowClaimability::HeldByThisGeneration
@@ -358,8 +211,9 @@ fn generation_claimability(
 pub fn turn_input_claimability(
     facts: WorkRowClaimFacts<'_>,
     claiming_generation: u64,
+    claiming_incarnation_id: &str,
 ) -> WorkRowClaimability {
-    generation_claimability(facts, claiming_generation)
+    generation_claimability(facts, claiming_generation, claiming_incarnation_id)
 }
 
 /// The one verdict for "is this queued-work batch claimable by my generation?"
@@ -370,8 +224,9 @@ pub fn turn_input_claimability(
 pub fn queued_work_batch_claimability(
     facts: WorkRowClaimFacts<'_>,
     claiming_generation: u64,
+    claiming_incarnation_id: &str,
 ) -> WorkRowClaimability {
-    generation_claimability(facts, claiming_generation)
+    generation_claimability(facts, claiming_generation, claiming_incarnation_id)
 }
 
 // ---------------------------------------------------------------------------

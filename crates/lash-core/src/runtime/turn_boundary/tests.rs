@@ -2,8 +2,8 @@ use super::*;
 use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
-use crate::store::SessionExecutionLeaseStore;
 use crate::store::TurnInputStore;
+use crate::testing::RuntimePersistenceTestClaimExt as _;
 use crate::testing::conformance_support::TurnCancelPeekIdentity;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,
@@ -388,7 +388,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
 async fn leased_boundary(
     store: &RecordingStore,
     state: RuntimeSessionState,
-) -> (TurnBoundary, crate::SessionExecutionLease) {
+) -> (TurnBoundary, crate::ClaimAuthority) {
     crate::SessionCommitStore::admit_and_bind_session(
         store,
         &crate::SessionBinding::root(state.session_id.clone()),
@@ -397,7 +397,7 @@ async fn leased_boundary(
     .expect("admit turn-boundary test session");
     let owner = lease_owner("turn-boundary-test");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &state.session_id,
             &owner,
             "leased-boundary-executor",
@@ -1502,13 +1502,13 @@ async fn recovered_final_commit_cedes_when_a_peer_supersedes_its_restored_queue_
     .expect("predecessor claim exists");
     assert_eq!(predecessor_claim.batches[0].batch_id, batch.batch_id);
     store
-        .release_session_execution_lease(&predecessor_lease.completion())
+        .supersede_claim_epoch_for_test(&predecessor_lease.completion())
         .await
         .expect("release crashed predecessor lease");
 
     let peer_owner = lease_owner("fig905-peer");
     let peer_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from("session-1"),
             &peer_owner,
             "recovered-final-commit-cedes-to-a-peer-superseded-queue-row-executor",
@@ -1531,13 +1531,13 @@ async fn recovered_final_commit_cedes_when_a_peer_supersedes_its_restored_queue_
     .claim()
     .expect("peer claim exists");
     store
-        .release_session_execution_lease(&peer_lease.completion())
+        .supersede_claim_epoch_for_test(&peer_lease.completion())
         .await
         .expect("release peer lease without settling its row");
 
     let recovery_owner = lease_owner("fig905-recovery");
     let recovery_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from("session-1"),
             &recovery_owner,
             "recovered-final-commit-cedes-to-a-peer-superseded-queue-row-executor-2",
@@ -1676,7 +1676,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
             if claim_id == "queue-claim"
     ));
     store
-        .release_session_execution_lease(&queue_lease.completion())
+        .supersede_claim_epoch_for_test(&queue_lease.completion())
         .await
         .expect("release queue-case execution lease");
 

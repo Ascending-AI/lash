@@ -23,10 +23,6 @@ fn sqlite_attachment_owner_kind_sql_derives_from_the_enum() {
             include_str!("../../src/persistence/session_commit.rs"),
         ),
         (
-            "persistence/session_execution_lease.rs",
-            include_str!("../../src/persistence/session_execution_lease.rs"),
-        ),
-        (
             "persistence/turn_input.rs",
             include_str!("../../src/persistence/turn_input.rs"),
         ),

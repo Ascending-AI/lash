@@ -767,6 +767,14 @@ pub(super) async fn verify_independent_session_meta_layout(
             "SQLite production decoder must reconstruct literal metadata for {}",
             case.meta.session_id
         );
+        assert_eq!(
+            sqlite_store
+                .load_session_meta_for_commit()
+                .await
+                .expect("preflight SQLite commit metadata"),
+            sqlite_meta,
+            "SQLite commit preflight must see the same materialized metadata"
+        );
         let postgres_meta = postgres_store
             .load_session_meta()
             .await
@@ -776,6 +784,14 @@ pub(super) async fn verify_independent_session_meta_layout(
             Some(case.meta.clone()),
             "PostgreSQL production decoder must reconstruct literal metadata for {}",
             case.meta.session_id
+        );
+        assert_eq!(
+            postgres_store
+                .load_session_meta_for_commit()
+                .await
+                .expect("preflight PostgreSQL commit metadata"),
+            postgres_meta,
+            "PostgreSQL commit preflight must see the same materialized metadata"
         );
     }
 

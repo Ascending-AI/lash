@@ -73,14 +73,56 @@ fn second_model() -> crate::ModelSpec {
     clippy::expect_used,
     reason = "conformance-law fixture: the config command settles on a live store"
 )]
-async fn command_second_model(runtime: &mut crate::LashRuntime) {
-    runtime
-        .update_session_config(crate::SessionConfigPatch {
-            model: Some(second_model()),
-            ..crate::SessionConfigPatch::default()
-        })
-        .await
-        .expect("the model change settles through the command lane");
+async fn command_second_model(runner: &Arc<dyn crate::ConformanceTurnRunner>, parts: &ConfigParts) {
+    let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
+    let parts = parts.clone();
+    let scope = crate::ExecutionScope::queue_drain(&parts.session_id, "turn-config-command");
+    runner
+        .run_turn(
+            admit(scope),
+            Arc::new(move |controller| {
+                let parts = parts.clone();
+                let settled_tx = settled_tx.clone();
+                Box::pin(async move {
+                    let mut runtime = build_runtime(parts).await;
+                    let command = runtime
+                        .update_session_config(crate::SessionConfigPatch {
+                            model: Some(second_model()),
+                            ..crate::SessionConfigPatch::default()
+                        })
+                        .await;
+                    let receipt = match command {
+                        Ok(()) => {
+                            let _ = settled_tx.send(());
+                            return crate::ConformanceTurnEnd::Settled;
+                        }
+                        Err(crate::SessionError::SessionCommandPending(receipt)) => receipt,
+                        Err(error) => panic!("the model change enters the command lane: {error}"),
+                    };
+                    runtime
+                        .drive_next_root(
+                            "turn-config-command",
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                controller,
+                            ),
+                        )
+                        .await
+                        .expect("engine drives the model change");
+                    assert!(matches!(
+                        runtime
+                            .settle_session_command(receipt)
+                            .await
+                            .expect("read the model change settlement"),
+                        crate::runtime::SessionCommandSettlement::Durable(_)
+                    ));
+                    let _ = settled_tx.send(());
+                    crate::ConformanceTurnEnd::Settled
+                })
+            }),
+        )
+        .await;
+    settled_rx.recv().await.expect("the model change settled");
 }
 
 fn text_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
@@ -122,20 +164,18 @@ fn recording_model(
 type TurnResultTx =
     tokio::sync::mpsc::UnboundedSender<Result<crate::AssembledTurn, crate::RuntimeError>>;
 
-/// A committed root redriven after a later model change replays under the
-/// config it recorded at its start (D3 §2.2).
+/// A later model change raises the drive epoch and refuses an older
+/// admission's redrive (D24a), including one whose root already committed.
 ///
 /// Root A commits on the first model. Before its reply reaches anyone, the
 /// session's next boundary applies a model change, and the execution dies.
-/// The tier redrives A: it must replay to its committed answer, its model
-/// call must read back the first model's answer, it must not park as a
-/// replay divergence, and it must leave the durable head on the second
-/// model. A root that follows then runs on the second model.
+/// The tier redrives A: it must refuse the stale admission without another
+/// model call or head write. A root that follows runs on the second model.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded_config(
+pub async fn a_committed_root_redriven_after_a_model_change_refuses_its_stale_epoch(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -163,15 +203,17 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
     let (result_tx, mut result_rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<crate::AssembledTurn, crate::RuntimeError>>();
 
-    // The first execution commits A, and then the model change lands at
-    // the session's next boundary. The execution dies before A's reply
-    // leaves it: the reply is lost.
+    // The first execution commits A and dies before its reply leaves it.
+    // The model change then lands at the session's next boundary.
+    let crash = crate::ConformanceCrash::new();
     let crashing: crate::ConformanceTurnAttempt = {
         let parts = parts.clone();
         let root = root.clone();
+        let crash = crash.clone();
         Arc::new(move |scope| {
             let parts = parts.clone();
             let root = root.clone();
+            let crash = crash.clone();
             Box::pin(async move {
                 let mut runtime = build_runtime(parts).await;
                 let turn = runtime
@@ -186,8 +228,8 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
                     "root A finishes on its first execution: {:?}",
                     turn.outcome
                 );
-                command_second_model(&mut runtime).await;
-                panic!("injected loss of root A's reply after the model change landed");
+                crash.fire();
+                std::future::pending().await
             })
         })
     };
@@ -213,13 +255,12 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
             })
         })
     };
+    let admitted = admit(crate::ExecutionScope::turn(&session_id, &root));
     runner
-        .run_crashed_then_redriven_turn(
-            admit(crate::ExecutionScope::turn(&session_id, &root)),
-            crashing,
-            redrive,
-        )
+        .run_turn_until_crash(admitted.clone(), crashing, crash)
         .await;
+    command_second_model(&runner, &parts).await;
+    runner.run_turn(admitted, redrive).await;
     let committed = store
         .load_session_head_meta()
         .await
@@ -231,27 +272,20 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
     );
     let revision_after_change = committed.head_revision;
 
-    let turn = result_rx
+    let error = result_rx
         .recv()
         .await
         .expect("the tier's runner ran the redriven root")
-        .unwrap_or_else(|error| {
-            panic!("the redrive of committed root A replays under its recorded config: {error:?}")
-        });
+        .expect_err("the older admission is fenced out after the config drive");
+    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitFailed);
     assert!(
-        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
-        "the redrive of root A finishes: {:?}; errors: {:?}",
-        turn.outcome,
-        turn.errors
-    );
-    assert_eq!(
-        turn.assistant_output.safe_text, "answer 1",
-        "the redrive answers with what root A committed"
+        error.message.contains("drive fence epoch") && error.message.contains("is stale"),
+        "the refusal names the stale drive epoch: {error:?}"
     );
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
-        "the redrive reads root A's model call back instead of asking again"
+        "the stale redrive makes no new model call"
     );
     assert!(
         store
@@ -259,7 +293,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
             .await
             .expect("read the session's park")
             .is_none(),
-        "the redrive of a committed root does not park as a replay divergence"
+        "the stale redrive does not park as a replay divergence"
     );
     let head = store
         .load_session_head_meta()
@@ -268,7 +302,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
         .expect("the head is durable");
     assert_eq!(
         head.head_revision, revision_after_change,
-        "the redrive commits nothing again"
+        "the stale redrive commits nothing again"
     );
     assert_eq!(
         head.config.model.id, SECOND_MODEL,
@@ -366,11 +400,14 @@ async fn run_text_turn(
     text: &'static str,
     before: BeforeSend,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
+    if matches!(before, BeforeSend::CommandSecondModel) {
+        command_second_model(runner, parts).await;
+    }
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(
             admit(crate::ExecutionScope::turn(&parts.session_id, root)),
-            text_attempt(parts, root, text, before, turn_tx),
+            text_attempt(parts, root, text, turn_tx),
         )
         .await;
     turn_rx
@@ -383,7 +420,6 @@ fn text_attempt(
     parts: &ConfigParts,
     root: &TurnId,
     text: &'static str,
-    before: BeforeSend,
     turn_tx: TurnResultTx,
 ) -> crate::ConformanceTurnAttempt {
     let parts = parts.clone();
@@ -394,9 +430,6 @@ fn text_attempt(
         let turn_tx = turn_tx.clone();
         Box::pin(async move {
             let mut runtime = build_runtime(parts).await;
-            if matches!(before, BeforeSend::CommandSecondModel) {
-                command_second_model(&mut runtime).await;
-            }
             let turn = runtime
                 .drive_turn(
                     text_input(&root, text),
@@ -823,12 +856,12 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
         Arc::new(crate::SingleProviderResolver::new(session));
     let store = Arc::clone(&sender.store);
     let session_id = sender.session_id.clone();
-    let scope = TurnId::from(format!("{prefix}-turn-config-refused-at-apply"));
+    let scope = format!("{prefix}-turn-config-refused-at-apply");
     let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(
-            admit(crate::ExecutionScope::turn(&session_id, &scope)),
-            Arc::new(move |_scope| {
+            admit(crate::ExecutionScope::queue_drain(&session_id, &scope)),
+            Arc::new(move |controller| {
                 let sender = sender.clone();
                 let applier = applier.clone();
                 let settled_tx = settled_tx.clone();
@@ -847,6 +880,16 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
                         .await
                         .expect("a served route is accepted at send");
                     let mut applying = build_runtime(applier).await;
+                    applying
+                        .drive_next_root(
+                            "turn-config-refused-at-apply",
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                controller,
+                            ),
+                        )
+                        .await
+                        .expect("engine drives the refused command");
                     let settled = applying.settle_session_command(receipt).await;
                     let _ = settled_tx.send(settled);
                     crate::ConformanceTurnEnd::Settled

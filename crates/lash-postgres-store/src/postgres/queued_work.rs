@@ -20,6 +20,7 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) claim_id: Option<String>,
     pub(crate) claim_token: Option<String>,
     pub(crate) claim_session_lease_generation: u64,
+    pub(crate) claim_owner_incarnation_id: Option<String>,
 }
 
 impl QueuedBatchRow {
@@ -33,6 +34,7 @@ impl QueuedBatchRow {
         lash_core_execution::store_backend_support::WorkRowClaimFacts {
             claim_token: self.claim_token.as_deref(),
             claim_session_lease_generation: self.claim_session_lease_generation,
+            claim_owner_incarnation_id: self.claim_owner_incarnation_id.as_deref(),
         }
     }
 }
@@ -84,6 +86,7 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
             "claim_session_lease_generation",
             row.get("claim_session_lease_generation"),
         )?,
+        claim_owner_incarnation_id: row.get("claim_owner_incarnation_id"),
     })
 }
 

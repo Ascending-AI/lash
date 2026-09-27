@@ -18,9 +18,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use lash_core_execution::runtime::{QueuedWorkClaimBoundary, process_wake_batch_draft};
-use lash_core_execution::{
-    LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError,
-};
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
+use lash_core_execution::{LeaseOwnerIdentity, QueuedWorkStore, StoreError};
 use lash_postgres_store::{
     ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig,
     RequiredConstraintFinding, SchemaCheck, SchemaFinding,
@@ -1969,17 +1968,22 @@ async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls
         .await
         .expect("inject predecessor claim state");
 
-        let owner = LeaseOwnerIdentity::opaque(
-            format!("corrupt-owner-{case}"),
-            format!("corrupt-owner-{case}:incarnation"),
-        );
         let executor_id = format!("corrupt-executor-{case}");
         let lease = store
-            .try_claim_session_execution_lease(&session_id, &owner, &executor_id, 60_000)
+            .seal_claim_epoch_for_test(
+                &session_id,
+                &LeaseOwnerIdentity::opaque(
+                    format!("corrupt-owner-{case}"),
+                    format!("corrupt-owner-{case}:incarnation"),
+                ),
+                &executor_id,
+                60_000,
+            )
             .await
-            .expect("claim session lease")
+            .expect("seal drive")
             .acquired()
-            .expect("session lease available");
+            .expect("drive sealed");
+        let owner = lease.owner.clone();
         let outcome = store
             .claim_ready_queued_work(
                 &session_id,

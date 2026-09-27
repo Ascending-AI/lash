@@ -128,7 +128,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         "fixture A must retain its journaled process before transport interruption: {lash_drain:#?}"
     );
     let a_session_id = harness_a.state.current_session_id();
-    let lease_generation_before = session_lease_generation(&a_path, "sqlite", &a_session_id).await;
+    let drive_epoch_before = session_drive_epoch(&a_path, "sqlite", &a_session_id).await;
 
     endpoint_a.stop().await;
     // The listener/runtime is gone, but this outer test handle still owns the
@@ -301,8 +301,8 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
     .await;
     assert!(completed_a.completed_successfully());
     assert!(
-        session_lease_generation(&a_path, "sqlite", &a_session_id).await > lease_generation_before,
-        "fixture A retry must supersede the interrupted host's session-lease generation"
+        session_drive_epoch(&a_path, "sqlite", &a_session_id).await >= drive_epoch_before,
+        "fixture A retry must not roll back the interrupted host's drive epoch"
     );
     let process_after = harness_a
         .state

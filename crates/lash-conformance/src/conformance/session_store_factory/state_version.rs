@@ -1,3 +1,4 @@
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -47,7 +48,7 @@ pub(super) async fn session_state_version_admission_contract(
         .expect("stamp newer marker above an undecodable payload");
 
     let owner = crate::LeaseOwnerIdentity::opaque("state-admission-owner", "incarnation");
-    let no_lease = crate::SessionExecutionLeaseAuthority {
+    let no_lease = crate::ClaimAuthority {
         session_id: request.session_id.clone(),
         owner: owner.clone(),
         executor_id: "state-admission-executor".to_string(),
@@ -59,16 +60,12 @@ pub(super) async fn session_state_version_admission_contract(
         .await
         .expect_err("admission must validate the lease before consulting migration state");
     assert!(
-        matches!(
-            ordering_error,
-            crate::StoreError::SessionExecutionLeaseExpired { .. }
-                | crate::StoreError::SessionExecutionLeaseRenewalRefused { .. }
-        ),
+        matches!(ordering_error, crate::StoreError::StaleDriveFence { .. }),
         "lease validation must precede the marker gate: {ordering_error:?}"
     );
 
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &owner,
             "state-admission-executor",

@@ -113,7 +113,7 @@
 //! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `usage_deltas`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
 //! | Session retention | `node_anchors`, `deleted_sessions` | `fork_points`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_manifest`, SQLite `artifact_refs`, PostgreSQL's artifact table | Manifest listing plus process-execution-environment reference recovery |
-//! | Receiver queue | `queued_work_batches`, `queued_work_items`, `pending_turn_inputs`, `wake_redelivery_fences`, `session_execution_leases` | Queue/input payloads, deterministic ids, typed wake-rewind refusal, and the raw expired lease generation |
+//! | Receiver queue | `queued_work_batches`, `queued_work_items`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
 //! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
 //! | Backend metadata | PostgreSQL `lash_schema_versions`; SQLite `user_version` | Exact component/store schema-version comparison before read-back |
@@ -235,14 +235,14 @@ use lash_core::runtime::{
 };
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentManifest, BoundaryReason, Clock, ExecutionScope,
-    LashSchema, LeaseClaimNonce, LeaseOwnerIdentity, MessageOrigin, MessageRole, OperationId,
-    PartKind, PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
-    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
-    ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventLogTestSupport as _,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
-    ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
+    LashSchema, MessageOrigin, MessageRole, OperationId, PartKind, PendingTurnInputDraft,
+    PersistedSegmentHandover, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionAuthority, ProcessContinuationStore,
+    ProcessEventAppendRequest, ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec,
+    ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
+    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
     ProtocolTurnOptions, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SegmentHandover,
     SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
@@ -1096,29 +1096,33 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .enqueue_queued_work(process_wake_batch_draft(wake_delivery.clone()))
         .await
         .expect("enqueue fixture process wake at receiver");
-    let queue_owner = LeaseOwnerIdentity::opaque(
-        "durable-read-session-owner",
-        "durable-read-session-incarnation",
-    );
-    let queue_lease = handles
+    let queue_admission = lash_core::store::AdmissionId::new("durable-read-queue-admission");
+    let queue_epoch = handles
         .runtime
-        .try_claim_session_execution_lease_with_token(
+        .drive_epoch(&SessionId::from(SESSION_ID))
+        .await
+        .expect("read fixture drive epoch");
+    let queue_fence = match handles
+        .runtime
+        .seal_drive_epoch(
             &SessionId::from(SESSION_ID),
-            &queue_owner,
-            "durable-read-queue-executor",
-            &LeaseClaimNonce::for_testing("durable-read-queue-claim-nonce"),
-            100,
+            &queue_admission,
+            queue_epoch.epoch,
+            &lash_core::store::RootStartNonce::new(queue_admission.as_str()),
         )
         .await
-        .expect("claim fixture session lane for wake consumption")
-        .acquired()
-        .expect("fixture session lane is available");
+        .expect("seal fixture queue drive")
+    {
+        lash_core::store::DriveEpochSeal::Sealed(fence) => fence,
+        other => panic!("fixture queue drive did not seal: {other:?}"),
+    };
+    let queue_lease = lash_core::ClaimAuthority::from_drive_fence(&queue_fence);
     let wake_claim = handles
         .runtime
         .claim_ready_queued_work_by_batch_ids(
             &SessionId::from(SESSION_ID),
             &queue_lease.fence(),
-            &queue_owner,
+            &queue_lease.owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&wake_batch.batch_id),
             lash_core::testing::queued_work_claim_policy(1),
@@ -1136,26 +1140,31 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     );
     let wake_commit =
         RuntimeCommit::persisted_state_with_operation_for_testing(&wake_state, &[], wake_operation)
-            .completing_queue_claim(wake_claim.completion())
-            .releasing_session_execution_lease(queue_lease.completion());
+            .completing_queue_claim(wake_claim.completion());
     handles
         .runtime
         .commit_runtime_state(wake_commit)
         .await
         .expect("settle fixture receiver wake and persist redelivery fence");
-    handles
+    let retained_admission = lash_core::store::AdmissionId::new("durable-read-retained-admission");
+    let retained_epoch = handles
         .runtime
-        .try_claim_session_execution_lease_with_token(
-            &SessionId::from(SESSION_ID),
-            &queue_owner,
-            "durable-read-retained-executor",
-            &LeaseClaimNonce::for_testing("durable-read-retained-session-lease"),
-            100,
-        )
+        .drive_epoch(&SessionId::from(SESSION_ID))
         .await
-        .expect("persist fixture retained session lease")
-        .acquired()
-        .expect("fixture retained session lease is available");
+        .expect("read fixture drive epoch");
+    assert!(matches!(
+        handles
+            .runtime
+            .seal_drive_epoch(
+                &SessionId::from(SESSION_ID),
+                &retained_admission,
+                retained_epoch.epoch,
+                &lash_core::store::RootStartNonce::new(retained_admission.as_str()),
+            )
+            .await
+            .expect("seal retained fixture drive"),
+        lash_core::store::DriveEpochSeal::Sealed(_)
+    ));
 
     let read = handles
         .runtime
@@ -1339,31 +1348,15 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         ),
     }
 
-    let session_lease = handles
+    let stored_epoch = handles
         .runtime
-        .get_session_execution_lease(&SessionId::from(SESSION_ID))
+        .drive_epoch(&SessionId::from(SESSION_ID))
         .await
-        .expect("durable fixture drift: session lease read failed")
-        .lease
-        .expect("durable fixture drift: retained session lease disappeared");
+        .expect("durable fixture drive epoch read");
+    assert_eq!(stored_epoch.epoch, 2);
     assert_eq!(
-        session_lease.owner,
-        LeaseOwnerIdentity::opaque(
-            "durable-read-session-owner",
-            "durable-read-session-incarnation"
-        )
-    );
-    assert_eq!(
-        session_lease.lease_token,
-        "durable-read-retained-session-lease"
-    );
-    assert_eq!(session_lease.fencing_token, 2);
-    assert_eq!(session_lease.claimed_at_epoch_ms, FIXTURE_WRITE_MS);
-    assert_eq!(session_lease.lease_term_ms, 100);
-    assert_eq!(session_lease.expires_at_epoch_ms, FIXTURE_WRITE_MS + 100);
-    assert!(
-        session_lease.expires_at_epoch_ms <= FIXTURE_READ_MS,
-        "fixture session lease must deliberately read as an expired raw generation fact"
+        stored_epoch.admission.as_ref().map(|id| id.as_str()),
+        Some("durable-read-retained-admission")
     );
 
     let current_replay = handles

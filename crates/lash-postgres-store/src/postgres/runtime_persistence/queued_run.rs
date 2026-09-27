@@ -183,7 +183,7 @@ pub(crate) async fn write_run_tx(
 impl PostgresSessionStore {
     pub(super) async fn begin_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         request: BeginQueuedRun,
     ) -> Result<QueuedRunAdmission, StoreError> {
         request.validate(fence)?;
@@ -251,7 +251,7 @@ impl PostgresSessionStore {
     }
     pub(super) async fn settle_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         settlement: QueuedRunCommit,
     ) -> Result<QueuedRunAdmission, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -344,7 +344,7 @@ impl PostgresSessionStore {
     }
     pub(super) async fn select_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         scope: &lash_core_execution::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -421,12 +421,14 @@ impl PostgresSessionStore {
                             tx,
                             &fence.session_id,
                             fence.fencing_token,
+                            owner,
                         )
                         .await?,
                         super::claim_support::earliest_turn_candidate_seq_tx(
                             tx,
                             &fence.session_id,
                             fence.fencing_token,
+                            owner,
                         )
                         .await?,
                     )
@@ -473,6 +475,7 @@ impl PostgresSessionStore {
                                     tx,
                                     &fence.session_id,
                                     fence.fencing_token,
+                                    owner,
                                     QueuedWorkClaimBoundary::Idle,
                                     &policy,
                                 )
@@ -571,7 +574,7 @@ fn require_claim<T>(
 /// claim was released went back to the queue. Neither is retaken.
 async fn open_assigned_members_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     admission: &QueuedRunAdmission,
 ) -> Result<Vec<QueuedRunMember>, StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
@@ -618,7 +621,7 @@ async fn open_assigned_members_tx(
 async fn reclaim_run_members_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     now: u64,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     members: &[QueuedRunMember],
 ) -> Result<
@@ -664,12 +667,15 @@ async fn reclaim_run_members_tx(
     let mut remaining_inputs = inputs.into_iter().peekable();
     while let Some(first) = remaining_inputs.next() {
         let identity = |row: &PendingTurnInputRow| {
-            (row.claim_session_lease_generation() == fence.fencing_token && row.is_claimed()).then(
-                || {
-                    row.claim_identity()
-                        .map(|(id, token, owner)| (id.to_owned(), token.to_owned(), owner.clone()))
-                },
-            )
+            (row.claim_session_lease_generation() == fence.fencing_token
+                && row.is_claimed()
+                && row.claim_identity().is_some_and(|(_, _, claim_owner)| {
+                    claim_owner.incarnation_id == owner.incarnation_id
+                }))
+            .then(|| {
+                row.claim_identity()
+                    .map(|(id, token, owner)| (id.to_owned(), token.to_owned(), owner.clone()))
+            })
         };
         let head_identity = identity(&first.0);
         let mut inputs = vec![first];
@@ -679,7 +685,10 @@ async fn reclaim_run_members_tx(
         let input_claim = match inputs.first() {
             Some((head, _))
                 if head.claim_session_lease_generation() == fence.fencing_token
-                    && head.is_claimed() =>
+                    && head.is_claimed()
+                    && head.claim_identity().is_some_and(|(_, _, claim_owner)| {
+                        claim_owner.incarnation_id == owner.incarnation_id
+                    }) =>
             {
                 let (claim_id, claim_token, claim_owner) = head
                     .claim_identity()
@@ -736,8 +745,10 @@ async fn reclaim_run_members_tx(
     let mut remaining_batches = batches.into_iter().zip(hydrated).peekable();
     while let Some((first_row, first_batch)) = remaining_batches.next() {
         let identity = |row: &QueuedBatchRow| {
-            (row.claim_session_lease_generation == fence.fencing_token && row.claim_token.is_some())
-                .then(|| (row.claim_id.clone(), row.claim_token.clone()))
+            (row.claim_session_lease_generation == fence.fencing_token
+                && row.claim_token.is_some()
+                && row.claim_owner_incarnation_id.as_deref() == Some(owner.incarnation_id.as_str()))
+            .then(|| (row.claim_id.clone(), row.claim_token.clone()))
         };
         let head_identity = identity(&first_row);
         let mut batches = vec![first_row];
@@ -751,7 +762,9 @@ async fn reclaim_run_members_tx(
         let queued_claim = match batches.first() {
             Some(head)
                 if head.claim_session_lease_generation == fence.fencing_token
-                    && head.claim_token.is_some() =>
+                    && head.claim_token.is_some()
+                    && head.claim_owner_incarnation_id.as_deref()
+                        == Some(owner.incarnation_id.as_str()) =>
             {
                 if batches.iter().any(|row| {
                     row.claim_id != head.claim_id
@@ -809,7 +822,7 @@ async fn reclaim_run_members_tx(
 
 pub(super) async fn settle_run_members_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     scope: &lash_core_execution::ExecutionScope,
 ) -> Result<(), StoreError> {
     sqlx::query(run_sql().cancel_inputs.sql())
@@ -832,7 +845,7 @@ pub(super) async fn settle_run_members_tx(
 
 pub(super) async fn validate_run_members_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     commit: &QueuedRunCommit,
 ) -> Result<(), StoreError> {
     let QueuedRunProgress::Advance {

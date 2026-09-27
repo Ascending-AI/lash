@@ -736,8 +736,6 @@ class ParkedEntryTests(unittest.TestCase):
                 "--skip",
                 "tests::turn_laws_on_the_double::accept_turn_input_redrive_after_store_commit_admits_one_row",
                 "--skip",
-                "tests::turn_laws_on_the_double::busy_execution_lane_defers_an_accepted_direct_turn",
-                "--skip",
                 "tests::turn_laws_on_the_double::cancelled_vacuumed_acceptance_is_not_resurrected",
                 "--skip",
                 "tests::turn_laws_on_the_double::direct_turn_acceptance_mints_no_idempotency_key",
@@ -941,10 +939,7 @@ class RealTreeTests(unittest.TestCase):
                 MODULE.ROOT / "crates/lash-postgres-store"
             )
         }
-        for module in (
-            "process_prune_reclaim",
-            "session_execution_lease_renewal",
-        ):
+        for module in ("process_prune_reclaim",):
             self.assertIn(f"integration::{module}", claimants)
             self.assertNotIn(module, claimants)
 

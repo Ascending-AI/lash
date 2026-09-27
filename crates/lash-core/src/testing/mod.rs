@@ -43,12 +43,12 @@ pub use lash_core_execution::testing::{
     process_engine_fixture, process_engine_plugin_fixture,
     process_engine_run_context_for_validation, process_execution_env_fixture,
     process_execution_env_fixture_ref, process_work_wiring_for_registry,
-    publish_process_execution_env_for_testing, queued_lane_holder_for_testing,
-    queued_work_claim_policy, run_tool, run_tool_granted, runbook_evidence, runtime_lease_owner,
-    runtime_services_without_ports, sansio_transcript, stage_execution_state_components,
-    standard_test_policy, store_fixtures, test_code_protocol_factories, test_plugin_host,
-    test_standard_protocol_factories, test_standard_protocol_factory_with_runtime_state,
-    test_trigger_router, tool_registry_with_live_provider, trace_capture,
+    publish_process_execution_env_for_testing, queued_work_claim_policy, run_tool,
+    run_tool_granted, runbook_evidence, runtime_lease_owner, runtime_services_without_ports,
+    sansio_transcript, stage_execution_state_components, standard_test_policy, store_fixtures,
+    test_code_protocol_factories, test_plugin_host, test_standard_protocol_factories,
+    test_standard_protocol_factory_with_runtime_state, test_trigger_router,
+    tool_registry_with_live_provider, trace_capture,
 };
 
 // Each submodule documents itself in its own file. Adding an outer doc comment
@@ -199,3 +199,5 @@ pub fn response_synthesized_from_aborted_stream(
 ) -> crate::llm::types::LlmResponse {
     crate::runtime::response_synthesized_from_aborted_stream(events)
 }
+
+pub use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;

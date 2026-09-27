@@ -33,7 +33,5 @@ mod process_prune_reclaim;
 mod refcount_benchmark;
 #[path = "release_stamp.rs"]
 mod release_stamp;
-#[path = "session_execution_lease_renewal.rs"]
-mod session_execution_lease_renewal;
 #[path = "turn_cancel_receipt_consistency.rs"]
 mod turn_cancel_receipt_consistency;

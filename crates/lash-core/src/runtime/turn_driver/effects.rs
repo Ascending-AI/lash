@@ -508,7 +508,7 @@ impl RuntimeTurnDriver<'_> {
                     .claim_checkpoint_work(
                         &self.session_id,
                         session_execution_lease,
-                        &self.runtime_lease_owner,
+                        &session_execution_lease.owner,
                         &self.turn_id,
                         checkpoint,
                         64,

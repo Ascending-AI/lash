@@ -158,6 +158,7 @@ pub(super) async fn postgres_refusal_for_empty_scan(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
 ) -> Result<TurnWorkEmptyScanDiagnostic, StoreError> {
@@ -166,6 +167,7 @@ pub(super) async fn postgres_refusal_for_empty_scan(
     let head_rows = sqlx::query(sql.queued_batches.select_head_candidate.sql())
         .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
+        .bind(&owner.incarnation_id)
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -217,6 +219,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
                 batch,
                 claim_token: row.claim_token.clone(),
                 claim_session_lease_generation: row.claim_session_lease_generation,
+                claim_owner_incarnation_id: row.claim_owner_incarnation_id.clone(),
             }
         })
         .collect::<Vec<_>>();
@@ -258,6 +261,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
             write.next_claim_fencing_token,
         )?)
         .bind(i64::try_from(now).unwrap_or(i64::MAX))
+        .bind(&plan.owner().incarnation_id)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -283,6 +287,7 @@ pub(super) async fn scan_queued_work_candidates_postgres(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     max_rows: usize,
 ) -> Result<
@@ -297,6 +302,7 @@ pub(super) async fn scan_queued_work_candidates_postgres(
         .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
         .bind(claim_scan_limit(max_rows))
+        .bind(&owner.incarnation_id)
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -309,6 +315,7 @@ pub(super) async fn scan_queued_work_candidates_postgres(
         if lash_core_execution::store_backend_support::queued_work_batch_claimability(
             row.claim_facts(),
             generation,
+            &owner.incarnation_id,
         )
         .is_claimable()
         {
@@ -333,6 +340,7 @@ pub(super) async fn earliest_next_turn_candidate_seq_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
 ) -> Result<Option<u64>, StoreError> {
     earliest_candidate_seq_tx(
         tx,
@@ -342,6 +350,7 @@ pub(super) async fn earliest_next_turn_candidate_seq_tx(
             .sql(),
         session_id,
         generation,
+        owner,
     )
     .await
 }
@@ -352,6 +361,7 @@ pub(super) async fn earliest_turn_candidate_seq_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
 ) -> Result<Option<u64>, StoreError> {
     earliest_candidate_seq_tx(
         tx,
@@ -361,6 +371,7 @@ pub(super) async fn earliest_turn_candidate_seq_tx(
             .sql(),
         session_id,
         generation,
+        owner,
     )
     .await
 }
@@ -370,10 +381,12 @@ async fn earliest_candidate_seq_tx(
     sql: &'static str,
     session_id: &SessionId,
     generation: u64,
+    owner: &LeaseOwnerIdentity,
 ) -> Result<Option<u64>, StoreError> {
     let seq: Option<i64> = sqlx::query_scalar(sql)
         .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
+        .bind(&owner.incarnation_id)
         .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -384,7 +397,7 @@ async fn earliest_candidate_seq_tx(
 pub(super) async fn claim_ready_queued_work_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     policy: QueuedWorkClaimPolicy,
@@ -394,15 +407,21 @@ pub(super) async fn claim_ready_queued_work_postgres_tx(
     }
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
-    let (selected_rows, mut selected_batches, candidates) =
-        scan_queued_work_candidates_postgres(tx, session_id, generation, boundary, policy.max_rows)
-            .await?;
+    let (selected_rows, mut selected_batches, candidates) = scan_queued_work_candidates_postgres(
+        tx,
+        session_id,
+        generation,
+        owner,
+        boundary,
+        policy.max_rows,
+    )
+    .await?;
     // ADR 0101 §5: queued work accepted after an unclaimed next-turn input
     // waits behind it, at idle and at a checkpoint alike. Read after the scan:
     // an input committed before a scanned row took its sequence first, so
     // this read sees it.
     let admitted = TurnLaneStop::before(
-        earliest_next_turn_candidate_seq_tx(tx, session_id, generation).await?,
+        earliest_next_turn_candidate_seq_tx(tx, session_id, generation, owner).await?,
     )
     .queued_prefix(&candidates);
     let candidates = &candidates[..admitted];
@@ -947,7 +966,7 @@ pub(super) enum CommandLaneGate {
 pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core_execution::TurnInputClaimMode,
@@ -1002,6 +1021,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     if let lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
         query = query.bind(turn_id.to_string());
     }
+    query = query.bind(&owner.incarnation_id);
     let rows = query.fetch_all(&mut **tx).await.map_err(store_sqlx_error)?;
     let selected = rows
         .into_iter()
@@ -1028,7 +1048,7 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     now: u64,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     mode: lash_core_execution::TurnInputClaimMode,
     selected: Vec<(PendingTurnInputRow, lash_core_execution::PendingTurnInput)>,
@@ -1043,6 +1063,10 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
                 claim_fencing_token: row.claim_fencing_token,
                 claim_token: row.claim_facts().claim_token.map(str::to_string),
                 claim_session_lease_generation: row.claim_session_lease_generation(),
+                claim_owner_incarnation_id: row
+                    .claim_facts()
+                    .claim_owner_incarnation_id
+                    .map(str::to_string),
             },
         )
         .collect();
@@ -1114,7 +1138,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
         &Arc<dyn lash_core_execution::Clock>,
     >,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core_execution::TurnInputClaimMode,
@@ -1157,142 +1181,6 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
             Ok(value)
         }
     }
-}
-
-/// Read the lease row without locking it, for diagnostics.
-///
-/// The mutation paths deliberately take a `FOR UPDATE` row lock (see
-/// [`load_session_execution_lease_tx`]) because check-then-act on this row is not
-/// atomic under READ COMMITTED. A diagnostic read must never take that lock: an
-/// operator polling a stuck session would otherwise make the holder's renewal or
-/// a peer's claim wait behind the observer's transaction, so watching the lease
-/// could itself delay the lane it is watching. The caller owns a short read
-/// transaction so the row and `transaction_timestamp()` share one transaction;
-/// this SELECT itself still has no `FOR UPDATE`.
-pub(crate) async fn read_session_execution_lease_unlocked(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
-    let row = sqlx::query(
-        crate::turn_ingress::turn_ingress_sql()
-            .leases
-            .select_by_session
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    row.map(session_execution_lease_row_from_columns)
-        .transpose()
-}
-
-pub(crate) async fn load_session_execution_lease_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
-    let row = sqlx::query(
-        crate::turn_ingress::turn_ingress_sql()
-            .leases_postgres
-            .select_by_session_for_update
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    row.map(session_execution_lease_row_from_columns)
-        .transpose()
-}
-
-pub(super) fn session_execution_lease_row_from_columns(
-    row: sqlx::postgres::PgRow,
-) -> Result<SessionExecutionLeaseRow, StoreError> {
-    Ok(SessionExecutionLeaseRow {
-        owner: lease_owner_from_columns(row.get(0), row.get(5))?,
-        executor_id: row.get(6),
-        lease_token: row.get(1),
-        fencing_token: u64_from_sql("SessionExecutionLease", "fencing_token", row.get(2))?,
-        claimed_at_ms: u64_from_sql("SessionExecutionLease", "claimed_at_ms", row.get(3))?,
-        lease_term_ms: u64_from_sql("SessionExecutionLease", "lease_term_ms", row.get(7))?,
-        expires_at_ms: u64_from_sql("SessionExecutionLease", "expires_at_ms", row.get(4))?,
-    })
-}
-
-/// Serialize concurrent session-execution-lease claims for one session.
-///
-/// `try_claim`/`reclaim` read the current lease and then conditionally
-/// `acquire` it. That check-then-act is not atomic under Postgres READ
-/// COMMITTED, so two concurrent first claims can both observe no live lease and
-/// both `ON CONFLICT DO UPDATE`, leaving two acquired winners. A
-/// transaction-scoped advisory lock keyed by the session id makes the sequence
-/// mutually exclusive per session; Postgres releases it automatically when the
-/// transaction ends. (SQLite and the in-memory store serialize writers
-/// globally, so they do not need this.)
-pub(super) async fn lock_session_execution_lease_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-) -> Result<(), StoreError> {
-    sqlx::query(
-        crate::connection_sql::connection_sql()
-            .lock_xact_by_text
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    Ok(())
-}
-
-pub(super) async fn acquire_session_execution_lease_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    claim: lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity<'_>,
-    previous_fencing_token: u64,
-    now: u64,
-    lease_ttl_ms: u64,
-) -> Result<SessionExecutionLease, StoreError> {
-    let lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity {
-        session_id,
-        owner,
-        executor_id,
-        lease_token,
-    } = claim;
-    let fencing_token = StoreError::checked_monotonic_increment(
-        "session_execution_lease_fencing_token",
-        previous_fencing_token,
-    )?;
-    let sql_fencing_token = sql_monotonic_counter_value(
-        "session_execution_lease_fencing_token",
-        previous_fencing_token,
-        fencing_token,
-    )?;
-    let expires_at = now.saturating_add(lease_ttl_ms);
-    let sql_expires_at = sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
-    let sql_lease_term = sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
-    sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.acquire.sql())
-        .bind(session_id.as_str())
-        .bind(&owner.owner_id)
-        .bind(&owner.incarnation_id)
-        .bind(executor_id)
-        .bind(lease_token)
-        .bind(sql_fencing_token)
-        .bind(now as i64)
-        .bind(sql_expires_at)
-        .bind(sql_lease_term)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    Ok(SessionExecutionLease {
-        session_id: SessionId::from(session_id.to_string()),
-        owner: owner.clone(),
-        executor_id: executor_id.to_string(),
-        lease_token: lease_token.to_string(),
-        fencing_token,
-        claimed_at_epoch_ms: now,
-        lease_term_ms: lease_ttl_ms,
-        expires_at_epoch_ms: expires_at,
-    })
 }
 
 /// The follow-on the head of `session_id` owes (ADR 0101 §3), read inside
@@ -1343,42 +1231,10 @@ pub(super) async fn follow_on_blocks_claim_tx(
 pub(super) async fn ensure_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
 ) -> Result<(), StoreError> {
-    let now = postgres_transaction_epoch_ms(tx).await?;
-    let current = load_session_execution_lease_tx(tx, session_id).await?;
-    lash_core_execution::store_backend_support::require_current_session_execution_lease(
-        session_id,
-        current.as_ref().map(|current| {
-            lash_core_execution::store_backend_support::SessionExecutionLeaseFenceFacts {
-                owner: current.owner.as_ref(),
-                executor_id: current.executor_id.as_deref(),
-                lease_token: current.lease_token.as_deref(),
-                fencing_token: current.fencing_token,
-                expires_at_epoch_ms: current.expires_at_ms,
-            }
-        }),
-        fence,
-        now,
-    )
+    super::drive_epoch::require_fence_tx(tx, session_id, &fence.drive_fence()).await
 }
-
-pub(super) async fn release_session_execution_lease_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    completion: &SessionExecutionLeaseAuthority,
-) -> Result<bool, StoreError> {
-    let released = sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.release.sql())
-        .bind(completion.session_id.as_str())
-        .bind(&completion.owner.owner_id)
-        .bind(&completion.owner.incarnation_id)
-        .bind(&completion.executor_id)
-        .bind(&completion.lease_token)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    Ok(released.rows_affected() == 1)
-}
-
 pub(super) fn requested_append_ancestor(
     stamp: &lash_core_execution::RuntimeTurnCommitStamp,
 ) -> Option<&str> {

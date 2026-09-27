@@ -435,20 +435,12 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
 
     let session_id = SessionId::from("restate-authority-reopen");
     let store = memory_session_store(session_id.as_str()).await;
-    let lease = store
-        .try_claim_session_execution_lease(
-            &session_id,
-            &lash_core::LeaseOwnerIdentity::opaque(
-                "restate-authority-reopen",
-                "restate-authority-reopen:incarnation",
-            ),
-            "restate-authority-reopen:executor",
-            60_000,
-        )
-        .await
-        .expect("claim authority reopen lane")
-        .acquired()
-        .expect("authority reopen lane is free");
+    let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
+        &store,
+        &session_id,
+        "restate-authority-reopen",
+    )
+    .await;
     let physical_scope =
         ExecutionScope::process(lash_core::ProcessId::fixture("restate-authority-process"));
     let first_binding = lash_core::facade_support::turn_control_binding_id_for_scope(

@@ -146,6 +146,51 @@ the same turn count as both held and untyped.
 """
 
 [[cross_family]]
+statement = "pending_turn_input.list_undelivered"
+owner = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
+touches = ["session_meta"]
+reason = """
+The pending-input read reports a held claim only when its admitting drive
+epoch remains current in the same read snapshot.
+"""
+
+[[cross_family]]
+statement = "queued_work_batch.list_unclaimed"
+owner = "crates/lash-store-sql/src/turn_ingress/queued_batches.rs"
+touches = ["session_meta"]
+reason = """
+The unclaimed queue read uses the current drive epoch to expose rows held by
+an older drive immediately after successor admission.
+"""
+
+[[cross_family]]
+statement = "queued_work_batch.select_cancelable"
+owner = "crates/lash-sqlite-store/src/turn_ingress/queued_work.rs"
+touches = ["session_meta"]
+reason = """
+SQLite cancellation checks the current drive epoch in its write transaction
+before treating an older claim as abandoned.
+"""
+
+[[cross_family]]
+statement = "queued_work_batch.delete_cancelled"
+owner = "crates/lash-sqlite-store/src/turn_ingress/queued_work.rs"
+touches = ["session_meta"]
+reason = """
+The SQLite delete repeats the drive-epoch liveness predicate in the write
+that removes the queue row.
+"""
+
+[[cross_family]]
+statement = "queued_work_batch.select_cancelable"
+owner = "crates/lash-postgres-store/src/postgres/turn_ingress/queued_work.rs"
+touches = ["session_meta"]
+reason = """
+PostgreSQL cancellation reads the current drive epoch while locking the
+candidate queue row, so an older claim does not delay cancellation.
+"""
+
+[[cross_family]]
 statement = "pending_turn_input.delete_withdrawn"
 owner = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
 touches = ["session_root_inputs"]
@@ -182,7 +227,6 @@ touches = [
     "queued_runs",
     "queued_work_batches",
     "queued_work_items",
-    "session_execution_leases",
     "session_ingress_sequence",
     "turn_cancel_closure_authorizations",
     "turn_cancel_requests",
@@ -667,7 +711,6 @@ tables = [
     "queued_work_items",
     "queued_runs",
     "queued_run_members",
-    "session_execution_leases",
     "tool_intent_submissions",
     "turn_cancel_affected_inputs",
     "turn_cancel_requests",
@@ -685,7 +728,6 @@ statement_prefixes = [
     "queued_work_batch",
     "queued_work_item",
     "queued_run",
-    "session_execution_lease",
     "tool_intent_submission",
     "turn_cancel_affected_input",
     "turn_cancel_request",
@@ -710,7 +752,6 @@ shared = [
     "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs",
     "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs",
     "crates/lash-store-sql/src/turn_ingress/run_specs.rs",
-    "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs",
     "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs",
     "crates/lash-store-sql/src/turn_ingress/turn_park_clock.rs",
     "crates/lash-store-sql/src/turn_ingress/turn_park_events.rs",
@@ -732,7 +773,6 @@ sqlite = [
 postgres = [
     "crates/lash-postgres-store/src/postgres/turn_ingress.rs",
     "crates/lash-postgres-store/src/postgres/turn_ingress/family.rs",
-    "crates/lash-postgres-store/src/postgres/turn_ingress/leases.rs",
     "crates/lash-postgres-store/src/postgres/turn_ingress/pending_inputs.rs",
     "crates/lash-postgres-store/src/postgres/turn_ingress/queued_work.rs",
     "crates/lash-postgres-store/src/postgres/turn_ingress/turn_cancel.rs",
@@ -774,7 +814,6 @@ queued_run_members = "crates/lash-store-sql/src/turn_ingress/queued_run_members.
 pending_turn_inputs = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
 queued_work_batches = "crates/lash-store-sql/src/turn_ingress/queued_batches.rs"
 queued_work_items = "crates/lash-store-sql/src/turn_ingress/queued_items.rs"
-session_execution_leases = "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs"
 tool_intent_submissions = "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs"
 turn_cancel_affected_inputs = "crates/lash-store-sql/src/turn_ingress/cancel_affected_inputs.rs"
 turn_cancel_requests = "crates/lash-store-sql/src/turn_ingress/cancel_requests.rs"
@@ -3294,18 +3333,6 @@ reason = """
 SQLite reclaims a deleted session's items through the foreign key's
 ON DELETE CASCADE. This schema's constraint is not declared cascading, so the
 sweep names the rows itself.
-"""
-
-[[dialect_only]]
-statement = "session_execution_lease.select_by_session_for_update"
-backends = ["postgres"]
-kind = "FOR UPDATE"
-reason = """
-Every PostgreSQL mutation path locks the lease row: check-then-act on it is not
-atomic under READ COMMITTED, so two concurrent first claims could otherwise
-both observe no live lease and both win. SQLite serializes writers globally.
-The one read that must NOT take the lock — an operator's diagnostic poll — uses
-the shared unlocked statement, so watching a lane cannot delay it.
 """
 
 [[dialect_only]]

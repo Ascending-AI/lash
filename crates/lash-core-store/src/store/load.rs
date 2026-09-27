@@ -82,45 +82,16 @@ pub async fn load_persisted_session_read_view(
     })
 }
 
-/// Recover a session only after completing lease-fenced state admission.
+/// Load a session after checking that this build can read its state version.
 pub async fn load_persisted_session_admitted(
     store: &(dyn RuntimePersistence + '_),
-    session_id: &SessionId,
-    owner: &crate::LeaseOwnerIdentity,
-    executor_id: &str,
-    lease_ttl_ms: u64,
+    _session_id: &SessionId,
+    _owner: &crate::LeaseOwnerIdentity,
+    _executor_id: &str,
+    _lease_ttl_ms: u64,
 ) -> Result<Option<LoadedPersistedSession>, StoreError> {
-    let claim = store
-        .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
-        .await?;
-    let acquisition = match claim {
-        crate::SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
-        crate::SessionExecutionLeaseClaimOutcome::Busy { holder } => {
-            crate::runtime::session_execution_lease::trace_busy(
-                session_id,
-                owner,
-                executor_id,
-                &holder,
-            );
-            return Err(StoreError::Contended);
-        }
-    };
-    crate::runtime::session_execution_lease::trace_acquisition(&acquisition);
-    let lease = acquisition.lease;
-    let fence = lease.fence();
-    let result = async {
-        store.admit_session_state(&fence).await?;
-        load_persisted_session(store).await
-    }
-    .await;
-    let release = store.release_session_execution_lease(&fence).await;
-    match result {
-        Err(error) => Err(error),
-        Ok(loaded) => {
-            release?;
-            Ok(loaded)
-        }
-    }
+    store.read_session_state_version().await?;
+    load_persisted_session(store).await
 }
 
 pub async fn load_persisted_session_state(

@@ -1978,16 +1978,19 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
                 .expect_err("message append must preserve the retirement refusal")
             };
 
-        assert!(matches!(
-            &error,
-            EmbedError::Session(lash_core::SessionError::Store {
-                context,
-                source: lash_core::StoreError::SessionDeleted {
-                    session_id: deleted_session_id,
-                },
-            }) if context == "failed to persist runtime state"
-                && deleted_session_id == session_id
-        ));
+        assert!(
+            matches!(
+                &error,
+                EmbedError::Session(lash_core::SessionError::Store {
+                    context,
+                    source: lash_core::StoreError::SessionDeleted {
+                        session_id: deleted_session_id,
+                    },
+                }) if context == "failed to persist runtime state"
+                    && deleted_session_id == session_id
+            ),
+            "{error:?}"
+        );
         assert_eq!(
             error.to_string(),
             format!(

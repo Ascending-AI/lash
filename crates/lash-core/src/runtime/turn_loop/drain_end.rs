@@ -58,7 +58,7 @@ impl LashRuntime {
     pub(super) async fn end_queue_drain(
         &mut self,
         drain_scope: &crate::ExecutionScope,
-        session_execution_lease: &SessionExecutionLeaseGuard,
+        session_execution_lease: &DriveClaimGuard,
         store: &Arc<dyn crate::store::RuntimePersistence>,
         ran: bool,
     ) {

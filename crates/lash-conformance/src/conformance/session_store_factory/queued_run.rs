@@ -24,7 +24,7 @@ pub async fn session_store_factory_discovers_empty_pending_queued_run(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
+    let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
         &store,
         &request.session_id,
         "empty-run-owner",
@@ -59,7 +59,7 @@ pub async fn session_store_factory_discovers_empty_pending_queued_run(
         .expect("freeze empty selection");
     assert_eq!(selected.admission.members, Some(Vec::new()));
     store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .expect("release old owner");
     drop(store);
@@ -76,7 +76,7 @@ pub async fn session_store_factory_discovers_empty_pending_queued_run(
         .await
         .expect("open session")
         .expect("session exists");
-    let successor = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
+    let successor = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
         &reopened,
         &request.session_id,
         "empty-run-successor",
@@ -133,7 +133,7 @@ pub async fn session_store_factory_retains_assigned_input_tombstone(
         ))
         .await
         .expect("enqueue initial input");
-    let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
+    let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
         &store,
         &request.session_id,
         "assigned-retention-owner",

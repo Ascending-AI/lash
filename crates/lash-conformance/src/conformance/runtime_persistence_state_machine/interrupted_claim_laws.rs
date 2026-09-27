@@ -14,7 +14,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let stale_owner = owner(0);
     let stale_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(SESSION_ID),
             &stale_owner,
             "law-stale-settlement-cannot-damage-successor-executor",
@@ -37,12 +37,12 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("coalesced work absent"))?;
     store
-        .release_session_execution_lease(&stale_lease.completion())
+        .supersede_claim_epoch_for_test(&stale_lease.completion())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let successor_owner = owner(1);
     let successor_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(SESSION_ID),
             &successor_owner,
             "law-stale-settlement-cannot-damage-successor-executor-2",
@@ -109,7 +109,6 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     let stale_result = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(stale_lease.completion())
                 .completing_queue_claim(stale_completion),
         )
         .await;
@@ -142,24 +141,22 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     );
     let third_owner = owner(2);
     prop_assert!(
-        matches!(
-            store
-                .try_claim_session_execution_lease(
-                    &SessionId::from(SESSION_ID),
-                    &third_owner,
-                    "law-stale-settlement-cannot-damage-successor-executor-3",
-                    60_000,
-                )
-                .await
-                .map_err(|error| TestCaseError::fail(error.to_string()))?,
-            SessionExecutionLeaseClaimOutcome::Busy { .. }
-        ),
-        "stale completion released the successor session lease"
+        store
+            .seal_claim_epoch_for_test(
+                &SessionId::from(SESSION_ID),
+                &third_owner,
+                "law-stale-settlement-cannot-damage-successor-executor-3",
+                60_000,
+            )
+            .await
+            .map_err(|error| TestCaseError::fail(error.to_string()))?
+            .acquired()
+            .is_some(),
+        "stale completion must not prevent a successor drive seal"
     );
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(successor_lease.completion())
                 .completing_queue_claim(successor_claim.completion()),
         )
         .await

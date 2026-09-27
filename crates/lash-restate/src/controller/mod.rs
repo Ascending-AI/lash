@@ -37,10 +37,10 @@ use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
     EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, PluginError,
     ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord, ProcessRegistry,
-    QueuedLaneAcquisition, QueuedLaneProbe, RankedGroupSettlement, Resolution, ResolveOutcome,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, ScopedEffectController, SleepSpec,
+    RankedGroupSettlement, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeError, RuntimeErrorCode, ScopedEffectController, SleepSpec,
     facade_support::RuntimeAwaitEventOptions, facade_support::RuntimeSleepOptions,
     facade_support::refuse_unhonored_group_membership,
 };
@@ -494,20 +494,6 @@ where
 {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         Some(self.authority_id.binding_id().to_string())
-    }
-
-    /// Restate re-drives this handler invocation, so its retry policy - not a
-    /// sleep inside one invocation - is the right place to pace a queued drain
-    /// that found the session execution lane held by a live foreign executor.
-    /// The deployment-level [`RestateEffectHost`](crate::RestateEffectHost)
-    /// deliberately does not opt in: it serves requests from outside a handler,
-    /// where nothing re-drives the caller.
-    async fn acquire_queued_lane(
-        &self,
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        self.wait_out_crashed_lane_holder(lane, cancel).await
     }
 
     async fn prepare_completion_key(

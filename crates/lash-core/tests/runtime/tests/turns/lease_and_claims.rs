@@ -779,7 +779,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         .await
         .expect("open the late-input handler");
     let drained = Box::pin(
-        next_turn_worker.stream_next_queued_work(TurnOptions::new(
+        next_turn_worker.drive_one_admitted_queued_root(TurnOptions::new(
             CancellationToken::new(),
             lash_core::testing::LayeredEffectHost::layer_scoped(
                 handler.scoped(),

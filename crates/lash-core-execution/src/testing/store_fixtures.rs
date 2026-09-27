@@ -1,9 +1,9 @@
 use crate::*;
 
 pub use lash_core_store::testing::store_fixtures::{
-    append_conformance_event_node, bind_conformance_session,
-    claim_session_execution_lease_for_test, commit_conformance_state,
-    commit_runtime_state_for_test, durable_admission, durable_turn_address, durable_turn_scope,
+    DriveClaimTestOutcome, RuntimePersistenceTestClaimExt, append_conformance_event_node,
+    bind_conformance_session, commit_conformance_state, commit_runtime_state_for_test,
+    durable_admission, durable_turn_address, durable_turn_scope, seal_claim_authority_for_test,
     session_store_request,
 };
 
@@ -30,7 +30,7 @@ pub async fn recorded_process_admission(
 pub async fn authorize_completion_deferral_for_test(
     store: &dyn RuntimePersistence,
     authority: &crate::TurnCancellationAuthority,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     mut commit: RuntimeCommit,
 ) -> Result<RuntimeCommit, RuntimeError> {
     let store_error =

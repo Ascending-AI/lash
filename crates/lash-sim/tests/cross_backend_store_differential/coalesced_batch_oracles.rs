@@ -246,7 +246,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                 format!("literal-oracle-{}:incarnation", runner.name),
             );
             let lease = store
-                .try_claim_session_execution_lease(
+                .seal_claim_epoch_for_test(
                     &runner.session_id,
                     &owner,
                     "coalesced-batch-oracle-executor",
@@ -310,7 +310,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                 other => panic!("missing literal assertion for batch oracle {other}"),
             }
             store
-                .release_session_execution_lease(&lease.completion())
+                .supersede_claim_epoch_for_test(&lease.completion())
                 .await
                 .expect("release literal-oracle session lease");
             runner.close_reopened_postgres_pool().await;
@@ -384,7 +384,7 @@ async fn interrupted_claim_identity_stands_over_a_later_row() {
             format!("claim-gap-a-{}:incarnation", runner.name),
         );
         let lease = store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &runner.session_id,
                 &owner,
                 "coalesced-batch-oracle-executor",
@@ -413,7 +413,7 @@ async fn interrupted_claim_identity_stands_over_a_later_row() {
             runner.name
         );
         store
-            .release_session_execution_lease(&lease.completion())
+            .supersede_claim_epoch_for_test(&lease.completion())
             .await
             .expect("release first claim-gap session lease");
         // The gap row arrives only after the interrupted claim exists, so a
@@ -433,7 +433,7 @@ async fn interrupted_claim_identity_stands_over_a_later_row() {
             format!("claim-gap-b-{}:incarnation", runner.name),
         );
         let lease = store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &runner.session_id,
                 &owner,
                 "coalesced-batch-oracle-executor",
@@ -484,7 +484,7 @@ async fn interrupted_claim_identity_stands_over_a_later_row() {
             runner.name
         );
         store
-            .release_session_execution_lease(&lease.completion())
+            .supersede_claim_epoch_for_test(&lease.completion())
             .await
             .expect("release successor claim-gap session lease");
         runner.close_reopened_postgres_pool().await;

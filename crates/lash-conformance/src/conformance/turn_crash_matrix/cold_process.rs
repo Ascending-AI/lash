@@ -242,7 +242,6 @@ async fn recover_turn_cancel_closure(
     identity: &ReferenceIdentity,
 ) {
     super::super::bind_conformance_session(&store, &identity.session_id).await;
-    super::collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
     let owner = LeaseOwnerIdentity::opaque(
         "cold-process-cancel-recovery",
         format!("{}:cancel-recovery", identity.turn_id),
@@ -250,7 +249,7 @@ async fn recover_turn_cancel_closure(
     let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
         loop {
             let outcome = store
-                .try_claim_session_execution_lease(
+                .seal_claim_epoch_for_test(
                     &identity.session_id,
                     &owner,
                     "cold-process-cancel-recovery-executor",
@@ -409,7 +408,7 @@ async fn recover_turn_cancel_closure(
         "input effects and closure consumption become durable together"
     );
     store
-        .release_session_execution_lease(&lease.completion())
+        .supersede_claim_epoch_for_test(&lease.completion())
         .await
         .expect("release cancellation recovery lane");
     println!(
@@ -531,9 +530,8 @@ pub async fn cold_process_real_turn_driver(
                 // The killed helper ran on a term wide enough that no
                 // scheduling delay could lapse it before the crash point;
                 // expire what it abandoned rather than waiting the term out.
-                super::collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
                 let outcome = store
-                    .try_claim_session_execution_lease(
+                    .seal_claim_epoch_for_test(
                         &identity.session_id,
                         &owner,
                         "cold-process-real-turn-driver-executor",
@@ -541,13 +539,8 @@ pub async fn cold_process_real_turn_driver(
                     )
                     .await
                     .expect("poll peer-reclaim lease");
-                if let Some(acquisition) = outcome.acquisition() {
-                    let displaced = acquisition
-                        .displaced
-                        .as_ref()
-                        .expect("peer reclaim displaces the crashed executor");
-                    assert_eq!(displaced.owner.owner_id, "lash-core-test-worker");
-                    break acquisition.lease;
+                if let Some(lease) = outcome.acquired() {
+                    break lease;
                 }
                 tokio::time::sleep(recovery_timings().renew_interval()).await;
             }
@@ -568,7 +561,7 @@ pub async fn cold_process_real_turn_driver(
             .expect("crashed turn left one queued-work row");
         assert_eq!(claim.batches.len(), 1, "peer reclaims exactly one row");
         store
-            .release_session_execution_lease(&lease.completion())
+            .supersede_claim_epoch_for_test(&lease.completion())
             .await
             .expect("release peer lease without settling peer row");
         println!(
@@ -587,9 +580,8 @@ pub async fn cold_process_real_turn_driver(
                 // Same collapse as the peer-reclaim probe above: the crashed
                 // helper's lease is expired on demand, so displacement stays a
                 // real store decision instead of a wall-clock race.
-                super::collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
                 let outcome = store
-                    .try_claim_session_execution_lease(
+                    .seal_claim_epoch_for_test(
                         &identity.session_id,
                         &owner,
                         "cold-process-real-turn-driver-executor-2",
@@ -597,71 +589,11 @@ pub async fn cold_process_real_turn_driver(
                     )
                     .await
                     .expect("poll cold-process recovery lease");
-                if let Some(acquisition) = outcome.acquisition() {
-                    if let Some(displaced) = acquisition.displaced.as_ref() {
-                        assert_eq!(displaced.owner.owner_id, "lash-core-test-worker");
-                    } else if action == ColdProcessTurnAction::CancelRecover {
-                        assert!(
-                            store
-                                .turn_is_committed(&crate::TurnAddress::new(
-                                    &identity.session_id,
-                                    &identity.turn_id,
-                                ))
-                                .await
-                                .expect("read already-committed cancellation receipt"),
-                            "only an already-landed cancellation commit may leave recovery unheld"
-                        );
-                    } else {
-                        let terminal_count = crate::load_persisted_session_state(store.as_ref())
-                            .await
-                            .expect("read already-committed cold-process state")
-                            .map(|state| {
-                                state
-                                    .session_graph
-                                    .read_model(None)
-                                    .unwrap()
-                                    .messages
-                                    .iter()
-                                    .flat_map(|message| message.parts.iter())
-                                    .filter(|part| part.content() == "trace turn complete")
-                                    .count()
-                            })
-                            .unwrap_or(0);
-                        let pending_count = store
-                            .list_pending_turn_inputs(&identity.session_id)
-                            .await
-                            .expect("list recovery turn inputs")
-                            .len();
-                        let queued_count = store
-                            .list_queued_work(&identity.session_id)
-                            .await
-                            .expect("list recovery queued work")
-                            .len();
-                        // FIG-1573: the pinned-active-input scenario seeds no
-                        // next-turn row, so its one pending row is the
-                        // active-turn row pinned to the turn recovery is about
-                        // to resume - the same count, reached from the other
-                        // side, and the state in which the drain evaluates the
-                        // orphan backstop.
-                        if scenario.starts_with("peer-reclaim-") {
-                            assert_eq!(
-                                (terminal_count, pending_count, queued_count),
-                                (0, 1, 1),
-                                "the asserted peer handoff leaves both ingress rows for recovery"
-                            );
-                        } else {
-                            assert_eq!(
-                                (terminal_count, pending_count, queued_count),
-                                (1, 0, 0),
-                                "only an already-landed final commit may leave ordinary recovery unheld"
-                            );
-                        }
-                    }
-                    let lease = acquisition.lease;
+                if let Some(authority) = outcome.acquired() {
                     store
-                        .release_session_execution_lease(&lease.completion())
+                        .supersede_claim_epoch_for_test(&authority)
                         .await
-                        .expect("release cold-process recovery probe");
+                        .expect("supersede recovery probe");
                     break;
                 }
                 tokio::time::sleep(recovery_timings().renew_interval()).await;

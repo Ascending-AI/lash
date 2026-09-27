@@ -125,6 +125,8 @@ impl CoreTriggerAdmin {
 pub struct SessionAdmin {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) process_work: Arc<dyn lash_core::ProcessWorkSubstrate>,
+    pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,
+    pub(crate) ingress: lash_core::drive::IngressRelay,
 }
 
 impl SessionAdmin {
@@ -190,12 +192,128 @@ impl SessionAdmin {
         value
     }
 
+    /// A command accepted while the writer is held must be driven after the
+    /// writer is released. Retry the setter against the refreshed head so its
+    /// live policy and observation publication finish after the durable write.
+    async fn with_writer_settling<F>(&self, mut f: F) -> Result<()>
+    where
+        F: for<'a> FnMut(
+                &'a mut LashRuntime,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>,
+            > + Send,
+    {
+        let mut previous_policy = None;
+        for _ in 0..3 {
+            let result = {
+                let writer = self.runtime.writer();
+                let mut runtime = writer.lock().await;
+                if previous_policy.is_none() {
+                    previous_policy = Some(runtime.session_policy());
+                }
+                let result = f(&mut runtime).await;
+                self.runtime.publish_from(&runtime);
+                result
+            };
+            match result {
+                Err(EmbedError::Session(SessionError::SessionCommandPending(receipt))) => {
+                    self.await_command_drive_with_previous(receipt, previous_policy.clone())
+                        .await?;
+                }
+                result => return result,
+            }
+        }
+        Err(EmbedError::Session(SessionError::Protocol(
+            "session config kept enqueuing after its engine drive settled".into(),
+        )))
+    }
+
+    pub(crate) async fn await_command_drive(
+        &self,
+        receipt: lash_core::runtime::SessionCommandReceipt,
+    ) -> Result<()> {
+        self.await_command_drive_with_previous(receipt, None).await
+    }
+
+    async fn await_command_drive_with_previous(
+        &self,
+        receipt: lash_core::runtime::SessionCommandReceipt,
+        previous_policy: Option<lash_core::SessionPolicy>,
+    ) -> Result<()> {
+        let request = self
+            .ingress
+            .current_ask(receipt.batch_id.as_str())
+            .await
+            .map_err(|source| {
+                EmbedError::Session(SessionError::Store {
+                    context: "failed to read session command drive".into(),
+                    source,
+                })
+            })?;
+        let Some(request) = request else {
+            return Err(EmbedError::Session(SessionError::SessionCommandPending(
+                receipt,
+            )));
+        };
+        let wait = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.work.await_drive(&receipt.session_id, &request),
+        )
+        .await;
+        match wait {
+            Ok(Ok(_)) => {}
+            Ok(Err(abort)) => return Err(EmbedError::Runtime(abort.into_error())),
+            Err(_) => {
+                return Err(EmbedError::Session(SessionError::SessionCommandPending(
+                    receipt,
+                )));
+            }
+        }
+        let writer = self.runtime.writer();
+        let mut runtime = writer.lock().await;
+        let settlement = match previous_policy {
+            Some(previous_policy) => {
+                runtime
+                    .settle_session_command_from_policy(receipt.clone(), previous_policy)
+                    .await
+            }
+            None => runtime.settle_session_command(receipt.clone()).await,
+        }
+        .map_err(EmbedError::from)?;
+        self.runtime.publish_from(&runtime);
+        match settlement {
+            lash_core::runtime::SessionCommandSettlement::Durable(_) => Ok(()),
+            lash_core::runtime::SessionCommandSettlement::Pending(receipt) => Err(
+                EmbedError::Session(SessionError::SessionCommandPending(receipt)),
+            ),
+            lash_core::runtime::SessionCommandSettlement::Cancelled(receipt) => Err(
+                EmbedError::Session(SessionError::SessionCommandCancelled(receipt)),
+            ),
+            lash_core::runtime::SessionCommandSettlement::Rejected(error) => {
+                Err(EmbedError::Runtime(error))
+            }
+            lash_core::runtime::SessionCommandSettlement::Stale { base, head } => {
+                Err(EmbedError::Session(SessionError::Protocol(format!(
+                    "session config command was written against config revision {base}, but the running revision is {head}"
+                ))))
+            }
+            lash_core::runtime::SessionCommandSettlement::Refused { code } => {
+                Err(EmbedError::Session(SessionError::Protocol(format!(
+                    "session config command refused at the drain: {code:?}"
+                ))))
+            }
+        }
+    }
+
     async fn update_config(&self, patch: SessionConfigPatch) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .update_session_config(patch)
-                .await
-                .map_err(Into::into)
+        self.with_writer_settling(|runtime: &mut LashRuntime| {
+            let patch = patch.clone();
+            Box::pin(async move {
+                runtime
+                    .update_session_config(patch)
+                    .await
+                    .map_err(Into::into)
+            })
         })
         .await
     }
@@ -252,28 +370,34 @@ impl SessionAdmin {
     }
 
     async fn set_prompt_template(&self, template: PromptTemplate) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .set_prompt_template(template)
-                .await
-                .map_err(Into::into)
+        self.with_writer_settling(|runtime: &mut LashRuntime| {
+            let template = template.clone();
+            Box::pin(async move {
+                runtime
+                    .set_prompt_template(template)
+                    .await
+                    .map_err(Into::into)
+            })
         })
         .await
     }
 
     async fn clear_prompt_template(&self) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.clear_prompt_template().await.map_err(Into::into)
+        self.with_writer_settling(|runtime: &mut LashRuntime| {
+            Box::pin(async move { runtime.clear_prompt_template().await.map_err(Into::into) })
         })
         .await
     }
 
     async fn add_prompt_contribution(&self, contribution: PromptContribution) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .add_prompt_contribution(contribution)
-                .await
-                .map_err(Into::into)
+        self.with_writer_settling(|runtime: &mut LashRuntime| {
+            let contribution = contribution.clone();
+            Box::pin(async move {
+                runtime
+                    .add_prompt_contribution(contribution)
+                    .await
+                    .map_err(Into::into)
+            })
         })
         .await
     }
@@ -283,27 +407,30 @@ impl SessionAdmin {
         slot: PromptSlot,
         contributions: impl IntoIterator<Item = PromptContribution>,
     ) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .replace_prompt_slot(slot, contributions)
-                .await
-                .map_err(Into::into)
+        let contributions = contributions.into_iter().collect::<Vec<_>>();
+        self.with_writer_settling(|runtime: &mut LashRuntime| {
+            let contributions = contributions.clone();
+            Box::pin(async move {
+                runtime
+                    .replace_prompt_slot(slot, contributions)
+                    .await
+                    .map_err(Into::into)
+            })
         })
         .await
     }
 
     async fn clear_prompt_slot(&self, slot: PromptSlot) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.clear_prompt_slot(slot).await.map_err(Into::into)
+        self.with_writer_settling(|runtime: &mut LashRuntime| {
+            Box::pin(async move { runtime.clear_prompt_slot(slot).await.map_err(Into::into) })
         })
         .await
     }
 
     async fn set_tool_access(&self, access: SessionToolAccess) -> Result<()> {
-        Box::pin(self.with_writer(async |runtime: &mut LashRuntime| {
-            Box::pin(runtime.set_tool_access(access))
-                .await
-                .map_err(Into::into)
+        Box::pin(self.with_writer_settling(|runtime: &mut LashRuntime| {
+            let access = access.clone();
+            Box::pin(async move { runtime.set_tool_access(access).await.map_err(Into::into) })
         }))
         .await
     }

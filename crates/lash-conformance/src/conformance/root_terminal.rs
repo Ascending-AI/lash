@@ -12,6 +12,7 @@
 //! - L-C1: the root's scope closes after its evidence is durable, at least
 //!   once across a crash between the two, and never for a parked root.
 
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -808,7 +809,7 @@ pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
     parts.host.control.scope_close = closes.clone();
     // An earlier drain admitted a named run and selected nothing before it
     // stopped: the run is the session's pending root.
-    let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
+    let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
         &parts.store,
         &parts.session_id,
         "root-settled-earlier-drain",
@@ -840,7 +841,7 @@ pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
         .expect("an earlier drain admits the run");
     parts
         .store
-        .release_session_execution_lease(&lease.authority())
+        .supersede_claim_epoch_for_test(&lease.authority())
         .await
         .expect("the earlier drain stops");
     let root = TurnId::from(run.scope.id());

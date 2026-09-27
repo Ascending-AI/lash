@@ -31,7 +31,6 @@ tokio-stream = "0.1"
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-lash-conformance = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }
 lash-restate-test = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }

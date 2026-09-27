@@ -63,13 +63,7 @@ fn outcome_validation_rejects_a_relocated_level_2_expectation() {
         .expect("level-2 source row");
     let destination = table
         .iter()
-        .position(|entry| {
-            entry.point
-                == TurnCrashPoint {
-                    operation: TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
-                    placement: CrashPlacement::Boundary,
-                }
-        })
+        .position(|entry| entry.level_2.is_none())
         .expect("level-1-only destination row");
     table[destination].level_2 = table[source].level_2.take();
     assert!(

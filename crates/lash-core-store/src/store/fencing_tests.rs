@@ -7,80 +7,12 @@
 
 use super::StoreError;
 use super::fencing::*;
-use super::session_execution_lease::{
-    LeaseOwnerIdentity, SessionExecutionLeaseAuthority, SessionExecutionLeaseFenceFacts,
-    SessionExecutionLeaseRow, require_current_session_execution_lease,
-};
 use crate::SessionId;
 
 const SESSION: &str = "session-fencing";
-const FRESHNESS: &str = "unit_test_snapshot";
 
 fn session_id() -> SessionId {
     SessionId::from(SESSION.to_string())
-}
-
-fn owner() -> LeaseOwnerIdentity {
-    LeaseOwnerIdentity::opaque("worker-a", "boot-1")
-}
-
-fn authority() -> SessionExecutionLeaseAuthority {
-    SessionExecutionLeaseAuthority {
-        session_id: session_id(),
-        owner: owner(),
-        executor_id: "executor-1".to_string(),
-        lease_token: "token-1".to_string(),
-        fencing_token: 7,
-    }
-}
-
-/// A held lease row as a locked read returns it.
-fn row(
-    owner: &LeaseOwnerIdentity,
-    executor_id: &str,
-    lease_token: &str,
-    fencing_token: u64,
-    expires_at_ms: u64,
-) -> SessionExecutionLeaseRow {
-    SessionExecutionLeaseRow {
-        owner: Some(owner.clone()),
-        executor_id: Some(executor_id.to_string()),
-        lease_token: Some(lease_token.to_string()),
-        fencing_token,
-        claimed_at_ms: 500,
-        lease_term_ms: 30_000,
-        expires_at_ms,
-    }
-}
-
-/// A released row: the generation is retained, every identity column is NULL.
-fn released_row(fencing_token: u64) -> SessionExecutionLeaseRow {
-    SessionExecutionLeaseRow {
-        owner: None,
-        executor_id: None,
-        lease_token: None,
-        fencing_token,
-        claimed_at_ms: 0,
-        lease_term_ms: 0,
-        expires_at_ms: 0,
-    }
-}
-
-/// The same held row borrowed as the execution fence's fact view.
-fn facts<'a>(
-    owner: &'a LeaseOwnerIdentity,
-    executor_id: &'a str,
-    lease_token: &'a str,
-    fencing_token: u64,
-    expires_at_epoch_ms: u64,
-) -> SessionExecutionLeaseFenceFacts<'a> {
-    SessionExecutionLeaseFenceFacts {
-        owner: Some(owner),
-        executor_id: Some(executor_id),
-        lease_token: Some(lease_token),
-        fencing_token,
-        expires_at_epoch_ms,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -89,21 +21,14 @@ fn facts<'a>(
 
 /// The refusal a site returns when its fenced write loses, standing in for
 /// whichever domain refusal the real call site owns.
-fn lost_lease_refusal() -> StoreError {
-    StoreError::SessionExecutionLeaseRenewalRefused {
-        session_id: session_id(),
-    }
+fn lost_claim_refusal() -> StoreError {
+    StoreError::Contended
 }
 
 #[test]
 fn one_affected_row_satisfies_the_backstop_silently() {
     let (applied, capture) = lash_core_ids::trace_capture::capturing_sync(|| {
-        fenced_write_applied(
-            FencedWrite::SessionExecutionLeaseRenewal,
-            "sqlite",
-            SESSION,
-            1,
-        )
+        fenced_write_applied(FencedWrite::TurnInputClaimAcquisition, "sqlite", SESSION, 1)
     });
     assert!(applied);
     assert!(
@@ -112,7 +37,7 @@ fn one_affected_row_satisfies_the_backstop_silently() {
     );
     assert!(
         require_fenced_write_applied(
-            FencedWrite::SessionExecutionLeaseRenewal,
+            FencedWrite::TurnInputClaimAcquisition,
             "sqlite",
             SESSION,
             1,
@@ -129,15 +54,15 @@ fn a_lost_fenced_write_returns_the_sites_own_domain_refusal() {
     // runtime's stand-down handling is untouched.
     let (result, _capture) = lash_core_ids::trace_capture::capturing_sync(|| {
         require_fenced_write_applied(
-            FencedWrite::SessionExecutionLeaseRenewal,
+            FencedWrite::TurnInputClaimAcquisition,
             "sqlite",
             SESSION,
             0,
-            lost_lease_refusal,
+            lost_claim_refusal,
         )
     });
     let error = result.expect_err("a fenced write that changed no row must fail closed");
-    assert_eq!(error.variant_name(), "SessionExecutionLeaseRenewalRefused");
+    assert_eq!(error.variant_name(), "Contended");
 }
 
 #[test]
@@ -148,7 +73,7 @@ fn a_lost_fenced_write_records_the_disagreement_as_evidence() {
             "postgres",
             "input-9",
             0,
-            lost_lease_refusal,
+            lost_claim_refusal,
         )
     });
     assert!(result.is_err());
@@ -170,7 +95,7 @@ fn more_than_one_affected_row_is_the_same_defect() {
             "sqlite",
             SESSION,
             2,
-            lost_lease_refusal,
+            lost_claim_refusal,
         )
     });
     assert!(
@@ -206,8 +131,6 @@ fn the_backstop_carries_any_callers_error_type() {
 #[test]
 fn every_fenced_write_has_a_distinct_label() {
     let writes = [
-        FencedWrite::SessionExecutionLeaseRenewal,
-        FencedWrite::SessionExecutionLeaseRelease,
         FencedWrite::TurnInputClaimAcquisition,
         FencedWrite::TurnInputClaimSettlement,
         FencedWrite::UnclaimedTurnInputSettlement,
@@ -221,186 +144,6 @@ fn every_fenced_write_has_a_distinct_label() {
     assert_eq!(unique.len(), labels.len(), "labels collided: {labels:?}");
 }
 
-#[test]
-fn time_authorities_are_named_distinctly() {
-    assert_eq!(
-        FenceTimeAuthority::DatabaseTransaction.label(),
-        "database_transaction_clock"
-    );
-    assert_eq!(
-        FenceTimeAuthority::EmbeddedHost.label(),
-        "embedded_host_clock"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// D1 — session-execution lease
-// ---------------------------------------------------------------------------
-
-#[test]
-fn renewal_admits_the_current_holder_before_expiry() {
-    let owner = owner();
-    let current = row(&owner, "executor-1", "token-1", 7, 1_001);
-    let authorized = require_renewable_session_execution_lease(
-        Some(&current),
-        &authority(),
-        1_000,
-        FenceTimeAuthority::EmbeddedHost,
-        FRESHNESS,
-    )
-    .expect("the current holder may renew before expiry");
-    // The authorized row is handed back so the caller reaches its retained
-    // generation without a second option unwrap.
-    assert_eq!(authorized.fencing_token, 7);
-    assert_eq!(authorized.claimed_at_ms, 500);
-}
-
-#[test]
-fn renewal_refuses_an_absent_row_as_expired() {
-    let error = require_renewable_session_execution_lease(
-        None,
-        &authority(),
-        1_000,
-        FenceTimeAuthority::EmbeddedHost,
-        FRESHNESS,
-    )
-    .expect_err("an absent lease row cannot be renewed");
-    assert_eq!(error.variant_name(), "SessionExecutionLeaseExpired");
-}
-
-#[test]
-fn renewal_refuses_a_released_row() {
-    let error = require_renewable_session_execution_lease(
-        Some(&released_row(7)),
-        &authority(),
-        1_000,
-        FenceTimeAuthority::EmbeddedHost,
-        FRESHNESS,
-    )
-    .expect_err("a released lease row cannot be renewed");
-    assert_eq!(error.variant_name(), "SessionExecutionLeaseRenewalRefused");
-}
-
-#[test]
-fn renewal_refuses_a_stale_lease_token() {
-    let owner = owner();
-    let error = require_renewable_session_execution_lease(
-        Some(&row(&owner, "executor-1", "token-2", 7, 9_999)),
-        &authority(),
-        1_000,
-        FenceTimeAuthority::EmbeddedHost,
-        FRESHNESS,
-    )
-    .expect_err("a rotated lease token cannot renew");
-    assert_eq!(error.variant_name(), "SessionExecutionLeaseRenewalRefused");
-}
-
-#[test]
-fn renewal_refuses_a_different_incarnation_and_a_different_executor() {
-    let other_incarnation = LeaseOwnerIdentity::opaque("worker-a", "boot-2");
-    let owner = owner();
-    for (current, case) in [
-        (
-            row(&other_incarnation, "executor-1", "token-1", 7, 9_999),
-            "incarnation",
-        ),
-        (row(&owner, "executor-2", "token-1", 7, 9_999), "executor"),
-    ] {
-        let error = require_renewable_session_execution_lease(
-            Some(&current),
-            &authority(),
-            1_000,
-            FenceTimeAuthority::EmbeddedHost,
-            FRESHNESS,
-        )
-        .unwrap_err();
-        assert_eq!(
-            error.variant_name(),
-            "SessionExecutionLeaseRenewalRefused",
-            "{case} mismatch must refuse renewal",
-        );
-    }
-}
-
-#[test]
-fn renewal_expiry_is_decided_at_the_boundary_millisecond() {
-    let owner = owner();
-    // Expiry is strictly-after: the lease is dead at exactly `expires_at`.
-    let at_boundary = require_renewable_session_execution_lease(
-        Some(&row(&owner, "executor-1", "token-1", 7, 1_000)),
-        &authority(),
-        1_000,
-        FenceTimeAuthority::DatabaseTransaction,
-        FRESHNESS,
-    )
-    .expect_err("a lease expiring exactly now is expired");
-    assert_eq!(at_boundary.variant_name(), "SessionExecutionLeaseExpired");
-    assert!(
-        require_renewable_session_execution_lease(
-            Some(&row(&owner, "executor-1", "token-1", 7, 1_001)),
-            &authority(),
-            1_000,
-            FenceTimeAuthority::DatabaseTransaction,
-            FRESHNESS,
-        )
-        .is_ok(),
-        "one millisecond of life is still life",
-    );
-}
-
-#[test]
-fn renewal_ignores_the_fencing_generation_by_contract() {
-    // Renewal fences on owner, executor and lease token. The generation is
-    // commit authority, not lock-lifecycle authority (CONTEXT: Session
-    // Execution Lease Authority), and renewal never rotates it.
-    let owner = owner();
-    assert!(
-        require_renewable_session_execution_lease(
-            Some(&row(&owner, "executor-1", "token-1", 999, 9_999)),
-            &authority(),
-            1_000,
-            FenceTimeAuthority::EmbeddedHost,
-            FRESHNESS,
-        )
-        .is_ok()
-    );
-    // The execution fence, which guards writes, does consult it.
-    let fence_error = require_current_session_execution_lease(
-        &session_id(),
-        Some(facts(&owner, "executor-1", "token-1", 999, 9_999)),
-        &authority(),
-        1_000,
-    )
-    .expect_err("a superseded generation cannot fence execution writes");
-    assert_eq!(fence_error.variant_name(), "SessionExecutionLeaseExpired");
-}
-
-#[test]
-fn release_admits_the_current_holder_even_after_expiry() {
-    let owner = owner();
-    assert!(
-        require_releasable_session_execution_lease(
-            Some(&row(&owner, "executor-1", "token-1", 7, 0)),
-            &authority(),
-            FRESHNESS,
-        )
-        .is_ok(),
-        "a lapsed holder may still hand the lane back",
-    );
-}
-
-#[test]
-fn release_refuses_an_absent_a_released_and_a_stale_token_row() {
-    let owner = owner();
-    let released = released_row(7);
-    let rotated = row(&owner, "executor-1", "token-2", 7, 9_999);
-    for current in [None, Some(&released), Some(&rotated)] {
-        let error = require_releasable_session_execution_lease(current, &authority(), FRESHNESS)
-            .expect_err("release must refuse a row that does not name the holder");
-        assert_eq!(error.variant_name(), "SessionExecutionLeaseReleaseRefused");
-    }
-}
-
 // ---------------------------------------------------------------------------
 // D2 / D5 — generation claimability
 // ---------------------------------------------------------------------------
@@ -410,13 +153,14 @@ fn an_unclaimed_row_is_claimable_whatever_generation_it_retains() {
     let facts = WorkRowClaimFacts {
         claim_token: None,
         claim_session_lease_generation: 4,
+        claim_owner_incarnation_id: None,
     };
     assert_eq!(
-        turn_input_claimability(facts, 4),
+        turn_input_claimability(facts, 4, "owner"),
         WorkRowClaimability::Claimable
     );
     assert_eq!(
-        queued_work_batch_claimability(facts, 4),
+        queued_work_batch_claimability(facts, 4, "owner"),
         WorkRowClaimability::Claimable
     );
 }
@@ -426,9 +170,10 @@ fn a_row_claimed_under_a_superseded_generation_is_reclaimable() {
     let facts = WorkRowClaimFacts {
         claim_token: Some("claim-token"),
         claim_session_lease_generation: 3,
+        claim_owner_incarnation_id: Some("owner"),
     };
-    assert!(turn_input_claimability(facts, 4).is_claimable());
-    assert!(queued_work_batch_claimability(facts, 4).is_claimable());
+    assert!(turn_input_claimability(facts, 4, "owner").is_claimable());
+    assert!(queued_work_batch_claimability(facts, 4, "owner").is_claimable());
 }
 
 #[test]
@@ -436,16 +181,19 @@ fn a_row_already_claimed_under_this_generation_is_not_reclaimable() {
     let facts = WorkRowClaimFacts {
         claim_token: Some("claim-token"),
         claim_session_lease_generation: 4,
+        claim_owner_incarnation_id: Some("owner"),
     };
     assert_eq!(
-        turn_input_claimability(facts, 4),
+        turn_input_claimability(facts, 4, "owner"),
         WorkRowClaimability::HeldByThisGeneration
     );
     assert_eq!(
-        queued_work_batch_claimability(facts, 4),
+        queued_work_batch_claimability(facts, 4, "owner"),
         WorkRowClaimability::HeldByThisGeneration
     );
-    assert!(!turn_input_claimability(facts, 4).is_claimable());
+    assert!(!turn_input_claimability(facts, 4, "owner").is_claimable());
+    assert!(turn_input_claimability(facts, 4, "new-owner").is_claimable());
+    assert!(queued_work_batch_claimability(facts, 4, "new-owner").is_claimable());
 }
 
 // ---------------------------------------------------------------------------

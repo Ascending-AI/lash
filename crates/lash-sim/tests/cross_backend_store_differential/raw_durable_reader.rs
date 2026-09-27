@@ -320,45 +320,6 @@ impl RawDurableReader {
                     .await
                     .expect("read PostgreSQL session metadata")
                     .map(session_meta_observation);
-                let lease_rows: Vec<LeaseRow> = sqlx::query_as(
-                    "SELECT lease_owner_id, lease_owner_incarnation_id,
-                            lease_executor_id, lease_token,
-                            lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms,
-                            lease_term_ms
-                     FROM lash_session_execution_leases
-                     WHERE session_id = $1",
-                )
-                .bind(session_id.as_str())
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres session-execution lease");
-                let session_execution_leases = lease_rows
-                    .into_iter()
-                    .map(
-                        |(
-                            owner_id,
-                            incarnation_id,
-                            executor_id,
-                            lease_token,
-                            fencing_token,
-                            claimed_at_epoch_ms,
-                            _expires_at_epoch_ms,
-                            lease_term_ms,
-                        )| SessionExecutionLeaseObservation {
-                            owner: lash_core::store_backend_support::lease_owner_from_columns(
-                                owner_id,
-                                incarnation_id,
-                            )
-                            .expect("decode Postgres session lease owner"),
-                            executor_id,
-                            lease_token,
-                            fencing_token: fencing_token as u64,
-                            claimed: claimed_at_epoch_ms != 0,
-                            lease_term_ms: (claimed_at_epoch_ms != 0)
-                                .then_some(lease_term_ms as u64),
-                        },
-                    )
-                    .collect();
                 let pending_rows: Vec<PendingTurnInputClaimRow> = sqlx::query_as(
                     "SELECT input_id, enqueue_seq, state, claim_id, claim_fencing_token,
                             CASE WHEN claim_token IS NULL
@@ -451,7 +412,6 @@ impl RawDurableReader {
                     node_anchors,
                     usage_deltas,
                     session_meta,
-                    session_execution_leases,
                     pending_turn_inputs,
                     queued_work,
                     scope_close_obligations,
@@ -672,39 +632,6 @@ pub(super) async fn read_sqlite_durable_state(
         .await
         .expect("read SQLite session metadata")
         .map(session_meta_observation);
-    let session_execution_leases = {
-        let mut statement = connection
-            .prepare(
-                "SELECT lease_owner_id, lease_owner_incarnation_id,
-                        lease_executor_id, lease_token,
-                        lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms,
-                        lease_term_ms
-                 FROM session_execution_leases
-                 WHERE session_id = ?1",
-            )
-            .expect("prepare SQLite session-execution-lease read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                let owner_id = row.get::<_, Option<String>>(0)?;
-                let incarnation_id = row.get::<_, Option<String>>(1)?;
-                Ok(SessionExecutionLeaseObservation {
-                    owner: lash_core::store_backend_support::lease_owner_from_columns(
-                        owner_id,
-                        incarnation_id,
-                    )
-                    .expect("decode SQLite session lease owner"),
-                    executor_id: row.get::<_, Option<String>>(2)?,
-                    lease_token: row.get::<_, Option<String>>(3)?,
-                    fencing_token: row.get::<_, i64>(4)? as u64,
-                    claimed: row.get::<_, i64>(5)? != 0,
-                    lease_term_ms: (row.get::<_, i64>(5)? != 0)
-                        .then_some(row.get::<_, i64>(7)? as u64),
-                })
-            })
-            .expect("read SQLite session-execution lease")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite session-execution lease")
-    };
     let pending_turn_inputs = {
         let mut statement = connection
             .prepare(
@@ -851,7 +778,6 @@ pub(super) async fn read_sqlite_durable_state(
         node_anchors,
         usage_deltas,
         session_meta,
-        session_execution_leases,
         pending_turn_inputs,
         queued_work,
         scope_close_obligations,

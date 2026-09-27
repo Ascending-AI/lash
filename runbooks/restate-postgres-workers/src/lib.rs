@@ -287,7 +287,6 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
             "DELETE FROM lash_session_meta WHERE session_id = $1",
             "DELETE FROM lash_runtime_turn_commits WHERE session_id = $1",
             "DELETE FROM lash_attachment_manifest WHERE session_id = $1",
-            "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
             "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
         ] {
             sqlx::query(statement)

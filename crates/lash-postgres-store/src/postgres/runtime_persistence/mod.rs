@@ -395,18 +395,14 @@ mod queued_work;
 pub(crate) use queued_run::pending_queued_root_tx;
 use queued_run::*;
 use queued_run_selection::*;
-mod drive_epoch;
+pub(crate) mod drive_epoch;
 #[cfg(test)]
 mod refusal_probe_tests;
 mod session_commit;
-mod session_execution_lease;
 mod turn_input;
 pub(crate) mod turn_park;
 pub(crate) mod turn_park_feed;
 
 use claim_support::*;
-pub(crate) use claim_support::{
-    load_session_execution_lease_tx, read_session_execution_lease_unlocked,
-};
 use commit_claims::complete_queued_work_claims_tx;
 pub(crate) use commit_claims::complete_turn_input_claims_tx;

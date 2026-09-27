@@ -945,22 +945,16 @@ impl lash::persistence::RuntimePersistenceDecorator for ContendedRuntimePersiste
         self.inner.as_ref()
     }
 
-    async fn try_claim_session_execution_lease(
+    async fn admit_session_state(
         &self,
-        session_id: &SessionId,
-        owner: &lash::persistence::LeaseOwnerIdentity,
-        executor_id: &str,
-        lease_ttl_ms: u64,
-    ) -> Result<lash::persistence::SessionExecutionLeaseClaimOutcome, lash::persistence::StoreError>
-    {
+        authority: &lash::persistence::ClaimAuthority,
+    ) -> Result<lash::persistence::SessionStateAdmission, lash::persistence::StoreError> {
         if self.contend.load(std::sync::atomic::Ordering::SeqCst) {
             self.contended_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             return Err(lash::persistence::StoreError::Contended);
         }
-        self.inner
-            .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
-            .await
+        self.inner.admit_session_state(authority).await
     }
 }
 

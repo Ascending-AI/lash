@@ -1,9 +1,9 @@
+use super::claim_repair::is_resumable_turn_or_follow_on;
 use super::commit::recovered_turn_cancel_closure;
-use super::lease::is_resumable_turn_or_follow_on;
 use crate::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, LeaseOwnerIdentity,
-    SessionExecutionLeaseAuthority, TurnAddress, TurnCancelClosureAuthorization,
-    TurnCancelClosureProposal, TurnCancelIntentSnapshot, TurnId,
+    AwaitEventKey, AwaitEventWaitIdentity, ClaimAuthority, ExecutionScope, LeaseOwnerIdentity,
+    TurnAddress, TurnCancelClosureAuthorization, TurnCancelClosureProposal,
+    TurnCancelIntentSnapshot, TurnId,
 };
 
 fn closure_authorization(
@@ -29,7 +29,7 @@ fn closure_authorization(
         key(AwaitEventWaitIdentity::TurnTerminal, "terminal"),
         TurnCancelClosureProposal::CompletionSealed,
         TurnCancelIntentSnapshot::Absent,
-        &SessionExecutionLeaseAuthority {
+        &ClaimAuthority {
             session_id: "recovery-session".into(),
             owner: LeaseOwnerIdentity::opaque("owner", "old-process"),
             executor_id: "old-executor".to_string(),

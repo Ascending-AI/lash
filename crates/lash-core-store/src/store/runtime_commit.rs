@@ -1,8 +1,8 @@
 //! Runtime commit envelope and result types.
 
 use super::{
-    BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
-    SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
+    BlobRef, ClaimAuthority, GraphAppend, HydratedSessionCheckpoint, OperationId,
+    RealizedNodeTimestamp, SessionCheckpoint, StoreError, commit_identity,
     ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
 };
 use crate::SessionId;
@@ -110,7 +110,7 @@ pub struct RuntimeCommit {
     /// fence before receipt replay or mutation, and never rotate or release the
     /// matching lease row.
     #[serde(skip)]
-    pub session_execution_lease_fence: Option<SessionExecutionLeaseAuthority>,
+    pub session_execution_lease_fence: Option<ClaimAuthority>,
     /// The drive fence of the admission this commit's root was sealed under
     /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate like the lease
     /// fence, never commit content: the backend refuses the commit
@@ -137,8 +137,6 @@ pub struct RuntimeCommit {
     /// store instruction excluded from the commit's serialized form.
     #[serde(skip)]
     pub park_root: Option<crate::TurnId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
     pub config: crate::PersistedSessionConfig,
     /// The config the committing root ran under, when it is not the config
     /// the commit writes: a root runs under its recorded execution view and

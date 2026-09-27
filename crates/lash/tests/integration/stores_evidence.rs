@@ -97,22 +97,6 @@ pub(crate) fn store_area_test_support_witnesses() {
             let _ = session_id;
         }
     });
-    // FIG-2105-TEST-WITNESS-0017: lash_conformance::FenceIntegrityTarget::SessionLeaseFencingToken [variant]
-    variant_witness(|value: &lash_conformance::FenceIntegrityTarget| {
-        matches!(
-            value,
-            lash_conformance::FenceIntegrityTarget::SessionLeaseFencingToken { .. }
-        )
-    });
-    // FIG-2105-TEST-WITNESS-0018: lash_conformance::FenceIntegrityTarget::SessionLeaseFencingToken::session_id [field]
-    field_witness(|value: &lash_conformance::FenceIntegrityTarget| {
-        if let lash_conformance::FenceIntegrityTarget::SessionLeaseFencingToken {
-            session_id, ..
-        } = value
-        {
-            let _ = session_id;
-        }
-    });
     // FIG-2105-TEST-WITNESS-0019: lash_conformance::FenceIntegrityTarget::TriggerRevision [variant]
     variant_witness(|value: &lash_conformance::FenceIntegrityTarget| {
         matches!(
@@ -129,41 +113,6 @@ pub(crate) fn store_area_test_support_witnesses() {
             let _ = subscription_id;
         }
     });
-    // FIG-2105-TEST-WITNESS-0021: lash_conformance::SessionExecutionLeaseRenewalZeroRowHandles [struct]
-    type_witness::<lash_conformance::SessionExecutionLeaseRenewalZeroRowHandles>();
-    // FIG-2105-TEST-WITNESS-0022: lash_conformance::SessionExecutionLeaseRenewalZeroRowHandles::injector [field]
-    field_witness(
-        |value: &lash_conformance::SessionExecutionLeaseRenewalZeroRowHandles| {
-            let _ = &value.injector;
-        },
-    );
-    // FIG-2105-TEST-WITNESS-0023: lash_conformance::SessionExecutionLeaseRenewalZeroRowHandles::store [field]
-    field_witness(
-        |value: &lash_conformance::SessionExecutionLeaseRenewalZeroRowHandles| {
-            let _ = &value.store;
-        },
-    );
-    // FIG-2105-TEST-WITNESS-0024: lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector [trait]
-    fn trait_witness_0024<T: lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector>() {}
-    // FIG-2105-TEST-WITNESS-0025: lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector::arm [function]
-    fn method_witness_0025<T: lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector>(
-        value: &T,
-    ) {
-        std::mem::drop(
-            lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector::arm(
-                value,
-                &SessionId::from("session"),
-            ),
-        );
-    }
-    // FIG-2105-TEST-WITNESS-0026: lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector::disarm [function]
-    fn method_witness_0026<T: lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector>(
-        value: &T,
-    ) {
-        std::mem::drop(
-            lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector::disarm(value),
-        );
-    }
     // FIG-2105-TEST-WITNESS-0027: lash_conformance::UnboundSessionAdmissionState [enum]
     type_witness::<lash_conformance::UnboundSessionAdmissionState>();
     // FIG-2105-TEST-WITNESS-0028: lash_conformance::UnboundSessionAdmissionState::AdmittedOnly [variant]

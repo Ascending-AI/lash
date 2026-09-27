@@ -1,3 +1,4 @@
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
@@ -51,7 +52,7 @@ fn closure_key(
 )]
 async fn authorize_closure(
     store: &Arc<dyn crate::RuntimePersistence>,
-    fence: &crate::SessionExecutionLeaseAuthority,
+    fence: &crate::ClaimAuthority,
     address: &crate::TurnAddress,
     observed: crate::TurnCancelIntentSnapshot,
     proposed: crate::TurnCancelClosureProposal,
@@ -84,7 +85,7 @@ fn closure_authorization(
     admitted_scope: crate::ExecutionScope,
     observed: crate::TurnCancelIntentSnapshot,
     proposed: crate::TurnCancelClosureProposal,
-    fence: &crate::SessionExecutionLeaseAuthority,
+    fence: &crate::ClaimAuthority,
 ) -> crate::TurnCancelClosureAuthorization {
     closure_authorization_under(
         address,
@@ -108,7 +109,7 @@ fn closure_authorization_under(
     admitted_scope: crate::ExecutionScope,
     observed: crate::TurnCancelIntentSnapshot,
     proposed: crate::TurnCancelClosureProposal,
-    fence: &crate::SessionExecutionLeaseAuthority,
+    fence: &crate::ClaimAuthority,
 ) -> crate::TurnCancelClosureAuthorization {
     let binding_id = crate::turn_control_binding_id_for_scope(binding_base, &admitted_scope)
         .expect("bind physical cancellation scope");
@@ -169,7 +170,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
         TurnId::from("turn-cancel-exact-replay:turn"),
     );
     let first = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("exact-replay-first", "exact-replay-first:1"),
             "exact-replay-first:executor",
@@ -202,14 +203,13 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
     commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
     commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
     commit.turn_cancel_closure_settlement = Some(settled_closure(&first_authorization, None));
-    commit.release_session_execution_lease = Some(first.completion());
     store
         .commit_runtime_state(commit.clone())
         .await
         .expect("commit first authorization");
 
     let successor = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "exact-replay-successor",
@@ -280,7 +280,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     );
     let store = factory.create_store(&request).await.expect("create store");
     let first = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("closure-first", "closure-first:incarnation"),
             "closure-first:executor",
@@ -418,11 +418,11 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     ));
 
     store
-        .release_session_execution_lease(&first.completion())
+        .supersede_claim_epoch_for_test(&first.completion())
         .await
         .expect("release first owner");
     let successor = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "closure-successor",
@@ -521,7 +521,6 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     stale_commit.interrupted_turn_input_turn_id = Some(turn.clone());
     stale_commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
     stale_commit.turn_cancel_closure_settlement = Some(settled_closure(&exact, None));
-    stale_commit.release_session_execution_lease = Some(first.completion());
     assert!(matches!(
         store.commit_runtime_state(stale_commit).await,
         Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch { .. })
@@ -582,7 +581,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         .await
         .expect("create session-scoped store");
     let session_lease = session_store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &session_request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "session-scope-owner",
@@ -683,9 +682,9 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
         store: &Arc<dyn crate::RuntimePersistence>,
         session_id: &SessionId,
         owner: &str,
-    ) -> crate::SessionExecutionLease {
+    ) -> crate::ClaimAuthority {
         store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 session_id,
                 &crate::LeaseOwnerIdentity::opaque(owner, format!("{owner}:incarnation")),
                 "repair-base-executor",
@@ -746,7 +745,7 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
     )
     .await;
     store
-        .release_session_execution_lease(&authorizing.completion())
+        .supersede_claim_epoch_for_test(&authorizing.completion())
         .await
         .expect("release crashed owner");
     drop(store);
@@ -805,7 +804,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
         scope: crate::ExecutionScope,
     ) -> (
         Arc<dyn crate::RuntimePersistence>,
-        crate::SessionExecutionLease,
+        crate::ClaimAuthority,
         crate::TurnCancelClosureAuthorization,
     ) {
         let request = session_store_request(
@@ -815,7 +814,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
         );
         let store = factory.create_store(&request).await.expect("create store");
         let lease = store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque(
                     format!("scope-retirement:{suffix}"),
@@ -1046,7 +1045,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             .await
             .expect("persist the disposition before the owner crashes");
         let authorizing_lease = store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque(
                     "turn-cancel-authorizer",
@@ -1092,7 +1091,6 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     .await
                     .expect("snapshot cancellation intent before final commit"),
             );
-            commit.release_session_execution_lease = Some(authorizing_lease.completion());
             commit.turn_cancel_closure_settlement = Some(settled_closure(
                 &closure_authorization,
                 Some(cancel_evidence(&cancel)),
@@ -1104,7 +1102,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             assert_eq!(receipt.turn_cancel_input_outcome.len(), 1);
         } else {
             store
-                .release_session_execution_lease(&authorizing_lease.completion())
+                .supersede_claim_epoch_for_test(&authorizing_lease.completion())
                 .await
                 .expect("release authorizing owner before successor repair");
         }
@@ -1131,7 +1129,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             );
         }
         let lease = reopened
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque(
                     "turn-cancel-drop-successor",
@@ -1533,9 +1531,9 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         store: &Arc<dyn crate::RuntimePersistence>,
         session_id: &SessionId,
         owner: &str,
-    ) -> crate::SessionExecutionLeaseAuthority {
+    ) -> crate::ClaimAuthority {
         store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 session_id,
                 &crate::LeaseOwnerIdentity::opaque(owner, format!("{owner}:incarnation")),
                 &format!("{owner}:executor"),
@@ -1875,7 +1873,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         .await
         .expect("snapshot after-step intent");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "turn-cancel-final-cas-owner",
@@ -1912,7 +1910,6 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&after_step));
     commit.interrupted_turn_cancel_intent = Some(stale);
-    commit.release_session_execution_lease = Some(lease.completion());
     commit.turn_cancel_closure_settlement = Some(settled_closure(
         &closure_authorization,
         Some(cancel_evidence(&after_step)),
@@ -2301,7 +2298,7 @@ pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
     );
     let store = factory.create_store(&request).await.expect("create store");
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "wrong-binding-owner",

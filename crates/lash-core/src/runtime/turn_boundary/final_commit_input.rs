@@ -17,7 +17,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) failure_evidence: &'a [crate::TurnFailureEvidence],
     pub(super) outcome: &'a TurnOutcome,
     pub(super) claim_settlement: TurnClaimSettlement,
-    pub(super) current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
+    pub(super) current_session_lease_fence: Option<crate::ClaimAuthority>,
     pub(super) queued_run: Option<Box<crate::store::QueuedRunCommit>>,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3).
     pub(super) pending_follow_on: Option<crate::store::PendingFollowOn>,
@@ -27,5 +27,5 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
     pub(super) turn_control_resolver: Option<&'a dyn crate::AwaitEventResolver>,
     pub(super) recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    pub(super) session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
+    pub(super) session_execution_lease_completion: Option<crate::ClaimAuthority>,
 }

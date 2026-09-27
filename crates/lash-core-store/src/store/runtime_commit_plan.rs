@@ -94,17 +94,9 @@ pub struct PlannedNodeFacts {
 #[derive(Clone, Debug)]
 pub struct RuntimeCommitReplay {
     result: RuntimeCommitReceipt,
-    release_session_execution_lease: Option<crate::store::SessionExecutionLeaseAuthority>,
 }
 
 impl RuntimeCommitReplay {
-    /// Ancillary execution-lease release to attempt before returning replay.
-    pub fn release_session_execution_lease(
-        &self,
-    ) -> Option<&crate::store::SessionExecutionLeaseAuthority> {
-        self.release_session_execution_lease.as_ref()
-    }
-
     /// Consume the replay prescription and return its canonical stored result.
     pub fn into_result(self) -> RuntimeCommitReceipt {
         self.result
@@ -245,13 +237,7 @@ impl RuntimeCommitPlanner {
             RuntimeCommitReceiptDecision::Replay => {
                 let mut result = prior.result;
                 result.receipt_replayed = true;
-                Ok(Some(RuntimeCommitReplay {
-                    result,
-                    release_session_execution_lease: self
-                        .commit
-                        .release_session_execution_lease
-                        .clone(),
-                }))
+                Ok(Some(RuntimeCommitReplay { result }))
             }
             RuntimeCommitReceiptDecision::AppendIdentityConflict => {
                 Err(StoreError::AppendOperationIdentityConflict {
@@ -566,13 +552,6 @@ fn derive_appended_node_facts(
 }
 
 fn validate_session_execution_lease_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
-    if commit.session_execution_lease_fence.is_some()
-        && commit.release_session_execution_lease.is_some()
-    {
-        return Err(StoreError::RuntimeCommitLeaseAuthorityConflict {
-            session_id: commit.session_id.clone(),
-        });
-    }
     if (!commit.undelivered_turn_input_claims.is_empty()
         || !commit.undelivered_queue_claims.is_empty())
         && commit.interrupted_turn_input_turn_id.is_none()
@@ -609,37 +588,6 @@ fn validate_head_revision(expected: u64, actual: u64) -> Result<(), StoreError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn lease_plan_rejects_borrow_xor_release_violation_with_typed_error() {
-        let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("lease-plan-conflict"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        };
-        let authority = crate::SessionExecutionLeaseAuthority {
-            session_id: state.session_id.clone(),
-            owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
-            executor_id: "executor".to_string(),
-            lease_token: "token".to_string(),
-            fencing_token: 1,
-        };
-        let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .borrowing_session_execution_lease(authority.clone())
-            .releasing_session_execution_lease(authority);
-
-        let error =
-            match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
-                Ok(_) => panic!("one commit must not borrow and release the lane"),
-                Err(error) => error,
-            };
-        assert!(matches!(
-            error,
-            StoreError::RuntimeCommitLeaseAuthorityConflict { session_id }
-                if session_id == "lease-plan-conflict"
-        ));
-    }
 
     #[test]
     fn commit_rejects_cancellation_evidence_without_an_interrupted_turn() {

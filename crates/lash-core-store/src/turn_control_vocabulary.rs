@@ -211,7 +211,7 @@ impl TurnCancelClosureAuthorization {
         terminal_key: AwaitEventKey,
         proposed_base: TurnCancelClosureProposal,
         observed_intent: TurnCancelIntentSnapshot,
-        fence: &crate::SessionExecutionLeaseAuthority,
+        fence: &crate::ClaimAuthority,
     ) -> Result<Self, RuntimeError> {
         address.validate()?;
         admitted_scope.validate()?;

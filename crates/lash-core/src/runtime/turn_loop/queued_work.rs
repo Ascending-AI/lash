@@ -387,7 +387,7 @@ impl LashRuntime {
                 .collect::<Vec<_>>()
         });
         let Some(lease) = self
-            .claim_session_execution_lease_for_queued_work(&queued_opts)
+            .claim_drive_authority_for_queued_work(&queued_opts)
             .await?
         else {
             return if selected.is_some() {
@@ -442,7 +442,7 @@ impl LashRuntime {
         .await?
         {
             super::follow_on_recovery::FollowOnAdmission::Continue { lease, exhausted } => {
-                (lease, exhausted)
+                (*lease, exhausted)
             }
             super::follow_on_recovery::FollowOnAdmission::Recovered(drain) => {
                 return Ok(QueuedWorkDrainResult::Automatic(*drain));
@@ -472,8 +472,28 @@ impl LashRuntime {
                 .clone()
                 .unwrap_or_else(|| self.host.core.backend().build_generation().clone()),
         };
+        let requested_scope = request.identity.clone();
         let admission = match store.begin_or_resume_queued_run(&fence, request).await {
             Ok(run) => run,
+            Err(crate::StoreError::QueuedRunConflict { .. })
+                if selected.is_none()
+                    && store
+                        .pending_queued_run(&self.state.session_id)
+                        .await
+                        .map_err(super::runtime_error_from_store_commit)?
+                        .is_some_and(|pending| {
+                            requested_scope.as_ref() != Some(&pending.scope)
+                        }) =>
+            {
+                // An earlier admitted root owns an unfinished run. A replayed
+                // admission can still name this root after the durable head
+                // has moved; cede it so the engine admits the pending run.
+                return Ok(QueuedWorkDrainResult::Automatic(QueuedTurnDrain::Empty(
+                    EmptyQueuedDrainReason::ClaimRefused(
+                        crate::QueuedWorkClaimRefusal::ClaimRaceLost,
+                    ),
+                )));
+            }
             Err(error) => {
                 let _ = lease.release_if_live().await;
                 return Err(super::runtime_error_from_store_commit(error).into());
@@ -582,7 +602,7 @@ impl LashRuntime {
             .select_queued_run(
                 &fence,
                 &admission.scope,
-                &self.runtime_lease_owner,
+                &fence.owner,
                 self.host
                     .core
                     .durability
@@ -752,9 +772,7 @@ impl LashRuntime {
         {
             Box::pin(self.end_queue_drain(&admission.scope, held, &store, true)).await;
         }
-        let result = self
-            .settle_session_execution_lease(lease.as_ref(), result)
-            .await?;
+        let result = self.settle_drive_authority(lease.as_ref(), result).await?;
         let turn = result.into_final_turn();
         Ok(if selected.is_some() {
             QueuedWorkDrainResult::Selected(SelectedQueuedWorkDrainOutcome::new(turn, satisfaction))
@@ -899,7 +917,7 @@ impl LashRuntime {
     async fn retain_or_settle_queued_error(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
-        lease: &SessionExecutionLeaseGuard,
+        lease: &DriveClaimGuard,
         run: &crate::store::QueuedRunAdmission,
         anonymous_caller: bool,
         error: RuntimeError,
@@ -949,7 +967,7 @@ impl LashRuntime {
     async fn settle_failed_queued_run(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
-        lease: &SessionExecutionLeaseGuard,
+        lease: &DriveClaimGuard,
         settlement: crate::store::QueuedRunCommit,
     ) -> Result<crate::store::QueuedRunAdmission, crate::StoreError> {
         let settled = store
@@ -1101,13 +1119,7 @@ impl LashRuntime {
     async fn claim_lane_for_settled_drain_work(
         &mut self,
         purpose: &str,
-    ) -> Result<
-        (
-            Arc<dyn crate::store::RuntimePersistence>,
-            SessionExecutionLeaseGuard,
-        ),
-        RuntimeError,
-    > {
+    ) -> Result<(Arc<dyn crate::store::RuntimePersistence>, DriveClaimGuard), RuntimeError> {
         let store = self
             .session
             .as_ref()
@@ -1118,7 +1130,7 @@ impl LashRuntime {
                     format!("a runtime needs persistence to {purpose}"),
                 )
             })?;
-        let Some(lease) = SessionExecutionLeaseGuard::try_acquire_for_executor(
+        let Some(lease) = DriveClaimGuard::try_acquire_for_executor(
             Arc::clone(&store),
             &self.state.session_id,
             &self.runtime_lease_owner,

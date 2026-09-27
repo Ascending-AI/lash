@@ -1211,7 +1211,6 @@ pub(crate) async fn delete_session_tx(
         // deletion, after which the pinned closure obligation may be retired.
         turn_ingress.closures.delete_by_session.sql(),
         turn_ingress.bindings.delete_by_session.sql(),
-        turn_ingress.leases.delete_by_session.sql(),
     ] {
         sqlx::query(statement)
             .bind(session_id.as_str())

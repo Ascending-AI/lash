@@ -17,6 +17,7 @@
 //! `cancel_pending_turn_input`.
 
 use crate::admit;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -181,11 +182,11 @@ pub async fn direct_turn_accepts_before_driving(
                         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
                         .await
                         .expect("read the session's pending inputs mid-drive");
-                    let lease = store
-                        .get_session_execution_lease(&SessionId::from(SESSION_ID))
+                    let epoch = store
+                        .drive_epoch(&SessionId::from(SESSION_ID))
                         .await
-                        .expect("read the matching session lease mid-drive");
-                    *probe.lock().expect("probe lock") = Some((pending, lease));
+                        .expect("read the current drive epoch mid-drive");
+                    *probe.lock().expect("probe lock") = Some((pending, epoch));
                     Ok(text_response("accepted"))
                 }
             })
@@ -212,26 +213,19 @@ pub async fn direct_turn_accepts_before_driving(
         .await
         .expect("run the direct acceptance conformance turn");
 
-    let (pending, lease_observation) = probe
+    let (pending, epoch) = probe
         .lock()
         .expect("probe lock")
         .clone()
         .expect("the provider must have run");
     assert_eq!(pending.len(), 1, "the held input must remain visible");
     let held = &pending[0];
-    let lease = lease_observation
-        .lease
-        .expect("the executing turn must still hold its session lease");
-    assert!(
-        lease_observation.observed_at_epoch_ms < lease.expires_at_epoch_ms,
-        "the control read must observe a still-live lease"
-    );
     assert_eq!(
         held.status,
         crate::PendingTurnInputReadStatus::Held {
-            lease_expires_at_ms: lease.expires_at_epoch_ms,
+            drive_epoch: epoch.epoch
         },
-        "the held marker must carry the exact matching session-lease expiry"
+        "the held marker must carry the matching drive epoch"
     );
     assert_eq!(
         held.input.state,
@@ -361,10 +355,12 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
             SESSION_ID, &drain_id,
         )))
         .expect("scope the successor drain");
-    let drain = Box::pin(successor.stream_next_queued_work(crate::TurnOptions::new(
-        tokio_util::sync::CancellationToken::new(),
-        drain_scope,
-    )))
+    let drain = Box::pin(
+        successor.drive_one_admitted_queued_root(crate::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            drain_scope,
+        )),
+    )
     .await
     .expect("the successor drain must run");
     let recovered = match drain {
@@ -390,10 +386,10 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
         .into_iter()
         .find(|application| application.input_id == input_id)
         .expect("the recovered input settles as canonical input of the successor's turn");
-    assert_ne!(
+    assert_eq!(
         application.turn_id.as_str(),
         turn_id,
-        "the successor commits its own turn, not the abandoned driver's"
+        "the successor preserves the accepted input's canonical root id"
     );
     assert!(
         store
@@ -477,121 +473,6 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     );
 }
 
-/// A direct turn may not drive while another owner holds the session
-/// execution lane (ADR 0077).
-///
-/// Acceptance is the store's and precedes the drive (FIG-3600): the input is
-/// durably accepted, and the drive refuses retryably before any provider
-/// execution, leaving the row pending. After the holder releases the lane,
-/// the identical input names the same accepted row, and a successor's drive
-/// answers it exactly once.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn busy_execution_lane_defers_an_accepted_direct_turn(
-    prefix: &str,
-    backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
-) {
-    let turn_id = TurnId::from(format!("{prefix}-busy-lane-refusal"));
-    let successor_owner = crate::LeaseOwnerIdentity::opaque(
-        format!("{prefix}-successor-owner"),
-        format!("{prefix}-successor-incarnation"),
-    );
-    let successor_lease =
-        crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-            store.as_ref(),
-            &SessionId::from(SESSION_ID),
-            &successor_owner,
-            &format!("{prefix}-successor-executor"),
-            60_000,
-        )
-        .await
-        .expect("the successor claims the session execution lease")
-        .acquired()
-        .expect("the session execution lease is free in this law");
-
-    let drives = Arc::new(AtomicUsize::new(0));
-    let provider = {
-        let drives = Arc::clone(&drives);
-        crate::testing::TestProvider::builder()
-            .kind("stub")
-            .complete(move |_| {
-                let drives = Arc::clone(&drives);
-                async move {
-                    drives.fetch_add(1, Ordering::SeqCst);
-                    Ok(text_response("the admitted successor commits these words"))
-                }
-            })
-            .build()
-            .into_handle()
-    };
-
-    let effect_host: Arc<dyn crate::EffectHost> = backend.effect_host();
-    let mut loser = acceptance_runtime(
-        &store,
-        &backend,
-        provider.clone(),
-        Vec::new(),
-        crate::testing::runtime_lease_owner(),
-    )
-    .await;
-    let scope = effect_host
-        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
-        .expect("scope the refused direct turn");
-    let failure = loser
-        .drive_child_session_turn(
-            direct_input(&turn_id, "words admitted only after takeover"),
-            crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-        )
-        .await
-        .expect_err("a direct turn cannot bypass a live execution lane");
-    assert_eq!(
-        failure.code,
-        crate::RuntimeErrorCode::SessionExecutionLaneBusy,
-        "the refusal names the live lane: {failure:?}"
-    );
-    assert_eq!(
-        drives.load(Ordering::SeqCst),
-        0,
-        "lane refusal must precede provider execution"
-    );
-    let pending = store
-        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
-        .await
-        .expect("read pending inputs after lane refusal");
-    assert_eq!(
-        pending.len(),
-        1,
-        "the refused drive leaves the accepted input pending: {pending:?}"
-    );
-    crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
-        store.as_ref(),
-        &successor_lease.completion(),
-    )
-    .await
-    .expect("release the successor's session execution lease");
-
-    let mut successor =
-        acceptance_runtime(&store, &backend, provider, Vec::new(), successor_owner).await;
-    let scope = effect_host
-        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
-        .expect("scope the successor direct turn");
-    successor
-        .drive_child_session_turn(
-            direct_input(&turn_id, "words admitted only after takeover"),
-            crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-        )
-        .await
-        .expect("the successor admits and drives after release");
-    assert_eq!(
-        drives.load(Ordering::SeqCst),
-        1,
-        "the provider runs exactly once after takeover"
-    );
-}
-
 /// Unclaimed settlement is a conditional write on every backend (ADR 0069 §5).
 ///
 /// A turn that drove the acceptance it minted may settle that row without
@@ -656,17 +537,17 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
         "{prefix}: a claimed row is not settleable unclaimed"
     ))
     .await;
-    let lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        store.as_ref(),
-        &SessionId::from(SESSION_ID),
-        &crate::testing::runtime_lease_owner(),
-        "unclaimed-settlement-law-executor",
-        60_000,
-    )
-    .await
-    .expect("claim the session execution lease")
-    .acquired()
-    .expect("the session execution lease is free in this law");
+    let lease = store
+        .seal_claim_epoch_for_test(
+            &SessionId::from(SESSION_ID),
+            &crate::testing::runtime_lease_owner(),
+            "unclaimed-settlement-law-executor",
+            60_000,
+        )
+        .await
+        .expect("claim the session execution lease")
+        .acquired()
+        .expect("the session execution lease is free in this law");
     let claim = crate::store::TurnInputStore::claim_next_turn_inputs(
         store.as_ref(),
         &SessionId::from(SESSION_ID),
@@ -701,12 +582,10 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     crate::store::TurnInputStore::abandon_turn_input_claim(store.as_ref(), &claim)
         .await
         .expect("abandon the claim");
-    crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
-        store.as_ref(),
-        &lease.completion(),
-    )
-    .await
-    .expect("release the session execution lease");
+    store
+        .supersede_claim_epoch_for_test(&lease)
+        .await
+        .expect("release the session execution lease");
 
     // (b) A withdrawn admission is terminal. The turn that accepted it does not
     // get to settle it anyway.
@@ -933,7 +812,7 @@ impl crate::store::RuntimePersistenceDecorator for RedriveStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        session_execution_lease: &crate::ClaimAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<crate::TurnInputClaim>, crate::StoreError> {
@@ -1090,12 +969,8 @@ pub(super) fn crash_before_commit_plugin(
 /// Drive `turn` until its worker dies in [`crash_before_commit_plugin`], drop
 /// it there, and wait for the dropped lease guard's best-effort release, so a
 /// successor worker can take the lane.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub(super) async fn crash_turn<T>(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    _store: &Arc<dyn crate::RuntimePersistence>,
     died: &tokio::sync::Notify,
     turn: impl std::future::Future<Output = T>,
 ) {
@@ -1103,49 +978,6 @@ pub(super) async fn crash_turn<T>(
         _ = turn => panic!("a crashed worker's turn never returns"),
         () = died.notified() => {}
     }
-    let session_id = SessionId::from(SESSION_ID);
-    for _ in 0..1_000 {
-        let observed = store
-            .get_session_execution_lease(&session_id)
-            .await
-            .expect("observe the crashed worker's lease");
-        if observed.lease.is_none() {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
-    panic!("the crashed worker's lease was never released");
-}
-
-/// Expire the lane a crashed worker still holds, so the redrive's admission
-/// claim proceeds instead of racing the dropped guard's best-effort release.
-///
-/// The harness reads the abandoned row and releases it under the authority the
-/// store recorded — the ghost of the crashed executor, the same role the crash
-/// matrix's `collapse_crashed_executor_lease` plays when it shortens an
-/// abandoned lease to its minimum term. Releasing rather than shortening keeps
-/// the handoff synchronous: a renewal that was in flight when the worker died,
-/// or the guard's own late release, is refused by the cleared row, so the lane
-/// stays free either way.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn expire_crashed_worker_lane(store: &Arc<dyn crate::RuntimePersistence>) {
-    let session_id = SessionId::from(SESSION_ID);
-    let Some(lease) = store
-        .get_session_execution_lease(&session_id)
-        .await
-        .expect("read the crashed worker's lane")
-        .lease
-    else {
-        return;
-    };
-    // A refused release only means the guard's own best-effort release landed
-    // first; either landing leaves the lane free.
-    let _ = store
-        .release_session_execution_lease(&lease.completion())
-        .await;
 }
 
 /// A provider that records the text of every request it answers.
@@ -1284,7 +1116,7 @@ async fn assert_nothing_left_to_answer(
         )))
         .expect("scope the post-redrive drain");
     let drain = drainer
-        .stream_next_queued_work(crate::TurnOptions::new(
+        .drive_one_admitted_queued_root(crate::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             scope,
         ))
@@ -1754,7 +1586,7 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
         )))
         .expect("scope the recovery drain");
     let drain = drainer
-        .stream_next_queued_work(crate::TurnOptions::new(
+        .drive_one_admitted_queued_root(crate::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             drain_scope,
         ))
@@ -1766,18 +1598,18 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
     );
     drop(drainer);
 
-    // The redrive resumes the session as the store now holds it, the drain's
-    // answer included: nothing about the head refuses it, so only the
-    // settlement can.
+    // The successor's admission raised the drive epoch, so the older
+    // admission cannot race its answer into another commit.
     let ceded = journal
         .run(&store, provider, &turn_id, "answer me once")
         .await
         .expect_err("a redrive whose rows another driver answered must not commit them again");
     assert_eq!(
         ceded.code,
-        crate::RuntimeErrorCode::AcceptedTurnInputCeded,
+        crate::RuntimeErrorCode::StoreCommitFailed,
         "{ceded:?}"
     );
+    assert!(ceded.message.contains("drive fence epoch") && ceded.message.contains("is stale"));
     let applied = applications(&store).await;
     assert_eq!(
         applied
@@ -1790,8 +1622,8 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
     assert!(
         applied
             .iter()
-            .all(|application| application.turn_id != turn_id),
-        "the recovery drain's turn is the one that answered it: {applied:?}"
+            .all(|application| application.turn_id == turn_id),
+        "the recovery drain keeps the accepted root identity: {applied:?}"
     );
     assert!(pending_input_ids(&store).await.is_empty());
 }
@@ -1827,7 +1659,6 @@ pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
     // held: only the dropped guard's spawned best-effort release frees it, so
     // the redrive's admission claim can observe the abandoned lease and refuse
     // with `SessionExecutionLaneBusy`. Expire it first.
-    expire_crashed_worker_lane(&store).await;
 
     let redriven = journal
         .run(&store, provider, &turn_id, "deploy staging once")

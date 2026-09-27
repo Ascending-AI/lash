@@ -23,11 +23,11 @@ use std::sync::Arc;
 use lash_core_execution::runtime::{
     ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, RuntimeSubject,
 };
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;
 use lash_core_execution::{
     AttachmentRootSet, LeaseOwnerIdentity, PendingTurnInputDraft, PluginState, QueuedWorkStore,
-    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore,
-    SessionExecutionLeaseStore, SessionStoreFactory, StoreError, ToolState, TurnInput,
-    TurnInputIngress, TurnInputStore,
+    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore, SessionStoreFactory,
+    StoreError, ToolState, TurnInput, TurnInputIngress, TurnInputStore,
 };
 use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
@@ -62,6 +62,20 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
 
 fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
+}
+
+async fn sealed_claim_epoch(
+    store: &Store,
+    session_id: &SessionId,
+    owner: &LeaseOwnerIdentity,
+    executor_id: &str,
+) -> lash_core_execution::ClaimAuthority {
+    store
+        .seal_claim_epoch_for_test(session_id, owner, executor_id, 0)
+        .await
+        .expect("seal drive epoch for claim")
+        .acquired()
+        .expect("drive epoch sealed")
 }
 
 fn commit_at(
@@ -186,23 +200,10 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         ))
         .await
         .expect("bind session to store");
-    let owner = lease_owner("gc-test");
-    let session_lease = store
-        .try_claim_session_execution_lease(
-            &SessionId::from("root"),
-            &owner,
-            "gc-keeps-live-committed-checkpoint-blobs-executor",
-            60_000,
-        )
-        .await
-        .expect("claim session execution lease")
-        .acquired()
-        .expect("session execution lease");
     let commit = RuntimeCommit {
         expected_head_revision: 0,
         ..RuntimeCommit::persisted_state_for_test(&state, &[])
-    }
-    .releasing_session_execution_lease(session_lease.completion());
+    };
     let result = store.commit_runtime_state(commit).await.expect("commit");
 
     let report = store.gc_unreachable().await.expect("gc sweeps");
@@ -301,17 +302,13 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
         .await
         .expect("enqueue turn input");
     let owner = lease_owner("sqlite-claim-id-owner");
-    let lease = store
-        .try_claim_session_execution_lease(
-            &SessionId::from(session_id),
-            &owner,
-            "sqlite-claims-pin-both-production-claim-id-spellings-executor",
-            60_000,
-        )
-        .await
-        .expect("claim session execution lease")
-        .acquired()
-        .expect("session execution lease");
+    let lease = sealed_claim_epoch(
+        &store,
+        &SessionId::from(session_id),
+        &owner,
+        "sqlite-claims-pin-both-production-claim-id-spellings-executor",
+    )
+    .await;
 
     let queued_claim = store
         .claim_ready_queued_work(
@@ -343,7 +340,8 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
 
 // Finding 2 (sequential): when a batch is already held by a live claim, a
 // second claim must not "succeed" with a claim that doesn't actually own the
-// row. Owner A claims the only ready batch; owner B then asks to claim and must
+// row. One caller claims the only ready batch; another caller in the same
+// incarnation then asks to claim and must
 // get `None`.
 #[tokio::test]
 async fn second_claim_on_held_batch_is_not_won() {
@@ -357,24 +355,20 @@ async fn second_claim_on_held_batch_is_not_won() {
         .enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
         .await
         .expect("enqueue");
-    let session_lease = store
-        .try_claim_session_execution_lease(
-            &SessionId::from("root"),
-            &lease_owner("session-owner"),
-            "second-claim-on-held-batch-is-not-won-executor",
-            60_000,
-        )
-        .await
-        .expect("claim session execution lease")
-        .acquired()
-        .expect("session execution lease");
+    let session_lease = sealed_claim_epoch(
+        &store,
+        &SessionId::from("root"),
+        &lease_owner("session-owner"),
+        "second-claim-on-held-batch-is-not-won-executor",
+    )
+    .await;
     let session_fence = session_lease.fence();
 
     let claim_a = store
         .claim_ready_queued_work(
             &SessionId::from("root"),
             &session_fence,
-            &lease_owner("owner-a"),
+            &session_fence.owner,
             QueuedWorkClaimBoundary::Idle,
             lash_core_execution::testing::queued_work_claim_policy(10),
         )
@@ -388,7 +382,7 @@ async fn second_claim_on_held_batch_is_not_won() {
         .claim_ready_queued_work(
             &SessionId::from("root"),
             &session_fence,
-            &lease_owner("owner-b"),
+            &session_fence.owner,
             QueuedWorkClaimBoundary::Idle,
             lash_core_execution::testing::queued_work_claim_policy(10),
         )
@@ -397,11 +391,10 @@ async fn second_claim_on_held_batch_is_not_won() {
         .claim();
     assert!(
         claim_b.is_none(),
-        "a batch already held by a live claim must not be re-claimed, got {claim_b:?}"
+        "a batch already held by this incarnation must not be re-claimed, got {claim_b:?}"
     );
 
-    // Owner A's claim is the live one: while its session-lease generation holds
-    // the batch, the batch is hidden from the user-editable pending snapshot.
+    // The held batch is hidden from the user-editable pending snapshot.
     assert!(
         store
             .list_pending_queued_work(&SessionId::from("root"))
@@ -441,12 +434,7 @@ async fn corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() 
 
         let owner = lease_owner(&format!("corrupt-owner-{case}"));
         let executor_id = format!("corrupt-executor-{case}");
-        let lease = store
-            .try_claim_session_execution_lease(&session_id, &owner, &executor_id, 60_000)
-            .await
-            .expect("claim session lease")
-            .acquired()
-            .expect("session lease available");
+        let lease = sealed_claim_epoch(&store, &session_id, &owner, &executor_id).await;
         let error = store
             .claim_ready_queued_work(
                 &session_id,
@@ -485,7 +473,7 @@ async fn corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() 
     }
 }
 
-// Finding 2 (concurrent): two owners on two connections race for the same
+// Finding 2 (concurrent): two callers in one executor on two connections race for the same
 // single ready batch. The claim is read-then-write, so without the
 // rows-affected check (and the `BEGIN IMMEDIATE` that serializes the read with
 // the write) both could believe they won. At most one claim may succeed, and a
@@ -500,24 +488,20 @@ fn concurrent_claims_never_double_own_a_batch() {
             .expect("enqueue");
     });
     let session_fence = {
-        let store = block_on(Store::open(&path)).expect("lease store");
+        let store = block_on(Store::open(&path)).expect("claim store");
         let owner = lease_owner("session-owner");
-        block_on(store.try_claim_session_execution_lease(
+        block_on(sealed_claim_epoch(
+            &store,
             &SessionId::from("root"),
             &owner,
             "concurrent-claims-never-double-own-a-batch-executor",
-            60_000,
         ))
-        .expect("claim session execution lease")
-        .acquired()
-        .expect("session execution lease")
         .fence()
     };
 
     let barrier = Arc::new(std::sync::Barrier::new(2));
-    let run = |owner: &'static str,
-               path: std::path::PathBuf,
-               session_fence: lash_core_execution::SessionExecutionLeaseAuthority,
+    let run = |path: std::path::PathBuf,
+               session_fence: lash_core_execution::ClaimAuthority,
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
             block_on(async move {
@@ -527,7 +511,7 @@ fn concurrent_claims_never_double_own_a_batch() {
                     .claim_ready_queued_work(
                         &SessionId::from("root"),
                         &session_fence,
-                        &lease_owner(owner),
+                        &session_fence.owner,
                         QueuedWorkClaimBoundary::Idle,
                         lash_core_execution::testing::queued_work_claim_policy(10),
                     )
@@ -537,13 +521,8 @@ fn concurrent_claims_never_double_own_a_batch() {
         })
     };
 
-    let handle_a = run(
-        "owner-a",
-        path.clone(),
-        session_fence.clone(),
-        Arc::clone(&barrier),
-    );
-    let handle_b = run("owner-b", path.clone(), session_fence, Arc::clone(&barrier));
+    let handle_a = run(path.clone(), session_fence.clone(), Arc::clone(&barrier));
+    let handle_b = run(path.clone(), session_fence, Arc::clone(&barrier));
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 

@@ -46,7 +46,7 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         "config-command-coalescing:incarnation",
     );
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &owner,
             "config-command-coalescing-executor",
@@ -130,7 +130,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
         "config-command-claim-bound:incarnation",
     );
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &owner,
             "config-command-claim-bound-executor",
@@ -430,7 +430,7 @@ async fn hold_config_settlement_lease(
 ) {
     let owner = crate::LeaseOwnerIdentity::opaque("config-blocker", "config-blocker:incarnation");
     store
-        .try_claim_session_execution_lease(session_id, &owner, "config-blocker", 600_000)
+        .seal_claim_epoch_for_test(session_id, &owner, "config-blocker", 600_000)
         .await
         .expect("claim the competing writer lease")
         .acquired()
@@ -457,7 +457,7 @@ fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn session_config_settlement_timeout_is_typed<M, Fut>(make: M)
+pub async fn session_config_settlement_pending_returns_without_wait<M, Fut>(make: M)
 where
     M: Fn() -> Fut,
     Fut: Future<Output = crate::Backend>,
@@ -488,9 +488,10 @@ where
         matches!(error, crate::SessionError::SessionCommandPending(_)),
         "blocked config setter returned {error:?}"
     );
-    assert!(
-        clock.now().saturating_duration_since(started) == std::time::Duration::from_secs(30),
-        "the injected 30s settlement bound must not hang the facade writer"
+    assert_eq!(
+        clock.now().saturating_duration_since(started),
+        std::time::Duration::ZERO,
+        "the setter returns the pending receipt without driving the command"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
@@ -607,12 +608,7 @@ where
     let owner =
         crate::LeaseOwnerIdentity::opaque("superseding-writer", "superseding-writer:incarnation");
     let lease = store
-        .try_claim_session_execution_lease(
-            &request.session_id,
-            &owner,
-            "superseding-executor",
-            600_000,
-        )
+        .seal_claim_epoch_for_test(&request.session_id, &owner, "superseding-executor", 600_000)
         .await
         .expect("claim superseding session lease")
         .acquired()
@@ -666,8 +662,20 @@ where
     })
     .await;
 
-    let (result, runtime) = setter.await.expect("superseded setter task");
-    result.expect("superseded config setter settles durably");
+    let (result, mut runtime) = setter.await.expect("superseded setter task");
+    match result {
+        Ok(()) => {}
+        Err(crate::SessionError::SessionCommandPending(receipt)) => {
+            assert!(matches!(
+                runtime
+                    .settle_session_command(receipt)
+                    .await
+                    .expect("read superseded command settlement"),
+                crate::runtime::SessionCommandSettlement::Durable(_)
+            ));
+        }
+        Err(error) => panic!("superseded config setter: {error}"),
+    }
     assert_eq!(
         runtime.export_persistence_state().policy.model,
         superseding_model,

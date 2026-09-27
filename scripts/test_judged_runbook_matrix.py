@@ -13,13 +13,6 @@ SPEC.loader.exec_module(MATRIX)
 
 
 SELF_CONTAINED_OPERATOR_RUNBOOKS = {
-    "session-lease-triage": (
-        "01-facade-read-tests.log",
-        "02-provider-hang.jsonl",
-        "03-lease-takeover.jsonl",
-        "04-commit-cas-livelock.jsonl",
-        "08-direct-turn-recovery.jsonl",
-    ),
     "version-bump-recreation": (
         "01-seed.jsonl",
         "02-refusal.jsonl",
@@ -158,7 +151,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             if policy["emits"]
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 34)
+        self.assertEqual(expected, 33)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -322,7 +315,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # guard that only reads the shipped tree can stay green after its own
         # checks stop detecting the regression it exists to prevent.
         runbooks = self.operator_runbooks()
-        runbooks["session-lease-triage"] += "\nRead docs/operations.html before scoring.\n"
+        runbooks["version-bump-recreation"] += "\nRead docs/operations.html before scoring.\n"
         runbooks["version-bump-recreation"] = runbooks[
             "version-bump-recreation"
         ].replace("04-health.jsonl", "health-artifact")

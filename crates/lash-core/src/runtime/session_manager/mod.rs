@@ -99,7 +99,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
     /// Explicit lane context for services scoped to a running parent turn.
     /// `None` identifies a lane-less host/service call and selects the fresh
     /// acquisition path at the persistence call site.
-    held_session_execution_lease: Option<BorrowedLaneAuthority>,
+    held_session_execution_lease: Option<BorrowedDriveAuthority>,
     resident_graph_head_stale: Arc<AtomicBool>,
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
@@ -238,7 +238,7 @@ impl CurrentSessionCapability {
         runtime: &LashRuntime,
         plugins: Arc<crate::PluginSession>,
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
-        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        held_session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Self {
         Self {
             session_id: runtime.state.session_id.clone(),
@@ -263,7 +263,7 @@ impl CurrentSessionCapability {
             runtime_lease_owner: runtime.runtime_lease_owner.clone(),
             runtime_lease_executor_id: runtime.runtime_lease_executor_id.clone(),
             held_session_execution_lease: held_session_execution_lease
-                .map(SessionExecutionLeaseGuard::borrowed_authority),
+                .map(DriveClaimGuard::borrowed_authority),
             resident_graph_head_stale: Arc::clone(runtime.resident_session.graph_head_stale_flag()),
             turn_phase_probe: runtime.turn_phase_probe.clone(),
         }
@@ -394,7 +394,7 @@ impl RuntimeSessionServices {
     pub(super) fn new(
         runtime: &LashRuntime,
         persist_usage_to_store: bool,
-        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        held_session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<Self, PluginOperationInvokeError> {
         if !persist_usage_to_store {
             return Err(PluginOperationInvokeError::Unknown(
@@ -416,7 +416,7 @@ impl RuntimeSessionServices {
     /// appends ride `turn_graph_appends`, both committed once by the turn.
     pub(super) fn for_turn(
         runtime: &LashRuntime,
-        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        held_session_execution_lease: Option<&DriveClaimGuard>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Self, PluginOperationInvokeError> {
         Self::with_scope(
@@ -429,7 +429,7 @@ impl RuntimeSessionServices {
     fn with_scope(
         runtime: &LashRuntime,
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
-        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        held_session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<Self, PluginOperationInvokeError> {
         let Some(session) = runtime.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(

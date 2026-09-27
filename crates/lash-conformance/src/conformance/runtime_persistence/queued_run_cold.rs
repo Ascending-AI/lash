@@ -30,7 +30,7 @@ pub async fn queued_run_cold_process_driver(
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(
+    let lease = seal_claim_authority_for_test(
         &store,
         &session_id,
         if action == "queued_recover" {

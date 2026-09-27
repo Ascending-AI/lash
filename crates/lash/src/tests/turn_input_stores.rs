@@ -17,7 +17,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _binding_id: &str,
         _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<(), lash_core::StoreError> {
@@ -26,7 +26,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> std::result::Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError>
     {
@@ -43,7 +43,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn pending_turn_cancel_closures(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _binding_id: &str,
         _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
@@ -150,7 +150,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn claim_active_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
@@ -165,7 +165,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
@@ -184,12 +184,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
         if claimed.is_empty() {
             return Ok(None);
         }
-        let generation = self
-            .session_execution_lease_generations
-            .lock_recover()
-            .get(session_id)
-            .copied()
-            .unwrap_or_default();
+        let generation = session_execution_lease.fencing_token;
         Ok(Some(lash_core::TurnInputClaim {
             session_id: SessionId::from(session_id.to_string()),
             claim_id: format!("snapshot-turn-input-claim-{}", claimed[0].enqueue_seq),
@@ -224,7 +219,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn orphaned_active_turn_ids(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> std::result::Result<Vec<lash_core::TurnId>, lash_core::store::StoreError> {
         Ok(Vec::new())
@@ -233,7 +228,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _turn_id: &lash_core::TurnId,
         _observed: &lash_core::TurnCancelIntentSnapshot,
         _settlement: Option<&lash_core::TurnCancelClosureSettlement>,
@@ -249,7 +244,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _binding_id: &str,
         _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<(), lash_core::StoreError> {
@@ -258,7 +253,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> std::result::Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError>
     {
@@ -275,7 +270,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn pending_turn_cancel_closures(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _binding_id: &str,
         _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
@@ -323,7 +318,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn claim_active_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
@@ -335,7 +330,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn claim_next_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _max_inputs: usize,
     ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
@@ -354,7 +349,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn orphaned_active_turn_ids(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> std::result::Result<Vec<lash_core::TurnId>, lash_core::store::StoreError> {
         Ok(Vec::new())
@@ -363,7 +358,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _session_execution_lease: &lash_core::ClaimAuthority,
         _turn_id: &lash_core::TurnId,
         _observed: &lash_core::TurnCancelIntentSnapshot,
         _settlement: Option<&lash_core::TurnCancelClosureSettlement>,

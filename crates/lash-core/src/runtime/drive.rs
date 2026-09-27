@@ -14,15 +14,14 @@
 //! head. A separate `InspectAdmittedHead` step records whether that head is
 //! ready, ceded, or divergent. A redrive reads both outcomes from its journal
 //! and issues no second repair. It revalidates a `Ready` verdict under its
-//! current execution lease before any turn effect: a root whose claim lost
-//! authority while the handler was down can only cede or park. This fenced
-//! check cannot select new work or change the claim's recorded base (ADR 0105
-//! §2). Rule 6 of the substrate lint pins direct store calls and the
-//! orphan-repair helper in the drive.
+//! current drive epoch before any turn effect: a root whose claim lost
+//! authority while the handler was down can only cede or park. This check
+//! cannot select new work or change the claim's recorded base (ADR 0105 §2).
+//! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
+//! helper in the drive.
 //!
-//! Serialization is the SQL session execution lease's until S8: the drive
-//! epoch the seal raises answers a stale admission `Superseded`, but claims
-//! and commits do not check the [`DriveFence`](crate::store::DriveFence) yet.
+//! The drive epoch fences admission and repairs claims left by older epochs.
+//! Commit CAS still protects the session head from stale writes.
 //!
 //! The drive names no engine. An engine that runs drives in process hands
 //! [`drive_session`] one controller, and the drive rescopes it per step
@@ -108,7 +107,7 @@ pub(crate) struct DriveRootRun {
     /// The logical root the evidence names. A follow-on recovery's root is
     /// the recovery's; its evidence names the root that owed the follow-on.
     root: TurnId,
-    fence: crate::store::DriveFence,
+    pub(crate) fence: crate::store::DriveFence,
     /// The drain generation stamped on the journal the root runs on: the
     /// admitting drive's request stamp (FIG-3795 S9). A park this run writes
     /// records it, so the drain routes the root's resume to the build its
@@ -739,40 +738,6 @@ impl LashRuntime {
         let host = Arc::clone(&self.host.core.control.effect_host);
         let root_controller = step_controller(controller, host.as_ref(), scope.clone())
             .map_err(DriveAbort::Refused)?;
-        // An input root takes the session's lane before it marks itself
-        // started: an execution the lane turns away has run nothing, so it
-        // must not leave a start marker that refuses the execution that runs
-        // the root after it (L-S8).
-        let input_lease = match admitted.work() {
-            crate::engine::AdmittedWork::Input { .. } => {
-                match self.claim_session_execution_lease().await {
-                    Ok(lease) => Some(lease),
-                    // The session retired between this attempt's open and its
-                    // lane claim. An earlier attempt may have journaled the
-                    // start marker and the seal, so this one issues them too,
-                    // and the seal's recorded body answers (FIG-3881).
-                    Err(error) if error.is_session_retirement() => {
-                        let verdict = Box::pin(mark_and_seal_root(
-                            &root_controller,
-                            &scope,
-                            &admitted,
-                            Some(store),
-                        ))
-                        .await?;
-                        return retired_root_outcome(&admitted, verdict).map(|outcome| RootRun {
-                            outcome,
-                            run: None,
-                            driven_inputs: Vec::new(),
-                            queued_drain: None,
-                        });
-                    }
-                    Err(error) => return Err(drive_abort(Some(&root), error)),
-                }
-            }
-            crate::engine::AdmittedWork::Queued | crate::engine::AdmittedWork::FollowOn { .. } => {
-                None
-            }
-        };
         let marked = Box::pin(mark_and_seal_root(
             &root_controller,
             &scope,
@@ -780,19 +745,8 @@ impl LashRuntime {
             Some(store),
         ))
         .await;
-        let verdict = match marked {
-            Ok(verdict) => verdict,
-            Err(abort) => {
-                if let Some(lease) = input_lease.as_ref() {
-                    self.release_root_lease(lease.as_ref()).await;
-                }
-                return Err(abort);
-            }
-        };
+        let verdict = marked?;
         if !matches!(verdict, crate::engine::SealVerdict::Sealed(_)) {
-            if let Some(lease) = input_lease.as_ref() {
-                self.release_root_lease(lease.as_ref()).await;
-            }
             return Ok(RootRun {
                 outcome: RootOutcome::Refused { root, verdict },
                 run: None,
@@ -803,6 +757,11 @@ impl LashRuntime {
         let crate::engine::SealVerdict::Sealed(fence) = verdict else {
             unreachable!("a refused seal returned above");
         };
+        let input_authority = crate::runtime::DriveClaimGuard::from_drive_fence(
+            &fence,
+            self.runtime_lease_owner.clone(),
+            self.runtime_lease_executor_id.clone(),
+        );
         let run = DriveRootRun::sealed(&admitted, fence);
         let evidence_root = run.root.clone();
         let outer = self.drive_root.replace(Box::new(run));
@@ -814,7 +773,7 @@ impl LashRuntime {
                     &head,
                     sinks,
                     live,
-                    input_lease.flatten(),
+                    Some(input_authority),
                 ))
                 .await
             }

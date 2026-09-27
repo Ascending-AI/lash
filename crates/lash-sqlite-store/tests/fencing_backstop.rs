@@ -1,12 +1,10 @@
-//! FIG-3381: the fencing backstop's two obligations, asserted together.
+//! The queued-work claim fencing backstop's two obligations, asserted together.
 //!
 //! When a conditional write loses after its shared verdict said yes, the store
 //! must do exactly two things:
 //!
-//! 1. **Fail closed with the site's own domain refusal.** A lost lease still
-//!    reads as a lost lease to its caller, so the runtime's stand-down handling
-//!    is unchanged. ADR 0053's conformance law owns that half and passes
-//!    unedited.
+//! 1. **Fail closed with the site's own domain refusal.** A lost claim
+//!    reports no claim to its caller.
 //! 2. **Record the disagreement as evidence** — an error-level event naming the
 //!    decision, the backend, the row and the rows affected — because the locked
 //!    read and the statement's predicate disagreeing about one locked row is a
@@ -26,9 +24,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use lash_core_execution::store_backend_support::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
 };
-use lash_core_execution::{
-    LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError,
-};
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;
+use lash_core_execution::{LeaseOwnerIdentity, QueuedWorkStore};
 use lash_sansio::SessionId;
 use lash_sqlite_store::Store;
 use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -130,179 +127,7 @@ fn capture() -> EventCapture {
 }
 
 // ---------------------------------------------------------------------------
-// The seam: a trigger that silently drops the renewal write.
-// ---------------------------------------------------------------------------
-
-/// Suppress the renewal `UPDATE` for one session, so it affects no row after
-/// the shared verdict has already authorized it.
-///
-/// This is the same seam the ADR 0053 conformance law uses, spelled here so
-/// this binary can assert the evidence half without touching that law.
-#[expect(
-    clippy::expect_used,
-    reason = "test fixture wiring: a failure here is a broken fixture, and panicking names it"
-)]
-fn suppress_lease_renewal(path: &Path, session_id: &str) {
-    rusqlite::Connection::open(path)
-        .expect("open the renewal-suppression connection")
-        .execute_batch(&format!(
-            "CREATE TRIGGER lash_test_fencing_backstop
-             BEFORE UPDATE OF lease_expires_at_ms ON session_execution_leases
-             WHEN OLD.session_id = '{session_id}'
-             BEGIN
-                 SELECT RAISE(IGNORE);
-             END;"
-        ))
-        .expect("arm the renewal-suppression trigger");
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test fixture wiring: a failure here is a broken fixture, and panicking names it"
-)]
-fn restore_lease_renewal(path: &Path) {
-    rusqlite::Connection::open(path)
-        .expect("open the renewal-restore connection")
-        .execute_batch("DROP TRIGGER lash_test_fencing_backstop;")
-        .expect("disarm the renewal-suppression trigger");
-}
-
-// ---------------------------------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_lost_fenced_write_fails_closed_and_records_the_disagreement() {
-    let capture = capture();
-    let dir = tempfile::tempdir().expect("fencing backstop tempdir");
-    let path = dir.path().join("fencing-backstop.db");
-    let store = Store::open(&path)
-        .await
-        .expect("open fencing backstop store");
-    let session_id = SessionId::from("fencing-backstop-lost-write");
-    let owner = LeaseOwnerIdentity::opaque("backstop-owner", "backstop-incarnation");
-    let held = store
-        .try_claim_session_execution_lease(&session_id, &owner, "backstop-executor", 120_000)
-        .await
-        .expect("claim the backstop lease")
-        .acquired()
-        .expect("the backstop lease is acquired");
-
-    suppress_lease_renewal(&path, session_id.as_str());
-    let refusal = store
-        .renew_session_execution_lease(&held.fence(), 120_000)
-        .await;
-    restore_lease_renewal(&path);
-
-    // Obligation one: the caller receives exactly what it always received.
-    assert!(
-        matches!(
-            refusal,
-            Err(StoreError::SessionExecutionLeaseRenewalRefused { ref session_id })
-                if session_id == "fencing-backstop-lost-write"
-        ),
-        "a lost fenced write must fail closed with this site's own refusal, got {refusal:?}"
-    );
-
-    // Obligation two: the disagreement is recorded, with the evidence an
-    // operator needs to locate it.
-    let recorded = capture.disagreements_for(session_id.as_str());
-    assert_eq!(
-        recorded.len(),
-        1,
-        "exactly one disagreement must be recorded, got {recorded:?}"
-    );
-    let event = &recorded[0];
-    assert_eq!(event.level, "ERROR", "a store defect is not a warning");
-    assert_eq!(event.target, FENCING_TRACE_TARGET);
-    assert_eq!(event.field("fenced_write"), "session_execution_lease.renew");
-    assert_eq!(event.field("backend"), "sqlite");
-    assert_eq!(event.field("row_identity"), session_id.as_str());
-    assert_eq!(event.field("rows_affected"), "0");
-    assert_eq!(event.field("outcome"), "fenced_write_lost");
-
-    // Failing closed means nothing was published: the lease is untouched.
-    let durable = store
-        .get_session_execution_lease(&session_id)
-        .await
-        .expect("read the lease after the refused renewal")
-        .lease
-        .expect("a refused renewal preserves the current lease");
-    assert_eq!(durable.lease_token, held.lease_token);
-    assert_eq!(durable.fencing_token, held.fencing_token);
-    assert_eq!(durable.expires_at_epoch_ms, held.expires_at_epoch_ms);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_renewal_the_verdict_refuses_never_reaches_the_write() {
-    // The companion to the law above, and the reason the backstop is a
-    // backstop: when the verdict refuses, no write is attempted, so no
-    // disagreement exists to record. An empty capture here is what proves the
-    // verdict — not rows-affected — decided the refusal.
-    let capture = capture();
-    let dir = tempfile::tempdir().expect("verdict-first tempdir");
-    let path = dir.path().join("verdict-first.db");
-    let store = Store::open(&path).await.expect("open verdict-first store");
-    let session_id = SessionId::from("fencing-backstop-verdict-first");
-    let owner = LeaseOwnerIdentity::opaque("verdict-owner", "verdict-incarnation");
-    let held = store
-        .try_claim_session_execution_lease(&session_id, &owner, "verdict-executor", 120_000)
-        .await
-        .expect("claim the verdict-first lease")
-        .acquired()
-        .expect("the verdict-first lease is acquired");
-
-    let mut stale = held.fence();
-    stale.lease_token = "a-token-this-row-never-carried".to_string();
-    let refusal = store.renew_session_execution_lease(&stale, 120_000).await;
-
-    assert!(
-        matches!(
-            refusal,
-            Err(StoreError::SessionExecutionLeaseRenewalRefused { ref session_id })
-                if session_id == "fencing-backstop-verdict-first"
-        ),
-        "a stale lease token must be refused by the verdict, got {refusal:?}"
-    );
-    assert!(
-        capture.disagreements_for(session_id.as_str()).is_empty(),
-        "a verdict-refused renewal must never reach the write, so nothing disagrees",
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn renewing_a_lapsed_lease_is_refused_as_expired_not_renewed() {
-    // The renewal statement's five-column predicate names owner, executor and lease token and
-    // says nothing about expiry, so this answer exists only because the shared verdict
-    // compares `expires_at` against the `now` the store sampled.
-    let dir = tempfile::tempdir().expect("lapsed renewal tempdir");
-    let path = dir.path().join("lapsed-renewal.db");
-    let store = Store::open(&path).await.expect("open lapsed renewal store");
-    let session_id = SessionId::from("fencing-backstop-lapsed-renewal");
-    let owner = LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation");
-    let held = store
-        .try_claim_session_execution_lease(&session_id, &owner, "lapsed-executor", 1)
-        .await
-        .expect("claim the lapsing lease")
-        .acquired()
-        .expect("the lapsing lease is acquired");
-
-    // One-sided wait: a slow machine only lapses the lease harder.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let refusal = store
-        .renew_session_execution_lease(&held.fence(), 120_000)
-        .await;
-    assert!(
-        matches!(
-            refusal,
-            Err(StoreError::SessionExecutionLeaseExpired { ref session_id })
-                if session_id == "fencing-backstop-lapsed-renewal"
-        ),
-        "a lapsed holder must be told its lease expired, not handed a fresh term, got {refusal:?}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// FIG-3383: the same two obligations over the queued-work claim.
+// Queued-work claim fenced-write backstop.
 // ---------------------------------------------------------------------------
 
 #[expect(
@@ -376,6 +201,24 @@ async fn enqueue_one(store: &Store, session_id: &SessionId) -> lash_core_executi
         .batch_id
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test fixture wiring: a failed drive epoch setup must fail the test"
+)]
+async fn sealed_claim_epoch(
+    store: &Store,
+    session_id: &SessionId,
+    owner: &LeaseOwnerIdentity,
+    executor_id: &str,
+) -> lash_core_execution::ClaimAuthority {
+    store
+        .seal_claim_epoch_for_test(session_id, owner, executor_id, 0)
+        .await
+        .expect("seal drive epoch")
+        .acquired()
+        .expect("drive epoch sealed")
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
     // The queued-work claim's half of the same contract (D5). The verdict
@@ -392,12 +235,7 @@ async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
     let session_id = SessionId::from("queued-claim-backstop-lost-write");
     let owner = LeaseOwnerIdentity::opaque("queued-owner", "queued-incarnation");
     let batch_id = enqueue_one(&store, &session_id).await;
-    let lease = store
-        .try_claim_session_execution_lease(&session_id, &owner, "queued-executor", 120_000)
-        .await
-        .expect("claim the queued backstop lease")
-        .acquired()
-        .expect("the queued backstop lease is acquired");
+    let lease = sealed_claim_epoch(&store, &session_id, &owner, "queued-executor").await;
 
     suppress_queued_work_claim(&path, batch_id.as_str());
     let outcome = store
@@ -475,12 +313,7 @@ async fn a_queued_work_claim_the_verdict_refuses_never_reaches_the_write() {
     let session_id = SessionId::from("queued-claim-backstop-verdict-first");
     let owner = LeaseOwnerIdentity::opaque("queued-verdict-owner", "queued-verdict-incarnation");
     let batch_id = enqueue_one(&store, &session_id).await;
-    let lease = store
-        .try_claim_session_execution_lease(&session_id, &owner, "queued-verdict-executor", 120_000)
-        .await
-        .expect("claim the queued verdict-first lease")
-        .acquired()
-        .expect("the queued verdict-first lease is acquired");
+    let lease = sealed_claim_epoch(&store, &session_id, &owner, "queued-verdict-executor").await;
 
     assert!(
         store

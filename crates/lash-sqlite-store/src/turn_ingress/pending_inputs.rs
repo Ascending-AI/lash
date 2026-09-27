@@ -84,6 +84,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?4
                )
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
@@ -95,6 +96,7 @@ lash_store_sql::statements! {
                       AND (
                            turn_work.claim_token IS NULL
                            OR turn_work.claim_session_lease_generation <> ?2
+                           OR turn_work.claim_owner_incarnation_id <> ?4
                       )
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
@@ -120,6 +122,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?4
                )
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
@@ -132,6 +135,7 @@ lash_store_sql::statements! {
                       AND (
                            turn_work.claim_token IS NULL
                            OR turn_work.claim_session_lease_generation <> ?2
+                           OR turn_work.claim_owner_incarnation_id <> ?4
                       )
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
@@ -156,6 +160,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?5
                )
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?4
@@ -176,6 +181,7 @@ lash_store_sql::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?5
                )
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?4
@@ -183,7 +189,6 @@ lash_store_sql::statements! {
                    IN ('after_work', 'before_completion')
              ORDER BY enqueue_seq ASC
              LIMIT ?3";
-
 
         /// Give up claim `?2`/`?3` on session `?1`, restoring each row to the
         /// open spelling its own ingress carries (FIG-1573).

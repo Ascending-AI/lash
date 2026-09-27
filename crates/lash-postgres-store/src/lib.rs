@@ -55,21 +55,18 @@ use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core_execution::store_backend_support::{
-    SessionExecutionLeaseRow, lease_owner_from_columns, row_to_session_execution_lease,
-};
+use lash_core_execution::store_backend_support::lease_owner_from_columns;
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, LeaseOwnerIdentity,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
-    ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
-    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    ProcessStartOutcome, ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
-    SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory,
-    SessionSummary, StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
+    AttachmentOwnerKind, BlobRef, ClaimAuthority, DeliveryPolicy, ExecutionScope, GcReport,
+    LeaseOwnerIdentity, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
+    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
+    RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta, SessionNodeRecord,
+    SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
     facade_support::ProcessStartPlan, facade_support::ProcessTransition,
     facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
@@ -1559,8 +1556,8 @@ pub use schema_shape::{
     SchemaReport, UniqueGuard,
 };
 use {
-    pending_turn_inputs::*, process_helpers::*, queued_work::*, runtime_persistence::*, schema::*,
-    session_factory::*, support::*, turn_input_settlement::*,
+    pending_turn_inputs::*, process_helpers::*, queued_work::*, schema::*, session_factory::*,
+    support::*, turn_input_settlement::*,
 };
 
 // `tests/support/mod.rs` is also compiled into this crate's unit tests (as

@@ -19,20 +19,42 @@ use lash_conformance::{
     GraphFactObservation, GraphIntegrityCorruption, GraphIntegrityHandles, GraphIntegrityInjector,
     GraphIntegrityRead, GraphIntegrityTarget, LineageConformanceHandles,
     LineageConformanceInjector, ReopenableProcessRegistry, ReopenableRuntimePersistence,
-    ReopenableTriggerStore, SessionExecutionLeaseRenewalZeroRowHandles,
-    SessionExecutionLeaseRenewalZeroRowInjector,
+    ReopenableTriggerStore,
 };
-use lash_core_execution::store::ConformanceSessionStoreFactory;
+use lash_core_execution::store::{ConformanceSessionStoreFactory, RuntimePersistenceDecorator};
 use lash_core_execution::{
     ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity, ProcessInput,
     ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
     ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
-    RuntimePersistence, SessionCommitStore, SessionStoreFactory, TriggerStore,
+    RuntimePersistence, SessionCommitStore, SessionStoreFactory, StoreError, TriggerStore,
 };
 use lash_sqlite_store::{SqliteDatabase, SqliteStoreSetOptions};
 
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
+
+struct MultiSessionAdmissionStore {
+    inner: Arc<dyn RuntimePersistence>,
+    backend: TestBackend,
+}
+
+#[async_trait::async_trait]
+impl RuntimePersistenceDecorator for MultiSessionAdmissionStore {
+    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn admit_and_bind_session(
+        &self,
+        binding: &lash_core_execution::SessionBinding,
+    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
+        self.backend
+            .store()
+            .await
+            .admit_and_bind_session(binding)
+            .await
+    }
+}
 
 /// Engine promise authority for storage laws that cross a turn-control boundary.
 async fn promise_authority() -> (
@@ -244,49 +266,6 @@ lash_conformance::abandoned_attachment_recovery_tests!({
     })
 });
 
-struct SqliteSessionExecutionLeaseRenewalZeroRowInjector {
-    backend: TestBackend,
-}
-
-#[async_trait::async_trait]
-impl SessionExecutionLeaseRenewalZeroRowInjector
-    for SqliteSessionExecutionLeaseRenewalZeroRowInjector
-{
-    async fn arm(&self, session_id: &SessionId) {
-        assert_eq!(session_id, "zero-row-session-lease-renewal");
-        self.backend
-            .raw(SqliteDatabase::DurableCore)
-            .execute_batch(
-                "CREATE TRIGGER lash_test_session_lease_renewal_zero_row
-                 BEFORE UPDATE OF lease_expires_at_ms ON session_execution_leases
-                 WHEN OLD.session_id = 'zero-row-session-lease-renewal'
-                 BEGIN
-                     SELECT RAISE(IGNORE);
-                 END;",
-            )
-            .expect("arm SQLite zero-row renewal trigger");
-    }
-
-    async fn disarm(&self) {
-        self.backend
-            .raw(SqliteDatabase::DurableCore)
-            .execute_batch("DROP TRIGGER lash_test_session_lease_renewal_zero_row;")
-            .expect("disarm SQLite zero-row renewal trigger");
-    }
-}
-
-lash_conformance::session_execution_lease_renewal_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let store = backend.store().await;
-    (
-        (),
-        SessionExecutionLeaseRenewalZeroRowHandles {
-            store: store as Arc<dyn RuntimePersistence>,
-            injector: Arc::new(SqliteSessionExecutionLeaseRenewalZeroRowInjector { backend }),
-        },
-    )
-});
-
 fn artifact_store_handles(
     backend: &TestBackend,
 ) -> lash_conformance::fused_artifact_store::ArtifactStoreHandles {
@@ -358,10 +337,6 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
                 "UPDATE session_head SET head_revision = ?1 WHERE session_id = ?2",
                 rusqlite::params![value, session_id.as_str()],
             ),
-            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => conn.execute(
-                "UPDATE session_execution_leases SET lease_fencing_token = ?1 WHERE session_id = ?2",
-                rusqlite::params![value, session_id.as_str()],
-            ),
             FenceIntegrityTarget::TriggerRevision { subscription_id } => conn.execute(
                 "UPDATE trigger_subscriptions
                  SET revision = ?1,
@@ -417,27 +392,6 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
                     },
                 )
                 .expect("observe SQLite session-head revision"),
-            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => conn
-                .query_row(
-                    "SELECT lease_fencing_token, lease_owner_id, lease_token,
-                            lease_claimed_at_ms, lease_expires_at_ms
-                     FROM session_execution_leases WHERE session_id = ?1",
-                    [session_id.as_str()],
-                    |row| {
-                        let value: i64 = row.get(0)?;
-                        let owner: Option<String> = row.get(1)?;
-                        let token: Option<String> = row.get(2)?;
-                        let claimed: i64 = row.get(3)?;
-                        let expires: i64 = row.get(4)?;
-                        Ok(FenceIntegrityObservation {
-                            value,
-                            mutation_fingerprint: format!(
-                                "{owner:?}:{token:?}:{claimed}:{expires}"
-                            ),
-                        })
-                    },
-                )
-                .expect("observe SQLite session-lease fence"),
             FenceIntegrityTarget::TriggerRevision { subscription_id } => conn
                 .query_row(
                     "SELECT revision, record_json, lifecycle, deleted_at_ms
@@ -888,34 +842,6 @@ lash_conformance::process_prune_session_store_tests!({
     ((backend, engine), factory, registry, effect_host)
 });
 
-lash_conformance::runtime_persistence_clock_tests!({
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(20_000));
-    let advance_clock = Arc::clone(&clock);
-    let verify_clock = Arc::clone(&clock);
-    let backend = TestBackend::open_with_clock(
-        SUBSTRATE,
-        clock.clone() as Arc<dyn lash_core_execution::Clock>,
-    )
-    .await;
-    let store = backend.store().await as Arc<dyn RuntimePersistence>;
-    (
-        backend,
-        store,
-        move |duration_ms| advance_clock.advance(duration_ms),
-        move |store: Arc<dyn RuntimePersistence>| async move {
-            let observation = store
-                .get_session_execution_lease(&SessionId::from("sqlite-injected-clock-diagnostic"))
-                .await
-                .expect("read SQLite session-lease diagnostics");
-            assert_eq!(
-                observation.observed_at_epoch_ms,
-                lash_core_execution::ClockWallTime::timestamp_ms(verify_clock.as_ref()),
-                "SQLite diagnostics must return the same injected clock that authors lease timestamps"
-            );
-        },
-    )
-});
-
 lash_conformance::trigger_store_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move || {
@@ -1037,8 +963,14 @@ lash_conformance::runtime_persistence_reopenable_tests!({
             let effect_host = Arc::clone(&effect_host);
             retained.keep(&backend);
             ReopenableRuntimePersistence {
-                open,
-                reopen,
+                open: Arc::new(MultiSessionAdmissionStore {
+                    inner: open,
+                    backend: backend.clone(),
+                }),
+                reopen: Arc::new(MultiSessionAdmissionStore {
+                    inner: reopen,
+                    backend,
+                }),
                 effect_host,
             }
         },
@@ -1158,8 +1090,8 @@ mod cancelled_queued_append {
             .await
             .expect("create cancellation store");
         (backend, store, move || {
-            // Pause the graph append after lease-fenced admission's write transaction.
-            let pause = injector.pause_after(SqliteFaultPoint::BeforeCommit, 2);
+            // The append commit is the first write after the pause is armed.
+            let pause = injector.pause(SqliteFaultPoint::BeforeCommit);
             async move {
                 pause.wait_until_reached().await;
                 move || pause.release()

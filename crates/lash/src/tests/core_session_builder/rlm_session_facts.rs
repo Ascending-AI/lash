@@ -530,7 +530,8 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
     Ok(())
 }
 
-/// A guarded RLM fact write publishes the durable revision it committed.
+/// A guarded RLM fact write publishes its durable revision after the engine
+/// first materializes the opened session's head.
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
@@ -556,12 +557,21 @@ async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
     else {
         panic!("committed fact publication must remain replayable");
     };
-    assert_eq!(events.len(), 1);
-    assert!(matches!(
-        events[0].payload,
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.revision())
+            .collect::<Vec<_>>(),
+        vec![
+            lash_core::SessionRevision::new(1),
+            lash_core::SessionRevision::new(2),
+        ],
+        "the initial head and the commanded fact commit each publish once"
+    );
+    assert!(events.iter().all(|event| matches!(
+        event.payload,
         lash_core::SessionObservationEventPayload::Committed { .. }
-    ));
-    assert_eq!(events[0].revision(), lash_core::SessionRevision::new(2));
+    )));
     Ok(())
 }
 

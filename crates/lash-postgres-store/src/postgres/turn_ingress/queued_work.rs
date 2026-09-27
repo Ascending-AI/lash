@@ -38,16 +38,14 @@ lash_store_sql::statements! {
         /// locked for the caller's transaction.
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
                AND (claim_token IS NULL OR NOT EXISTS (
-                    SELECT 1 FROM session_execution_leases sel
-                    WHERE sel.session_id = ?1
-                      AND sel.lease_token IS NOT NULL
-                      AND sel.lease_expires_at_ms > ?3
-                      AND sel.lease_fencing_token
+                    SELECT 1 FROM session_meta sm
+                    WHERE sm.session_id = ?1
+                      AND sm.drive_epoch
                           = queued_work_batches.claim_session_lease_generation
                ))
              FOR UPDATE";
@@ -74,6 +72,7 @@ lash_store_sql::statements! {
                        AND (
                             claim_token IS NULL
                             OR claim_session_lease_generation <> ?2
+                            OR claim_owner_incarnation_id <> ?4
                        )
                      ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
                      LIMIT 1
@@ -81,13 +80,14 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                            OR claim_owner_incarnation_id <> ?4
                )
                AND (work_kind = 'control' OR NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
@@ -116,6 +116,7 @@ lash_store_sql::statements! {
                    AND (
                         claim_token IS NULL
                         OR claim_session_lease_generation <> ?2
+                            OR claim_owner_incarnation_id <> ?4
                    )
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
@@ -133,6 +134,7 @@ lash_store_sql::statements! {
                        AND (
                             candidate.claim_token IS NULL
                             OR candidate.claim_session_lease_generation <> ?2
+                            OR candidate.claim_owner_incarnation_id <> ?4
                        )
                        AND (
                             (
@@ -152,13 +154,14 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                            OR claim_owner_incarnation_id <> ?4
                )
                AND enqueue_seq >= head_enqueue_seq
                AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
@@ -177,10 +180,11 @@ lash_store_sql::statements! {
         /// in the array `?3`.
         select_by_ids = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
+               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
+                            OR claim_owner_incarnation_id <> ?4)
                AND batch_id = ANY(?3)
              ORDER BY enqueue_seq ASC";
 
@@ -190,10 +194,11 @@ lash_store_sql::statements! {
         select_by_claim_ids = "SELECT enqueue_seq, batch_id, session_id, source_key,
                     delivery_policy, work_kind, authority_json, merge_key,
                     enqueued_at_ms, claim_fencing_token, claim_token,
-                    claim_session_lease_generation, claim_id
+                    claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
+               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
+                            OR claim_owner_incarnation_id <> ?4)
                AND claim_id = ANY(?3)
              ORDER BY enqueue_seq ASC";
 
@@ -212,6 +217,7 @@ lash_store_sql::statements! {
              SET claim_id = abandoned.restore_claim_id,
                  claim_token = abandoned.restore_claim_token,
                  claim_session_lease_generation = 0,
+                 claim_owner_incarnation_id = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'

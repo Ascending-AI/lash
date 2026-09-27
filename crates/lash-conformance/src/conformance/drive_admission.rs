@@ -919,8 +919,8 @@ struct ClaimFaultsOnce {
 
 /// A session store whose worker dies once right after the root claim
 /// committed, before the effect journal records the claim's outcome
-/// (FIG-3840). It keeps every claim result it returned, with the lease
-/// generation that asked for it.
+/// (FIG-3840). It keeps every claim result it returned, with the drive
+/// epoch that asked for it.
 struct CrashAfterClaim {
     inner: Arc<dyn crate::RuntimePersistence>,
     fired: AtomicUsize,
@@ -957,7 +957,7 @@ impl crate::store::RuntimePersistenceDecorator for CrashAfterClaim {
 
 /// A root whose worker dies after the store committed its claim, but before
 /// the journal recorded the claim's outcome, is redriven by a fresh worker
-/// under a new lease generation on exactly the composition, base and
+/// under the same recorded admission on exactly the composition, base and
 /// executable generation the claim committed (FIG-3840). An input that
 /// arrives in the window never widens the recorded prefix.
 #[expect(
@@ -1034,12 +1034,12 @@ pub async fn a_claim_commit_survives_a_worker_crash_without_widening(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
-    let [(crashed_lease, crashed), (successor_lease, successor)] = results.as_slice() else {
+    let [(crashed_epoch, crashed), (successor_epoch, successor)] = results.as_slice() else {
         panic!("the crashed worker and its successor each claim once: {results:?}");
     };
-    assert_ne!(
-        crashed_lease, successor_lease,
-        "the successor claims under a new lease generation"
+    assert_eq!(
+        crashed_epoch, successor_epoch,
+        "the retried admission reuses its sealed drive epoch"
     );
     let crate::AcceptedTurnInputDrive::Claimed { claim, .. } = crashed else {
         panic!("the crashed worker claimed its head: {crashed:?}");
@@ -1083,7 +1083,7 @@ impl crate::store::RuntimePersistenceDecorator for NoReplayRepairRead {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        lease: &crate::SessionExecutionLeaseAuthority,
+        lease: &crate::ClaimAuthority,
         binding_id: &str,
         scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::StoreError> {
@@ -1449,119 +1449,6 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
         .collect();
     assert_eq!(applied.len(), 2, "both inputs are answered: {applied:?}");
     assert_eq!(applied[0], head, "the head is answered once, first");
-}
-
-/// A drive whose accepted root meets a live foreign lane keeps the input and
-/// its invocation open. Its redrive can start while the holder is releasing;
-/// once released, the same root answers without a Failed terminal row.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_redrive_racing_lane_release_answers_without_a_failed_row(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let parts = DriveParts::new(prefix, "lane-release-redrive", &effect_host, &stores, 1).await;
-    let root = TurnId::from("lane-release-root");
-    let input = parts.enqueue("answer once", Some(root.as_str())).await;
-    let request = parts.request("lane-release-drive");
-    let holder = crate::LeaseOwnerIdentity::opaque("lane-holder", "lane-holder-incarnation");
-    let held = parts
-        .store
-        .try_claim_session_execution_lease(&parts.session_id, &holder, "foreign-executor", 60_000)
-        .await
-        .expect("claim the foreign lane")
-        .acquired()
-        .expect("the lane starts free");
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let attempt: crate::ConformanceTurnAttempt = {
-        let parts = parts.clone();
-        Arc::new(move |scope| {
-            let parts = parts.clone();
-            let request = request.clone();
-            let tx = tx.clone();
-            Box::pin(async move {
-                let mut runtime = parts.runtime().await;
-                match lash_core::drive::drive_session(&mut runtime, &scope, &request).await {
-                    Ok(outcome) => {
-                        let _ = tx.send(Ok(outcome));
-                        crate::ConformanceTurnEnd::Settled
-                    }
-                    Err(abort) => {
-                        let error = abort.into_error();
-                        let cause = error.turn_failure_cause();
-                        let _ = tx.send(Err(error.code));
-                        crate::ConformanceTurnEnd::Aborted(cause)
-                    }
-                }
-            })
-        })
-    };
-    let scope = admit(crate::ExecutionScope::turn(
-        &parts.session_id,
-        TurnId::from("lane-release-driver"),
-    ));
-    runner.run_turn(scope.clone(), Arc::clone(&attempt)).await;
-    assert_eq!(
-        rx.try_recv().expect("the busy attempt reports its refusal"),
-        Err(crate::RuntimeErrorCode::SessionExecutionLaneBusy)
-    );
-    assert_eq!(parts.calls(), 0, "a busy lane runs no model call");
-    assert!(
-        parts
-            .store
-            .root_terminal(&parts.session_id, &root)
-            .await
-            .expect("read root terminal")
-            .is_none(),
-        "a retryable lane refusal writes no Failed row"
-    );
-
-    let release_store = Arc::clone(&parts.store);
-    let ((), ()) = tokio::join!(
-        runner.run_turn(scope.clone(), Arc::clone(&attempt)),
-        async {
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            release_store
-                .release_session_execution_lease(&held.completion())
-                .await
-                .expect("release the foreign lane");
-        }
-    );
-    let redrive = rx.try_recv().expect("the racing redrive reports an answer");
-    if redrive == Err(crate::RuntimeErrorCode::SessionExecutionLaneBusy) {
-        runner.run_turn(scope, attempt).await;
-    } else {
-        assert!(
-            redrive.is_ok(),
-            "the racing redrive only waits for the lane: {redrive:?}"
-        );
-    }
-    let final_answer = if redrive.is_ok() {
-        redrive
-    } else {
-        rx.try_recv()
-            .expect("the released lane lets the redrive finish")
-    };
-    assert!(
-        matches!(&final_answer, Ok(DriveOutcome { ran, .. }) if matches!(ran.as_slice(), [RootOutcome::Committed { .. }])),
-        "the root commits once after release: {final_answer:?}"
-    );
-    assert_eq!(parts.calls(), 1, "the root makes one model call");
-    assert_eq!(parts.applications().await, vec![(input, root.clone())]);
-    assert_eq!(
-        parts
-            .store
-            .root_terminal(&parts.session_id, &root)
-            .await
-            .expect("read terminal after redrive")
-            .map(|row| row.kind),
-        Some(crate::store::RootTerminalKind::Answered),
-        "the root has an Answered row and no Failed row"
-    );
 }
 
 /// What an idle session's admission takes first: `queued` or `input:<id>`.

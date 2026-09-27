@@ -313,11 +313,11 @@ impl LashRuntime {
         // drivers, so this handle owns no retained execution guard.
         //
         // Structurally excluded from `state::commit_in_lane_context`: this site
-        // is strictly lane-less (never carries a `BorrowedLaneAuthority`) and
+        // is strictly lane-less (never carries a `BorrowedDriveAuthority`) and
         // interleaves in-memory protocol session rollback
         // (`restore_protocol_session_from_state`) on commit failure or
         // `AppendAncestorNotActive` stale-branch response.
-        let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
+        let result = match super::commit_runtime_state_without_session_lease(
             Arc::clone(&store),
             commit,
             &self.runtime_lease_owner,
@@ -831,7 +831,7 @@ impl LashRuntime {
             // Lane-less host plugin-operation boundary. In-turn lifecycle
             // graph appends use `session_manager::graph` and carry an explicit
             // borrowed guard instead of reaching this runtime-owned path.
-            let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
+            let result = match super::commit_runtime_state_without_session_lease(
                 store,
                 commit,
                 &self.runtime_lease_owner,
@@ -895,7 +895,7 @@ impl LashRuntime {
             })?;
         // Lane-less host plugin-operation snapshot. Turn-scoped service calls
         // are classified at the session-manager call sites instead.
-        let result = super::commit_runtime_state_with_fresh_session_execution_lease(
+        let result = super::commit_runtime_state_without_session_lease(
             store,
             commit,
             &self.runtime_lease_owner,

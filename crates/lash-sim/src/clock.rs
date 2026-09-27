@@ -65,6 +65,7 @@ impl SimClock {
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn advance_by(&self, delta_ms: u64) {
         self.advance_to(self.logical_ms().saturating_add(delta_ms))
             .await;

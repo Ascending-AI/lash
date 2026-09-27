@@ -170,13 +170,6 @@ macro_rules! runtime_persistence_tests {
             (preserve_head_commit_reports_the_resident_leaf, "root"),
             (empty_append_cannot_move_the_head, "empty-append-head-move"),
             (commit_rejects_leaf_without_frame_open_ancestor, "missing-frame-root"),
-            (session_execution_lease_contract, "root"),
-            (borrowed_session_execution_lease_commit_contract, "borrowed-commit-fence"),
-            (same_incarnation_rotation_gates_claims_not_commits, "root"),
-            (same_host_distinct_executors_are_lane_less_without_revoking_holder, "fig1133-same-host-session"),
-            (concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable, "concurrent-rotation-renewal"),
-            (session_execution_lease_diagnostic_read_contract, "lease-diagnostic"),
-            (session_execution_lease_displacement_contract, "lease-displacement"),
             (queued_work_source_keys_are_idempotent_and_list_ordered, "queued-work-source-keys"),
             (concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing, "concurrent-queued-work-source-key"),
             (decorated_queued_work_source_key_replay_reports_absorbed, "decorated-queued-work-source-key"),
@@ -193,11 +186,11 @@ macro_rules! runtime_persistence_tests {
             (queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions, "queued-membership"),
             (queued_work_join_groups_by_delivery_policy_and_merge_key, "queued-join"),
             (abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations, "abandoned-predecessor-generation"),
-            (queued_work_redrive_preserves_interrupted_batch_composition, "redrive-composition"),
-            (queued_work_redrive_selects_interrupted_claim_identity_over_later_rows, "redrive-claim-gap"),
-            (queued_work_redrive_obeys_delivery_boundary_before_identity, "redrive-boundary"),
-            (queued_work_redrive_ignores_successor_row_limit, "redrive-row-limit"),
-            (queued_work_redrive_ignores_a_changed_drain_policy, "redrive-drain-policy"),
+            (queued_work_redrive_preserves_interrupted_batch_composition, "interrupted-batch-redrive"),
+            (queued_work_redrive_selects_interrupted_claim_identity_over_later_rows, "interrupted-batch-claim-gap"),
+            (queued_work_redrive_obeys_delivery_boundary_before_identity, "interrupted-batch-delivery-gate"),
+            (queued_work_redrive_ignores_successor_row_limit, "interrupted-batch-row-limit"),
+            (queued_work_redrive_ignores_a_changed_drain_policy, "interrupted-batch-drain-policy"),
             (queued_work_selected_multi_identity_validation_and_abandon_restore, "selected-multi-identity"),
             (queued_work_exact_claim_preserves_physical_order_and_key_breaks, "physical-order"),
             (process_wakes_batch_by_default, "wake-default-batch"),
@@ -223,6 +216,11 @@ macro_rules! runtime_persistence_tests {
             (turn_park_lives_while_its_turn_holds_work, "turn-parks"),
             (root_terminal_evidence_commits_in_the_head_transaction, "root-terminal-head"),
             (a_commit_sealed_under_a_superseded_admission_is_refused, "root-terminal-fence"),
+            (a_stale_drive_epoch_refuses_a_claim, "claim-stale-drive"),
+            (a_new_drive_repairs_an_older_claim_without_a_ttl, "claim-orphan-drive"),
+            (a_new_incarnation_reclaims_within_the_same_drive_epoch, "claim-new-incarnation"),
+            (claim_liveness_tracks_superseded_drive_epoch, "claim-liveness"),
+            (accepted_turn_input_with_superseded_drive_is_cancelled_and_vacuumed, "fig1511-orphaned-accepted"),
             (a_settled_queued_run_writes_its_roots_terminal, "root-terminal-settled"),
             (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),
             (active_turn_input_claim_reacquires_after_unrecorded_checkpoint, "fig905-active-reacquire"),
@@ -235,20 +233,15 @@ macro_rules! runtime_persistence_tests {
             (pending_active_turn_inputs_defer_unaccepted_once_on_interrupt, "root"),
             ]
             store_refs [
-            (session_execution_lease_fence_authority, "lease-fence-authority"),
             ]
             factories [
             (plugin_state_boundary, "plugin-state"),
             ]
             timed_stores [
-            (durable_queued_drain_wait_store_laws, "durable-queued-drain"),
             (queued_work_claims_supersede_across_session_lease_generations_with_timing, "root"),
-            (claim_liveness_for_lease_less_paths_tracks_session_generations, "claim-liveness"),
-            (accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed, "fig1511-orphaned-accepted"),
             (turn_input_claims_supersede_across_session_lease_generations_with_timing, "root"),
             ]
             timed_factories [
-            (session_execution_lease_expires_by_ttl_contract, "ttl-expiry"),
             ]
         }
     };
@@ -1073,27 +1066,6 @@ macro_rules! session_delete_blob_reclaim_tests {
     };
 }
 
-/// Register the zero-row session-lease renewal law.
-#[macro_export]
-macro_rules! session_execution_lease_renewal_tests {
-    ($fixture:block) => {
-        $crate::session_execution_lease_renewal_tests!(@catalogue $fixture; [
-            (session_execution_lease_zero_row_renewal_is_refused, "session-lease-zero-row-renewal"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, handles) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(handles).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
 /// Register the durable tool-access recovery law.
 #[macro_export]
 macro_rules! tool_access_persistence_tests {
@@ -1520,7 +1492,7 @@ macro_rules! __session_config_settlement_register {
 macro_rules! session_config_settlement_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::session_config_settlement_tests!(@catalogue [$(#[$attr])*] $fixture; [
-            (session_config_settlement_timeout_is_typed, "config-settlement-timeout"),
+            (session_config_settlement_pending_returns_without_wait, "config-settlement-pending"),
             (cancelled_session_config_settlement_is_typed, "config-settlement-cancelled"),
             (superseded_config_settlement_adopts_the_newer_head, "config-settlement-superseded"),
         ]);
@@ -1721,27 +1693,6 @@ macro_rules! session_graph_append_tests {
                 let (_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! runtime_persistence_clock_tests {
-    ($fixture:block) => {
-        $crate::runtime_persistence_clock_tests!(@catalogue $fixture; [
-            (runtime_persistence_clock_expiry, "runtime-persistence-clock-expiry"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store, advance, verify) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(::std::sync::Arc::clone(&store), advance).await;
-                verify(store).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -2124,27 +2075,6 @@ macro_rules! checkpoint_claim_probe_tests {
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, &session_id, counts).await;
                 teardown.await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
-/// The fixture supplies the engine-paced and deployment-host resolver factories.
-#[macro_export]
-macro_rules! durable_queued_drain_wait_resolver_tests {
-    ($fixture:block) => {
-        $crate::durable_queued_drain_wait_resolver_tests!(@catalogue $fixture; [
-            (durable_queued_drain_wait_resolver_laws, "durable-queued-drain-resolver"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make_engine, make_deployment) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make_engine, make_deployment).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*

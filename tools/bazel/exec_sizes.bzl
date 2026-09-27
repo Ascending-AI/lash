@@ -136,7 +136,6 @@ COMPILE_REQUESTS = {
     "lash-restate-postgres-workers-e2e/lash_e2e_mock_provider": {"cpu_count": 2, "memory_kb": 2097152},
     "lash-restate-postgres-workers-e2e/lash_e2e_process_operations_worker": {"cpu_count": 2, "memory_kb": 1572864},
     "lash-restate-postgres-workers-e2e/lash_e2e_runner": {"cpu_count": 2, "memory_kb": 2621440},
-    "lash-restate-postgres-workers-e2e/lash_e2e_session_lease_triage": {"cpu_count": 2, "memory_kb": 2621440},
     "lash-restate-postgres-workers-e2e/lash_e2e_version_bump": {"cpu_count": 2, "memory_kb": 2621440},
     "lash-restate-postgres-workers-e2e/lash_e2e_worker": {"cpu_count": 2, "memory_kb": 2621440},
     "lash-restate-postgres-workers-e2e/lash_restate_postgres_workers_e2e": {"cpu_count": 2, "memory_kb": 2097152},

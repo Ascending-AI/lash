@@ -79,7 +79,6 @@ async fn law_lease_exclusivity_and_claim_generation_fencing(
         RuntimePersistenceOp::ClaimLease { owner: 1 },
         RuntimePersistenceOp::Crash,
         RuntimePersistenceOp::ClaimLease { owner: 1 },
-        RuntimePersistenceOp::RenewLease { stale: true },
         RuntimePersistenceOp::ClaimWorkWithStaleLease,
         RuntimePersistenceOp::ClaimTurnInputsWithStaleLease,
     ];
@@ -89,8 +88,8 @@ async fn law_lease_exclusivity_and_claim_generation_fencing(
             .map_err(TestCaseError::fail)?;
     }
     prop_assert!(
-        shape[RunShapeCounter::LeaseFenceRejections] >= 3,
-        "generation fencing did not reject stale renewal and claim attempts"
+        shape[RunShapeCounter::LeaseFenceRejections] >= 2,
+        "drive epoch fencing did not reject both stale claim attempts"
     );
     prop_assert_eq!(model.work.len(), 1, "stale claim attempt removed work");
     prop_assert_eq!(model.inputs.len(), 1, "stale claim attempt removed input");
@@ -106,7 +105,7 @@ async fn law_claimed_work_settles_exactly_once(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(&session_id(), &owner, "claimed-work-executor", 60_000)
+        .seal_claim_epoch_for_test(&session_id(), &owner, "claimed-work-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -191,7 +190,7 @@ async fn law_reclaim_mediates_supersession(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let stale_owner = owner(0);
     let stale_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &session_id(),
             &stale_owner,
             "reclaim-stale-executor",
@@ -215,13 +214,13 @@ async fn law_reclaim_mediates_supersession(
         .ok_or_else(|| TestCaseError::fail("coalesced work absent"))?;
     prop_assert_eq!(stale_claim.batches.len(), 2, "join claim did not coalesce");
     store
-        .release_session_execution_lease(&stale_lease.completion())
+        .supersede_claim_epoch_for_test(&stale_lease.completion())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
 
     let successor_owner = owner(1);
     let successor_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &session_id(),
             &successor_owner,
             "reclaim-successor-executor",
@@ -327,7 +326,7 @@ async fn law_reclaim_mediates_supersession(
         "the rejected predecessor commit released the successor-owned batch"
     );
     store
-        .release_session_execution_lease(&successor_lease.completion())
+        .supersede_claim_epoch_for_test(&successor_lease.completion())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let pending = store
@@ -360,7 +359,7 @@ async fn law_head_cas_serializes_competing_commits(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let stale_owner = owner(0);
     let stale_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &session_id(),
             &stale_owner,
             "head-cas-stale-executor",
@@ -388,12 +387,12 @@ async fn law_head_cas_serializes_competing_commits(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("turn input absent"))?;
     store
-        .release_session_execution_lease(&stale_lease.completion())
+        .supersede_claim_epoch_for_test(&stale_lease.completion())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let successor_owner = owner(1);
     let _successor_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &session_id(),
             &successor_owner,
             "head-cas-successor-executor",
@@ -418,7 +417,6 @@ async fn law_head_cas_serializes_competing_commits(
         ))
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let loser = loser
-        .releasing_session_execution_lease(stale_lease.completion())
         .completing_queue_claim(stale_work.completion())
         .completing_turn_input_claim(stale_input.completion());
     let mut winner_state = RuntimeSessionState {
@@ -475,7 +473,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(&session_id(), &owner, "selected-batch-executor", 60_000)
+        .seal_claim_epoch_for_test(&session_id(), &owner, "selected-batch-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -556,7 +554,7 @@ async fn law_turn_inputs_apply_once_in_order(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(&session_id(), &owner, "turn-input-executor", 60_000)
+        .seal_claim_epoch_for_test(&session_id(), &owner, "turn-input-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()

@@ -70,22 +70,11 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
 
     let reader = make(scenario);
     super::super::bind_conformance_session(&reader, &identity.session_id).await;
-    let lease_observation = reader
-        .get_session_execution_lease(&identity.session_id)
+    let drive_epoch = reader
+        .drive_epoch(&identity.session_id)
         .await
-        .expect("read the crashed holder's lease");
-    let lease = lease_observation
-        .lease
-        .as_ref()
-        .expect("the crash must leave its session lease held");
-    assert_eq!(
-        lease.owner.owner_id, CRASHED_EXECUTOR_OWNER_ID,
-        "the observed lease must belong to the crashed runtime"
-    );
-    assert!(
-        lease_observation.observed_at_epoch_ms < lease.expires_at_epoch_ms,
-        "the first read must occur while the crashed holder's lease is still live"
-    );
+        .expect("read the crashed drive epoch")
+        .epoch;
     let during_live_lease = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
@@ -107,9 +96,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     );
     assert_eq!(
         held[0].status,
-        crate::PendingTurnInputReadStatus::Held {
-            lease_expires_at_ms: lease.expires_at_epoch_ms,
-        },
+        crate::PendingTurnInputReadStatus::Held { drive_epoch },
         "the held read must carry the exact matching lease expiry"
     );
     let pending = during_live_lease
@@ -124,7 +111,6 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     );
 
     let successor_invocation = invocation.redrive();
-    wait_for_recovery_lease(&make, scenario, &point, true).await;
     let after_expiry = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await

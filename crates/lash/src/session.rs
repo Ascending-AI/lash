@@ -920,6 +920,8 @@ impl LashSession {
         SessionAdmin {
             runtime: self.runtime.clone(),
             process_work: Arc::clone(self.binding.process().port()),
+            work: self.binding.queued(),
+            ingress: self.binding.ingress_relay(),
         }
     }
 

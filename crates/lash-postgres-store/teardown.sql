@@ -64,8 +64,6 @@ DROP TABLE IF EXISTS lash_turn_park_clock CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_park_events CASCADE;
 
-DROP TABLE IF EXISTS lash_session_execution_leases CASCADE;
-
 DROP TABLE IF EXISTS lash_queued_work_batches CASCADE;
 
 DROP TABLE IF EXISTS lash_queued_work_items CASCADE;

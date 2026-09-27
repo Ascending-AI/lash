@@ -3,20 +3,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lash_core::{
-    LeaseOwnerIdentity, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionPolicy, SessionRelation,
+    RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionPolicy, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::Barrier;
-
-pub(crate) const LEASE_TTL_MS: u64 = 60_000;
-pub(crate) const LEASE_SEMANTIC_TTL_MS: u64 = 50;
-// Keep these harness budgets aligned with runtime-persistence conformance.
-const LEASE_OBSERVATION_STALL_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(5);
-const LEASE_OBSERVATION_ATTEMPTS: usize = 3;
-const LEASE_EXPIRY_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 
 #[derive(Debug, Serialize)]
 pub struct BackendContentionReport {
@@ -147,8 +139,8 @@ pub async fn run_backend_contention_report_against(
             passed,
             skipped,
             failed,
-            production_api: "SessionExecutionLeaseStore claim/renew/release and SessionCommitStore::commit_runtime_state through SessionStoreFactory handles",
-            semantics: "Competing store handles must admit one lease owner, reject stale completion tokens, survive reopen handles, preserve idempotent retry, reject stale head revisions and stale write conflicts, and wait for stale-owner TTL without clearing the live successor.",
+            production_api: "DriveEpochStore::seal_drive_epoch and SessionCommitStore::commit_runtime_state through SessionStoreFactory handles",
+            semantics: "Competing drive seals from the same epoch admit one winner; session commits preserve idempotent retry and reject stale head revisions and changed retries.",
         },
         report_path: report_path.clone(),
     };
@@ -173,17 +165,7 @@ async fn run_factory_contention_scenario(
     let store = create_store(Arc::clone(&factory), &session_id).await?;
     let reopened = open_store(Arc::clone(&factory), &session_id).await?;
     let mut operations = Vec::new();
-    operations.push(competing_first_claim(&session_id, Arc::clone(&store), reopened).await?);
-
-    let store = open_store(Arc::clone(&factory), &session_id).await?;
-    operations.push(stale_completion_is_fenced(&session_id, Arc::clone(&store)).await?);
-
-    let store = open_store(Arc::clone(&factory), &session_id).await?;
-    let reopened = open_store(Arc::clone(&factory), &session_id).await?;
-    operations.push(reopen_handle_preserves_live_lease(&session_id, store, reopened).await?);
-
-    let store = open_store(Arc::clone(&factory), &session_id).await?;
-    operations.push(stale_owner_ttl_preserves_live_successor(&session_id, store).await?);
+    operations.push(competing_drive_seals(&session_id, Arc::clone(&store), reopened).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
     operations.push(final_commit_retry_and_conflict_are_fenced(&session_id, store).await?);
@@ -235,360 +217,67 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
     }
 }
 
-async fn competing_first_claim(
+async fn competing_drive_seals(
     session_id: &SessionId,
-    open: Arc<dyn RuntimePersistence>,
-    reopened: Arc<dyn RuntimePersistence>,
+    left_store: Arc<dyn RuntimePersistence>,
+    right_store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
-    let owner_a = LeaseOwnerIdentity::opaque("contention-owner-a", "contention-owner-a:001");
-    let owner_b = LeaseOwnerIdentity::opaque("contention-owner-b", "contention-owner-b:001");
+    use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
+    let observed = left_store
+        .drive_epoch(session_id)
+        .await
+        .map_err(|error| error.to_string())?;
     let barrier = Arc::new(Barrier::new(3));
-    let left_barrier = Arc::clone(&barrier);
-    let right_barrier = Arc::clone(&barrier);
-    let left_release_store = Arc::clone(&open);
-    let right_release_store = Arc::clone(&reopened);
-    let left_session = session_id.to_string();
-    let right_session = session_id.to_string();
-    let left_owner = owner_a.clone();
-    let right_owner = owner_b.clone();
-    let left = tokio::spawn(async move {
-        left_barrier.wait().await;
-        open.try_claim_session_execution_lease(
-            &SessionId::from(left_session),
-            &left_owner,
-            "competing-first-claim-executor",
-            LEASE_TTL_MS,
-        )
-        .await
-    });
-    let right = tokio::spawn(async move {
-        right_barrier.wait().await;
-        reopened
-            .try_claim_session_execution_lease(
-                &SessionId::from(right_session),
-                &right_owner,
-                "competing-first-claim-executor-2",
-                LEASE_TTL_MS,
-            )
-            .await
-    });
-    barrier.wait().await;
-    let left = left
-        .await
-        .map_err(|err| format!("join left first-claim race: {err}"))?
-        .map_err(|err| format!("left first-claim race: {err}"))?;
-    let right = right
-        .await
-        .map_err(|err| format!("join right first-claim race: {err}"))?
-        .map_err(|err| format!("right first-claim race: {err}"))?;
-    let winner = single_acquired(&left, &right)?;
-    let winner_summary = lease_summary(&winner);
-    let release_target = match &left {
-        SessionExecutionLeaseClaimOutcome::Acquired(_) => "left",
-        SessionExecutionLeaseClaimOutcome::Busy { .. } => "right",
-    };
-    match (&left, &right) {
-        (SessionExecutionLeaseClaimOutcome::Acquired(acquisition), _) => {
-            let lease = &acquisition.lease;
-            left_release_store
-                .release_session_execution_lease(&lease.completion())
-                .await
-                .map_err(|err| format!("release left first-claim winner: {err}"))?;
-        }
-        (_, SessionExecutionLeaseClaimOutcome::Acquired(acquisition)) => {
-            let lease = &acquisition.lease;
-            right_release_store
-                .release_session_execution_lease(&lease.completion())
-                .await
-                .map_err(|err| format!("release right first-claim winner: {err}"))?;
-        }
-        _ => return Err("first-claim race had no winner".to_string()),
-    }
-    Ok(BackendContentionOperation {
-        operation_id: "runtime-persistence.competing-first-claim",
-        status: "passed",
-        production_api: "SessionExecutionLeaseStore::try_claim_session_execution_lease",
-        assertion: "two concurrently opened backend handles cannot both acquire the first session execution lease",
-        evidence: json!({
-            "left": claim_outcome_summary(&left),
-            "right": claim_outcome_summary(&right),
-            "winner": winner_summary,
-            "release_target": release_target,
-            "acquired_count": 1,
-        }),
-    })
-}
-
-async fn stale_completion_is_fenced(
-    session_id: &SessionId,
-    store: Arc<dyn RuntimePersistence>,
-) -> Result<BackendContentionOperation, String> {
-    let owner_a = LeaseOwnerIdentity::opaque("stale-release-owner-a", "stale-release-owner-a:001");
-    let owner_b = LeaseOwnerIdentity::opaque("stale-release-owner-b", "stale-release-owner-b:001");
-    let lease = acquired(
-        store
-            .try_claim_session_execution_lease(
-                session_id,
-                &owner_a,
-                "stale-completion-is-fenced-executor",
-                LEASE_TTL_MS,
-            )
-            .await
-            .map_err(|err| format!("claim stale-release setup: {err}"))?,
-    )?;
-    let mut stale_completion = lease.completion();
-    stale_completion.lease_token.push_str(":stale");
-    let stale_release_error = match store
-        .release_session_execution_lease(&stale_completion)
-        .await
-    {
-        Err(error) => error,
-        Ok(()) => return Err("stale completion was silently accepted".to_string()),
-    };
-    if !matches!(
-        stale_release_error,
-        lash_core::StoreError::SessionExecutionLeaseReleaseRefused { .. }
-    ) {
-        return Err(format!(
-            "stale completion returned the wrong refusal: {stale_release_error}"
-        ));
-    }
-    let after_stale_release = store
-        .try_claim_session_execution_lease(
-            session_id,
-            &owner_b,
-            "stale-completion-is-fenced-executor-2",
-            LEASE_TTL_MS,
-        )
-        .await
-        .map_err(|err| format!("claim after stale release: {err}"))?;
-    if !matches!(
-        after_stale_release,
-        SessionExecutionLeaseClaimOutcome::Busy { .. }
-    ) {
-        return Err("stale release cleared the live session execution lease".to_string());
-    }
-    store
-        .release_session_execution_lease(&lease.completion())
-        .await
-        .map_err(|err| format!("release live lease after stale-release proof: {err}"))?;
-    Ok(BackendContentionOperation {
-        operation_id: "runtime-persistence.stale-completion-fenced",
-        status: "passed",
-        production_api: "SessionExecutionLeaseStore::release_session_execution_lease",
-        assertion: "a stale completion token is refused by name and cannot clear a newer or live lease",
-        evidence: json!({
-            "live_lease": lease_summary(&lease),
-            "stale_completion": {
-                "session_id": stale_completion.session_id,
-                "fencing_token": stale_completion.fencing_token,
-                "lease_token_was_mutated": true,
-            },
-            "claim_after_stale_release": claim_outcome_summary(&after_stale_release),
-            "stale_release_refusal": "SessionExecutionLeaseReleaseRefused",
-        }),
-    })
-}
-
-async fn reopen_handle_preserves_live_lease(
-    session_id: &SessionId,
-    open: Arc<dyn RuntimePersistence>,
-    reopened: Arc<dyn RuntimePersistence>,
-) -> Result<BackendContentionOperation, String> {
-    let owner_a = LeaseOwnerIdentity::opaque("reopen-owner-a", "reopen-owner-a:001");
-    let owner_b = LeaseOwnerIdentity::opaque("reopen-owner-b", "reopen-owner-b:001");
-    let lease = acquired(
-        open.try_claim_session_execution_lease(
-            session_id,
-            &owner_a,
-            "reopen-handle-preserves-live-lease-executor",
-            LEASE_TTL_MS,
-        )
-        .await
-        .map_err(|err| format!("claim reopen setup: {err}"))?,
-    )?;
-    let reopened_claim = reopened
-        .try_claim_session_execution_lease(
-            session_id,
-            &owner_b,
-            "reopen-handle-preserves-live-lease-executor-2",
-            LEASE_TTL_MS,
-        )
-        .await
-        .map_err(|err| format!("claim from reopened handle: {err}"))?;
-    if !matches!(
-        reopened_claim,
-        SessionExecutionLeaseClaimOutcome::Busy { .. }
-    ) {
-        return Err("reopened handle did not observe the live lease".to_string());
-    }
-    reopened
-        .release_session_execution_lease(&lease.completion())
-        .await
-        .map_err(|err| format!("release lease from reopened handle: {err}"))?;
-    let after_release = acquired(
-        reopened
-            .try_claim_session_execution_lease(
-                session_id,
-                &owner_b,
-                "reopen-handle-preserves-live-lease-executor-3",
-                LEASE_TTL_MS,
-            )
-            .await
-            .map_err(|err| format!("claim after reopened release: {err}"))?,
-    )?;
-    reopened
-        .release_session_execution_lease(&after_release.completion())
-        .await
-        .map_err(|err| format!("release reopened successor lease: {err}"))?;
-    Ok(BackendContentionOperation {
-        operation_id: "runtime-persistence.reopen-handle-preserves-lease",
-        status: "passed",
-        production_api: "SessionStoreFactory::open_existing_store + SessionExecutionLeaseStore lease methods",
-        assertion: "a reopened backend handle observes live lease state and can release by fenced completion",
-        evidence: json!({
-            "initial_lease": lease_summary(&lease),
-            "reopened_claim_while_live": claim_outcome_summary(&reopened_claim),
-            "successor_lease": lease_summary(&after_release),
-            "successor_fencing_token_advanced": after_release.fencing_token > lease.fencing_token,
-        }),
-    })
-}
-
-async fn stale_owner_ttl_preserves_live_successor(
-    session_id: &SessionId,
-    store: Arc<dyn RuntimePersistence>,
-) -> Result<BackendContentionOperation, String> {
-    let stale_owner = LeaseOwnerIdentity::opaque("stale-worker-owner", "stale-worker-owner:001");
-    let live_owner = LeaseOwnerIdentity::opaque("live-worker-owner", "live-worker-owner:001");
-    let mut observed = None;
-    for attempt in 1..=LEASE_OBSERVATION_ATTEMPTS {
-        let observation_started = std::time::Instant::now();
-        let stale_lease = acquired(
+    let mut handles = Vec::new();
+    for (store, name) in [(left_store, "left"), (right_store, "right")] {
+        let barrier = Arc::clone(&barrier);
+        let session = session_id.clone();
+        handles.push(tokio::spawn(async move {
+            let admission = AdmissionId::new(format!("backend-contention-{name}"));
+            barrier.wait().await;
             store
-                .try_claim_session_execution_lease(
-                    session_id,
-                    &stale_owner,
-                    "stale-owner-ttl-preserves-live-successor-executor",
-                    LEASE_SEMANTIC_TTL_MS,
+                .seal_drive_epoch(
+                    &session,
+                    &admission,
+                    observed.epoch,
+                    &RootStartNonce::new(admission.as_str()),
                 )
                 .await
-                .map_err(|err| format!("claim stale-owner setup: {err}"))?,
-        )?;
-        let outcome = store
-            .try_claim_session_execution_lease(
-                session_id,
-                &live_owner,
-                "stale-owner-ttl-preserves-live-successor-executor-2",
-                LEASE_TTL_MS,
-            )
+        }));
+    }
+    barrier.wait().await;
+    let mut sealed = 0;
+    let mut superseded = 0;
+    for handle in handles {
+        match handle
             .await
-            .map_err(|err| format!("observe stale owner before TTL: {err}"))?;
-        let observed_elapsed_ms = observation_started
-            .elapsed()
-            .as_millis()
-            .min(u128::from(u64::MAX)) as u64;
-        match outcome {
-            SessionExecutionLeaseClaimOutcome::Busy { holder } => {
-                if holder.lease_token != stale_lease.lease_token {
-                    return Err("busy observation named a different stale-owner lease".to_string());
-                }
-                observed = Some((stale_lease, attempt, observed_elapsed_ms));
-                break;
-            }
-            SessionExecutionLeaseClaimOutcome::Acquired(successor)
-                if successor.lease.claimed_at_epoch_ms < stale_lease.expires_at_epoch_ms =>
-            {
-                return Err(format!(
-                    "stale owner was replaced at {} before its lease expiry {}",
-                    successor.lease.claimed_at_epoch_ms, stale_lease.expires_at_epoch_ms
-                ));
-            }
-            SessionExecutionLeaseClaimOutcome::Acquired(lapsed_successor) => {
-                store
-                    .release_session_execution_lease(&lapsed_successor.lease.completion())
-                    .await
-                    .map_err(|err| format!("release successor from lapsed observation: {err}"))?;
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?
+        {
+            DriveEpochSeal::Sealed(_) => sealed += 1,
+            DriveEpochSeal::Superseded { .. } => superseded += 1,
+            DriveEpochSeal::ExecutionLost => {
+                return Err("drive seal unexpectedly lost execution".to_string());
             }
         }
     }
-    let (stale_lease, attempts, observed_elapsed_ms) = observed.ok_or_else(|| {
-        format!(
-            "could not observe the stale owner before its {LEASE_SEMANTIC_TTL_MS} ms TTL after {} attempts",
-            LEASE_OBSERVATION_ATTEMPTS,
-        )
-    })?;
-    let expiry_deadline = std::time::Instant::now() + LEASE_OBSERVATION_STALL_ALLOWANCE;
-    let live_lease = loop {
-        match store
-            .try_claim_session_execution_lease(
-                session_id,
-                &live_owner,
-                "stale-owner-ttl-preserves-live-successor-executor-3",
-                LEASE_TTL_MS,
-            )
-            .await
-            .map_err(|err| format!("claim stale-owner lease after TTL: {err}"))?
-        {
-            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => break acquisition.lease,
-            SessionExecutionLeaseClaimOutcome::Busy { .. }
-                if std::time::Instant::now() < expiry_deadline =>
-            {
-                tokio::time::sleep(LEASE_EXPIRY_POLL).await;
-            }
-            SessionExecutionLeaseClaimOutcome::Busy { holder } => {
-                return Err(format!(
-                    "stale-owner lease remained busy after TTL: {holder:?}"
-                ));
-            }
-        }
-    };
-    let stale_release_error = match store
-        .release_session_execution_lease(&stale_lease.completion())
-        .await
-    {
-        Err(error) => error,
-        Ok(()) => return Err("stale predecessor completion was silently accepted".to_string()),
-    };
-    if !matches!(
-        stale_release_error,
-        StoreError::SessionExecutionLeaseReleaseRefused { .. }
-    ) {
+    if (sealed, superseded) != (1, 1) {
         return Err(format!(
-            "stale predecessor completion returned the wrong refusal: {stale_release_error}"
+            "expected one seal and one supersession, got {sealed}/{superseded}"
         ));
     }
-    let renewed_live = store
-        .renew_session_execution_lease(&live_lease.fence(), LEASE_TTL_MS)
-        .await
-        .map_err(|err| format!("renew live successor after stale completion: {err}"))?;
-    store
-        .release_session_execution_lease(&renewed_live.completion())
-        .await
-        .map_err(|err| format!("release renewed live successor: {err}"))?;
     Ok(BackendContentionOperation {
-        operation_id: "runtime-persistence.stale-owner-ttl",
+        operation_id: "runtime-persistence.competing-drive-seals",
         status: "passed",
-        production_api: "SessionExecutionLeaseStore::try_claim_session_execution_lease + renew_session_execution_lease",
-        assertion: "an unexpired stale owner stays busy, TTL takeover advances the lease, and stale predecessor completion cannot clear the live successor",
-        evidence: json!({
-            "stale_lease": lease_summary(&stale_lease),
-            "live_lease": lease_summary(&live_lease),
-            "renewed_live_lease": lease_summary(&renewed_live),
-            "attempts": attempts,
-            "observed_elapsed_ms": observed_elapsed_ms,
-            "stale_ttl_ms": LEASE_SEMANTIC_TTL_MS,
-            "stale_completion_left_live_lease_renewable": true,
-            "stale_completion_refusal": "SessionExecutionLeaseReleaseRefused",
-            "fencing_token_advanced": live_lease.fencing_token > stale_lease.fencing_token,
-            "scope": "session_execution_lease_only",
-        }),
+        production_api: "DriveEpochStore::seal_drive_epoch",
+        assertion: "two handles sealing different admissions from one observed epoch produce exactly one winner",
+        evidence: json!({"sealed": sealed, "superseded": superseded}),
     })
 }
 
 #[expect(
     clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    reason = "test support: the surrounding harness establishes this value"
 )]
 async fn stale_head_transaction_is_rejected(
     session_id: &SessionId,
@@ -658,25 +347,8 @@ async fn final_commit_retry_and_conflict_are_fenced(
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation.clone())
         .map_err(|err| format!("stamp final commit: {err}"))?;
-    let owner =
-        LeaseOwnerIdentity::opaque("final-commit-owner", "final-commit-owner:incarnation-001");
-    let lease = acquired(
-        store
-            .try_claim_session_execution_lease(
-                session_id,
-                &owner,
-                "final-commit-retry-and-conflict-are-fenced-executor",
-                LEASE_TTL_MS,
-            )
-            .await
-            .map_err(|err| format!("claim final commit lease: {err}"))?,
-    )?;
     let first = store
-        .commit_runtime_state(
-            stamped_commit
-                .clone()
-                .releasing_session_execution_lease(lease.completion()),
-        )
+        .commit_runtime_state(stamped_commit.clone())
         .await
         .map_err(|err| format!("first final commit failed: {err}"))?;
     let retry = store
@@ -724,65 +396,6 @@ async fn final_commit_retry_and_conflict_are_fenced(
     })
 }
 
-fn single_acquired(
-    left: &SessionExecutionLeaseClaimOutcome,
-    right: &SessionExecutionLeaseClaimOutcome,
-) -> Result<SessionExecutionLease, String> {
-    let mut leases = Vec::new();
-    if let SessionExecutionLeaseClaimOutcome::Acquired(acquisition) = left {
-        let lease = &acquisition.lease;
-        leases.push(lease.clone());
-    }
-    if let SessionExecutionLeaseClaimOutcome::Acquired(acquisition) = right {
-        let lease = &acquisition.lease;
-        leases.push(lease.clone());
-    }
-    match leases.len() {
-        1 => Ok(leases.remove(0)),
-        count => Err(format!(
-            "expected exactly one first-claim race winner, observed {count}"
-        )),
-    }
-}
-
-fn acquired(outcome: SessionExecutionLeaseClaimOutcome) -> Result<SessionExecutionLease, String> {
-    match outcome {
-        SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => Ok(acquisition.lease),
-        SessionExecutionLeaseClaimOutcome::Busy { holder } => Err(format!(
-            "expected acquired lease, observed busy holder {} fencing {}",
-            holder.owner.owner_id, holder.fencing_token
-        )),
-    }
-}
-
-fn claim_outcome_summary(outcome: &SessionExecutionLeaseClaimOutcome) -> Value {
-    match outcome {
-        SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => json!({
-            "outcome": "acquired",
-            "lease": lease_summary(&acquisition.lease),
-            "displaced_fencing_token": acquisition
-                .displaced
-                .as_ref()
-                .map(|displaced| displaced.fencing_token),
-        }),
-        SessionExecutionLeaseClaimOutcome::Busy { holder } => json!({
-            "outcome": "busy",
-            "holder": lease_summary(holder),
-        }),
-    }
-}
-
-fn lease_summary(lease: &SessionExecutionLease) -> Value {
-    json!({
-        "session_id": lease.session_id,
-        "owner_id": lease.owner.owner_id,
-        "incarnation_id": lease.owner.incarnation_id,
-        "fencing_token": lease.fencing_token,
-        "lease_token_present": !lease.lease_token.is_empty(),
-        "expires_at_epoch_ms": lease.expires_at_epoch_ms,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -806,12 +419,11 @@ mod tests {
                 .iter()
                 .any(|scenario| scenario.backend == "sqlite"
                     && scenario.status == "passed"
-                    && scenario.operations.len() >= 6)
+                    && scenario.operations.len() >= 3)
         );
         assert!(report.report_path.exists());
         let body = std::fs::read_to_string(report.report_path).expect("report body");
-        assert!(body.contains("runtime-persistence.competing-first-claim"));
-        assert!(body.contains("runtime-persistence.stale-owner-ttl"));
+        assert!(body.contains("runtime-persistence.competing-drive-seals"));
         assert!(body.contains("runtime-persistence.stale-head-transaction-rejected"));
         assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
     }

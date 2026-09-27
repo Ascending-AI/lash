@@ -21,6 +21,7 @@
 use crate::engine::{AdmitVerdict, DriveLoop, DriveRequest, DriveRequestId};
 use crate::runtime::{LashRuntime, TurnOptions};
 use crate::{AgentFrameRun, AssembledTurn, RuntimeError, RuntimeErrorCode, TurnId, TurnInput};
+use crate::{EmptyQueuedDrainReason, QueuedTurnDrain};
 
 /// A test's turn on a runtime it holds, driven by the engine's own calls on
 /// the controller in its [`TurnOptions`]. See the module docs.
@@ -69,10 +70,35 @@ pub trait TestTurnDrive {
         request: &str,
         opts: TurnOptions<'_>,
     ) -> Result<Option<AgentFrameRun>, RuntimeError>;
+
+    /// Run one queue root through recorded engine admission for tests that
+    /// formerly called the direct queued drain. A command-only root has no
+    /// physical turn.
+    async fn drive_one_admitted_queued_root(
+        &mut self,
+        opts: TurnOptions<'_>,
+    ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError>;
 }
 
 #[async_trait::async_trait]
 impl TestTurnDrive for LashRuntime {
+    async fn drive_one_admitted_queued_root(
+        &mut self,
+        opts: TurnOptions<'_>,
+    ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
+        let request = opts.execution_scope_id().to_owned();
+        let turn = self
+            .drive_next_root(&request, opts)
+            .await?
+            .and_then(AgentFrameRun::into_final_turn);
+        Ok(match turn {
+            Some(turn) => QueuedTurnDrain::Ran(turn),
+            None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
+                crate::QueuedWorkClaimRefusal::Empty,
+            )),
+        })
+    }
+
     async fn drive_turn_frames(
         &mut self,
         input: TurnInput,

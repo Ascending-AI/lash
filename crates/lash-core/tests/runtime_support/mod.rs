@@ -62,6 +62,46 @@ pub(crate) async fn kernel_double(
         .expect("build the Restate server double")
 }
 
+pub(crate) async fn settle_pending_session_command(
+    runtime: &mut lash_core::runtime::LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    result: Result<(), lash_core::SessionError>,
+    request: &str,
+) {
+    use lash_core::testing::TestTurnDrive as _;
+
+    let receipt = match result {
+        Ok(()) => return,
+        Err(lash_core::SessionError::SessionCommandPending(receipt)) => receipt,
+        Err(error) => panic!("session command was refused before drive: {error}"),
+    };
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::queue_drain(
+            lash_core::SessionId::from(runtime.session_id()),
+            request,
+        ))
+        .await
+        .expect("open session command drive handler");
+    runtime
+        .drive_next_root(
+            request,
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                handler.scoped(),
+            ),
+        )
+        .await
+        .expect("engine drives accepted session command");
+    handler.close().await.expect("close session command drive");
+    assert!(matches!(
+        runtime
+            .settle_session_command(receipt)
+            .await
+            .expect("read settled session command"),
+        lash_core::runtime::SessionCommandSettlement::Durable(_)
+    ));
+}
+
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.
     static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =

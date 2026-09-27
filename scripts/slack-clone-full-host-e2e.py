@@ -35,17 +35,6 @@ from slack_clone_thread_evidence import (
 LAYERS = ("dom", "platform", "bot", "trace")
 
 
-def slack_ts_to_ms(ts: str) -> int | None:
-    if not ts or "." not in ts:
-        return None
-    seconds, _, frac = ts.partition(".")
-    try:
-        micros = int((frac + "000000")[:6])
-        return int(seconds) * 1000 + micros // 1000
-    except ValueError:
-        return None
-
-
 class LayerFailure(AssertionError):
     def __init__(self, layer: str, message: str):
         super().__init__(f"LAYER {layer} FAIL: {message}")
@@ -91,7 +80,7 @@ class Journey:
         self.kill_event = ""
         self.root_ts = ""
         self.kill_claim_owner = ""
-        self.kill_lease_generation = 0
+        self.kill_drive_epoch = 0
         self.kill_started = 0.0
 
     def gate(
@@ -215,13 +204,11 @@ class Journey:
             "nodes": "SELECT session_id, node_id, parent_node_id, generation, node_json FROM graph_nodes "
             "WHERE tombstoned = 0 ORDER BY session_id, generation",
             "turns": "SELECT session_id, turn_id, result_json FROM runtime_turn_commits ORDER BY committed_at_ms",
-            "meta": "SELECT session_id, relation_kind, parent_session_id, source_session_id, source_node_id "
+            "meta": "SELECT session_id, relation_kind, parent_session_id, source_session_id, source_node_id, drive_epoch "
             "FROM session_meta ORDER BY session_id",
             "lineage": "SELECT session_id, ancestor_session_id, fork_node_id, fork_generation "
             "FROM fork_lineage ORDER BY session_id, ancestor_session_id",
             "usage": "SELECT session_id, model, input_tokens, output_tokens FROM usage_deltas ORDER BY seq",
-            "leases": "SELECT session_id, lease_owner_incarnation_id, lease_fencing_token, "
-            "lease_expires_at_ms FROM session_execution_leases ORDER BY session_id",
         }
         if not self.session_db.exists():
             return {name: [] for name in tables}
@@ -683,14 +670,13 @@ class Journey:
             print(error, file=sys.stderr)
             killed_ledger, pending = {}, []
         self.kill_claim_owner = pending[0]["claim_owner_incarnation_id"] if pending else ""
-        self.kill_lease_generation = pending[0]["claim_session_lease_generation"] if pending else 0
+        self.kill_drive_epoch = pending[0]["claim_session_lease_generation"] if pending else 0
         killed_session = self.session_snapshot()
-        killed_lease = next(
-            (row for row in killed_session["leases"] if row["session_id"] == f"channel:{self.channel}"),
+        killed_meta = next(
+            (row for row in killed_session["meta"] if row["session_id"] == f"channel:{self.channel}"),
             None,
         )
-        self.kill_lease_expires_at_ms = int(killed_lease["lease_expires_at_ms"]) if killed_lease else 0
-        self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"] and self.kill_lease_expires_at_ms > 0, "05-killed-four-layers.json")
+        self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"] and killed_meta is not None and self.kill_drive_epoch == killed_meta["drive_epoch"] and self.kill_drive_epoch > 0, "05-killed-four-layers.json")
         self.gate("05-killed", "trace", "interrupted turn emitted no turn_completed", len(self.turn_traces()) == before_turns, "05-killed-four-layers.json")
         self.screenshot("05-killed")
         self.write_extract("05-killed")
@@ -708,32 +694,24 @@ class Journey:
         settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: (?:Turn|Transcript)[^\n]*", recovery_log)
         handled = re.search(rf"handled {re.escape(self.kill_event)}: Replied \{{", recovery_log)
         after_session = self.session_snapshot()
-        channel_lease = next(r for r in after_session["leases"] if r["session_id"] == f"channel:{self.channel}")
+        channel_meta = next(r for r in after_session["meta"] if r["session_id"] == f"channel:{self.channel}")
         reply_matches_platform = recovered["reply_ts"] is not None and any(
             str(r["ts"] // 1_000_000) + "." + str(r["ts"] % 1_000_000).zfill(6) == recovered["reply_ts"]
             for r in bot_rows
         )
-        fencing_advanced = channel_lease["lease_fencing_token"] > self.kill_lease_generation
+        fencing_advanced = channel_meta["drive_epoch"] > self.kill_drive_epoch
         if deferred_lines:
             recovery_path = "fast"
             path_ok = settled is not None
             path_note = f"fast path: deferral then settle-from-turn for {self.kill_event}"
         else:
-            recovery_path = "slow"
-            reply_ms = slack_ts_to_ms(recovered["reply_ts"] or "")
-            path_ok = (
-                handled is not None
-                and reply_ms is not None
-                and reply_ms >= self.kill_lease_expires_at_ms
-            )
-            path_note = (
-                f"slow path: direct handled-Replied at {reply_ms}ms "
-                f">= lease expiry {self.kill_lease_expires_at_ms}ms"
-            )
+            recovery_path = "direct"
+            path_ok = handled is not None
+            path_note = f"direct handled-Replied for {self.kill_event}"
         self.gate(
             "05-recovered",
             "bot",
-            f"dead incarnation {self.kill_claim_owner} generation {self.kill_lease_generation} recovered via {path_note}",
+            f"dead incarnation {self.kill_claim_owner} drive epoch {self.kill_drive_epoch} recovered via {path_note}",
             path_ok and fencing_advanced and reply_matches_platform,
             "05-recovered-four-layers.json + bot log",
         )

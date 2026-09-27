@@ -301,7 +301,6 @@ CREATE TABLE IF NOT EXISTS session_meta_pending_observer_intents (
     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
 );
 
-
 -- Identity families: all-NULL is a plain commit; hash+version+count is an
 -- append identity; hash+version without a count is a semantic-boundary
 -- identity (FIG-2480). A count without a hash is representable nowhere.
@@ -412,18 +411,6 @@ CREATE TABLE IF NOT EXISTS turn_park_events (
     CONSTRAINT ck_turn_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
 );
 
-CREATE TABLE IF NOT EXISTS session_execution_leases (
-    session_id               TEXT PRIMARY KEY,
-    lease_owner_id           TEXT,
-    lease_owner_incarnation_id TEXT,
-    lease_executor_id        TEXT,
-    lease_token              TEXT,
-    lease_fencing_token      INTEGER NOT NULL DEFAULT 0,
-    lease_claimed_at_ms      INTEGER NOT NULL DEFAULT 0,
-    lease_term_ms            INTEGER NOT NULL DEFAULT 0,
-    lease_expires_at_ms      INTEGER NOT NULL DEFAULT 0,
-    CONSTRAINT ck_session_execution_leases_identity_all_or_none CHECK ((lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL))
-);
 
 CREATE TABLE IF NOT EXISTS queued_work_batches (
     enqueue_seq       INTEGER NOT NULL,
@@ -439,6 +426,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     claim_token       TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
     claim_fencing_token INTEGER NOT NULL DEFAULT 0,
     claim_session_lease_generation INTEGER NOT NULL DEFAULT 0, -- Zero disambiguates the predecessor record from a live claim.
+    claim_owner_incarnation_id TEXT,
     obligation_id     TEXT,
     obligation_state  TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -451,6 +439,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
+    CONSTRAINT ck_queued_work_batches_live_claim_owner CHECK (claim_token IS NULL OR claim_session_lease_generation = 0 OR claim_owner_incarnation_id IS NOT NULL),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );

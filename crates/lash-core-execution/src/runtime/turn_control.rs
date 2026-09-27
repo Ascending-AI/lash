@@ -1081,7 +1081,7 @@ impl ActiveTurnControl {
         &self,
         binding_id: impl Into<String>,
         admitted_scope: ExecutionScope,
-        fence: &crate::SessionExecutionLeaseAuthority,
+        fence: &crate::ClaimAuthority,
         observed_intent: TurnCancelIntentSnapshot,
         honoured: Option<&TurnCancellationEvidence>,
         assembled: Option<TurnCancellationEvidence>,

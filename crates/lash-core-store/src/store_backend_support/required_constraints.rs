@@ -277,14 +277,14 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(
-            "session_execution_leases",
-            "ck_session_execution_leases_identity_all_or_none",
-            "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
+            "queued_work_batches",
+            "ck_queued_work_batches_live_claim_owner",
+            "claim_token IS NULL OR claim_session_lease_generation = 0 OR claim_owner_incarnation_id IS NOT NULL",
         ),
         rendered(
-            "lash_session_execution_leases",
-            "ck_session_execution_leases_identity_all_or_none",
-            "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
+            "lash_queued_work_batches",
+            "ck_queued_work_batches_live_claim_owner",
+            "claim_token IS NULL OR claim_session_lease_generation = 0 OR claim_owner_incarnation_id IS NOT NULL",
         ),
     ),
     expected_constraint(

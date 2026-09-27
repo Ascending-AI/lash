@@ -242,7 +242,6 @@ pub(super) async fn delete_session_from_catalog(
                 turn_ingress.cancel_requests.delete_by_session.sql(),
                 turn_ingress.closures.delete_by_session.sql(),
                 turn_ingress.bindings.delete_by_session.sql(),
-                turn_ingress.leases.delete_by_session.sql(),
             ] {
                 tx.execute(statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;

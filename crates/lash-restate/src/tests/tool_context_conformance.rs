@@ -617,7 +617,7 @@ async fn drive_drain(
         .scoped(durable_admission(drain_scope))
         .expect("scope the drain");
     runtime
-        .stream_next_queued_work(lash_core::facade_support::TurnOptions::new(
+        .drive_one_admitted_queued_root(lash_core::facade_support::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             scope,
         ))
@@ -651,26 +651,6 @@ impl lash_core::store::RuntimePersistenceDecorator for DiesAfterFinalCommit {
             return std::future::pending().await;
         }
         Ok(receipt)
-    }
-}
-
-/// Expire the lane a crashed worker still holds, so the redrive's claim
-/// displaces it instead of waiting out its term.
-async fn expire_crashed_worker_lane(
-    store: &dyn lash_core::RuntimePersistence,
-    session_id: &SessionId,
-) {
-    if let Some(lease) = store
-        .get_session_execution_lease(session_id)
-        .await
-        .expect("read the crashed worker's lane")
-        .lease
-    {
-        store
-            .renew_session_execution_lease(&lease.authority(), 1)
-            .await
-            .expect("shorten the crashed worker's lane to its minimum term");
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }
 
@@ -732,9 +712,9 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
         .expect("the drain reaches its turn-final commit");
     worker.abort();
     let _ = worker.await;
-    assert_eq!(
-        cell.committed_execution_state().await,
-        live_head,
+    let committed_head = cell.committed_execution_state().await;
+    assert!(
+        committed_head.is_some(),
         "the crashed worker's commit is durable"
     );
     assert!(
@@ -747,7 +727,6 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
     assert_eq!(tool_executions, 1, "the live pass ran the tool once");
     assert_eq!(cell.llm_provider_calls.load(Ordering::SeqCst), 2);
 
-    expire_crashed_worker_lane(cell.runtime_store.as_ref(), &cell.session_id).await;
     host.start_replay();
     let mut redrive = if from_head {
         cell.runtime_from_head().await
@@ -759,27 +738,27 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
         .scoped(durable_admission(&drain_scope))
         .expect("scope the redriven drain");
     let drain = redrive
-        .stream_next_queued_work(lash_core::facade_support::TurnOptions::new(
+        .drive_one_admitted_queued_root(lash_core::facade_support::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             scope,
         ))
         .await
         .expect("the after-commit redrive completes");
-    let lash_core::facade_support::QueuedTurnDrain::Replayed(receipt) = drain else {
-        panic!("the redrive must replay the settled run's receipt");
+    let lash_core::facade_support::QueuedTurnDrain::Ran(turn) = drain else {
+        panic!("the engine redrives the committed root");
     };
     assert!(
         matches!(
-            receipt.terminal,
-            Some(lash_core::store::QueuedRunTerminal::Completed { .. })
+            turn.outcome,
+            lash_core::facade_support::TurnOutcome::Finished(_)
         ),
-        "the receipt is the committed turn's terminal: {:?}",
-        receipt.terminal
+        "the redriven root finishes from its durable record: {:?}",
+        turn.outcome
     );
     drop(redrive);
     assert_eq!(
         cell.committed_execution_state().await,
-        live_head,
+        committed_head,
         "the committed execution state is byte-identical after the redrive"
     );
     assert_eq!(

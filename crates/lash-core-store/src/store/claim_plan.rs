@@ -80,6 +80,7 @@ pub struct QueuedWorkClaimRow {
     /// The session-execution-lease generation the row's claim pins (`0` on a
     /// released or restored row).
     pub claim_session_lease_generation: u64,
+    pub claim_owner_incarnation_id: Option<String>,
 }
 
 impl QueuedWorkClaimRow {
@@ -87,6 +88,7 @@ impl QueuedWorkClaimRow {
         WorkRowClaimFacts {
             claim_token: self.claim_token.as_deref(),
             claim_session_lease_generation: self.claim_session_lease_generation,
+            claim_owner_incarnation_id: self.claim_owner_incarnation_id.as_deref(),
         }
     }
 }
@@ -107,6 +109,7 @@ pub struct TurnInputClaimRow {
     pub claim_token: Option<String>,
     /// The session-execution-lease generation the row's claim pins.
     pub claim_session_lease_generation: u64,
+    pub claim_owner_incarnation_id: Option<String>,
 }
 
 impl TurnInputClaimRow {
@@ -114,6 +117,7 @@ impl TurnInputClaimRow {
         WorkRowClaimFacts {
             claim_token: self.claim_token.as_deref(),
             claim_session_lease_generation: self.claim_session_lease_generation,
+            claim_owner_incarnation_id: self.claim_owner_incarnation_id.as_deref(),
         }
     }
 }
@@ -333,7 +337,13 @@ pub fn plan_queued_work_claim(
         // move before the claim write below. The shared verdict decides; the
         // write-side copy of this predicate stays on the statement as its
         // backstop.
-        if !queued_work_batch_claimability(row.claim_facts(), claiming_generation).is_claimable() {
+        if !queued_work_batch_claimability(
+            row.claim_facts(),
+            claiming_generation,
+            &owner.incarnation_id,
+        )
+        .is_claimable()
+        {
             return Ok(ClaimPlanDecision::Defer);
         }
         batches.push(row.batch);
@@ -415,7 +425,13 @@ pub fn plan_turn_input_claim(
         // Same contract as the queued-work claim: the row was read under the
         // backend's claim authority, the shared verdict decides, and the
         // generation predicate stays on the claim statement as its backstop.
-        if !turn_input_claimability(row.claim_facts(), claiming_generation).is_claimable() {
+        if !turn_input_claimability(
+            row.claim_facts(),
+            claiming_generation,
+            &owner.incarnation_id,
+        )
+        .is_claimable()
+        {
             return Ok(ClaimPlanDecision::Defer);
         }
         let mut input = row.input;

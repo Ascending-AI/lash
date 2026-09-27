@@ -1,5 +1,6 @@
 //! L-D1 through L-D4: the recorded session close and its retained tombstone.
 
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -345,7 +346,7 @@ pub(super) async fn pin_a_turn_cancel_closure(
     id: &SessionId,
 ) {
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             id,
             &crate::LeaseOwnerIdentity::opaque("close-law", "close-law:incarnation"),
             "close-law:executor",

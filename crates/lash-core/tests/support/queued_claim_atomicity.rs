@@ -1,7 +1,8 @@
 use lash_core::runtime::{
     DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
 };
-use lash_core::{LeaseOwnerIdentity, RuntimePersistence, SessionExecutionLease};
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::{ClaimAuthority, LeaseOwnerIdentity, RuntimePersistence};
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ pub(super) struct Case {
     pub(super) store: Arc<dyn RuntimePersistence>,
     pub(super) ids: Vec<lash_core::BatchId>,
     owner: LeaseOwnerIdentity,
-    lease: SessionExecutionLease,
+    lease: ClaimAuthority,
     entry: Entry,
 }
 
@@ -51,12 +52,7 @@ pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) ->
     }
     let owner = LeaseOwnerIdentity::opaque("claims", "claims-incarnation");
     let lease = store
-        .try_claim_session_execution_lease(
-            &SessionId::from("root"),
-            &owner,
-            "claims-executor",
-            60_000,
-        )
+        .seal_claim_epoch_for_test(&SessionId::from("root"), &owner, "claims-executor", 60_000)
         .await
         .expect("claim execution lease")
         .acquired()
@@ -215,13 +211,13 @@ impl Case {
     /// to recover from.
     async fn displace_lease(&self) -> Case {
         self.store
-            .release_session_execution_lease(&self.lease.fence())
+            .supersede_claim_epoch_for_test(&self.lease.fence())
             .await
             .expect("the incumbent hands its lane back");
         let owner = LeaseOwnerIdentity::opaque("claims-successor", "claims-successor-incarnation");
         let lease = self
             .store
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &SessionId::from("root"),
                 &owner,
                 "claims-successor-executor",

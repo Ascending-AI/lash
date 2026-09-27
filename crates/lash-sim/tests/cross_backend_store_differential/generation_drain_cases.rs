@@ -145,17 +145,16 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             format!("{nonce}-{name}:incarnation"),
         );
         let lease = store
-            .try_claim_session_execution_lease_with_token(
+            .seal_claim_epoch_for_test(
                 &session_id,
                 &owner,
                 &format!("{nonce}-{name}-executor"),
-                &LeaseClaimNonce::for_testing(format!("{nonce}-{name}-token")),
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("claim the session lease")
+            .expect("seal queued-run drive epoch")
             .acquired()
-            .expect("a fresh session's lease is free");
+            .expect("drive seal");
         let expected_head_revision = store
             .load_session_head_meta()
             .await

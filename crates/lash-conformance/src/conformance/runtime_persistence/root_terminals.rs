@@ -266,8 +266,7 @@ pub async fn a_settled_queued_run_writes_its_roots_terminal(store: Arc<dyn Runti
         let store = Arc::clone(&store);
         let session = SessionId::from(session);
         async move {
-            let lease =
-                claim_session_execution_lease_for_test(&store, &session, "settled-run").await;
+            let lease = seal_claim_authority_for_test(&store, &session, "settled-run").await;
             let authority = lease.authority();
             let request = BeginQueuedRun {
                 session_id: session.clone(),

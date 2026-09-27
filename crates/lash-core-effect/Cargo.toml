@@ -32,15 +32,7 @@ lash-core-store = { workspace = true }
 lash-sansio = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 tokio-util = { workspace = true, features = ["rt"] }
-tracing = { workspace = true }
 
 [dev-dependencies]
 lash-core-ids = { workspace = true, features = ["testing"] }
-# FIG-1161: loom seam tests run via `cargo rustc --profile test -- --cfg loom`
-# (a global RUSTFLAGS cannot work: `cfg(loom)` compiles `tokio::net` out and
-# the transitive dep closure then fails). loom must therefore resolve for the
-# test target unconditionally; normal builds never see it.
-loom = { workspace = true }
-tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }

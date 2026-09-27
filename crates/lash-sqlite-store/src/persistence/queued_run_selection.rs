@@ -5,7 +5,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
     tx: &Connection,
     now: u64,
     session_id: &SessionId,
-    fence: &SessionExecutionLeaseAuthority,
+    fence: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     batch_ids: &[lash_core_execution::BatchId],
@@ -59,6 +59,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
                     session_id.as_str(),
                     sql_session_lease_generation(generation)?,
                     sql_batch_ids,
+                    owner.incarnation_id.as_str(),
                 ],
                 queued_batch_row_from_sql,
             )
@@ -88,6 +89,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
                     session_id.as_str(),
                     sql_session_lease_generation(generation)?,
                     encode_json(&involved_claim_ids)?,
+                    owner.incarnation_id.as_str(),
                 ],
                 queued_batch_row_from_sql,
             )
@@ -160,6 +162,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
                     sql_session_lease_generation(generation)?,
                     requested_rows[0].enqueue_seq as i64,
                     last_enqueue_seq,
+                    owner.incarnation_id.as_str(),
                 ],
                 queued_batch_row_from_sql,
             )

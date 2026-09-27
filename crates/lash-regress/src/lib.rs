@@ -110,7 +110,6 @@ regress supports features (required by the EcmaScript spec) that regex does not,
 However the regex crate provides linear-time matching guarantees, while regress does not. This difference is due
 to the architecture: regex uses finite automata while regress uses "classical backtracking."
 
-
 # Architecture
 
 regress has a parser, intermediate representation, optimizer which acts on the IR, bytecode emitter, and two bytecode interpreters, referred to as "backends".

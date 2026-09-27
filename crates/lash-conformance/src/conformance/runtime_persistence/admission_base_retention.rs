@@ -9,6 +9,7 @@
 //! retains another.
 
 use super::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use pretty_assertions::assert_eq;
 
 /// Commit a checkpoint whose tool state carries `generation`, returning its
@@ -71,14 +72,13 @@ async fn admit_on(
     session_id: &SessionId,
     base: &crate::store::SessionHeadRef,
 ) {
-    let lease =
-        claim_session_execution_lease_for_test(store, session_id, "admission-base-retention").await;
+    let lease = seal_claim_authority_for_test(store, session_id, "admission-base-retention").await;
     store
         .retain_admission_base(&lease.fence(), base)
         .await
         .expect("retain the admission's base");
     store
-        .release_session_execution_lease(&lease.completion())
+        .supersede_claim_epoch_for_test(&lease.completion())
         .await
         .expect("release the admission's lease");
 }

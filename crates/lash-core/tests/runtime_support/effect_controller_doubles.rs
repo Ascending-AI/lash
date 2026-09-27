@@ -417,19 +417,6 @@ impl RecordingEffectController {
 
 #[async_trait::async_trait]
 impl lash_core::testing::EffectLayer for RecordingEffectController {
-    async fn acquire_queued_lane(
-        &self,
-        inner: &dyn lash_core::AwaitEventResolver,
-        lane: Arc<dyn lash_core::QueuedLaneProbe>,
-        cancel: CancellationToken,
-    ) -> Result<lash_core::QueuedLaneAcquisition, RuntimeError> {
-        if self.engine_paced_lane {
-            inner.wait_out_crashed_lane_holder(lane, cancel).await
-        } else {
-            inner.acquire_queued_lane(lane, cancel).await
-        }
-    }
-
     async fn await_await_event(
         &self,
         inner: &dyn lash_core::AwaitEventResolver,

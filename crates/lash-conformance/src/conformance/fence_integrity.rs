@@ -1,5 +1,6 @@
 //! Shared durable-counter corruption and exhaustion conformance.
 
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::future::Future;
@@ -10,7 +11,6 @@ use std::sync::Arc;
 pub enum FenceIntegrityTarget {
     QueuedWorkClaimFence { batch_id: String },
     SessionHeadRevision { session_id: SessionId },
-    SessionLeaseFencingToken { session_id: SessionId },
     TriggerRevision { subscription_id: String },
 }
 
@@ -43,7 +43,6 @@ where
 {
     negative_claim_fence(make("fence-negative-claim").await).await;
     negative_session_head_revision(make("fence-negative-head").await).await;
-    negative_session_lease_fence(make("fence-negative-lease").await).await;
     divergent_claim_fences_advance_per_row(make("fence-divergent-rows").await).await;
     exhausted_claim_fence(make("fence-exhausted-head").await, true).await;
     exhausted_claim_fence(make("fence-exhausted-tail").await, false).await;
@@ -58,38 +57,11 @@ where
 )]
 pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::RuntimePersistence>) {
     let too_large = (i64::MAX as u64) + 1;
-    let lease_owner =
-        crate::LeaseOwnerIdentity::opaque("signed-write-lease", "signed-write-lease:incarnation");
-    let lease_error = store
-        .try_claim_session_execution_lease(
-            &SessionId::from("signed-write-lease"),
-            &lease_owner,
-            "signed-counter-write-domain-conformance-executor",
-            u64::MAX,
-        )
-        .await
-        .expect_err("unrepresentable session lease expiry must refuse before insert");
-    assert!(matches!(
-        lease_error,
-        crate::StoreError::MonotonicCounterOverflow {
-            counter: "session_execution_lease_expires_at_ms",
-            current: u64::MAX,
-        }
-    ));
-    assert!(
-        store
-            .get_session_execution_lease(&SessionId::from("signed-write-lease"))
-            .await
-            .expect("read after refused session lease")
-            .lease
-            .is_none()
-    );
-
     let generation_owner = crate::LeaseOwnerIdentity::opaque(
         "signed-write-generation",
         "signed-write-generation:incarnation",
     );
-    let forged = crate::SessionExecutionLeaseAuthority {
+    let forged = crate::ClaimAuthority {
         session_id: SessionId::from("signed-write-generation"),
         owner: generation_owner.clone(),
         executor_id: "signed-write-generation-executor".to_string(),
@@ -135,10 +107,10 @@ fn queued_draft(session_id: &SessionId, label: &str) -> crate::QueuedWorkBatchDr
 async fn claim_lease(
     store: &Arc<dyn crate::RuntimePersistence>,
     session_id: &SessionId,
-) -> (crate::LeaseOwnerIdentity, crate::SessionExecutionLease) {
+) -> (crate::LeaseOwnerIdentity, crate::ClaimAuthority) {
     let owner = crate::LeaseOwnerIdentity::opaque("fence-owner", "fence-owner:incarnation");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, "claim-lease-executor", 60_000)
+        .seal_claim_epoch_for_test(session_id, &owner, "claim-lease-executor", 60_000)
         .await
         .expect("claim fence-integrity session lease")
         .acquired()
@@ -233,27 +205,6 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .await
         .expect_err("negative session-head revision must refuse");
     assert_corrupt(error, "SessionHeadMeta", "head_revision", -1);
-    assert_eq!(handles.injector.observe_raw_value(&target).await, before);
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn negative_session_lease_fence(handles: FenceIntegrityHandles) {
-    let session_id = "fence-negative-lease";
-    let _ = claim_lease(&handles.runtime, &SessionId::from(session_id)).await;
-    let target = FenceIntegrityTarget::SessionLeaseFencingToken {
-        session_id: SessionId::from(session_id.to_string()),
-    };
-    handles.injector.inject_raw_value(&target, -1).await;
-    let before = handles.injector.observe_raw_value(&target).await;
-    let error = handles
-        .runtime
-        .get_session_execution_lease(&SessionId::from(session_id))
-        .await
-        .expect_err("negative session-lease fence must refuse");
-    assert_corrupt(error, "SessionExecutionLease", "fencing_token", -1);
     assert_eq!(handles.injector.observe_raw_value(&target).await, before);
 }
 

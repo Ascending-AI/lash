@@ -11,12 +11,12 @@ use crate::facade_support::{ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFac
 use lash_sansio::core_support::*;
 
 mod accept;
+mod claim_repair;
 mod commit;
 mod drain_end;
 mod execute;
 mod follow_on_recovery;
 pub(in crate::runtime) mod generation_fence;
-mod lease;
 mod post_commit;
 #[cfg(feature = "testing")]
 pub mod prepare;
@@ -52,7 +52,7 @@ pub(in crate::runtime) struct TurnSinks<'sinks> {
 /// The guard and the policy are always passed together and are meaningless
 /// apart, so they travel as one field on the phase contexts.
 pub(in crate::runtime) struct TurnLeaseScope<'lease> {
-    pub(in crate::runtime) guard: Option<&'lease SessionExecutionLeaseGuard>,
+    pub(in crate::runtime) guard: Option<&'lease DriveClaimGuard>,
     pub(in crate::runtime) release_policy: SessionExecutionLeaseReleasePolicy,
 }
 

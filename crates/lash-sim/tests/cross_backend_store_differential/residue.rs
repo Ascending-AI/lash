@@ -106,10 +106,6 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
              (SELECT attachment_id FROM attachment_manifest WHERE session_id = ?1)",
     ),
     (
-        "session_execution_leases",
-        "SELECT * FROM session_execution_leases WHERE session_id = ?1",
-    ),
-    (
         "turn_parks",
         "SELECT * FROM turn_parks WHERE session_id = ?1",
     ),
@@ -232,10 +228,6 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
         "SELECT to_jsonb(t)::text FROM lash_attachment_condemnations t
          WHERE attachment_id IN
              (SELECT attachment_id FROM lash_attachment_manifest WHERE session_id = $1)",
-    ),
-    (
-        "session_execution_leases",
-        "SELECT to_jsonb(t)::text FROM lash_session_execution_leases t WHERE session_id = $1",
     ),
     (
         "turn_parks",

@@ -252,9 +252,9 @@ impl AdmitDriveRunner {
             .await
             .map_err(|error| store_fault("pending work ordering read", error))?;
         let queued = store
-            .list_pending_queued_work(session_id)
+            .list_queued_work(session_id)
             .await
-            .map_err(|error| store_fault("pending queued work read", error))?;
+            .map_err(|error| store_fault("open queued work read", error))?;
         let queued_run = || {
             Some((
                 queued_root(&admission_id(&self.request.request, self.ordinal)),

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 181,
+  "cargo_target_count": 180,
   "feature_lane_units": [
     {
       "features": [
@@ -16262,7 +16262,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 240,
+  "generated_label_count": 239,
   "packages": [
     {
       "declared_features": [
@@ -16325,12 +16325,9 @@
         "lash-internal-core-ids",
         "lash-internal-core-store",
         "lash-internal-sansio",
-        "loom",
         "serde",
         "serde_json",
-        "tokio",
-        "tokio-util",
-        "tracing"
+        "tokio-util"
       ],
       "doc": "//crates/lash-core-effect:lash-core-effect__doc",
       "manifest": "crates/lash-core-effect/Cargo.toml",
@@ -19087,7 +19084,6 @@
         "chrono",
         "dotenvy",
         "futures-util",
-        "lash-internal-conformance",
         "lash-internal-plugin-process-controls",
         "lash-internal-protocol-rlm",
         "lash-internal-provider-openai",
@@ -19470,7 +19466,6 @@
         "lash-internal-protocol-rlm",
         "lash-internal-provider-openai",
         "lash-internal-restate",
-        "lash-internal-restate-test",
         "lash-internal-s3-store",
         "lash-internal-sqlite-store",
         "lash-runtime",
@@ -19542,12 +19537,6 @@
           "cargo": "lash-e2e-runner",
           "kind": "bin-unit-test",
           "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
-          "tags": []
-        },
-        {
-          "cargo": "lash-e2e-session-lease-triage",
-          "kind": "bin",
-          "label": "//runbooks/restate-postgres-workers:lash-e2e-session-lease-triage__bin",
           "tags": []
         },
         {

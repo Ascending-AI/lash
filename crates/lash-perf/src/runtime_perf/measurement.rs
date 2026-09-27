@@ -20,11 +20,10 @@ use lash_core::{
     AttachmentIntent, DriverAction, DriverContextView, Effect, ExecResponse, LiveReplayOutcome,
     LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part, ProtocolTurnOptions,
     QueuedWorkStore, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
-    SessionExecutionLeaseStore, SessionObservationEventPayload, SessionRevision,
-    SessionStoreFactory, TokenUsage, ToolCallOutput, ToolCancellation, ToolFailure,
-    ToolFailureClass, TurnInput, TurnInputStore, TurnMachine, TurnMachineConfig,
-    facade_support::ModelToolReturn, facade_support::Response, facade_support::TurnFinish,
-    facade_support::TurnOutcome, facade_support::shared_parts,
+    SessionObservationEventPayload, SessionRevision, SessionStoreFactory, TokenUsage,
+    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, TurnInput, TurnInputStore,
+    TurnMachine, TurnMachineConfig, facade_support::ModelToolReturn, facade_support::Response,
+    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
@@ -48,6 +47,27 @@ use super::harness::{
 use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;
 use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
+
+async fn seal_perf_claim(
+    store: &(impl lash_core::RuntimePersistence + ?Sized),
+    session_id: &lash_sansio::SessionId,
+) -> anyhow::Result<lash_core::ClaimAuthority> {
+    use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
+    let stored = store.drive_epoch(session_id).await?;
+    let admission = AdmissionId::new(uuid::Uuid::new_v4().to_string());
+    let seal = store
+        .seal_drive_epoch(
+            session_id,
+            &admission,
+            stored.epoch,
+            &RootStartNonce::new(admission.as_str()),
+        )
+        .await?;
+    let DriveEpochSeal::Sealed(fence) = seal else {
+        anyhow::bail!("benchmark drive seal was superseded: {seal:?}");
+    };
+    Ok(lash_core::ClaimAuthority::from_drive_fence(&fence))
+}
 
 mod types;
 pub(crate) use types::*;

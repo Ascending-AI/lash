@@ -105,7 +105,7 @@ macro_rules! turn_crash_level_1_tests {
 
 /// Register the turn crash laws that run their turns on the tier's
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): the FIG-3571
-/// generation-refusal pair, the direct-acceptance crash after its store
+/// the direct-acceptance crash after its store
 /// commit, and the turn-cancel closure across a crash at each of its cuts.
 ///
 /// The fixture yields `(guard, stores, make, host, runner)`: `stores` supplies
@@ -116,42 +116,16 @@ macro_rules! turn_crash_level_1_tests {
 ///
 /// A tier that must park one of these laws registers the single-law macros
 /// instead, each with its own attributes, so a deferral names exactly the law
-/// it parks: [`turn_crash_generation_redrive_tests!`],
-/// [`turn_crash_generation_claim_tests!`],
-/// [`turn_crash_direct_acceptance_tests!`] and
+/// it parks: [`turn_crash_direct_acceptance_tests!`] and
 /// [`turn_crash_cancel_closure_tests!`].
 #[macro_export]
 macro_rules! turn_crash_runner_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
-            (pre_cutover_generation_turn_redrive_is_refused_before_any_effect,
-                "turn-crash-pre-cutover-redrive"));
-        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
-            (pre_cutover_generation_turn_claim_is_refused_typed, "turn-crash-pre-cutover-claim"));
-        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
             (direct_turn_acceptance_crash_after_store_commit_admits_one_row,
                 "turn-crash-direct-acceptance"));
         $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
             (turn_cancel_closure_recovers_from_a_crash_at_every_cut, "turn-crash-cancel-closure"));
-    };
-}
-
-/// Register the FIG-3571 redrive refusal of [`turn_crash_runner_tests!`]
-/// alone.
-#[macro_export]
-macro_rules! turn_crash_generation_redrive_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
-            (pre_cutover_generation_turn_redrive_is_refused_before_any_effect, "turn-crash-pre-cutover-redrive"));
-    };
-}
-
-/// Register the FIG-3619 claim refusal of [`turn_crash_runner_tests!`] alone.
-#[macro_export]
-macro_rules! turn_crash_generation_claim_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
-            (pre_cutover_generation_turn_claim_is_refused_typed, "turn-crash-pre-cutover-claim"));
     };
 }
 

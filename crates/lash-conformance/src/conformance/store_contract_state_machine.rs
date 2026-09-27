@@ -14,6 +14,7 @@ use crate::{
     process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
@@ -1645,7 +1646,7 @@ async fn assert_enqueued_wake_high_water_safety(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = LeaseOwnerIdentity::opaque("law-high-water-owner", "law-high-water-incarnation");
     let lease = runtime
-        .try_claim_session_execution_lease(&session, &owner, "wake-high-water-executor", 60_000)
+        .seal_claim_epoch_for_test(&session, &owner, "wake-high-water-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1673,7 +1674,6 @@ async fn assert_enqueued_wake_high_water_safety(
     let commit = runtime
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(lease.completion())
                 .completing_queue_claim(claim.completion()),
         )
         .await
@@ -1761,7 +1761,7 @@ async fn assert_enqueued_wake_high_water_safety(
         "law-high-water-earlier-incarnation",
     );
     let lease = runtime
-        .try_claim_session_execution_lease(&session, &owner, "wake-high-water-executor-2", 60_000)
+        .seal_claim_epoch_for_test(&session, &owner, "wake-high-water-executor-2", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1787,7 +1787,6 @@ async fn assert_enqueued_wake_high_water_safety(
     runtime
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(lease.completion())
                 .completing_queue_claim(claim.completion()),
         )
         .await
@@ -1868,7 +1867,7 @@ async fn assert_prune_reregister_wake_fence(
     );
     let lease = handles
         .runtime
-        .try_claim_session_execution_lease(&session, &owner, "wake-fence-executor", 60_000)
+        .seal_claim_epoch_for_test(&session, &owner, "wake-fence-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1898,7 +1897,6 @@ async fn assert_prune_reregister_wake_fence(
                 },
                 &[],
             )
-            .releasing_session_execution_lease(lease.completion())
             .completing_queue_claim(claim.completion()),
         )
         .await
@@ -2286,7 +2284,7 @@ async fn consume_wake(
     ))) else { return Ok(false); };
     let owner = LeaseOwnerIdentity::opaque("property-consumer", "property-consumer-incarnation");
     let Some(lease) = runtime
-        .try_claim_session_execution_lease(&session, &owner, "consume-wake-executor", 60_000)
+        .seal_claim_epoch_for_test(&session, &owner, "consume-wake-executor", 60_000)
         .await
         .map_err(|error| error.to_string())?
         .acquired()
@@ -2334,7 +2332,6 @@ async fn consume_wake(
         .with_operation(operation)
         .map_err(|error| error.to_string())?
         .0
-        .releasing_session_execution_lease(lease.completion())
         .completing_queue_claim(completion);
     let result = runtime.commit_runtime_state(commit).await;
     if stale {

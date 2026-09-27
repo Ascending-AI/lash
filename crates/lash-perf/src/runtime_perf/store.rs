@@ -269,7 +269,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core::WorkClaim<lash_core::runtime::TurnInputClaimData>>, StoreError>
@@ -289,7 +289,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        session_execution_lease: &lash_core::ClaimAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
@@ -321,60 +321,17 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
         result
     }
 
-    async fn try_claim_session_execution_lease(
+    async fn seal_drive_epoch(
         &self,
         session_id: &SessionId,
-        owner: &lash_core::LeaseOwnerIdentity,
-        executor_id: &str,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, StoreError> {
-        let _observation = self
-            .metrics
-            .observe_call("try_claim_session_execution_lease");
+        admission: &lash_core::store::AdmissionId,
+        observed_epoch: u64,
+        root_start: &lash_core::store::RootStartNonce,
+    ) -> Result<lash_core::store::DriveEpochSeal, StoreError> {
+        let _observation = self.metrics.observe_call("seal_drive_epoch");
         self.inner
-            .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
+            .seal_drive_epoch(session_id, admission, observed_epoch, root_start)
             .await
-    }
-
-    async fn try_claim_session_execution_lease_with_token(
-        &self,
-        session_id: &SessionId,
-        owner: &lash_core::LeaseOwnerIdentity,
-        executor_id: &str,
-        claim_nonce: &lash_core::LeaseClaimNonce,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, StoreError> {
-        let _observation = self
-            .metrics
-            .observe_call("try_claim_session_execution_lease_with_token");
-        self.inner
-            .try_claim_session_execution_lease_with_token(
-                session_id,
-                owner,
-                executor_id,
-                claim_nonce,
-                lease_ttl_ms,
-            )
-            .await
-    }
-
-    async fn renew_session_execution_lease(
-        &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::SessionExecutionLease, StoreError> {
-        let _observation = self.metrics.observe_call("renew_session_execution_lease");
-        self.inner
-            .renew_session_execution_lease(fence, lease_ttl_ms)
-            .await
-    }
-
-    async fn release_session_execution_lease(
-        &self,
-        completion: &lash_core::SessionExecutionLeaseAuthority,
-    ) -> Result<(), StoreError> {
-        let _observation = self.metrics.observe_call("release_session_execution_lease");
-        self.inner.release_session_execution_lease(completion).await
     }
 }
 

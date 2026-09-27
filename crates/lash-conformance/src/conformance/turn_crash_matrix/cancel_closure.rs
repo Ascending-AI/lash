@@ -123,12 +123,6 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
                 crash,
             )
             .await;
-        // On the drive the closure write is the root's final commit, which
-        // releases the lane with the head: once it landed, no lane is left.
-        let lane_held = !(point.operation
-            == TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
-            && point.placement == CrashPlacement::InsideCall);
-        wait_for_recovery_lease(&make, &scenario, &point, lane_held).await;
         let recovery = make(&scenario);
         super::super::bind_conformance_session(&recovery, &identity.session_id).await;
 

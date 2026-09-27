@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use pretty_assertions::assert_eq;
 
 #[expect(
@@ -236,12 +237,9 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
         )
         .await
         .expect("enqueue suffix later");
-    let lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from("root"),
-        "suffix-cancel-owner",
-    )
-    .await;
+    let lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "suffix-cancel-owner")
+            .await;
     let active_claim = store
         .claim_active_turn_inputs(
             &SessionId::from("root"),
@@ -354,12 +352,8 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
         ))
         .await
         .expect("enqueue second next input");
-    let lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from("root"),
-        "turn-input-owner",
-    )
-    .await;
+    let lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "turn-input-owner").await;
     let claim = store
         .claim_next_turn_inputs(
             &SessionId::from("root"),
@@ -407,17 +401,11 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
         }
         other => panic!("live claimed pending input must not be cancellable, got {other:?}"),
     }
-    let lease_observation = store
-        .get_session_execution_lease(&SessionId::from("root"))
+    let live_epoch = store
+        .drive_epoch(&SessionId::from("root"))
         .await
-        .expect("observe live lease for claimed inputs");
-    let live_lease = lease_observation
-        .lease
-        .expect("the claim's session lease must remain held");
-    assert!(
-        lease_observation.observed_at_epoch_ms < live_lease.expires_at_epoch_ms,
-        "the claim projection is only held while its matching lease is live"
-    );
+        .expect("read the current drive epoch for claimed inputs")
+        .epoch;
     let claimed_reads = store
         .list_pending_turn_inputs(&SessionId::from("root"))
         .await
@@ -432,7 +420,7 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
     assert!(claimed_reads.iter().all(|read| {
         read.status
             == crate::PendingTurnInputReadStatus::Held {
-                lease_expires_at_ms: live_lease.expires_at_epoch_ms,
+                drive_epoch: live_epoch,
             }
     }));
 
@@ -472,7 +460,7 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
     assert!(reclaimed_reads.iter().all(|read| {
         read.status
             == crate::PendingTurnInputReadStatus::Held {
-                lease_expires_at_ms: live_lease.expires_at_epoch_ms,
+                drive_epoch: live_epoch,
             }
     }));
 
@@ -497,7 +485,7 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
         reads_after_stale_completion.iter().all(|read| {
             read.status
                 == crate::PendingTurnInputReadStatus::Held {
-                    lease_expires_at_ms: live_lease.expires_at_epoch_ms,
+                    drive_epoch: live_epoch,
                 }
         }),
         "stale completion must not abandon the live reclaimed claim"
@@ -506,7 +494,6 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(lease.completion())
                 .completing_turn_input_claim(reclaimed.completion()),
         )
         .await
@@ -542,12 +529,9 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
         completed_replay.state.kind(),
         crate::TurnInputStateKind::Completed
     );
-    let post_completion_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from("root"),
-        "post-completion-owner",
-    )
-    .await;
+    let post_completion_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "post-completion-owner")
+            .await;
     assert!(
         store
             .claim_next_turn_inputs(
@@ -577,7 +561,7 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
 )]
 pub async fn turn_input_claims_supersede_across_session_lease_generations_with_timing(
     store: Arc<dyn RuntimePersistence>,
-    lease_timing: &RuntimePersistenceLeaseTiming,
+    _lease_timing: &RuntimePersistenceLeaseTiming,
 ) {
     // The DeferredNextTurn idle-retry shape: a failed turn releases its lease
     // and the next idle acquisition re-claims the same next-turn input under a
@@ -593,8 +577,7 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations_with_t
 
     // (a) Same generation: a live next-turn claim is not re-claimable.
     let lease_a =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "tin-owner-a")
-            .await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-owner-a").await;
     let claim_a = store
         .claim_next_turn_inputs(
             &SessionId::from("root"),
@@ -624,10 +607,8 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations_with_t
     // (b) Idle retry after lease release + re-acquire: the same next-turn input
     // is re-claimable by the new generation and the stale completion is
     // superseded.
-    release_session_execution_lease_for_test(&store, &lease_a).await;
     let lease_b =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "tin-owner-b")
-            .await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-owner-b").await;
     let claim_b = store
         .claim_next_turn_inputs(
             &SessionId::from("root"),
@@ -656,26 +637,19 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations_with_t
         stale_err,
         StoreError::TurnInputClaimSuperseded { .. }
     ));
-    release_session_execution_lease_for_test(&store, &lease_b).await;
 
     // (c) TTL takeover mints a new generation without a release.
     let dead_owner = lease_owner("tin-stale");
-    let (_dead_lease, claim_dead) = claim_turn_input_under_short_lease(
-        &store,
-        &SessionId::from("root"),
-        &dead_owner,
-        lease_timing,
-    )
-    .await;
+    let dead_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-stale").await;
+    let claim_dead = store
+        .claim_next_turn_inputs(&SessionId::from("root"), &dead_lease, &dead_owner, 10)
+        .await
+        .expect("pre-supersession claim")
+        .expect("claim exists");
     let taker = lease_owner("tin-taker");
-    let taker_lease = claim_session_execution_lease_after_expiry(
-        &store,
-        &SessionId::from("root"),
-        &taker,
-        lease_timing,
-        "stale turn-input owner TTL",
-    )
-    .await;
+    let taker_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-taker").await;
     let claim_taker = store
         .claim_next_turn_inputs(&SessionId::from("root"), &taker_lease.fence(), &taker, 10)
         .await
@@ -717,7 +691,7 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
         .await
         .expect("enqueue active input");
 
-    let predecessor = claim_session_execution_lease_for_test(
+    let predecessor = seal_claim_authority_for_test(
         &store,
         &SessionId::from(SESSION_ID),
         "fig905-active-predecessor",
@@ -739,9 +713,8 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
         predecessor_claim.inputs[0].state.kind(),
         crate::TurnInputStateKind::Accepted
     );
-    release_session_execution_lease_for_test(&store, &predecessor).await;
 
-    let successor = claim_session_execution_lease_for_test(
+    let successor = seal_claim_authority_for_test(
         &store,
         &SessionId::from(SESSION_ID),
         "fig905-active-successor",
@@ -787,7 +760,6 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .releasing_session_execution_lease(successor.completion())
                 .completing_turn_input_claim(successor_claim.completion()),
         )
         .await
@@ -798,9 +770,8 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
+pub async fn accepted_turn_input_with_superseded_drive_is_cancelled_and_vacuumed(
     store: Arc<dyn RuntimePersistence>,
-    lease_timing: &RuntimePersistenceLeaseTiming,
 ) {
     const SESSION_ID: &str = "fig1511-orphaned-accepted";
     const TURN_ID: &str = "fig1511-orphaned-accepted:turn";
@@ -816,12 +787,7 @@ pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
         .expect("enqueue active input");
     let owner = lease_owner("fig1511-accepted-owner");
     let lease = store
-        .try_claim_session_execution_lease(
-            &session_id,
-            &owner,
-            "fig1511-accepted-executor",
-            lease_timing.scaffolding_lease_ttl_ms(),
-        )
+        .seal_claim_epoch_for_test(&session_id, &owner, "fig1511-accepted-executor", 0)
         .await
         .expect("claim session lease")
         .acquired()
@@ -859,12 +825,15 @@ pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
         other => panic!("live accepted input must retain its real claim, got {other:?}"),
     }
 
-    lease_timing.wait_until_expired().await;
+    store
+        .supersede_claim_epoch_for_test(&lease)
+        .await
+        .expect("seal successor drive after the first claimant stopped");
     expect_cancelled_pending_input(
         store
             .cancel_pending_turn_input(&session_id, &input.input_id)
             .await
-            .expect("cancel accepted input after lease expiry"),
+            .expect("cancel accepted input after drive supersession"),
         &input.input_id,
     );
     let stale_state = RuntimeSessionState {
@@ -959,12 +928,8 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
         .expect("cancel next input");
     expect_cancelled_pending_input(cancelled_next, &next_cancel.input_id);
 
-    let lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from("root"),
-        "cancel-input-owner",
-    )
-    .await;
+    let lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "cancel-input-owner").await;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1081,12 +1046,8 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         .await
         .expect("enqueue other active input");
 
-    let lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from("root"),
-        "active-input-owner",
-    )
-    .await;
+    let lease =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "active-input-owner").await;
     let claim_turn_id = crate::TurnId::from(turn_id);
     let claim = store
         .claim_active_turn_inputs(
@@ -1203,7 +1164,6 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(lease.completion())
                 .completing_turn_input_claim(next_claim.completion()),
         )
         .await
@@ -1243,8 +1203,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     let dead_turn_id = "fig1573-dead-turn";
     let other_turn_id = "fig1573-other-turn";
     let lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "fig1573-owner")
-            .await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "fig1573-owner").await;
     let orphaned = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &SessionId::from("root"),
@@ -1474,13 +1433,8 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .await
         .expect("stale owner discovers the orphan before takeover");
     assert_eq!(discovered, vec![TurnId::from("fig1573-superseded-turn")]);
-    release_session_execution_lease_for_test(&store, &lease).await;
-    let successor = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from("root"),
-        "fig1573-successor",
-    )
-    .await;
+    let successor =
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "fig1573-successor").await;
     assert!(
         successor.fencing_token > stale_fence.fencing_token,
         "a reclaimed lane must advance the generation"
@@ -1496,8 +1450,8 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .await
         .expect_err("a superseded fence must be refused inside the repair");
     assert!(
-        matches!(refusal, StoreError::SessionExecutionLeaseExpired { .. }),
-        "a superseded repair must be refused as a lost lease, not silently applied: {refusal:?}"
+        matches!(refusal, StoreError::StaleDriveFence { .. }),
+        "a superseded repair must be refused by the drive fence: {refusal:?}"
     );
     let after_refusal = store
         .list_pending_turn_inputs(&SessionId::from("root"))
@@ -1533,7 +1487,6 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             .len(),
         1,
     );
-    release_session_execution_lease_for_test(&store, &successor).await;
 }
 
 #[expect(
@@ -1698,7 +1651,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
         .await
         .expect("admit the input orphan repair defers");
 
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "fig3544-owner").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "fig3544-owner").await;
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1793,7 +1746,6 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(lease.completion())
                 .completing_turn_input_claim(next_claim.completion()),
         )
         .await
@@ -1885,8 +1837,7 @@ pub async fn changed_retry_is_typed_conflict(store: Arc<dyn RuntimePersistence>)
         );
     }
 
-    let lease =
-        claim_session_execution_lease_for_test(&store, &session_id, "fig3544-conflict-owner").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "fig3544-conflict-owner").await;
     store
         .repair_orphaned_active_turn_inputs(
             &session_id,

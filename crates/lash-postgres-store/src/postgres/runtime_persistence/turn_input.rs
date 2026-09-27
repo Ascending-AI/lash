@@ -5,7 +5,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         binding_id: &str,
         admitted_scope: &ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -101,7 +101,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         authorization: &lash_core_execution::TurnCancelClosureAuthorization,
     ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
@@ -265,7 +265,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         binding_id: &str,
         admitted_scope: &ExecutionScope,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
@@ -628,7 +628,6 @@ impl TurnInputStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
@@ -636,7 +635,6 @@ impl TurnInputStore for PostgresSessionStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .bind(now as i64)
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -698,9 +696,6 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         let targets = targets.to_vec();
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        // Lease row first, then the input rows in queue order: the order every
-        // claim and commit takes them in.
-        load_session_execution_lease_tx(&mut tx, session_id).await?;
         let mut covered = std::collections::BTreeSet::new();
         for target in &targets {
             if let Some(row) =
@@ -763,9 +758,6 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         let anchor = anchor.clone();
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        // Lease row first, then the input rows in queue order: the order every
-        // claim and commit takes them in.
-        load_session_execution_lease_tx(&mut tx, session_id).await?;
         let Some(anchor_row) =
             load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &anchor, false).await?
         else {
@@ -830,7 +822,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core_execution::TurnId,
         checkpoint: lash_core_execution::CheckpointKind,
@@ -855,7 +847,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
@@ -951,7 +943,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         scope: lash_core_execution::OrphanedTurnInputScope<'_>,
     ) -> Result<Vec<lash_core_execution::TurnId>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -977,7 +969,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         turn_id: &lash_core_execution::TurnId,
         observed: &lash_core_execution::TurnCancelIntentSnapshot,
         settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,

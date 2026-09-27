@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 
 use lashlang::testing::ast_builders as b;
 
@@ -645,7 +646,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         })
         .await?;
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-owner",
@@ -758,7 +759,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         })
         .await?;
     let late_lease = late_store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &late_session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-late-owner",

@@ -7,30 +7,9 @@
 //! call, and a final model response produces the committed golden trace. The
 //! crash matrix is generated from that trace: every operation has a boundary
 //! crash, every durable write has an inside-call lost-response crash, and the
-//! scripted provider contributes its own mid-stream crash points. The scripted
-//! provider deliberately holds the initial stream until one lease renewal is
-//! observed, making the golden renewal position deterministic rather than a
-//! claim about scheduler ordering.
-//!
-//! The matrix then replays the renewal-boundary point once more with the
-//! recovered turn's lease-renewal task deterministically starved. A lease that
-//! lapses by wall clock cannot commit the admitted run. The suite asserts its
-//! retryable disposition and retained identity, then resumes the same run with
-//! a healthy lease and verifies one committed terminal and settled ingress.
-//! Pinning that path keeps it covered on every run rather than only when a
-//! loaded runner happens to starve the renewal.
-//!
-//! That starvation is the *only* lease lapse this suite admits. Every turn the
-//! matrix crashes runs on a lease term wide enough that no scheduling delay can
-//! close it before the injected crash ([`crashed_turn_timings`]), because an
-//! incidental lapse silently rewrites the case: the crashed turn's checkpoint
-//! claim becomes advisory, so it holds fewer claims than the ruled end state was
-//! written for, and recovery legally delivers the demoted input inside the
-//! recovered turn — a second protocol iteration and a second terminal assistant
-//! output that no deferral accounts for. Recovery never waits that wide term
-//! out: [`collapse_crashed_executor_lease`] expires the abandoned lease on
-//! demand, so displacement stays a real store decision and no ruled outcome
-//! depends on wall clock (FIG-2290).
+//! scripted provider contributes its own mid-stream crash points. Recovery
+//! replays the recorded drive admission and fences stale claim settlement by
+//! drive epoch and owner incarnation.
 //!
 //! Trace drift covers the operations explicitly decorated by this module.
 //! Durable-store methods that [`SeamStore`] passes through undecorated are
@@ -69,6 +48,8 @@
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
@@ -82,10 +63,9 @@ use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt};
 use crate::{
-    CheckpointKind, LeaseOwnerIdentity, PendingTurnInputDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, RuntimeEffectController, RuntimePersistence, SessionExecutionLease,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionHeadMeta, StoreError,
-    TurnInputClaim,
+    CheckpointKind, ClaimAuthority, LeaseOwnerIdentity, PendingTurnInputDraft, QueuedWorkClaim,
+    QueuedWorkClaimBoundary, RuntimeEffectController, RuntimePersistence, SessionHeadMeta,
+    StoreError, TurnInputClaim,
 };
 
 mod after_commit_redrive;
@@ -97,7 +77,6 @@ mod expectations;
 mod held_turn_input;
 mod invocation_effect_host;
 mod layered_group_child;
-mod pre_cutover_generation;
 mod recovery;
 mod reference_turn;
 mod seam_controllers;
@@ -125,10 +104,6 @@ use expectations::{
 pub use held_turn_input::held_turn_input_visibility_survives_claim_holder_crash;
 use invocation_effect_host::InvocationEffectHost;
 pub use layered_group_child::a_host_layer_observes_its_group_childrens_effects;
-pub use pre_cutover_generation::{
-    pre_cutover_generation_turn_claim_is_refused_typed,
-    pre_cutover_generation_turn_redrive_is_refused_before_any_effect,
-};
 use pretty_assertions::assert_eq;
 pub(crate) use seam_controllers::{
     CrashAfterCheckpointExecutionController, LawSeamHost, SeamLayer,
@@ -136,17 +111,12 @@ pub(crate) use seam_controllers::{
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
-// 10x the renewal cadence leaves stall margin on loaded runners; fencing is unchanged.
 const RECOVERY_TTL: Duration = Duration::from_secs(3);
 const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 const NOMINAL_RECOVERY_TTL: Duration = Duration::from_secs(5);
 const CRASHED_TURN_TTL: Duration = Duration::from_secs(60);
 const HIT_TIMEOUT: Duration = Duration::from_secs(60);
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
-/// Host owner id every runtime built by this harness leases under
-/// ([`crate::testing::runtime_lease_owner`]), so the recovery probe can tell a
-/// crashed turn's abandoned lease from its own.
-const CRASHED_EXECUTOR_OWNER_ID: &str = "lash-core-test-worker";
 
 #[derive(Clone, Debug)]
 struct ReferenceIdentity {
@@ -180,8 +150,7 @@ impl TurnSeamOperation {
         matches!(
             self,
             Self::Store(
-                StoreOperation::ClaimSessionExecutionLease
-                    | StoreOperation::BeginQueuedRun
+                StoreOperation::BeginQueuedRun
                     | StoreOperation::SelectQueuedRun
                     | StoreOperation::SettleQueuedRun
                     | StoreOperation::ClaimNextTurnInputs
@@ -191,8 +160,6 @@ impl TurnSeamOperation {
                     | StoreOperation::CommitFinalHead { .. }
                     | StoreOperation::AuthorizeTurnCancelClosure
                     | StoreOperation::ApplyTurnCancelEffectsAndConsume
-                    | StoreOperation::RenewSessionExecutionLease
-                    | StoreOperation::ReleaseSessionExecutionLease
             ) | Self::TurnControl(_)
         )
     }
@@ -205,9 +172,6 @@ enum StoreOperation {
     LoadSession,
     LoadSessionHeadMeta,
     LoadQueuedRunAdmissionHead,
-    ClaimSessionExecutionLease,
-    RenewSessionExecutionLease,
-    ReleaseSessionExecutionLease,
     ClaimLeadingSessionCommand,
     ClaimNextTurnInputs,
     BeginQueuedRun,
@@ -227,7 +191,6 @@ enum StoreOperation {
     CommitFinalHead {
         settles_queue: bool,
         settles_turn_input: bool,
-        releases_lease: bool,
     },
     AuthorizeTurnCancelClosure,
     ApplyTurnCancelEffectsAndConsume,
@@ -421,17 +384,6 @@ struct SeamState {
 struct SeamControl {
     state: Arc<Mutex<SeamState>>,
     hit: Arc<tokio::sync::Notify>,
-    completed: Arc<tokio::sync::Notify>,
-    /// When set, the scripted turn deterministically reproduces a starved
-    /// lease-renewal task: the first renewal still completes (so the scripted
-    /// provider's renewal park releases), every later renewal is held past the
-    /// lease TTL, and the scripted provider holds its initial response until
-    /// the wall-clock fence has certainly lapsed. See [`RenewalPressure`].
-    starve_renewal: Arc<std::sync::atomic::AtomicBool>,
-    /// When set, a background lease renewal is held until the scripted turn has
-    /// reached its provider mid-stream point. See
-    /// [`SeamControl::pin_renewal_after_provider`].
-    pin_renewal_after_provider: Arc<std::sync::atomic::AtomicBool>,
     /// Notified on every [`SeamControl::record`], so a seam can wait for another
     /// seam to appear in the trace rather than poll for it.
     recorded: Arc<tokio::sync::Notify>,
@@ -441,86 +393,9 @@ struct SeamControl {
     process_crash: tokio_util::sync::CancellationToken,
 }
 
-/// Whether a matrix case runs its successor turn under a nominal lease-renewal
-/// task or under a deterministically starved one.
-///
-/// A starved renewal is not a fault injected into the durable substrate: it is
-/// the scheduling reality of a loaded CI runner, where the renewal task can
-/// miss its deadline and the lease lapses by wall clock. The runtime answers
-/// that with the advisory checkpoint skip (ADR 0029), which defers the
-/// undelivered active-turn input to the next turn. `Starved` pins that path so
-/// the matrix covers it on every run instead of only when the runner is slow.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RenewalPressure {
-    Nominal,
-    Starved,
-}
-
 impl SeamControl {
-    fn starve_renewals(&self) {
-        self.starve_renewal
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn renewals_are_starved(&self) -> bool {
-        self.starve_renewal
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// Pin every background lease renewal behind the provider's mid-stream seam.
-    ///
-    /// **This exists solely for [`turn_crash_trace_drift_check`]'s exact
-    /// golden-trace comparison, and no other test should reach for it.** That
-    /// check is the one place a strict seam *ordering* is asserted; every matrix
-    /// case asserts durable end states instead, and several of them arm crash
-    /// points that legitimately stop the turn before the provider is ever
-    /// called, where this park would have nothing to wait for.
-    ///
-    /// The race it removes: the renewal task fires on a fixed timer from the
-    /// lease claim ([`RECOVERY_RENEW`], against a [`RECOVERY_TTL`] lease), while
-    /// the turn has three store seams to clear before it reaches the provider.
-    /// On a loaded runner the timer wins that race and the renewal is recorded
-    /// ahead of `Provider(InitialRequest)` — a legal runtime ordering that a
-    /// single golden trace cannot express. Ordering the renewal behind a
-    /// positive signal removes the race without relaxing the comparison: the
-    /// renewal must still happen, and the scripted provider still refuses to
-    /// answer until it has.
-    fn pin_renewal_after_provider(&self) {
-        self.pin_renewal_after_provider
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// A no-op unless [`SeamControl::pin_renewal_after_provider`] armed it.
-    async fn park_renewal_behind_provider(&self) {
-        if !self
-            .pin_renewal_after_provider
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
-            return;
-        }
-        let target = TurnSeamOperation::Provider(ProviderOperation::InitialMidStream);
-        tokio::time::timeout(HIT_TIMEOUT, async {
-            loop {
-                let recorded = self.recorded.notified();
-                if self.state.lock_recover().trace.contains(&target) {
-                    break;
-                }
-                recorded.await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("pinned lease renewal never saw the provider reach {target:?}"));
-    }
-
     fn record(&self, operation: TurnSeamOperation) {
-        let mut state = self.state.lock_recover();
-        let duplicate_renewal = operation
-            == TurnSeamOperation::Store(StoreOperation::RenewSessionExecutionLease)
-            && state.trace.contains(&operation);
-        if !duplicate_renewal {
-            state.trace.push(operation);
-        }
-        drop(state);
+        self.state.lock_recover().trace.push(operation);
         self.recorded.notify_one();
     }
 
@@ -584,10 +459,6 @@ impl SeamControl {
         self.process_crash.cancelled().await;
     }
 
-    fn process_has_crashed(&self) -> bool {
-        self.state.lock_recover().process_crashed
-    }
-
     fn trace(&self) -> Vec<TurnSeamOperation> {
         self.state.lock_recover().trace.clone()
     }
@@ -630,21 +501,6 @@ impl SeamControl {
 
     fn mark_completed(&self, operation: TurnSeamOperation) {
         self.state.lock_recover().completed.push(operation);
-        self.completed.notify_one();
-    }
-
-    async fn wait_until_completed(&self, operation: &TurnSeamOperation) {
-        tokio::time::timeout(HIT_TIMEOUT, async {
-            loop {
-                let completed = self.completed.notified();
-                if self.state.lock_recover().completed.contains(operation) {
-                    break;
-                }
-                completed.await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("semantic seam operation did not complete: {operation:?}"));
     }
 
     async fn around<T, F>(&self, operation: TurnSeamOperation, future: F) -> T
@@ -753,7 +609,6 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
             TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
                 settles_queue: !commit.completed_queue_claims.is_empty(),
                 settles_turn_input: !commit.completed_turn_input_claims.is_empty(),
-                releases_lease: commit.release_session_execution_lease.is_some(),
             })
         };
         self.control
@@ -763,7 +618,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        session_execution_lease: &ClaimAuthority,
         authorization: &crate::TurnCancelClosureAuthorization,
     ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
         self.control
@@ -777,7 +632,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn begin_or_resume_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         request: crate::BeginQueuedRun,
     ) -> Result<crate::QueuedRunAdmission, StoreError> {
         self.control
@@ -790,7 +645,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn select_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         scope: &crate::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -826,7 +681,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn settle_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         settlement: crate::QueuedRunCommit,
     ) -> Result<crate::QueuedRunAdmission, StoreError> {
         self.control
@@ -840,7 +695,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -857,7 +712,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        session_execution_lease: &crate::ClaimAuthority,
         scope: crate::OrphanedTurnInputScope<'_>,
     ) -> Result<Vec<crate::TurnId>, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs);
@@ -873,7 +728,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     async fn repair_orphaned_active_turn_inputs(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        session_execution_lease: &crate::ClaimAuthority,
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
         settlement: Option<&crate::TurnCancelClosureSettlement>,
@@ -897,81 +752,10 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
             .await
     }
 
-    async fn try_claim_session_execution_lease_with_token(
-        &self,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        executor_id: &str,
-        claim_nonce: &crate::LeaseClaimNonce,
-        ttl: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::ClaimSessionExecutionLease);
-        self.control
-            .around(
-                operation,
-                self.inner.try_claim_session_execution_lease_with_token(
-                    session_id,
-                    owner,
-                    executor_id,
-                    claim_nonce,
-                    ttl,
-                ),
-            )
-            .await
-    }
-
-    async fn renew_session_execution_lease(
-        &self,
-        fence: &SessionExecutionLeaseAuthority,
-        ttl: u64,
-    ) -> Result<SessionExecutionLease, StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::RenewSessionExecutionLease);
-        self.control.park_renewal_behind_provider().await;
-        // A starved renewal task is modeled at its only observable seam: the
-        // renewal call simply does not reach the store in time. The first
-        // renewal is left intact because the scripted provider parks on it.
-        //
-        // The hold is scaled to the test's own hit timeout rather than to a
-        // small multiple of the lease TTL: a checkpoint that lands late under a
-        // loaded runner must still find the lease lapsed, and any hold short
-        // enough for a re-armed renewal to beat it makes the case cover
-        // nothing. The renewal task is aborted at release, so an over-long
-        // hold costs no wall clock.
-        if self.control.renewals_are_starved() && self.control.completed_count(&operation) >= 1 {
-            tokio::time::sleep(HIT_TIMEOUT).await;
-        }
-        self.control
-            .around(
-                operation,
-                self.inner.renew_session_execution_lease(fence, ttl),
-            )
-            .await
-    }
-
-    async fn release_session_execution_lease(
-        &self,
-        completion: &SessionExecutionLeaseAuthority,
-    ) -> Result<(), StoreError> {
-        if self.control.process_has_crashed() {
-            return Err(StoreError::Backend(
-                "simulated process crash suppresses owner-side lease release".to_string(),
-            ));
-        }
-        let operation = TurnSeamOperation::Store(StoreOperation::ReleaseSessionExecutionLease);
-        self.control
-            .around(
-                operation,
-                self.inner.release_session_execution_lease(completion),
-            )
-            .await
-    }
-
-    // The diagnostic lease read inherits the delegating default deliberately.
-
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &SessionId,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimLeadingSessionCommand);
@@ -987,7 +771,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     async fn claim_ready_queued_work(
         &self,
         session_id: &SessionId,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: crate::QueuedWorkClaimPolicy,
@@ -1007,7 +791,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &SessionId,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
@@ -1030,7 +814,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &SessionId,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &ClaimAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         ids: &[crate::BatchId],
@@ -1186,19 +970,6 @@ impl Provider for ScriptedProvider {
         {
             self.control.stop_here().await;
         }
-        if operation == ProviderOperation::InitialRequest {
-            self.control
-                .wait_until_completed(&TurnSeamOperation::Store(
-                    StoreOperation::RenewSessionExecutionLease,
-                ))
-                .await;
-            if self.control.renewals_are_starved() {
-                // Hold the model response past the renewed lease's TTL. With
-                // the renewal task starved above, the wall-clock fence lapses
-                // before the turn reaches its `AfterWork` checkpoint.
-                tokio::time::sleep(RECOVERY_TTL + RECOVERY_RENEW).await;
-            }
-        }
         Ok(match operation {
             ProviderOperation::InitialRequest => crate::LlmResponse {
                 parts: vec![crate::LlmOutputPart::ToolCall {
@@ -1296,22 +1067,7 @@ fn recovery_timings() -> crate::LeaseTimings {
         .expect("3s TTL / 100ms renew satisfies ttl >= 3x renew")
 }
 
-/// Lease timings for a scripted turn that is about to be crashed.
-///
-/// The term must not lapse *before* the injected crash. A lapsed lease makes
-/// the turn's checkpoint claim advisory (ADR 0029), so the crashed turn silently
-/// holds fewer claims than the case was written for and recovery legally
-/// delivers the demoted input inside the recovered turn — a second protocol
-/// iteration, and a second terminal assistant output, with nothing deferred for
-/// the drain turn to account for. Whether that happens is decided by the
-/// runner's scheduler (a renewal task missing a 100ms deadline against a 300ms
-/// term), not by the crash under test, so the term is wide enough that no
-/// scheduling delay can close it.
-///
-/// Recovery does not wait the term out: the abandoned lease is expired on
-/// demand by [`collapse_crashed_executor_lease`]. Deliberate lease starvation
-/// stays available to cases that want it ([`RenewalPressure::Starved`], which
-/// runs its turn on [`recovery_timings`]).
+/// Configuration shared with the runtime fixture for a turn about to crash.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1321,51 +1077,13 @@ fn crashed_turn_timings() -> crate::LeaseTimings {
         .expect("60s TTL / 100ms renew satisfies ttl >= 3x renew")
 }
 
-/// Expire the lease an executor abandoned when it crashed, so recovery
-/// displaces it without waiting out its term.
-///
-/// The harness reads the row and renews it to the shortest legal term, acting
-/// as the ghost of the crashed executor: displacement stays a real store
-/// decision about an expired lease, it just stops being a wall-clock race.
-/// Returns whether a lease held by [`CRASHED_EXECUTOR_OWNER_ID`] was collapsed;
-/// an absent, released, or already-lapsed lease is not an error, because in each
-/// of those states the next claim already succeeds.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(crate) async fn collapse_crashed_executor_lease(
-    store: &dyn RuntimePersistence,
-    session_id: &SessionId,
-) -> bool {
-    let lease = store
-        .get_session_execution_lease(session_id)
-        .await
-        .expect("read the crashed turn's session execution lease")
-        .lease;
-    let Some(lease) = lease else {
-        return false;
-    };
-    if lease.owner.owner_id != CRASHED_EXECUTOR_OWNER_ID {
-        return false;
-    }
-    store
-        .renew_session_execution_lease(&lease.authority(), 1)
-        .await
-        .is_ok()
-}
-
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 fn nominal_recovery_timings() -> crate::LeaseTimings {
-    // The scripted provider deliberately awaits the first completed renewal.
-    // Keep that nominal successor turn's lease window independent from the
-    // short TTL used by the explicit starved-renewal case: a loaded runner may
-    // delay the renewal task past 300ms without changing the awaited condition.
     crate::LeaseTimings::new(NOMINAL_RECOVERY_TTL, RECOVERY_RENEW)
-        .expect("5s TTL / 100ms renew tolerates the nominal renewal barrier")
+        .expect("5s TTL / 100ms interval satisfies fixture configuration")
 }
 
 #[expect(
@@ -1544,12 +1262,18 @@ async fn try_build_runtime_over_host(
         PluginSpec::new().with_tool_provider(Arc::new(trace_tool)),
     )));
     Box::pin(
-        crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())
-            .with_session_id(&identity.session_id)
-            .with_policy(runtime_policy())
-            .with_store(store)
-            .with_plugin_factories(plugin_factories)
-            .build(),
+        crate::LashRuntime::builder(
+            host,
+            crate::LeaseOwnerIdentity::opaque(
+                "turn-crash-matrix",
+                uuid::Uuid::new_v4().to_string(),
+            ),
+        )
+        .with_session_id(&identity.session_id)
+        .with_policy(runtime_policy())
+        .with_store(store)
+        .with_plugin_factories(plugin_factories)
+        .build(),
     )
     .await
 }
@@ -1559,7 +1283,7 @@ async fn seed_reference_ingress(
     identity: &ReferenceIdentity,
     scenario: &str,
 ) {
-    seed_reference_ingress_as(store, identity, scenario, None).await;
+    seed_reference_ingress_as(store, identity, scenario, Some(&identity.turn_id)).await;
 }
 
 /// The reference ingress for a drain through the session drive: the
@@ -1630,10 +1354,12 @@ async fn drive_turn(
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
-    Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
-        tokio_util::sync::CancellationToken::new(),
-        scoped_controller(effect_controller, identity),
-    )))
+    Box::pin(
+        runtime.drive_one_admitted_queued_root(crate::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            scoped_controller(effect_controller, identity),
+        )),
+    )
     .await
     .map(crate::facade_support::QueuedTurnDrain::ran)
 }
@@ -1644,31 +1370,19 @@ async fn drive_root_on(
     mut runtime: crate::LashRuntime,
     scoped: crate::ScopedEffectController<'_>,
 ) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
-    Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
-        tokio_util::sync::CancellationToken::new(),
-        scoped,
-    )))
-    .await
-    .map(crate::facade_support::QueuedTurnDrain::ran)
-}
-
-/// Drain the reference turn on the controller a tier's runner lent it.
-async fn drive_turn_on(
-    mut runtime: crate::LashRuntime,
-    scoped: crate::ScopedEffectController<'_>,
-) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
-    Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
-        tokio_util::sync::CancellationToken::new(),
-        scoped,
-    )))
+    Box::pin(
+        runtime.drive_one_admitted_queued_root(crate::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            scoped,
+        )),
+    )
     .await
     .map(crate::facade_support::QueuedTurnDrain::ran)
 }
 
 /// Park the turn at `control`'s armed point and fire `crash` there: the crash
 /// trigger a runner-driven law hands [`ConformanceTurnRunner::run_turn_until_crash`](crate::ConformanceTurnRunner::run_turn_until_crash).
-/// The seam marks the process crashed first, so no best-effort release of the
-/// dying execution's lease reaches the store.
+/// The seam marks the process crashed before firing the runner's crash point.
 fn crash_at_armed_point(control: &SeamControl) -> crate::ConformanceCrash {
     let crash = crate::ConformanceCrash::new();
     let trigger = crash.clone();
@@ -1766,10 +1480,7 @@ pub async fn turn_crash_trace_drift_check<F, S>(
         &executions,
         nominal_recovery_timings(),
     )
-    .before_drive(|control| {
-        control.clear();
-        control.pin_renewal_after_provider();
-    })
+    .before_drive(SeamControl::clear)
     .reporting();
     runner
         .run_turn(reference_admitted_scope(&identity), attempt)
@@ -1793,65 +1504,6 @@ pub async fn turn_crash_trace_drift_check<F, S>(
         .unwrap_or_else(|error| panic!("invalid durable recovery rulings: {error}"));
     validate_error_return_rulings(&error_return_rulings())
         .unwrap_or_else(|error| panic!("invalid error-return rulings: {error}"));
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn wait_for_recovery_lease<F>(
-    make: &F,
-    scenario: &str,
-    point: &TurnCrashPoint,
-    predecessor_claimed: bool,
-) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-{
-    let identity = ReferenceIdentity::for_scenario(scenario);
-    let owner = LeaseOwnerIdentity::opaque("recovery-probe", format!("{scenario}:probe"));
-    let store = make(scenario);
-    super::bind_conformance_session(&store, &identity.session_id).await;
-    tokio::time::timeout(RECOVERY_TIMEOUT, async {
-        loop {
-            // The crashed turn ran on a term wide enough that no scheduling
-            // delay could lapse it mid-turn; expire what it abandoned here
-            // instead. Repeated per iteration so a renewal that was already in
-            // flight when the turn was aborted cannot re-extend it.
-            collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
-            let outcome = store
-                .try_claim_session_execution_lease(
-                    &identity.session_id,
-                    &owner,
-                    "wait-for-recovery-lease-executor",
-                    recovery_timings().ttl_ms(),
-                )
-                .await
-                .expect("probe recovery lease");
-            if let Some(acquisition) = outcome.acquisition() {
-                match (predecessor_claimed, acquisition.displaced.as_ref()) {
-                    (true, Some(displaced)) => {
-                        assert_eq!(displaced.owner.owner_id, "lash-core-test-worker");
-                    }
-                    (false, None) => {}
-                    (true, None) => panic!(
-                        "crash recovery must displace the lapsed predecessor executor: {scenario} {point:?}"
-                    ),
-                    (false, Some(displaced)) => {
-                        panic!("claim-boundary crash cannot have a predecessor, got {displaced:?}")
-                    }
-                }
-                let lease = acquisition.lease;
-                store
-                    .release_session_execution_lease(&lease.completion())
-                    .await
-                    .expect("release recovery probe");
-                break;
-            }
-            tokio::time::sleep(recovery_timings().renew_interval()).await;
-        }
-    })
-    .await
-    .expect("crashed turn lease becomes reclaimable by polling");
 }
 
 #[expect(
@@ -1911,10 +1563,7 @@ fn pending_input_text(read: &crate::PendingTurnInputRead) -> String {
 /// `turn_runner` module docs). `make` returns fresh outer handles over the
 /// substrate selected by its semantic scenario key.
 ///
-/// Every generated crash point runs under a nominal lease-renewal task. The
-/// matrix then replays the renewal-boundary point once more with the renewal
-/// task deterministically starved, which pins the retained-admission retry
-/// after lease loss that a loaded runner would otherwise reach only by luck.
+/// Every generated crash point runs under the tier's session drive.
 pub async fn turn_crash_matrix_level_1<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
@@ -1978,10 +1627,6 @@ fn validate_parked_points(
 /// [`turn_crash_matrix_level_1`] with `parked` crash points held back, each
 /// under the known-defect ticket that brings it back. A tier parks a point
 /// only where recovery from it hits that defect; every other point runs.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn turn_crash_matrix_level_1_parking<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
@@ -2013,32 +1658,8 @@ pub async fn turn_crash_matrix_level_1_parking<F, S>(
             continue;
         }
         let scenario = point_key(&entry.point);
-        Box::pin(run_crash_matrix_case(
-            &law,
-            &entry,
-            &scenario,
-            RenewalPressure::Nominal,
-        ))
-        .await;
+        Box::pin(run_crash_matrix_case(&law, &entry, &scenario)).await;
     }
-    let renewal_boundary = turn_crash_matrix_outcomes()
-        .into_iter()
-        .find(|entry| {
-            entry.point
-                == TurnCrashPoint {
-                    operation: TurnSeamOperation::Store(StoreOperation::RenewSessionExecutionLease),
-                    placement: CrashPlacement::Boundary,
-                }
-        })
-        .expect("generated matrix contains the renewal-boundary crash point");
-    let starved_scenario = format!("{}:starved-renewal", point_key(&renewal_boundary.point));
-    Box::pin(run_crash_matrix_case(
-        &law,
-        &renewal_boundary,
-        &starved_scenario,
-        RenewalPressure::Starved,
-    ))
-    .await;
 }
 
 /// What every case of a runner-driven crash-matrix law runs over.

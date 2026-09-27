@@ -1,6 +1,7 @@
 //! Durable store-recovery laws over fresh persistence handles.
 
 use super::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
@@ -80,7 +81,7 @@ async fn seed_and_claim(
     session_id: &SessionId,
     source: &str,
     lease_ttl_ms: u64,
-) -> (crate::SessionExecutionLease, crate::QueuedWorkClaim) {
+) -> (crate::ClaimAuthority, crate::QueuedWorkClaim) {
     bind_conformance_session(store, session_id).await;
     let batch = store
         .enqueue_queued_work(queued_work(session_id, source))
@@ -88,7 +89,7 @@ async fn seed_and_claim(
         .expect("seed store-recovery queued work");
     let lease_owner = owner(format!("{source}:owner-a"));
     let lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             session_id,
             &lease_owner,
             "seed-and-claim-executor",
@@ -122,7 +123,7 @@ async fn acquire_successor<F>(
     session_id: &SessionId,
     source: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
-) -> (Arc<dyn RuntimePersistence>, crate::SessionExecutionLease)
+) -> (Arc<dyn RuntimePersistence>, crate::ClaimAuthority)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
@@ -133,7 +134,7 @@ where
             let store = make(session_id);
             bind_conformance_session(&store, session_id).await;
             let acquired = store
-                .try_claim_session_execution_lease(
+                .seal_claim_epoch_for_test(
                     session_id,
                     &successor,
                     "acquire-successor-executor",
@@ -181,7 +182,7 @@ fn claimed_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<lash_core::BatchId> 
 async fn assert_no_parallel_reclaim(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
-    lease: &crate::SessionExecutionLease,
+    lease: &crate::ClaimAuthority,
     claim_owner: &crate::LeaseOwnerIdentity,
     batch_ids: &[lash_core::BatchId],
 ) {
@@ -275,7 +276,6 @@ pub async fn expired_claim_is_recoverable_once<F>(
                 &committed_state(&session_id, "claim-recovered"),
                 &[],
             )
-            .releasing_session_execution_lease(successor_lease.completion())
             .completing_queue_claim(successor_claim.completion()),
         )
         .await
@@ -360,7 +360,6 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
     successor_store
         .commit_runtime_state(
             crate::RuntimeCommit::persisted_state_for_test(&recovered_state, &[])
-                .releasing_session_execution_lease(successor_lease.completion())
                 .completing_queue_claim(successor_claim.completion()),
         )
         .await
@@ -379,7 +378,7 @@ where
 {
     let session_id = SessionId::from(format!("{prefix}:atomic-settlement"));
     let writer = make(&session_id);
-    let (lease, claim) = seed_and_claim(
+    let (_lease, claim) = seed_and_claim(
         &writer,
         &session_id,
         "atomic-settlement",
@@ -392,7 +391,6 @@ where
                 &committed_state(&session_id, "atomically-settled"),
                 &[],
             )
-            .releasing_session_execution_lease(lease.completion())
             .completing_queue_claim(claim.completion()),
         )
         .await
@@ -428,7 +426,7 @@ where
 {
     let session_id = SessionId::from(format!("{prefix}:commit-replay"));
     let writer = make(&session_id);
-    let (lease, claim) = seed_and_claim(
+    let (_lease, claim) = seed_and_claim(
         &writer,
         &session_id,
         "commit-replay",
@@ -442,9 +440,7 @@ where
     )
     .with_operation(operation)
     .expect("stamp recorded commit");
-    let commit = commit
-        .releasing_session_execution_lease(lease.completion())
-        .completing_queue_claim(claim.completion());
+    let commit = commit.completing_queue_claim(claim.completion());
     let first = writer
         .commit_runtime_state(commit.clone())
         .await

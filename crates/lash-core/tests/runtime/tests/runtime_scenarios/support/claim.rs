@@ -166,10 +166,10 @@ impl RuntimeScenarioContext {
                 reads.iter().all(|read| {
                     read.status
                         == lash_core::PendingTurnInputReadStatus::Held {
-                            lease_expires_at_ms: lease.expires_at_epoch_ms,
+                            drive_epoch: lease.fencing_token,
                         }
                 }),
-                "{} live claimed turn inputs must report the matching lease expiry",
+                "{} live claimed turn inputs must report the matching drive epoch",
                 self.name
             );
         }

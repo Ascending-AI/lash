@@ -1,6 +1,7 @@
 use super::*;
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
 use lash_core_execution::ModuleArtifactStore;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {
@@ -592,17 +593,16 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
     let session_id = "fence-corrupt";
     let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
     let lease = store
-        .try_claim_session_execution_lease_with_token(
+        .seal_claim_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "read-failure-executor",
-            &lash_core_execution::LeaseClaimNonce::new(),
-            120_000,
+            0,
         )
         .await
-        .expect("claim session lease")
+        .expect("seal drive epoch")
         .acquired()
-        .expect("session lease acquired");
+        .expect("drive epoch sealed");
     let batch = store
         .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
             session_id,

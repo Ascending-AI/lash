@@ -658,7 +658,7 @@ impl LashRuntime {
         commit
             .stamp_semantic_boundary()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = commit_runtime_state_with_fresh_session_execution_lease(
+        let result = commit_runtime_state_without_session_lease(
             store,
             commit,
             &self.runtime_lease_owner,
@@ -746,7 +746,7 @@ impl LashRuntime {
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             // Lane-less host lifecycle boundary: `park` runs between turns and
             // owns no retained session-execution guard.
-            let result = commit_runtime_state_with_fresh_session_execution_lease(
+            let result = commit_runtime_state_without_session_lease(
                 Arc::clone(&store),
                 commit,
                 &self.runtime_lease_owner,

@@ -163,7 +163,7 @@ pub struct ResidentSessionContinuity {
     /// Lease-guard identity retained across a successful physical-turn commit.
     /// A match proves no release/reacquisition boundary occurred before the
     /// next physical turn on this handle.
-    last_committed_lease_continuity: Option<SessionExecutionLeaseContinuity>,
+    last_committed_lease_continuity: Option<DriveClaimContinuity>,
     /// Most recent physical turn committed by this runtime, paired with the
     /// resulting session revision for observation-envelope attribution.
     last_committed_observation_turn: Option<(u64, TurnId)>,
@@ -225,7 +225,7 @@ impl ResidentSessionContinuity {
     /// issues no second durable probe.
     pub(in crate::runtime) fn mark_adopted(
         &mut self,
-        lease_continuity: Option<SessionExecutionLeaseContinuity>,
+        lease_continuity: Option<DriveClaimContinuity>,
     ) {
         self.validity = ResidentSessionState::Valid;
         self.graph_loaded_from_store = true;
@@ -259,7 +259,7 @@ impl ResidentSessionContinuity {
     /// the durable head.
     pub(in crate::runtime) fn graph_is_current_under(
         &self,
-        lease_continuity: Option<SessionExecutionLeaseContinuity>,
+        lease_continuity: Option<DriveClaimContinuity>,
     ) -> bool {
         self.graph_loaded_from_store
             && !self.graph_head_stale.load(Ordering::Acquire)
@@ -270,7 +270,7 @@ impl ResidentSessionContinuity {
     /// Retain (or drop) the lease identity a just-committed turn ran under.
     pub(in crate::runtime) fn retain_committed_lease_continuity(
         &mut self,
-        lease_continuity: Option<SessionExecutionLeaseContinuity>,
+        lease_continuity: Option<DriveClaimContinuity>,
     ) {
         self.last_committed_lease_continuity = lease_continuity;
     }
@@ -537,7 +537,7 @@ impl LashRuntime {
 
     pub(super) async fn reload_invalidated_resident_session_state_under_lease(
         &mut self,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<(), RuntimeError> {
         let decision_id = match self.resident_session.validity() {
             ResidentSessionState::Valid => {
@@ -610,9 +610,8 @@ impl LashRuntime {
             // A successful reload is a full durable adoption: settle the
             // freshness facts so the turn loop does not issue a second
             // durable probe right after this reload (FIG-1875).
-            self.resident_session.mark_adopted(
-                session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity),
-            );
+            self.resident_session
+                .mark_adopted(session_execution_lease.and_then(DriveClaimGuard::continuity));
             Ok(())
         }
         .await;

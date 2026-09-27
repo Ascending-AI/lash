@@ -1,8 +1,7 @@
 //! The after-commit redrive law of the turn crash matrix (FIG-3590, FIG-3748).
 //!
 //! A worker can die after its turn's final commit landed and before the drain
-//! finished: before the commit's response reached it, before it released the
-//! execution lane, or with the lane release itself in flight. The substrate
+//! finished, including before the commit's response reached it. The substrate
 //! then redrives the same drain under the same identity (ADR 0069 §6).
 //!
 //! The drain runs through the session drive (FIG-3600): a recorded admission
@@ -25,10 +24,8 @@ use pretty_assertions::assert_eq;
 
 /// Every seam placement of the drive's `trace` at which the root's final
 /// commit is already durable: inside the final commit (its response lost),
-/// and at and inside every store call after it. Each point says whether the
-/// crashed worker still holds the execution lane there: a final commit that
-/// releases the lane with the head leaves no lane behind.
-fn after_commit_points(trace: &[TurnSeamOperation]) -> Vec<(String, TurnCrashPoint, bool)> {
+/// and at and inside every store call after it.
+fn after_commit_points(trace: &[TurnSeamOperation]) -> Vec<(String, TurnCrashPoint)> {
     let final_commit = trace
         .iter()
         .rposition(|operation| {
@@ -41,15 +38,12 @@ fn after_commit_points(trace: &[TurnSeamOperation]) -> Vec<(String, TurnCrashPoi
             )
         })
         .unwrap_or_else(|| panic!("the drive's trace holds its final commit: {trace:?}"));
-    let release = TurnSeamOperation::Store(StoreOperation::ReleaseSessionExecutionLease);
-    let commit_releases_lane = !trace[final_commit + 1..].contains(&release);
     let mut points = vec![(
         "final-commit-response-lost".to_string(),
         TurnCrashPoint {
             operation: trace[final_commit].clone(),
             placement: CrashPlacement::InsideCall,
         },
-        !commit_releases_lane,
     )];
     for operation in &trace[final_commit + 1..] {
         for placement in [CrashPlacement::Boundary, CrashPlacement::InsideCall] {
@@ -57,12 +51,7 @@ fn after_commit_points(trace: &[TurnSeamOperation]) -> Vec<(String, TurnCrashPoi
                 operation: operation.clone(),
                 placement,
             };
-            let lane_held = !(*operation == release && placement == CrashPlacement::InsideCall);
-            points.push((
-                format!("after-final-commit-{}", point_key(&point)),
-                point,
-                lane_held,
-            ));
+            points.push((format!("after-final-commit-{}", point_key(&point)), point));
         }
     }
     points
@@ -90,7 +79,6 @@ async fn drive_trace(law: &MatrixLaw<'_>) -> Vec<TurnSeamOperation> {
         &executions,
         nominal_recovery_timings(),
     )
-    .through_drive()
     .before_drive(SeamControl::clear)
     .reporting();
     law.runner
@@ -126,9 +114,9 @@ pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, S>
         runner: &runner,
     };
     let trace = Box::pin(drive_trace(&law)).await;
-    for (key, point, lane_held) in after_commit_points(&trace) {
+    for (key, point) in after_commit_points(&trace) {
         let scenario = format!("after-commit-redrive-{key}");
-        Box::pin(run_after_commit_redrive(&law, &scenario, &point, lane_held)).await;
+        Box::pin(run_after_commit_redrive(&law, &scenario, &point)).await;
     }
 }
 
@@ -136,12 +124,7 @@ pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, S>
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn run_after_commit_redrive(
-    law: &MatrixLaw<'_>,
-    scenario: &str,
-    point: &TurnCrashPoint,
-    lane_held: bool,
-) {
+async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &TurnCrashPoint) {
     let make = law.make;
     let identity = ReferenceIdentity::for_scenario(scenario);
     let admitted = reference_admitted_scope(&identity);
@@ -163,7 +146,6 @@ async fn run_after_commit_redrive(
                 &executions,
                 crashed_turn_timings(),
             )
-            .through_drive()
             .before_drive(move |control| control.arm(armed.clone()))
             .attempt(),
             crash,
@@ -199,7 +181,6 @@ async fn run_after_commit_redrive(
         .expect("read the applied inputs")
         .len();
 
-    wait_for_recovery_lease(&make, scenario, point, lane_held).await;
     let successor_control = SeamControl::default();
     let (successor, redriven) = ReferenceTurn::new(
         law.stores,
@@ -210,7 +191,6 @@ async fn run_after_commit_redrive(
         &executions,
         nominal_recovery_timings(),
     )
-    .through_drive()
     .before_drive(SeamControl::clear)
     .reporting();
     law.runner.run_turn(admitted, successor).await;

@@ -39,15 +39,10 @@ async fn runtime(backend: &crate::Backend, store: Arc<RecordingStore>) -> LashRu
 
 #[tokio::test]
 async fn contained_panic_releases_lease_before_immediate_successor() {
-    Box::pin(assert_immediate_successor(false)).await;
+    Box::pin(assert_immediate_successor()).await;
 }
 
-#[tokio::test]
-async fn contained_panic_waits_for_lease_release_acknowledgement() {
-    Box::pin(assert_immediate_successor(true)).await;
-}
-
-async fn assert_immediate_successor(gate_release: bool) {
+async fn assert_immediate_successor() {
     let double =
         crate::testing::kernel_double(0x3861_0201, lash_restate_test::ServerConfig::default())
             .await;
@@ -57,7 +52,6 @@ async fn assert_immediate_successor(gate_release: bool) {
     let mut successor = runtime(&backend, Arc::clone(&store)).await;
     let session_id = first.state.session_id.clone();
     first.set_turn_phase_probe(Arc::new(PanicBeforeCommit));
-    let gate = gate_release.then(|| store.gate_session_execution_lease_release());
     let task = crate::task::spawn(async move {
         let handler = double
             .open_handler(crate::AdmittedScope::turn(&session_id, "panic"))
@@ -70,16 +64,6 @@ async fn assert_immediate_successor(gate_release: bool) {
             )
             .await
     });
-    if let Some(gate) = &gate {
-        gate.wait_entered().await;
-        // Force the losing schedule: an already surfaced panic gets no help
-        // from this test releasing its detached cleanup. Its successor must
-        // expose SessionExecutionLaneBusy below. An awaited release keeps the
-        // turn task pending until we acknowledge the backend operation.
-        if !task.is_finished() {
-            gate.admit_one();
-        }
-    }
     let failure = task.await.expect_err("turn task must panic");
     assert!(failure.is_panic());
     assert_eq!(
@@ -88,13 +72,10 @@ async fn assert_immediate_successor(gate_release: bool) {
         "cleanup preserves the original panic payload"
     );
     let lease = successor
-        .claim_session_execution_lease()
+        .claim_drive_authority()
         .await
         .expect("immediate successor admitted without SessionExecutionLaneBusy")
         .expect("store-backed successor holds a lease");
-    if let Some(gate) = gate {
-        gate.admit_one();
-    }
     lease.release_if_live().await.expect("release successor");
 }
 
@@ -122,13 +103,8 @@ async fn happy_turn_keeps_atomic_lease_release_without_extra_call() {
         .await
         .expect("happy turn completes");
     handler.close().await.expect("close the happy turn handler");
-    assert_eq!(
-        store.session_execution_lease_release_attempt_count(),
-        0,
-        "atomic commit releases the lease; settlement and Drop add no release call"
-    );
     let lease = successor
-        .claim_session_execution_lease()
+        .claim_drive_authority()
         .await
         .expect("lane free before return")
         .expect("successor admitted");

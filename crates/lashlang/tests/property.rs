@@ -497,7 +497,6 @@ proptest! {
         prop_assert_eq!(globals.get(&ident), Some(&expected));
     }
 
-
     /// `decode(encode(state)) == state` for states a program actually produces.
     ///
     /// Snapshot equality is the oracle every persistence test leans on, so this

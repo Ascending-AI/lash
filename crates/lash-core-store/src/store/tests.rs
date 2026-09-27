@@ -54,7 +54,6 @@ fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
 
     let mut semantic = commit.clone();
     semantic.expected_head_revision = 0;
-    semantic.release_session_execution_lease = None;
     let mut value = serde_json::to_value(semantic).expect("serialize legacy commit");
     scrub(&mut value);
     crate::stable_hash::stable_json_sha256_hex(&value).expect("hash legacy commit")
@@ -947,7 +946,6 @@ fn decorator_surface_covers_every_component_trait_method() {
     for trait_name in [
         "SessionCommitStore",
         "TurnInputStore",
-        "SessionExecutionLeaseStore",
         "QueuedWorkStore",
         "StoreMaintenance",
     ] {

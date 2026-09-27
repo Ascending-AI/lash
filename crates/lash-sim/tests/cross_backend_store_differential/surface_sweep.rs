@@ -18,8 +18,8 @@ use corrupt_input_cases::CorruptBackup;
 /// A syntactically valid but never-granted lease authority, for the inventory
 /// steps that take a fence in a case that holds no lease. Presenting it is
 /// itself a refusal driver: no backend may act on unheld authority.
-fn unheld_lease_fence(session_id: &SessionId) -> lash_core::SessionExecutionLeaseAuthority {
-    lash_core::SessionExecutionLeaseAuthority {
+fn unheld_lease_fence(session_id: &SessionId) -> lash_core::ClaimAuthority {
+    lash_core::ClaimAuthority {
         session_id: session_id.clone(),
         owner: LeaseOwnerIdentity::opaque("fig-2841-no-lease", "fig-2841-no-lease:incarnation"),
         executor_id: "fig-2841-no-lease-executor".to_string(),
@@ -65,8 +65,7 @@ pub(super) enum SurfaceMethod {
     AdmitSessionState,
     LoadKnownNode,
     LoadUnknownNode,
-    GetSessionExecutionLease,
-    RenewSessionExecutionLease,
+    ReadDriveEpoch,
     ListQueuedWork,
     ListPendingQueuedWork,
     PendingSessionWorkOrdering,
@@ -195,8 +194,7 @@ impl SurfaceMethod {
             Self::AdmitSessionState => "surface:admit_session_state",
             Self::LoadKnownNode => "surface:load_node_known",
             Self::LoadUnknownNode => "surface:load_node_unknown",
-            Self::GetSessionExecutionLease => "surface:get_session_execution_lease",
-            Self::RenewSessionExecutionLease => "surface:renew_session_execution_lease",
+            Self::ReadDriveEpoch => "surface:read_drive_epoch",
             Self::ListQueuedWork => "surface:list_queued_work",
             Self::ListPendingQueuedWork => "surface:list_pending_queued_work",
             Self::PendingSessionWorkOrdering => "surface:pending_session_work_ordering",
@@ -479,8 +477,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::AdmitSessionState),
             surface(SurfaceMethod::LoadKnownNode),
             surface(SurfaceMethod::LoadUnknownNode),
-            surface(SurfaceMethod::GetSessionExecutionLease),
-            surface(SurfaceMethod::RenewSessionExecutionLease),
+            surface(SurfaceMethod::ReadDriveEpoch),
             surface(SurfaceMethod::ListQueuedWork),
             surface(SurfaceMethod::ListPendingQueuedWork),
             surface(SurfaceMethod::PendingSessionWorkOrdering),
@@ -700,8 +697,7 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             StoreOperation::DeleteSession,
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::LoadUnknownNode),
-            surface(SurfaceMethod::GetSessionExecutionLease),
-            surface(SurfaceMethod::RenewSessionExecutionLease),
+            surface(SurfaceMethod::ReadDriveEpoch),
             surface(SurfaceMethod::ListQueuedWork),
             surface(SurfaceMethod::ListPendingQueuedWork),
             surface(SurfaceMethod::PendingSessionWorkOrdering),
@@ -996,15 +992,13 @@ impl BackendRunner {
                 let node = store.load_node("fig-2841-unknown-node").await?;
                 format!("present={}", node.is_some())
             }
-            SurfaceMethod::GetSessionExecutionLease => {
-                let observation = store.get_session_execution_lease(&session_id).await?;
-                format!("lease_present={}", observation.lease.is_some())
-            }
-            SurfaceMethod::RenewSessionExecutionLease => {
-                let renewed = store
-                    .renew_session_execution_lease(&lease_fence, SESSION_LEASE_TTL_MS)
-                    .await?;
-                format!("fencing_token={}", renewed.fencing_token)
+            SurfaceMethod::ReadDriveEpoch => {
+                let observed = store.drive_epoch(&session_id).await?;
+                format!(
+                    "epoch={} admission_present={}",
+                    observed.epoch,
+                    observed.admission.is_some()
+                )
             }
             SurfaceMethod::ListQueuedWork => {
                 format!("rows={}", store.list_queued_work(&session_id).await?.len())

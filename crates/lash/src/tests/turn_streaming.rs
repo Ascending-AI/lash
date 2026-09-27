@@ -147,31 +147,6 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
 }
 
 #[cfg(feature = "rlm")]
-fn assert_sqlite_session_lane_free_at_generation(
-    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    session_id: &SessionId,
-    expected_generation: u64,
-) {
-    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
-        .expect("open SQLite session catalog");
-    let (owner, generation) = conn
-        .query_row(
-            "SELECT lease_owner_id, lease_fencing_token FROM session_execution_leases WHERE session_id = ?1",
-            [session_id.as_str()],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, u64>(1)?)),
-        )
-        .expect("read session execution lease row");
-    assert!(
-        owner.is_none(),
-        "completed handoff must leave the lane free"
-    );
-    assert_eq!(
-        generation, expected_generation,
-        "nested borrowed commits must not rotate the outer lane generation"
-    );
-}
-
-#[cfg(feature = "rlm")]
 impl lash_core::facade_support::SessionPlugin for TurnPersistedGraphAppendPlugin {
     fn id(&self) -> &'static str {
         "turn-persisted-graph-append"

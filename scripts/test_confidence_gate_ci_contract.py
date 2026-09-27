@@ -1098,7 +1098,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for name, recipe in (
             ("process-operations", "process-operations-e2e"),
             ("version-bump-recreation", "version-bump-recreation-e2e"),
-            ("session-lease-triage", "session-lease-triage-e2e"),
         ):
             self.assertIn(f"- name: {name}", functional)
             self.assertIn(f"recipe: {recipe}", functional)
@@ -1107,7 +1106,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for artifact_dir in (
             "process-operations",
             "version-bump-recreation",
-            "session-lease-triage",
         ):
             self.assertIn(
                 f"target/functional-e2e-artifacts/{artifact_dir}", functional

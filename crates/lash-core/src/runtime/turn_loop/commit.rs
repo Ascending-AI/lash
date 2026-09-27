@@ -88,7 +88,7 @@ struct TurnCommitRequest<'commit> {
     staged_usage: session_manager::StagedTokenLedger,
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
     queued_run: Option<Box<crate::store::QueuedRunCommit>>,
-    session_execution_lease: Option<&'commit SessionExecutionLeaseGuard>,
+    session_execution_lease: Option<&'commit DriveClaimGuard>,
     release_session_execution_lease: bool,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
@@ -182,28 +182,24 @@ impl PreparedTurn {
         // deltas are durable. The store is captured before `final_commit`
         // consumes the session borrow, for the lost-reply branch below.
         let history_store = session.as_deref().and_then(Session::history_store);
-        let accepted = Box::pin(
-            self.turn_pipeline.final_commit(
-                &mut self.turn,
-                session,
-                staged_usage.deltas(),
-                commit_effects.claim_settlement,
-                session_execution_lease.map(SessionExecutionLeaseGuard::fence),
-                commit_effects.pending_follow_on,
-                queued_run,
-                // Any active-turn input that missed the turn's final
-                // checkpoint must become the next ordinary user turn.
-                Some(trace_turn_id.clone()),
-                interrupted_turn_input_cancellation,
-                interrupted_turn_cancel_intent,
-                turn_cancel_closure_settlement,
-                Some(turn_control_resolver),
-                recorded_attachment_intent_ids,
-                release_session_execution_lease
-                    .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
-                    .flatten(),
-            ),
-        )
+        let accepted = Box::pin(self.turn_pipeline.final_commit(
+            &mut self.turn,
+            session,
+            staged_usage.deltas(),
+            commit_effects.claim_settlement,
+            session_execution_lease.map(DriveClaimGuard::fence),
+            commit_effects.pending_follow_on,
+            queued_run,
+            // Any active-turn input that missed the turn's final
+            // checkpoint must become the next ordinary user turn.
+            Some(trace_turn_id.clone()),
+            interrupted_turn_input_cancellation,
+            interrupted_turn_cancel_intent,
+            turn_cancel_closure_settlement,
+            Some(turn_control_resolver),
+            recorded_attachment_intent_ids,
+            None,
+        ))
         .await;
         let accepted = match accepted {
             Ok(accepted) => accepted,
@@ -244,7 +240,7 @@ impl PreparedTurn {
             retained_lease_continuity: if release_session_execution_lease {
                 None
             } else {
-                session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity)
+                session_execution_lease.and_then(DriveClaimGuard::continuity)
             },
         })
     }
@@ -261,7 +257,7 @@ struct CommittedTurn {
     accepted: AcceptedTurnCommit,
     staged_usage: session_manager::StagedTokenLedger,
     release_session_execution_lease: bool,
-    retained_lease_continuity: Option<SessionExecutionLeaseContinuity>,
+    retained_lease_continuity: Option<DriveClaimContinuity>,
 }
 
 impl TypedTurnPhase for CommittedTurn {
@@ -276,7 +272,7 @@ impl CommittedTurn {
         self,
         runtime: &mut LashRuntime,
         trace_turn_id: &TurnId,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<PostCommitDelivery, crate::StoreError> {
         let confirmed_usage = self.accepted.into_confirmed_usage();
         self.staged_usage.confirm_identities(&confirmed_usage)?;
@@ -346,7 +342,7 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
     pub(in crate::runtime) sinks: TurnSinks<'error>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) claims: LogicalTurnClaims,
-    pub(in crate::runtime) session_execution_lease: Option<&'error SessionExecutionLeaseGuard>,
+    pub(in crate::runtime) session_execution_lease: Option<&'error DriveClaimGuard>,
 }
 
 impl LashRuntime {
@@ -843,9 +839,7 @@ impl LashRuntime {
                 // would grow every turn future.
                 trace_commit_cas_rejected(
                     &self.state.session_id,
-                    session_execution_lease
-                        .map(SessionExecutionLeaseGuard::commit_evidence)
-                        .as_deref(),
+                    session_execution_lease.map(DriveClaimGuard::fence).as_ref(),
                     &self.runtime_lease_owner,
                     &self.runtime_lease_executor_id,
                     &err,

@@ -9,6 +9,7 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -28,7 +29,8 @@ mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;
 pub use config_commands::{
-    cancelled_session_config_settlement_is_typed, session_config_settlement_timeout_is_typed,
+    cancelled_session_config_settlement_is_typed,
+    session_config_settlement_pending_returns_without_wait,
     superseded_config_settlement_adopts_the_newer_head,
 };
 mod state_version;
@@ -235,12 +237,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         "read-only-session-writer:incarnation",
     );
     let held = writer
-        .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
-            &owner,
-            "live-writer",
-            60_000,
-        )
+        .seal_claim_epoch_for_test(&SessionId::from(SESSION_ID), &owner, "live-writer", 60_000)
         .await
         .expect("claim live writer lease")
         .acquired()
@@ -282,14 +279,13 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         "usage is projected"
     );
 
-    let renewed = writer
-        .renew_session_execution_lease(&held.fence(), 60_000)
+    let current = writer
+        .drive_epoch(&held.session_id)
         .await
-        .expect("reader leaves writer authority usable");
-    assert_eq!(renewed.lease_token, held.lease_token);
-    assert_eq!(renewed.fencing_token, held.fencing_token);
+        .expect("reader leaves drive epoch available");
+    assert_eq!(current.epoch, held.fencing_token);
     writer
-        .release_session_execution_lease(&renewed.completion())
+        .supersede_claim_epoch_for_test(&held)
         .await
         .expect("release live writer after inspection");
 
@@ -451,7 +447,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("enqueue claim-fenced next-turn input");
     let first_owner = crate::LeaseOwnerIdentity::opaque("peek-fence-first", "incarnation");
     let first_lease = fenced_store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &fenced_request.session_id,
             &first_owner,
             "session-store-factory-claimable-queued-work-peek-executor",
@@ -521,7 +517,7 @@ async fn session_store_factory_claimable_queued_work_peek(
     );
 
     fenced_store
-        .renew_session_execution_lease(&first_lease.fence(), 0)
+        .supersede_claim_epoch_for_test(&first_lease)
         .await
         .expect("expire the first generation deterministically");
     assert!(
@@ -534,7 +530,7 @@ async fn session_store_factory_claimable_queued_work_peek(
     );
     let successor = crate::LeaseOwnerIdentity::opaque("peek-fence-successor", "incarnation");
     let successor_lease = fenced_store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &fenced_request.session_id,
             &successor,
             "session-store-factory-claimable-queued-work-peek-executor-2",
@@ -827,7 +823,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         .expect("open process-owned session for closure pin")
         .expect("process-owned session exists");
     let lease = pinned_store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &pinned_request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "process-prune-conformance-owner",
@@ -1334,7 +1330,7 @@ async fn session_store_factory_rejects_writes_after_delete(
     );
     assert_deleted_write(
         stale
-            .try_claim_session_execution_lease(
+            .seal_claim_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque("deleted-owner", "deleted-incarnation"),
                 "session-store-factory-rejects-writes-after-delete-executor",
@@ -2158,7 +2154,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         1
     );
     let initial_lease = created
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("delete-session-owner", "before-delete"),
             "session-store-factory-delete-removes-store-and-is-idempotent-executor",

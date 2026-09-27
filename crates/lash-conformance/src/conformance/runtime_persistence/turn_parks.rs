@@ -9,6 +9,7 @@
 //! keeps both and counts the refusal in `attempts`.
 
 use super::*;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 
 fn park(
     session_id: &SessionId,
@@ -46,7 +47,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "parked"))
         .await
         .expect("enqueue the parked turn's input");
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "parking-owner").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "parking-owner").await;
     let _drive = store
         .claim_next_turn_inputs(
             &session_id,
@@ -75,7 +76,10 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
         ))
         .await
         .expect("record the park");
-    release_session_execution_lease_for_test(&store, &lease).await;
+    store
+        .supersede_claim_epoch_for_test(&lease)
+        .await
+        .expect("seal a successor drive after parking");
     assert_eq!(
         divergence.since_ms, 1_234,
         "the first park stamps its refusal time"
@@ -91,7 +95,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
             .await
             .expect("read the park"),
         Some(divergence.clone()),
-        "the park reads back as recorded, and a released lease does not clear it"
+        "the park reads back as recorded after the drive is superseded"
     );
 
     // Parking the same turn again keeps the park's identity and first-park

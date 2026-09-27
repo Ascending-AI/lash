@@ -17,7 +17,7 @@ type PgTx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
 
 /// The session's stored drive epoch and the admission that last raised it,
 /// read inside the caller's transaction.
-async fn drive_epoch_tx(
+pub(crate) async fn drive_epoch_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
 ) -> Result<StoredDriveEpoch, StoreError> {

@@ -393,10 +393,39 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     })
                 .expect("replacement render options");
             replacement.payload["channel"] = serde_json::json!("cell");
-            runtime
-                .set_protocol_turn_options(replacement)
-                .await
-                .expect("replace protocol options command");
+            let command = runtime.set_protocol_turn_options(replacement).await;
+            let receipt = match command {
+                Ok(()) => None,
+                Err(lash_core::SessionError::SessionCommandPending(receipt)) => Some(receipt),
+                Err(error) => panic!("replace protocol options command: {error}"),
+            };
+            if let Some(receipt) = receipt {
+                let handler = double
+                    .open_handler(lash_core::AdmittedScope::queue_drain(
+                        &session_id,
+                        "render-options-command",
+                    ))
+                    .await
+                    .expect("open command drive handler");
+                runtime
+                    .drive_next_root(
+                        "render-options-command",
+                        lash_core::facade_support::TurnOptions::new(
+                            tokio_util::sync::CancellationToken::new(),
+                            handler.scoped(),
+                        ),
+                    )
+                    .await
+                    .expect("drive render options command");
+                handler.close().await.expect("close command drive handler");
+                assert!(matches!(
+                    runtime
+                        .settle_session_command(receipt)
+                        .await
+                        .expect("read settled render options command"),
+                    lash_core::runtime::SessionCommandSettlement::Durable(_)
+                ));
+            }
             renderer.mode.store(1, Ordering::SeqCst);
             drive(&mut runtime, &double, &session_id, "second").await;
             assert_eq!(renderer.first.load(Ordering::SeqCst), 2);

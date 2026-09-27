@@ -9,7 +9,6 @@ pub use lash_core_store::input_normalization as io;
 pub mod process;
 pub mod work;
 #[cfg(feature = "testing")]
-pub use lash_core_effect::session_execution_lease;
 pub(crate) use lash_core_store::queued_drain_policy;
 use lash_core_store::session_catalog;
 pub use lash_core_store::session_state as state;
@@ -59,7 +58,6 @@ pub use effect::{
     GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, IndependentEffectWork,
     LlmRequestSpec, LlmStreamRecord, LoserPolicy, ProcessCommand, ProcessDriveStep,
     ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
     RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange,
     Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
     RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,

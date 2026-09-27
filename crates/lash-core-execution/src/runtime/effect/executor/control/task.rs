@@ -27,11 +27,6 @@ pub enum EffectControllerTaskRequest {
         resolution: Resolution,
         response: oneshot::Sender<Result<ResolveOutcome, RuntimeError>>,
     },
-    AcquireQueuedLane {
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: CancellationToken,
-        response: oneshot::Sender<Result<QueuedLaneAcquisition, RuntimeError>>,
-    },
     PrepareCompletionKey {
         scope: ExecutionScope,
         wait: AwaitEventWaitIdentity,
@@ -124,13 +119,6 @@ impl EffectControllerTaskRequest {
                 response,
             } => Box::pin(async move {
                 let _ = response.send(controller.resolve_await_event(&key, resolution).await);
-            }),
-            Self::AcquireQueuedLane {
-                lane,
-                cancel,
-                response,
-            } => Box::pin(async move {
-                let _ = response.send(controller.acquire_queued_lane(lane, cancel).await);
             }),
             Self::PrepareCompletionKey {
                 scope,
@@ -248,32 +236,6 @@ impl EffectTaskController {
 impl AwaitEventResolver for EffectTaskController {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         self.await_event_authority_binding_id.clone()
-    }
-
-    async fn acquire_queued_lane(
-        &self,
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.requests
-            .send(EffectControllerTaskRequest::AcquireQueuedLane {
-                lane,
-                cancel,
-                response: response_tx,
-            })
-            .map_err(|_| {
-                RuntimeError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                    "queued-lane controller task is no longer running",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            RuntimeError::new(
-                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                "queued-lane controller response was dropped",
-            )
-        })?
     }
 
     async fn prepare_completion_key(

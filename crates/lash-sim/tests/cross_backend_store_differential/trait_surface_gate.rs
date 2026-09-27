@@ -71,7 +71,6 @@ const GATE_SOURCE: &str = include_str!("trait_surface_gate.rs");
 const GATED_SESSION_TRAITS: &[&str] = &[
     "SessionCommitStore",
     "TurnInputStore",
-    "SessionExecutionLeaseStore",
     "QueuedWorkStore",
     "StoreMaintenance",
 ];

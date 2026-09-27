@@ -9,10 +9,9 @@ use std::sync::Arc;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, ExecutionScope, GroupSettlement, LoserPolicy, QueuedLaneAcquisition,
-    QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    EffectGroupHandle, ExecutionScope, GroupSettlement, LoserPolicy, Resolution, ResolveOutcome,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
 };
 use restate_sdk::errors::TerminalError;
 
@@ -125,14 +124,6 @@ where
 {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         self.inner.await_event_authority_binding_id()
-    }
-
-    async fn acquire_queued_lane(
-        &self,
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        self.inner.acquire_queued_lane(lane, cancel).await
     }
 
     async fn prepare_completion_key(

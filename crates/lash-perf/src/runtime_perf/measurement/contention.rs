@@ -748,8 +748,8 @@ struct DurableContentionCounters {
     claim_attempts: std::sync::atomic::AtomicU64,
     claim_refusals: std::sync::atomic::AtomicU64,
     successful_claims: std::sync::atomic::AtomicU64,
-    lease_probe_busy: std::sync::atomic::AtomicU64,
-    renewals: std::sync::atomic::AtomicU64,
+    epoch_probe_current: std::sync::atomic::AtomicU64,
+    epoch_checks: std::sync::atomic::AtomicU64,
     abandons: std::sync::atomic::AtomicU64,
     reclaims: std::sync::atomic::AtomicU64,
     reclaim_conflicts: std::sync::atomic::AtomicU64,
@@ -864,32 +864,23 @@ async fn run_durable_contention_worker(
     target_completions: u64,
     session_id: SessionId,
     store: Arc<dyn lash_core::RuntimePersistence>,
-    session_fence: lash_core::SessionExecutionLeaseAuthority,
+    session_fence: lash_core::ClaimAuthority,
     counters: Arc<DurableContentionCounters>,
     samples: Arc<DurableContentionSamples>,
 ) -> anyhow::Result<()> {
-    let owner = lash_core::LeaseOwnerIdentity::opaque(
-        format!("runtime-perf-contention-worker-{worker}"),
-        uuid::Uuid::new_v4().to_string(),
+    let owner = session_fence.owner.clone();
+    let observed = store.drive_epoch(&session_id).await?;
+    anyhow::ensure!(
+        observed.epoch == session_fence.fencing_token
+            && observed
+                .admission
+                .as_ref()
+                .is_some_and(|id| id.as_str() == session_fence.lease_token),
+        "contention worker {worker} did not observe the controller drive epoch"
     );
-    let competing_lease = store
-        .try_claim_session_execution_lease(
-            &session_id,
-            &owner,
-            &format!("runtime-perf-contention-worker-{worker}"),
-            QUEUED_WORK_CLAIM_TTL_MS,
-        )
-        .await?;
-    if matches!(
-        competing_lease,
-        lash_core::SessionExecutionLeaseClaimOutcome::Busy { .. }
-    ) {
-        counters
-            .lease_probe_busy
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    } else {
-        anyhow::bail!("contention worker {worker} unexpectedly acquired the controller lease");
-    }
+    counters
+        .epoch_probe_current
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     'worker: while counters
         .completions
@@ -937,19 +928,14 @@ async fn run_durable_contention_worker(
             + 1;
         let service_started = Instant::now();
         if sequence.is_multiple_of(3) {
-            match store
-                .renew_session_execution_lease(&session_fence, QUEUED_WORK_CLAIM_TTL_MS)
-                .await
-            {
-                Ok(_) => {
-                    counters
-                        .renewals
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                Err(error) => {
-                    return Err(error.into());
-                }
-            }
+            let observed = store.drive_epoch(&session_id).await?;
+            anyhow::ensure!(
+                observed.epoch == session_fence.fencing_token,
+                "contention controller drive epoch changed during worker run"
+            );
+            counters
+                .epoch_checks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         if sequence.is_multiple_of(2) {
@@ -1059,20 +1045,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))
             .await?;
     }
-    let controller_owner = lash_core::LeaseOwnerIdentity::opaque(
-        "runtime-perf-contention-controller",
-        uuid::Uuid::new_v4().to_string(),
-    );
-    let controller_lease = store
-        .try_claim_session_execution_lease(
-            &session_id,
-            &controller_owner,
-            "runtime-perf-contention-controller",
-            QUEUED_WORK_CLAIM_TTL_MS,
-        )
-        .await?
-        .acquired()
-        .ok_or_else(|| anyhow::anyhow!("durable contention controller lease was busy"))?;
+    let controller_lease = seal_perf_claim(store.as_ref(), &session_id).await?;
     let session_fence = controller_lease.fence();
     let seed_state_ms = elapsed_ms(seed_started);
     let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
@@ -1100,9 +1073,6 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let run_turn_ms = elapsed_ms(run_started);
     let run_turn_alloc = alloc_delta(run_before_alloc, allocator_stats());
     let after_turn_memory = process_memory_sample();
-    store
-        .release_session_execution_lease(&session_fence)
-        .await?;
 
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
@@ -1207,8 +1177,10 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
-            "durable_contention.renewals".to_string(),
-            counters.renewals.load(std::sync::atomic::Ordering::Relaxed),
+            "durable_contention.epoch_checks".to_string(),
+            counters
+                .epoch_checks
+                .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
             "durable_contention.abandons".to_string(),
@@ -1231,9 +1203,9 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
-            "durable_contention.lease_probe_busy".to_string(),
+            "durable_contention.epoch_probe_current".to_string(),
             counters
-                .lease_probe_busy
+                .epoch_probe_current
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (

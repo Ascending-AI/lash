@@ -183,24 +183,6 @@ pub(super) struct SessionMetaObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SessionExecutionLeaseObservation {
-    pub(super) owner: Option<LeaseOwnerIdentity>,
-    // The executor id and the lease token are both caller-supplied bytes: the
-    // executor is the claimant's runtime-open discriminator and the token is the
-    // caller's `LeaseClaimNonce`. A backend that fails to persist or return
-    // either verbatim has broken lease authority, so the harness claims with
-    // deterministic values and compares the bytes rather than mere presence.
-    pub(super) executor_id: Option<String>,
-    pub(super) lease_token: Option<String>,
-    pub(super) fencing_token: u64,
-    // PostgreSQL uses database-authoritative wall time while local stores use
-    // the injected clock. Compare the durable temporal contract (claimed and
-    // the store-authored term) rather than incomparable clock-domain epoch values.
-    pub(super) claimed: bool,
-    pub(super) lease_term_ms: Option<u64>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ComparableRuntimeCommitResult {
     pub(super) head_revision: u64,
     pub(super) turn_input_applications: Vec<TurnInputApplication>,
@@ -226,7 +208,6 @@ pub(super) struct RawDurableState {
     pub(super) node_anchors: Vec<NodeAnchorObservation>,
     pub(super) usage_deltas: Vec<UsageDeltaObservation>,
     pub(super) session_meta: Option<SessionMetaObservation>,
-    pub(super) session_execution_leases: Vec<SessionExecutionLeaseObservation>,
     pub(super) pending_turn_inputs: Vec<PendingTurnInputObservation>,
     pub(super) queued_work: Vec<QueuedWorkObservation>,
     /// `session_roots` rows carrying terminal evidence or a scope-close

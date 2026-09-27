@@ -62,7 +62,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// own cancellation path, which is tracked separately.
     pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
-    pub(super) session_execution_lease: Option<crate::SessionExecutionLeaseAuthority>,
+    pub(super) session_execution_lease: Option<crate::ClaimAuthority>,
     pub(super) runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     pub(super) turn_control: Arc<ActiveTurnControl>,

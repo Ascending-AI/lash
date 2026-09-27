@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use pretty_assertions::assert_eq;
 
 #[expect(
@@ -27,7 +28,7 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
         );
     }
     let queue_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(queue_session),
             &queue_owner,
             "same-generation-claim-scans-reach-rows-beyond-the-scan-surplus-executor",
@@ -52,7 +53,6 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
             .expect("bounded-scan queued work remains reachable");
         assert_eq!(claim.batches[0].batch_id, expected.batch_id);
     }
-    release_session_execution_lease_for_test(&store, &queue_lease).await;
 
     let command_session = "bounded-scan-command";
     let command_owner = lease_owner("bounded-scan-command-owner");
@@ -69,7 +69,7 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
         );
     }
     let command_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(command_session),
             &command_owner,
             "same-generation-claim-scans-reach-rows-beyond-the-scan-surplus-executor-2",
@@ -91,7 +91,6 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
             .expect("bounded-scan session command remains reachable");
         assert_eq!(claim.batches[0].batch_id, expected.batch_id);
     }
-    release_session_execution_lease_for_test(&store, &command_lease).await;
 
     let input_session = "bounded-scan-turn-input";
     let input_owner = lease_owner("bounded-scan-turn-input-owner");
@@ -108,7 +107,7 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
         );
     }
     let input_lease = store
-        .try_claim_session_execution_lease(
+        .seal_claim_epoch_for_test(
             &SessionId::from(input_session),
             &input_owner,
             "same-generation-claim-scans-reach-rows-beyond-the-scan-surplus-executor-3",
@@ -131,7 +130,6 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
             .expect("bounded-scan turn input remains reachable");
         assert_eq!(claim.inputs[0].input_id, expected.input_id);
     }
-    release_session_execution_lease_for_test(&store, &input_lease).await;
 }
 
 #[expect(
@@ -173,7 +171,7 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
     // queue relies on each claimed batch staying held by the current generation,
     // so a same-generation follow-up claim skips it (ADR 0029).
     let root_session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "owner-a").await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "owner-a").await;
     let claim = store
         .claim_ready_queued_work(
             &SessionId::from("root"),
@@ -207,10 +205,9 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
         .expect("claim joined")
         .claim()
         .expect("joined claim");
-    release_session_execution_lease_for_test(&store, &root_session_lease).await;
     assert_eq!(next_root.batches[0].batch_id, joined.batch_id);
     let other_session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("other"), "owner-c").await;
+        seal_claim_authority_for_test(&store, &SessionId::from("other"), "owner-c").await;
     let other_claim = store
         .claim_ready_queued_work(
             &SessionId::from("other"),
@@ -223,7 +220,6 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
         .expect("claim other")
         .claim()
         .expect("other claim");
-    release_session_execution_lease_for_test(&store, &other_session_lease).await;
     assert_eq!(
         other_claim.batches[0].batch_id, other.batch_id,
         "claiming one session must not consume queued work from another session"
@@ -238,8 +234,7 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
         .await
         .expect("enqueue reclaim work");
     let first_generation_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("reclaim"), "owner-a")
-            .await;
+        seal_claim_authority_for_test(&store, &SessionId::from("reclaim"), "owner-a").await;
     let first_generation_claim = store
         .claim_ready_queued_work(
             &SessionId::from("reclaim"),
@@ -252,10 +247,8 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
         .expect("claim under the first generation")
         .claim()
         .expect("first-generation claim");
-    release_session_execution_lease_for_test(&store, &first_generation_lease).await;
     let reclaim_session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("reclaim"), "owner-b")
-            .await;
+        seal_claim_authority_for_test(&store, &SessionId::from("reclaim"), "owner-b").await;
     let reclaimed = store
         .claim_ready_queued_work(
             &SessionId::from("reclaim"),
@@ -268,7 +261,6 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
         .expect("reclaim under a new generation")
         .claim()
         .expect("reclaimed superseded claim");
-    release_session_execution_lease_for_test(&store, &reclaim_session_lease).await;
     assert_eq!(reclaimed.batches[0].batch_id, reclaimed_source.batch_id);
     assert!(
         reclaimed.fencing_token > first_generation_claim.fencing_token,
@@ -311,7 +303,7 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
     // One live lease: the capped claim keeps the first two batches held, so the
     // same-generation follow-up claim only sees the third (ADR 0029).
     let limited_session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("limited"), "owner").await;
+        seal_claim_authority_for_test(&store, &SessionId::from("limited"), "owner").await;
     let limited = store
         .claim_ready_queued_work(
             &SessionId::from("limited"),
@@ -348,7 +340,6 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
         .expect("remaining claim")
         .claim()
         .expect("remaining claim exists");
-    release_session_execution_lease_for_test(&store, &limited_session_lease).await;
     assert_eq!(remaining.batches[0].batch_id, limited_third.batch_id);
 }
 
@@ -408,7 +399,7 @@ pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     // group stays held by the current generation and the next same-generation
     // claim advances to the following group (ADR 0029).
     let session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "owner-a").await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "owner-a").await;
     let first_claim = store
         .claim_ready_queued_work(
             &SessionId::from("root"),
@@ -455,7 +446,6 @@ pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
         .expect("claim third group")
         .claim()
         .expect("third group claim");
-    release_session_execution_lease_for_test(&store, &session_lease).await;
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
     // FIG-3156. The runbook's phase-4 scorecard row asks for "two Each claims
     // vs one Coalesce claim". No `EachWake`/`Coalesce` delivery policy exists:
@@ -499,7 +489,7 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
     }
 
     let first_owner = lease_owner("redrive-owner-a");
-    let first_lease = claim_session_execution_lease_for_test(
+    let first_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from("interrupted-batch-redrive"),
         &first_owner.owner_id,
@@ -530,7 +520,6 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
     // journaled command, but before the queue completion commits. Releasing the
     // session lease makes the intact predecessor claim reclaimable without
     // abandoning or settling it.
-    release_session_execution_lease_for_test(&store, &first_lease).await;
     store
         .enqueue_queued_work(
             keyed_queued_draft(
@@ -545,7 +534,7 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
         .expect("enqueue post-interruption compatible row");
 
     let successor_owner = lease_owner("redrive-owner-b");
-    let successor_lease = claim_session_execution_lease_for_test(
+    let successor_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from("interrupted-batch-redrive"),
         &successor_owner.owner_id,
@@ -573,10 +562,9 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
         "redrive must retain the literal predecessor batch composition"
     );
     assert_ne!(first_claim.claim_id, redriven.claim_id);
-    release_session_execution_lease_for_test(&store, &successor_lease).await;
 
     let third_owner = lease_owner("redrive-owner-c");
-    let third_lease = claim_session_execution_lease_for_test(
+    let third_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from("interrupted-batch-redrive"),
         &third_owner.owner_id,
@@ -626,7 +614,6 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
         vec![(Some("redrive-w3"), 3)],
         "new compatible work must wait for a separate successor claim"
     );
-    release_session_execution_lease_for_test(&store, &third_lease).await;
 }
 
 #[expect(
@@ -647,7 +634,7 @@ pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_g
         .expect("enqueue generation-pinned predecessor");
 
     let predecessor_owner = lease_owner("abandoned-predecessor-owner");
-    let predecessor_lease = claim_session_execution_lease_for_test(
+    let predecessor_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from(session_id),
         &predecessor_owner.owner_id,
@@ -665,10 +652,9 @@ pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_g
         .expect("claim predecessor generation")
         .claim()
         .expect("predecessor generation claim exists");
-    release_session_execution_lease_for_test(&store, &predecessor_lease).await;
 
     let successor_owner = lease_owner("abandoned-successor-owner");
-    let successor_lease = claim_session_execution_lease_for_test(
+    let successor_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from(session_id),
         &successor_owner.owner_id,
@@ -759,14 +745,10 @@ pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_g
     assert_eq!(preserved.len(), 1);
     assert_eq!(preserved[0].batch_id, batch.batch_id);
 
-    release_session_execution_lease_for_test(&store, &successor_lease).await;
     let final_owner = lease_owner("abandoned-final-owner");
-    let final_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &final_owner.owner_id,
-    )
-    .await;
+    let final_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &final_owner.owner_id)
+            .await;
     assert!(
         final_lease.fencing_token > successor_lease.fencing_token,
         "the final claimant must hold a newer lease generation"
@@ -788,7 +770,6 @@ pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_g
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(final_lease.completion())
                 .completing_queue_claim(reclaimed.completion()),
         )
         .await
@@ -843,12 +824,9 @@ pub async fn queued_work_redrive_selects_interrupted_claim_identity_over_later_r
         .expect("enqueue gap W3");
 
     let first_owner = lease_owner("gap-owner-a");
-    let first_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &first_owner.owner_id,
-    )
-    .await;
+    let first_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &first_owner.owner_id)
+            .await;
     let first_claim = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
@@ -869,7 +847,6 @@ pub async fn queued_work_redrive_selects_interrupted_claim_identity_over_later_r
             .collect::<Vec<_>>(),
         vec![(Some("gap-w1"), 1), (Some("gap-w3"), 2)]
     );
-    release_session_execution_lease_for_test(&store, &first_lease).await;
 
     store
         .enqueue_queued_work(
@@ -885,12 +862,9 @@ pub async fn queued_work_redrive_selects_interrupted_claim_identity_over_later_r
         .expect("enqueue later gap W2");
 
     let successor = lease_owner("gap-owner-b");
-    let successor_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &successor.owner_id,
-    )
-    .await;
+    let successor_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &successor.owner_id)
+            .await;
     let redriven = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
@@ -931,7 +905,6 @@ pub async fn queued_work_redrive_selects_interrupted_claim_identity_over_later_r
             .collect::<Vec<_>>(),
         vec![(Some("gap-w2"), 3)]
     );
-    release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
 #[expect(
@@ -957,12 +930,9 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
             .expect("enqueue delivery-gated redrive row");
     }
     let first_owner = lease_owner("gate-owner-a");
-    let first_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &first_owner.owner_id,
-    )
-    .await;
+    let first_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &first_owner.owner_id)
+            .await;
     let first_claim = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
@@ -983,15 +953,11 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
             .collect::<Vec<_>>(),
         vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
     );
-    release_session_execution_lease_for_test(&store, &first_lease).await;
 
     let successor = lease_owner("gate-owner-b");
-    let successor_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &successor.owner_id,
-    )
-    .await;
+    let successor_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &successor.owner_id)
+            .await;
     assert_eq!(
         store
             .claim_ready_queued_work(
@@ -1066,7 +1032,6 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
             .collect::<Vec<_>>(),
         vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
     );
-    release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
 /// FIG-1313: a journaled drain composition outlives the policy that chose it.
@@ -1109,12 +1074,9 @@ pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
     ];
 
     let first_owner = lease_owner("policy-owner-a");
-    let first_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &first_owner.owner_id,
-    )
-    .await;
+    let first_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &first_owner.owner_id)
+            .await;
     let mut coalescing_policy = crate::testing::queued_work_claim_policy(64);
     coalescing_policy.drain_policy = Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
     let first_claim = store
@@ -1137,15 +1099,11 @@ pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
             .collect::<Vec<_>>(),
         expected
     );
-    release_session_execution_lease_for_test(&store, &first_lease).await;
 
     let successor = lease_owner("policy-owner-b");
-    let successor_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &successor.owner_id,
-    )
-    .await;
+    let successor_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &successor.owner_id)
+            .await;
     let mut one_at_a_time = crate::testing::queued_work_claim_policy(64);
     one_at_a_time.drain_policy = crate::default_queued_drain_policy();
     let redriven = store
@@ -1169,7 +1127,6 @@ pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
         expected,
         "a redrive must serve the journaled composition, not re-run the successor's drain policy"
     );
-    release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
 #[expect(
@@ -1199,12 +1156,9 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
             .expect("enqueue row-limit redrive row");
     }
     let first_owner = lease_owner("limit-owner-a");
-    let first_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &first_owner.owner_id,
-    )
-    .await;
+    let first_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &first_owner.owner_id)
+            .await;
     let first_claim = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
@@ -1231,15 +1185,11 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
             (Some("limit-w5"), 5),
         ]
     );
-    release_session_execution_lease_for_test(&store, &first_lease).await;
 
     let successor = lease_owner("limit-owner-b");
-    let successor_lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &successor.owner_id,
-    )
-    .await;
+    let successor_lease =
+        seal_claim_authority_for_test(&store, &SessionId::from(session_id), &successor.owner_id)
+            .await;
     let redriven = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
@@ -1266,10 +1216,9 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
             (Some("limit-w5"), 5),
         ]
     );
-    release_session_execution_lease_for_test(&store, &successor_lease).await;
 
     let selected_owner = lease_owner("limit-owner-c");
-    let selected_lease = claim_session_execution_lease_for_test(
+    let selected_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from("interrupted-batch-row-limit"),
         &selected_owner.owner_id,
@@ -1305,7 +1254,6 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
             (Some("limit-w5"), 5),
         ]
     );
-    release_session_execution_lease_for_test(&store, &selected_lease).await;
 }
 
 #[expect(
@@ -1339,7 +1287,7 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         );
     }
     let predecessor_owner = lease_owner("selected-multi-predecessor");
-    let predecessor_lease = claim_session_execution_lease_for_test(
+    let predecessor_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from(session_id),
         &predecessor_owner.owner_id,
@@ -1377,10 +1325,9 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         claim_b.batches.iter().map(keyed_source).collect::<Vec<_>>(),
         vec![Some("selected-claim-b1"), Some("selected-claim-b2")]
     );
-    release_session_execution_lease_for_test(&store, &predecessor_lease).await;
 
     let successor_owner = lease_owner("selected-multi-successor");
-    let successor_lease = claim_session_execution_lease_for_test(
+    let successor_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from(session_id),
         &successor_owner.owner_id,
@@ -1479,7 +1426,6 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
             "abandon must restore both predecessor identities: {partial:?}"
         );
     }
-    release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
 #[expect(
@@ -1505,7 +1451,7 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) 
             .await
             .expect("enqueue default-key wake");
     }
-    let merge_lease = claim_session_execution_lease_for_test(
+    let merge_lease = seal_claim_authority_for_test(
         &store,
         &SessionId::from("wake-default-batch"),
         "merge-owner",
@@ -1541,7 +1487,6 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) 
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(merge_lease.completion())
                 .completing_queue_claim(merged.completion()),
         )
         .await
@@ -1625,7 +1570,7 @@ pub async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersi
         .await
         .expect("enqueue second joined batch");
     let claim_session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "owner-a").await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "owner-a").await;
     let claim = store
         .claim_ready_queued_work(
             &SessionId::from("root"),
@@ -1673,7 +1618,6 @@ pub async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersi
     store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(claim_session_lease.completion())
                 .completing_queue_claim(claim.completion()),
         )
         .await
@@ -1701,8 +1645,7 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
         .await
         .expect("enqueue queue batch");
     let session_lease =
-        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "queue-owner")
-            .await;
+        seal_claim_authority_for_test(&store, &SessionId::from("root"), "queue-owner").await;
     let claim = store
         .claim_ready_queued_work(
             &SessionId::from("root"),
@@ -1825,7 +1768,6 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
         .commit_runtime_state(
             base_commit
                 .clone()
-                .releasing_session_execution_lease(session_lease.completion())
                 .completing_turn_input_claim(input_claim.completion())
                 .completing_queue_claim(claim.completion()),
         )
@@ -1840,7 +1782,6 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
                 "final",
             ));
             retry
-                .releasing_session_execution_lease(session_lease.completion())
                 .completing_turn_input_claim(input_claim.completion())
                 .completing_queue_claim(claim.completion())
         })

@@ -112,11 +112,10 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     assert_eq!(rows, 1);
 }
 
-/// FIG-460: a dropped suspended handler leaves its advisory lease live, but a
-/// fresh durable worker re-enters before TTL and still makes progress under the
-/// authoritative final-commit CAS fence.
+/// A dropped suspended handler is redriven under a newer drive admission and
+/// publishes one final commit even though its first provider attempt was lost.
 #[tokio::test]
-pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
+pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "restate-replay-lease-branch";
     let turn_id = "restate-replay-lease-turn-1";
@@ -165,10 +164,10 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
             .expect("open session store"),
     );
     let underlying_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let lease_claim_count = Arc::new(AtomicUsize::new(0));
+    let drive_seal_count = Arc::new(AtomicUsize::new(0));
     let probed_store = Arc::new(CommitRetryStore {
         inner: Arc::clone(&underlying_store),
-        lease_claim_count: Arc::clone(&lease_claim_count),
+        drive_seal_count: Arc::clone(&drive_seal_count),
     });
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = probed_store;
     let policy = replay_test_policy(&SessionId::from(session_id));
@@ -200,7 +199,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     )
     .await
     .expect("first durable worker reaches provider suspension");
-    assert_eq!(lease_claim_count.load(Ordering::SeqCst), 1);
+    assert_eq!(drive_seal_count.load(Ordering::SeqCst), 1);
     assert!(
         !context.runs().is_empty(),
         "the suspended handler reached the real Restate run boundary"
@@ -242,9 +241,9 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
 
     let replay_turn = replay_turn.unwrap_or_else(|error| {
         panic!(
-            "fresh durable worker must treat pre-TTL lease busy as advisory and \
-             progress under CAS: {error:?}; total_lease_store_acquisitions={}",
-            lease_claim_count.load(Ordering::SeqCst)
+            "fresh durable worker must redrive under a new admission: \
+             {error:?}; drive_seals={}",
+            drive_seal_count.load(Ordering::SeqCst)
         )
     });
     assert!(matches!(
@@ -256,9 +255,9 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         "fresh worker progressed"
     );
     assert_eq!(
-        lease_claim_count.load(Ordering::SeqCst),
-        2,
-        "the fresh worker re-enters before TTL and observes the advisory busy lease"
+        drive_seal_count.load(Ordering::SeqCst),
+        1,
+        "the fresh worker replays the recorded drive seal"
     );
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),

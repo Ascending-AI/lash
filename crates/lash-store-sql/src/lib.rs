@@ -144,7 +144,6 @@ pub const TABLES: &[&str] = &[
     turn_ingress::queued_batches::TABLE,
     turn_ingress::queued_items::TABLE,
     turn_ingress::retired_scopes::TABLE,
-    turn_ingress::session_execution_leases::TABLE,
     turn_ingress::tool_intent_submissions::TABLE,
     turn_ingress::turn_park_clock::TABLE,
     turn_ingress::turn_park_events::TABLE,
@@ -227,9 +226,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(turn_ingress::queued_batches::QueuedBatchStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::queued_items::QueuedItemStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::retired_scopes::RetiredScopeStatements::NEUTRAL);
-    statements.extend_from_slice(
-        turn_ingress::session_execution_leases::SessionExecutionLeaseStatements::NEUTRAL,
-    );
     statements.extend_from_slice(
         turn_ingress::tool_intent_submissions::ToolIntentSubmissionStatements::NEUTRAL,
     );

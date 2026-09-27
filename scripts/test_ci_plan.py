@@ -2193,7 +2193,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
                          [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
         self.assertEqual({"agent-service", "agent-workbench", "effect-group-conformance",
                           "server-double", "workflow-graph-roundtrip", "version-bump-recreation",
-                          "session-lease-triage", "slack-clone-full-host"},
+                          "slack-clone-full-host"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))
         self.assertTrue(any(step.get("name") == "Download worker binaries" for step in consumer["steps"]))

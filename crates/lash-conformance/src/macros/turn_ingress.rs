@@ -17,7 +17,6 @@ macro_rules! direct_turn_acceptance_tests {
             (orphaned_direct_turn_input_is_drivable_by_another_worker, "direct-turn-orphan-recovery"),
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
             (unclaimed_turn_input_settlement_is_a_conditional_write, "direct-turn-conditional-settlement"),
-            (busy_execution_lane_defers_an_accepted_direct_turn, "direct-turn-busy-lane"),
             (vacuum_then_redrive_replays_receipt_single_row, "direct-turn-vacuum-redrive-single"),
             (vacuum_then_redrive_replays_receipt_absorbed_rows, "direct-turn-vacuum-redrive-absorbed"),
             (cancelled_vacuumed_acceptance_is_not_resurrected, "direct-turn-cancelled-vacuumed"),

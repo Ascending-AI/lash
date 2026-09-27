@@ -2,7 +2,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 /// Crash one scripted turn at `entry`'s point on the tier's runner, recover it
-/// with the tier's next run of the same scope under `pressure`, and assert the
+/// with the tier's next run of the same scope, and assert the
 /// ruled durable end state.
 #[expect(
     clippy::expect_used,
@@ -13,7 +13,6 @@ pub(super) async fn run_crash_matrix_case(
     law: &MatrixLaw<'_>,
     entry: &TurnCrashOutcome,
     scenario: &str,
-    pressure: RenewalPressure,
 ) {
     let make = law.make;
     let identity = ReferenceIdentity::for_scenario(scenario);
@@ -42,28 +41,7 @@ pub(super) async fn run_crash_matrix_case(
         )
         .await;
 
-    let predecessor_claimed = !matches!(
-        (&entry.point.operation, entry.point.placement),
-        (
-            TurnSeamOperation::Store(StoreOperation::ClaimSessionExecutionLease),
-            CrashPlacement::Boundary
-        ) | (
-            TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                releases_lease: true,
-                ..
-            }),
-            CrashPlacement::InsideCall
-        ) | (
-            TurnSeamOperation::Store(StoreOperation::ReleaseSessionExecutionLease),
-            CrashPlacement::InsideCall
-        )
-    );
-    wait_for_recovery_lease(&make, scenario, &entry.point, predecessor_claimed).await;
     let successor_store = make(scenario);
-    let successor_timings = match pressure {
-        RenewalPressure::Nominal => nominal_recovery_timings(),
-        RenewalPressure::Starved => recovery_timings(),
-    };
     let (successor, recovered) = ReferenceTurn::new(
         law.stores,
         Arc::clone(&successor_store),
@@ -71,66 +49,16 @@ pub(super) async fn run_crash_matrix_case(
         &identity,
         SeamControl::default(),
         &executions,
-        successor_timings,
+        nominal_recovery_timings(),
     )
-    .before_drive(move |control| {
-        control.clear();
-        if pressure == RenewalPressure::Starved {
-            control.starve_renewals();
-        }
-    })
+    .before_drive(SeamControl::clear)
     .reporting();
     law.runner.run_turn(admitted.clone(), successor).await;
     let recovered = reference_turn::reported(recovered)
         .await
         .map(crate::facade_support::QueuedTurnDrain::ran);
-    if pressure == RenewalPressure::Starved {
-        let error = recovered.expect_err("a lapsed lane cannot commit the admitted run");
-        assert_eq!(error.code, crate::RuntimeErrorCode::QueuedRunPending);
-        assert!(
-            error.is_retryable(),
-            "lease loss keeps this run recoverable"
-        );
-        let admission = successor_store
-            .pending_queued_run(&identity.session_id)
-            .await
-            .expect("read run retained after lease loss")
-            .expect("a starved attempt retains durable ownership");
-        assert_eq!(admission.scope.id(), identity.turn_id.as_str());
-        assert_eq!(admission.position.physical_ordinal, 0);
-        assert_eq!(admission.position.turn_id, identity.turn_id);
-        assert!(
-            admission
-                .members
-                .as_ref()
-                .is_some_and(|members| !members.is_empty())
-        );
-        assert_eq!(
-            executions.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "the starved attempt crosses the effect before losing its commit lane"
-        );
-        // The starved run aborted without an outcome; the tier's next run of
-        // the scope redrives it.
-        let (redrive, redriven) = ReferenceTurn::new(
-            law.stores,
-            make(scenario),
-            law.host,
-            &identity,
-            SeamControl::default(),
-            &executions,
-            nominal_recovery_timings(),
-        )
-        .before_drive(SeamControl::clear)
-        .reporting();
-        law.runner.run_turn(admitted, redrive).await;
-        reference_turn::reported(redriven)
-            .await
-            .unwrap_or_else(|error| panic!("starved run redrive failed for {scenario}: {error}"));
-    } else {
-        recovered
-            .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
-    }
+    recovered
+        .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
 
     let reader = make(scenario);
     super::super::bind_conformance_session(&reader, &identity.session_id).await;
@@ -160,9 +88,37 @@ pub(super) async fn run_crash_matrix_case(
         );
         texts
     };
-    let drain_turns = usize::from(!deferred_texts.is_empty());
-    if drain_turns == 1 {
-        Box::pin(drive_drain_turn(law, scenario, &identity, &executions)).await;
+    // The recovered root is one engine admission. Work left in the other
+    // ingress table belongs to a later admission, including a terminal
+    // follow-on or a deferred active-turn input.
+    let mut drain_turns = 0;
+    loop {
+        let reader = make(scenario);
+        super::super::bind_conformance_session(&reader, &identity.session_id).await;
+        let pending = reader
+            .list_pending_turn_inputs(&identity.session_id)
+            .await
+            .expect("read pending inputs before follow-on drive");
+        let queued = reader
+            .list_queued_work(&identity.session_id)
+            .await
+            .expect("read queued work before follow-on drive");
+        if pending.is_empty() && queued.is_empty() {
+            break;
+        }
+        assert!(
+            drain_turns < 3,
+            "{scenario}: follow-on drive made no progress; pending={pending:?}; queued={queued:?}"
+        );
+        drain_turns += 1;
+        Box::pin(drive_drain_turn(
+            law,
+            scenario,
+            &identity,
+            &executions,
+            drain_turns,
+        ))
+        .await;
     }
 
     let state = crate::load_persisted_session_state(reader.as_ref())
@@ -178,35 +134,20 @@ pub(super) async fn run_crash_matrix_case(
             .filter(|part| part.content() == content)
             .count()
     };
-    // FIG-3157: queued work claimed at the terminal checkpoint no longer
-    // re-prompts the finishing turn. It is withheld from that delivery and
-    // drives a follow-on turn of the same logical run, so each seeded batch
-    // that lands renders its own terminal output instead of replacing one.
-    // The seeded work is a process wake, rendered as its event with the wake
-    // input last. A wake claimed at a mid-turn checkpoint is delivered into
-    // that turn; one withheld at the terminal checkpoint opens its own turn,
-    // so its event directly follows a finished turn's output.
-    let messages: Vec<(bool, bool)> = read_model
-        .messages
-        .iter()
-        .map(|message| {
-            let content = |matches: fn(&str) -> bool| {
-                message.parts.iter().any(|part| matches(&part.content()))
-            };
-            (
-                content(|text| text == "trace turn complete"),
-                content(|text| text.ends_with("Wake input:\ntrace-source")),
-            )
-        })
-        .collect();
-    let terminal_follow_on_turns = messages
-        .windows(2)
-        .filter(|pair| pair[0].0 && pair[1].1)
-        .count();
     assert_eq!(
         part_count("trace turn complete"),
-        1 + drain_turns + terminal_follow_on_turns,
-        "{scenario} ({entry:?}): recovery must expose one terminal assistant output per turn"
+        state.turn_index,
+        "{scenario} ({entry:?}): every committed physical turn adds one terminal assistant output"
+    );
+    let wake_count = read_model
+        .messages
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| part.content().ends_with("Wake input:\ntrace-source"))
+        .count();
+    assert_eq!(
+        wake_count, 1,
+        "{scenario} ({entry:?}): wake input is delivered once"
     );
     for text in &deferred_texts {
         assert_eq!(
@@ -223,13 +164,13 @@ pub(super) async fn run_crash_matrix_case(
         pending_inputs.is_empty(),
         "{scenario} ({entry:?}): all input claims settle exactly once; pending={pending_inputs:?}"
     );
+    let queued = reader
+        .list_queued_work(&identity.session_id)
+        .await
+        .expect("list queued work");
     assert!(
-        reader
-            .list_queued_work(&identity.session_id)
-            .await
-            .expect("list queued work")
-            .is_empty(),
-        "{scenario} ({entry:?}): queued-work claim settles exactly once"
+        queued.is_empty(),
+        "{scenario} ({entry:?}): queued-work claim settles exactly once; queued={queued:?}"
     );
 
     assert!(
@@ -263,13 +204,14 @@ async fn drive_drain_turn(
     scenario: &str,
     identity: &ReferenceIdentity,
     executions: &Arc<std::sync::atomic::AtomicUsize>,
+    ordinal: usize,
 ) {
     // The drain turn is a new turn, not a recovery of the crashed one, so it
     // gets its own turn identity: reusing the recovered turn's id would collide
     // with the history nodes that turn already committed.
     let identity = ReferenceIdentity {
         session_id: identity.session_id.clone(),
-        turn_id: crate::TurnId::from(format!("{}:drain", identity.turn_id)),
+        turn_id: crate::TurnId::from(format!("{}:drain:{ordinal}", identity.turn_id)),
     };
     let (drain, drained) = ReferenceTurn::new(
         law.stores,

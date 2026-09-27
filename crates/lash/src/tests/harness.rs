@@ -278,15 +278,6 @@ impl DecoratedBackend {
         }
     }
 
-    /// Run the runtime on `clock` while the stores keep the inner
-    /// backend's: the two clock domains a PostgreSQL backend has, where
-    /// lease timestamps come from the database.
-    pub(crate) fn runtime_clock(self, clock: Arc<dyn lash_core::Clock>) -> Self {
-        Self {
-            layered: self.layered.with_clock(clock),
-        }
-    }
-
     pub(crate) fn session_store_factory(
         self,
         decorate: impl FnOnce(

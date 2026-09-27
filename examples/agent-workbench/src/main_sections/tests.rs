@@ -72,9 +72,6 @@ pub(crate) use recoverable_chat_tests::{
 #[path = "tests/chat_projection_boundaries.rs"]
 mod chat_projection_boundaries_tests;
 #[cfg(test)]
-#[path = "tests/lease_free_probes.rs"]
-mod lease_free_probes_tests;
-#[cfg(test)]
 #[path = "tests/live_stream_user_rows.rs"]
 mod live_stream_user_rows_tests;
 #[cfg(test)]
@@ -1550,50 +1547,6 @@ pub(super) async fn lash_turn_invocation_at(
     }
 }
 
-/// Wait until the engine runs nothing on `session_id`: no `LashSession`
-/// drive and no `LashTurn` of the session is still in flight. A drive's last
-/// admission pass opens the session after its root committed, and a drive
-/// the host's own open contended retries, so a test that counts every claim
-/// on the session waits for this before it counts.
-pub(super) async fn wait_for_session_engine_idle(
-    admin_url: &str,
-    session_id: &SessionId,
-    timeout: Duration,
-) {
-    #[derive(serde::Deserialize)]
-    struct InFlight {
-        target: String,
-        status: String,
-    }
-    let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
-    let session = session_id.as_str().replace('\'', "''");
-    let query = format!(
-        "SELECT target, status FROM sys_invocation WHERE status <> 'completed' AND \
-         ((target_service_name = 'LashSession' AND target_service_key = '{session}') OR \
-         (target_service_name = 'LashTurn' AND target_service_key LIKE '%:{session}%'))"
-    );
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        let in_flight = admin
-            .query_json::<InFlight>(&query)
-            .await
-            .expect("query the session's in-flight engine invocations");
-        if in_flight.is_empty() {
-            return;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the engine still runs on {session_id} after {timeout:?}: {:?}",
-            in_flight
-                .iter()
-                .map(|row| format!("{} {}", row.target, row.status))
-                .collect::<Vec<_>>()
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
 async fn wait_for_restate_invocation_success(
     state: &AppState,
     invocation_id: &lash_restate::RestateInvocationId,
@@ -1713,24 +1666,8 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let stores = WorkbenchStores::open(data_dir, database_url)
         .await
         .expect("open live workbench stores");
-    let mut core_store_factory = stores.stores.session_store_factory();
-    let session_id = sessions.current();
-    let admission_gate = registered_session_open_admission_gates()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .get(&SessionId::from(&session_id))
-        .cloned();
-    let mut store_set = Arc::clone(&stores.stores);
-    if let Some(gate) = admission_gate {
-        core_store_factory = Arc::new(GatedSessionStoreFactory {
-            inner: core_store_factory,
-            gate,
-        });
-        store_set = Arc::new(GatedStoreSet {
-            inner: store_set,
-            catalog: Arc::clone(&core_store_factory),
-        });
-    }
+    let core_store_factory = stores.stores.session_store_factory();
+    let store_set = Arc::clone(&stores.stores);
     let trigger_store = store_set.trigger_store();
     let process_env_store = store_set.process_env_store();
     let trace_path = data_dir.join("trace.jsonl");
@@ -2179,15 +2116,6 @@ mod no_progress_budget_tests;
 #[cfg(test)]
 #[path = "tests/session_fence.rs"]
 mod session_fence_tests;
-#[cfg(test)]
-#[path = "tests/session_open_admission.rs"]
-mod session_open_admission_tests;
-pub(crate) use session_open_admission_tests::{
-    GatedSessionStoreFactory, GatedStoreSet, SessionOpenAdmissionGate,
-    register_session_open_admission_gate, registered_session_open_admission_gates,
-    unregister_session_open_admission_gate,
-};
-
 pub(crate) use recoverable_chat_tests::recoverable_chat_test_state_with_store_factory_and_trigger_store;
 
 #[path = "tests/observation_config.rs"]

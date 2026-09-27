@@ -1274,14 +1274,14 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
 }
 
 #[tokio::test]
-pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driving() {
+pub(super) async fn accepted_input_already_claimed_by_this_incarnation_cedes_before_driving() {
     let double = kernel_double(SEED + 18, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let turn_id = &TurnId::from("accepted-input-foreign-claim");
     let store = double_unbound_recording_store(&double).await;
     let controller: Arc<dyn lash_core::testing::EffectLayer> =
         Arc::new(JournalReplayEffectController::default());
-    let foreign: Arc<dyn lash_core::RuntimePersistence> = Arc::new(ForeignClaimBeforeDriveStore {
+    let held: Arc<dyn lash_core::RuntimePersistence> = Arc::new(HeldClaimBeforeDriveStore {
         inner: Arc::clone(&store),
     });
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -1289,7 +1289,7 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         journal_replay_host(&backend, Arc::clone(&controller)),
-        foreign,
+        held,
     )
     .await;
     let handler = double
@@ -1441,7 +1441,10 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
         .await
         .expect("open the drain's handler");
     runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
         .await
         .expect("drain deferred input")
         .ran()
@@ -1476,7 +1479,10 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
         .await
         .expect("open the drain's handler");
     let drained = runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
         .await
         .expect("command-only drain succeeds")
         .ran();
@@ -1496,15 +1502,9 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
     );
 }
 
-// Boundary: these process-wake and active-checkpoint steering tests stay in
-// `turns.rs` because they verify the full `LashRuntime` scheduler, provider
-// prompt contents, cancellation path, and selected queued-work APIs. Runtime
-// Scenarios cover the overlapping store-level queue/input/lease invariants,
-// including active-checkpoint process-wake claim eligibility and the selected
-// queued-work invariant that pending next-turn input is not consumed. The
-// selected-drain case remains here because the owned behavior is the public
-// `stream_selected_queued_work` API running a turn while preserving unrelated
-// pending input.
+// The process-wake and active-checkpoint tests exercise the engine drive and
+// its provider-visible turn, while the selected-batch invariant remains in
+// runtime persistence conformance.
 #[tokio::test]
 pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
     let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
@@ -1589,7 +1589,10 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         .await
         .expect("open the drain's handler");
     let drained = runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
         .await
         .expect("queued drain succeeds")
         .ran()
@@ -1629,123 +1632,6 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
     assert!(!request_contains_text(&requests[0], "wake should wait"));
     assert!(request_contains_text(&requests[1], "queued user input"));
     assert!(request_contains_text(&requests[1], "wake should wait"));
-}
-
-#[tokio::test]
-pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
-    let double = kernel_double(SEED + 19, lash_restate_test::ServerConfig::default()).await;
-    let transport = mock_provider(vec![MockCall {
-        stream_events: Vec::new(),
-        response: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: "selected wake response".to_string(),
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        }),
-    }]);
-    let (mut runtime, store) =
-        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
-    let queued_input = enqueue_idle_turn_input(
-        store.as_ref(),
-        &SessionId::from("root"),
-        "still pending user",
-    )
-    .await;
-    let registry = runtime
-        .host
-        .process_registry()
-        .cloned()
-        .expect("process registry");
-    let target_scope = lash_core::SessionScope::new("root");
-    let registered = registry
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                lash_core::ProcessProvenance::session(target_scope.clone()),
-                lash_core::Lifetime::Detached,
-            )
-            .with_extra_event_types([process_wake_event_type()])
-            .with_wake_session_id(Some(target_scope.session_id.clone())),
-        )
-        .await
-        .expect("register wake process");
-    let wake = append_process_wake_to_queue(
-        registry.as_ref(),
-        store.as_ref(),
-        &registered.id,
-        lash_core::ProcessEventAppendRequest::new(
-            "process.wake",
-            json!({
-                "text": "selected wake",
-                "value": {
-                    "status": "selected wake"
-                }
-            }),
-        ),
-    )
-    .await;
-    let wake_batch =
-        lash_core::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("queued work before selected drain")
-            .into_iter()
-            .find(|batch| {
-                batch.items.iter().any(|item| {
-                    matches!(
-                        &item.payload,
-                        lash_core::testing::runtime_internals::QueuedWorkPayload::ProcessWake { wake: queued_wake }
-                            if queued_wake.wake_id == wake.wake_id
-                    )
-                })
-            })
-            .expect("wake batch");
-
-    let handler = double
-        .open_handler(AdmittedScope::queue_drain(
-            SessionId::from("root"),
-            TurnId::from("selected-wake-drain"),
-        ))
-        .await
-        .expect("open the scope's handler");
-    let drained = runtime
-        .stream_selected_queued_work(
-            TurnOptions::new(CancellationToken::new(), handler.scoped()),
-            std::slice::from_ref(&wake_batch.batch_id),
-        )
-        .await
-        .expect("selected wake drain succeeds")
-        .expect("selected wake produces a turn");
-    handler.close().await.expect("close the scope's handler");
-
-    assert_eq!(drained.assistant_output.safe_text, "selected wake response");
-    let pending_inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("pending inputs after selected wake drain");
-    assert_eq!(
-        pending_inputs
-            .iter()
-            .map(|input| input.input.input_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![queued_input.input_id.as_str()],
-        "selected queued-work drains must not also claim pending user input"
-    );
-    assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("queued work after selected wake drain")
-        .is_empty(),
-        "selected wake batch should be completed"
-    );
 }
 
 #[tokio::test]
@@ -1819,14 +1705,15 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
                 let store = captured_store_cell.lock_recover().clone();
                 let observed = match store {
                     Some(store) => {
-                        lash_core::store::SessionExecutionLeaseStore::get_session_execution_lease(
+                        let epoch = lash_core::store::DriveEpochStore::drive_epoch(
                             store.as_ref(),
                             &SessionId::from(SESSION_ID),
                         )
                         .await
-                        .expect("read the session execution lease")
-                        .lease
-                        .map(|lease| (lease.executor_id.clone(), lease.fencing_token))
+                        .expect("read the sealed drive epoch");
+                        epoch
+                            .admission
+                            .map(|admission| (admission.as_str().to_owned(), epoch.epoch))
                     }
                     None => None,
                 };
@@ -2080,7 +1967,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         .expect("open the drain's handler");
     let drained = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        runtime.stream_next_queued_work(TurnOptions::new(cancel, handler.scoped())),
+        runtime.drive_one_admitted_queued_root(TurnOptions::new(cancel, handler.scoped())),
     )
     .await
     .expect("cancelled wake drain should finish")
@@ -2125,7 +2012,10 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         .expect("open the drain's handler");
     assert!(
         runtime
-            .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped(),))
+            .drive_one_admitted_queued_root(TurnOptions::new(
+                CancellationToken::new(),
+                handler.scoped(),
+            ))
             .await
             .expect("post-cancel drain should succeed")
             .ran()

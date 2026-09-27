@@ -68,7 +68,7 @@ impl SessionCommitStore for Store {
 
     async fn admit_session_state(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let lease = lease.clone();
         let now = self.clock.timestamp_ms();
@@ -110,7 +110,7 @@ impl SessionCommitStore for Store {
 
     async fn retain_admission_base(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let lease = lease.clone();
@@ -137,7 +137,7 @@ impl SessionCommitStore for Store {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        lease: &ClaimAuthority,
         follow_on_turn_id: &lash_core_execution::TurnId,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
         let lease = lease.clone();
@@ -450,14 +450,6 @@ impl SessionCommitStore for Store {
                                 append_request_identity,
                             };
                             if let Some(replay) = planner.decide_receipt(Some(prior))? {
-                                if let Some(completion) =
-                                    replay.release_session_execution_lease()
-                                {
-                                    let _release_was_current =
-                                        release_session_execution_lease_conn(tx, completion)?;
-                                    // FIG-884: ancillary stale release must
-                                    // never veto a replayed commit.
-                                }
                                 if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
                         && settlement.authorization().session_id() == commit.session_id
                         && commit.interrupted_turn_input_turn_id.as_ref() == Some(settlement.authorization().turn_id())
@@ -1127,11 +1119,7 @@ impl SessionCommitStore for Store {
                         )
                         .map_err(sqlite_error)?;
                     }
-                    if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-                        let _release_was_current =
-                            release_session_execution_lease_conn(tx, completion)?;
-                        // FIG-884: head CAS is commit authority; release is ancillary.
-                    }
+
                     Ok(result)
                 })();
                 // Roll back on a `StoreError` so a failure after the first
@@ -1216,6 +1204,21 @@ impl SessionCommitStore for Store {
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         Store::load_session_meta(self).await
+    }
+
+    async fn load_session_meta_for_commit(&self) -> Result<Option<SessionMeta>, StoreError> {
+        let Some(session_id) = self.session_id.get().cloned() else {
+            return self.load_session_meta().await;
+        };
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    ensure_session_not_deleted_conn(conn, &session_id)?;
+                    crate::session_meta::load_session_meta(conn, Some(&session_id))
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
     }
 }
 

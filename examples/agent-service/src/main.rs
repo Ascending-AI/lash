@@ -20,7 +20,6 @@ mod effect_groups;
 mod fork_compensation_tests;
 #[cfg(test)]
 mod fork_rewind_contract;
-mod lease_triage;
 #[path = "../../shared/prior_store_layout.rs"]
 mod prior_store_layout;
 mod raw_activities;
@@ -367,49 +366,40 @@ async fn async_main() -> anyhow_like::Result<()> {
         // Keep a state clone for the drain; the router consumes the original.
         let drain_state = state.clone();
         let app = Router::new()
-        .route("/", get(index))
-        .route("/api/settings", get(settings))
-        .route("/api/chats", get(list_chats).post(create_chat))
-        .route(
-            "/api/chats/{chat_id}/model",
-            axum::routing::post(update_chat_model),
-        )
-        .route(
-            "/api/chats/{chat_id}/messages",
-            get(list_messages).post(send_message),
-        )
-        .route(
-            "/api/chats/{chat_id}/activities",
-            axum::routing::post(stream_raw_activities),
-        )
-        .route("/api/chats/{chat_id}/board", get(chat_board))
-        .route(
-            "/api/chats/{chat_id}/branch-points",
-            get(list_chat_branch_points).post(pin_chat_branch_point),
-        )
-        .route("/api/chats/{chat_id}/forks", axum::routing::post(fork_chat))
-        // Operator triage read for a chat whose turn looks stuck. This is a
-        // read-only diagnostic that never authorizes fencing or cancellation.
-        // It names the replica and boot running the session, so any deployment
-        // beyond this localhost demo must authenticate and authorize the caller
-        // before this route is reachable.
-        .route(
-            "/api/chats/{chat_id}/lease",
-            get(crate::lease_triage::chat_lease_triage),
-        )
-        .route(
-            "/api/chats/{chat_id}/turns/{turn_id}/cancel",
-            axum::routing::post(cancel_turn),
-        )
-        .route(
-            "/api/effect-groups",
-            axum::routing::post(crate::effect_groups::run_effect_group),
-        )
-        .route(
-            "/api/effect-groups/{run_id}",
-            get(crate::effect_groups::get_effect_group),
-        )
-        .with_state(state);
+            .route("/", get(index))
+            .route("/api/settings", get(settings))
+            .route("/api/chats", get(list_chats).post(create_chat))
+            .route(
+                "/api/chats/{chat_id}/model",
+                axum::routing::post(update_chat_model),
+            )
+            .route(
+                "/api/chats/{chat_id}/messages",
+                get(list_messages).post(send_message),
+            )
+            .route(
+                "/api/chats/{chat_id}/activities",
+                axum::routing::post(stream_raw_activities),
+            )
+            .route("/api/chats/{chat_id}/board", get(chat_board))
+            .route(
+                "/api/chats/{chat_id}/branch-points",
+                get(list_chat_branch_points).post(pin_chat_branch_point),
+            )
+            .route("/api/chats/{chat_id}/forks", axum::routing::post(fork_chat))
+            .route(
+                "/api/chats/{chat_id}/turns/{turn_id}/cancel",
+                axum::routing::post(cancel_turn),
+            )
+            .route(
+                "/api/effect-groups",
+                axum::routing::post(crate::effect_groups::run_effect_group),
+            )
+            .route(
+                "/api/effect-groups/{run_id}",
+                get(crate::effect_groups::get_effect_group),
+            )
+            .with_state(state);
 
         println!("agent-service listening on http://{addr}");
         let listener = tokio::net::TcpListener::bind(addr)

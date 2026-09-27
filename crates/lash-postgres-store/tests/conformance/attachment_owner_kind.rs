@@ -30,10 +30,6 @@ fn postgres_attachment_owner_kind_sql_derives_from_the_enum() {
             include_str!("../../src/postgres/runtime_persistence/session_commit.rs"),
         ),
         (
-            "runtime_persistence/session_execution_lease.rs",
-            include_str!("../../src/postgres/runtime_persistence/session_execution_lease.rs"),
-        ),
-        (
             "runtime_persistence/turn_input.rs",
             include_str!("../../src/postgres/runtime_persistence/turn_input.rs"),
         ),

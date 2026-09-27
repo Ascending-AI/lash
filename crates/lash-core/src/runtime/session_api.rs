@@ -593,7 +593,7 @@ impl LashRuntime {
 
     pub(super) fn runtime_session_services_for_turn(
         &self,
-        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        held_session_execution_lease: Option<&DriveClaimGuard>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::for_turn(
@@ -605,7 +605,7 @@ impl LashRuntime {
 
     pub(super) fn runtime_session_services_after_commit(
         &self,
-        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        held_session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::new(
             self,
@@ -937,7 +937,7 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        let commit_result = commit_runtime_state_with_fresh_session_execution_lease(
+        let commit_result = commit_runtime_state_without_session_lease(
             store,
             commit,
             &self.runtime_lease_owner,
@@ -1081,9 +1081,10 @@ impl LashRuntime {
             command,
         )
         .with_source_key(source_key.clone());
-        let enqueued = store.enqueue_queued_work(draft).await.map_err(|err| {
-            RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
-        })?;
+        let enqueued = store
+            .enqueue_queued_work(draft)
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
         // The command's batch owes its session a drive, armed at admission;
         // deliver it now (ADR 0109 §3). The drive applies the command at its
         // next boundary, before any turn input (ADR 0101 §4).
@@ -1138,7 +1139,7 @@ impl LashRuntime {
                 Ok(crate::runtime::SessionCommandSettlement::Durable(receipt))
             }
             AcceptedSessionCommand::Queued(handle) => {
-                self.await_session_command_settlement(handle).await
+                self.await_session_command_settlement(handle, None).await
             }
         }
     }
@@ -1146,6 +1147,7 @@ impl LashRuntime {
     async fn await_session_command_settlement(
         &mut self,
         handle: crate::runtime::SessionCommandSettlementHandle,
+        previous_policy: Option<SessionPolicy>,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
         let store = self
             .session
@@ -1157,110 +1159,50 @@ impl LashRuntime {
                     "accepted session command lost its persistent store",
                 )
             })?;
-        // Session-command settlement is a control-plane wait. Reuse the
-        // host-configured lease TTL as its deadline: the default is the same
-        // 30-second operational window, and hosts that tighten durable-control
-        // timings through `with_lease_timings` tighten this wait as well.
-        let settlement_timeout = self.host.core.control.lease_timings.ttl();
-        let settlement_started = self.host.core.clock.now();
-        loop {
-            let still_pending = store
-                .list_queued_work(&handle.receipt.session_id)
-                .await
-                .map_err(super::runtime_error_from_store_commit)?
-                .iter()
-                .any(|batch| batch.batch_id == handle.receipt.batch_id);
-            if !still_pending {
-                let completed = store
-                    .queued_work_batch_completed(
-                        &handle.receipt.session_id,
-                        &handle.receipt.batch_id,
-                    )
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?;
-                if !completed {
-                    return Ok(crate::runtime::SessionCommandSettlement::Cancelled(
-                        handle.receipt,
-                    ));
-                }
-                self.refresh_session_graph_from_store()
-                    .await
-                    .map_err(runtime_error_from_session_command_refresh)?;
-                // The refresh adopts the durable head, which already carries
-                // this command's committed values — or newer ones from a
-                // later writer (head-authoritative adoption, FIG-1875). Every
-                // successful refresh path either confirms the resident state
-                // already carries the drain commit or fully hydrates the
-                // head, and probe failures propagate as errors, so there is
-                // no edge that needs the patch re-published residently.
-                // Reapplying it here would overwrite a newer settled head
-                // with this command's older values, resident-only.
-                return Ok(crate::runtime::SessionCommandSettlement::Durable(
-                    handle.receipt,
-                ));
-            }
-
-            if self
-                .host
-                .core
-                .clock
-                .now()
-                .saturating_duration_since(settlement_started)
-                >= settlement_timeout
-            {
-                return Ok(crate::runtime::SessionCommandSettlement::Pending(
-                    handle.receipt,
-                ));
-            }
-
-            let lease = super::session_execution_lease::SessionExecutionLeaseGuard::try_acquire_for_executor(
-                Arc::clone(&store),
-                &self.state.session_id,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
+        let still_pending = store
+            .list_queued_work(&handle.receipt.session_id)
             .await
-            .map_err(super::runtime_error_from_store_commit)?;
-            if let Some(lease) = lease {
-                let fence = lease.fence();
-                // The waiter drains beside the engine's drive, so every
-                // command commit it makes is fenced by the drive epoch
-                // (ADR 0109 §7): a drive that seals an admission after the
-                // waiter took the lane refuses the waiter's commit, and the
-                // waiter goes back to waiting for that drive to apply the
-                // command.
-                let drained = match self.settlement_drive_fence(store.as_ref()).await {
-                    Ok(drive_fence) => {
-                        self.drain_commands_until_settled(
-                            store.as_ref(),
-                            &fence,
-                            drive_fence.as_ref(),
-                            &handle.receipt,
-                        )
-                        .await
-                    }
-                    Err(error) => Err(error),
-                };
-                lease
-                    .release_if_live()
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?;
-                drained?;
+            .map_err(super::runtime_error_from_store_commit)?
+            .iter()
+            .any(|batch| batch.batch_id == handle.receipt.batch_id);
+        if !still_pending {
+            let completed = store
+                .queued_work_batch_completed(&handle.receipt.session_id, &handle.receipt.batch_id)
+                .await
+                .map_err(super::runtime_error_from_store_commit)?;
+            if !completed {
+                return Ok(crate::runtime::SessionCommandSettlement::Cancelled(
+                    handle.receipt,
+                ));
             }
-            let remaining = settlement_timeout.saturating_sub(
-                self.host
-                    .core
-                    .clock
-                    .now()
-                    .saturating_duration_since(settlement_started),
-            );
-            self.host
-                .core
-                .clock
-                .sleep(remaining.min(std::time::Duration::from_millis(10)))
-                .await;
+            let previous_policy = previous_policy.unwrap_or_else(|| self.session_policy());
+            self.refresh_session_graph_from_store()
+                .await
+                .map_err(runtime_error_from_session_command_refresh)?;
+            self.notify_session_config_changed(previous_policy)
+                .await
+                .map_err(|error| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::SessionCommandPostDriveRefresh,
+                        error.to_string(),
+                    )
+                })?;
+            // The refresh adopts the durable head, which already carries
+            // this command's committed values — or newer ones from a
+            // later writer (head-authoritative adoption, FIG-1875). Every
+            // successful refresh path either confirms the resident state
+            // already carries the drain commit or fully hydrates the
+            // head, and probe failures propagate as errors, so there is
+            // no edge that needs the patch re-published residently.
+            // Reapplying it here would overwrite a newer settled head
+            // with this command's older values, resident-only.
+            Ok(crate::runtime::SessionCommandSettlement::Durable(
+                handle.receipt,
+            ))
+        } else {
+            Ok(crate::runtime::SessionCommandSettlement::Pending(
+                handle.receipt,
+            ))
         }
     }
 
@@ -1289,21 +1231,37 @@ impl LashRuntime {
     }
 
     /// Wait for the command `receipt` names to settle, and adopt the durable
-    /// head it settled on. `Pending` when it has not settled within the
-    /// host's lease TTL; the command stays durable and settles later.
+    /// head it settled on. `Pending` when the engine has not settled it yet;
+    /// the command stays durable and settles later. Callers that need a
+    /// settled result await the engine drive outside this runtime's writer lock.
     pub async fn settle_session_command(
         &mut self,
         receipt: crate::SessionCommandReceipt,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        self.await_session_command_settlement(crate::runtime::SessionCommandSettlementHandle {
-            receipt,
-        })
+        self.await_session_command_settlement(
+            crate::runtime::SessionCommandSettlementHandle { receipt },
+            None,
+        )
+        .await
+    }
+
+    /// Settle an engine-driven command and report its policy transition from
+    /// the state observed before the command was enqueued.
+    pub async fn settle_session_command_from_policy(
+        &mut self,
+        receipt: crate::SessionCommandReceipt,
+        previous_policy: SessionPolicy,
+    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
+        self.await_session_command_settlement(
+            crate::runtime::SessionCommandSettlementHandle { receipt },
+            Some(previous_policy),
+        )
         .await
     }
 
     pub async fn drain_next_session_command(
         &mut self,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        session_execution_lease: &crate::ClaimAuthority,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         if self
             .session
@@ -1330,7 +1288,7 @@ impl LashRuntime {
 
     pub async fn drain_next_session_command_with_cancellation(
         &mut self,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        session_execution_lease: &crate::ClaimAuthority,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
@@ -1348,7 +1306,7 @@ impl LashRuntime {
     /// since the fence was read refuses the commit as superseded.
     pub(super) async fn drain_next_session_command_fenced(
         &mut self,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        session_execution_lease: &crate::ClaimAuthority,
         drive_fence: Option<&crate::store::DriveFence>,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
@@ -1365,7 +1323,7 @@ impl LashRuntime {
             .claim_leading_ready_session_command(
                 &self.state.session_id,
                 session_execution_lease,
-                &self.runtime_lease_owner,
+                &session_execution_lease.owner,
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
@@ -1415,7 +1373,7 @@ impl LashRuntime {
         &mut self,
         commands: Vec<crate::SessionCommand>,
         completion: Option<crate::QueuedWorkCompletion>,
-        session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        session_execution_lease: Option<&crate::ClaimAuthority>,
         drive_fence: Option<&crate::store::DriveFence>,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
@@ -1477,7 +1435,7 @@ impl LashRuntime {
         &mut self,
         commands: Vec<crate::SessionCommand>,
         completion: Option<crate::QueuedWorkCompletion>,
-        session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        session_execution_lease: Option<&crate::ClaimAuthority>,
         drive_fence: Option<&crate::store::DriveFence>,
     ) -> Result<(), RuntimeError> {
         self.refresh_session_graph_from_store()

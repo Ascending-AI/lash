@@ -8,6 +8,7 @@
 //! park count, the oldest park's age, and the per-reason split the gauges
 //! record.
 
+use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 
@@ -465,7 +466,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         ))
         .await
         .expect("enqueue the held input");
-    let lease = crate::testing::store_fixtures::claim_session_execution_lease_for_test(
+    let lease = crate::testing::store_fixtures::seal_claim_authority_for_test(
         &withdraw_store,
         &withdraw_session,
         "withdraw-owner",
@@ -497,7 +498,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     // still holds the session; the turn aborted, so its lease releases and
     // the held input's cancel withdraws it.
     withdraw_store
-        .release_session_execution_lease(&lease.completion())
+        .supersede_claim_epoch_for_test(&lease.completion())
         .await
         .expect("release the aborted turn's lease");
     let cancelled = withdraw_store
@@ -524,7 +525,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         ))
         .await
         .expect("enqueue the held input");
-    let suffix_lease = crate::testing::store_fixtures::claim_session_execution_lease_for_test(
+    let suffix_lease = crate::testing::store_fixtures::seal_claim_authority_for_test(
         &suffix_store,
         &suffix_session,
         "suffix-owner",
@@ -558,7 +559,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         .await
         .expect("park turn-3s");
     suffix_store
-        .release_session_execution_lease(&suffix_lease.completion())
+        .supersede_claim_epoch_for_test(&suffix_lease.completion())
         .await
         .expect("release the aborted turn's lease");
     let suffix_outcome = suffix_store
@@ -583,7 +584,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         .record_turn_park(&park_write(&run_session, "turn-4", divergence("four"), 40))
         .await
         .expect("park turn-4");
-    let run_lease = crate::testing::store_fixtures::claim_session_execution_lease_for_test(
+    let run_lease = crate::testing::store_fixtures::seal_claim_authority_for_test(
         &run_store,
         &run_session,
         "run-owner",

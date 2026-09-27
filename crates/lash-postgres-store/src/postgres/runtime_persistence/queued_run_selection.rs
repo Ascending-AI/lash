@@ -4,7 +4,7 @@ use super::*;
 pub(super) async fn claim_selected_queued_work_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    session_execution_lease: &SessionExecutionLeaseAuthority,
+    session_execution_lease: &ClaimAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     batch_ids: &[lash_core_execution::BatchId],
@@ -46,6 +46,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
         .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
         .bind(&sql_batch_ids)
+        .bind(&owner.incarnation_id)
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -71,6 +72,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
                 .bind(session_id.as_str())
                 .bind(sql_session_lease_generation(generation)?)
                 .bind(&involved_claim_ids)
+                .bind(&owner.incarnation_id)
                 .fetch_all(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
@@ -142,6 +144,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
                         .enqueue_seq as i64;
                     last
                 })
+                .bind(&owner.incarnation_id)
                 .fetch_all(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?

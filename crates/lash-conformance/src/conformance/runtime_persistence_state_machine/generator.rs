@@ -1,6 +1,6 @@
 use super::*;
 
-const GENERATED_PREFIX_OPS: usize = 60;
+const GENERATED_PREFIX_OPS: usize = 59;
 
 pub(super) struct ComponentSelection {
     pub(super) store_tool: bool,
@@ -167,7 +167,6 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
         },
         ConfirmUsage { selection: 0 },
         ClaimLease { owner: 0 },
-        RenewLease { stale: true },
         ClaimWorkWithStaleLease,
         ClaimWork {
             selected: false,
@@ -257,7 +256,6 @@ fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
     use RuntimePersistenceOp::*;
     prop_oneof![
         3 => (0_u8..4).prop_map(|owner| ClaimLease { owner }),
-        2 => any::<bool>().prop_map(|stale| RenewLease { stale }),
         1 => Just(Crash),
         5 => (0_u8..8, any::<u8>(), any::<bool>()).prop_map(|(slot, value, coalesce)| EnqueueWork { slot, value, coalesce }),
         4 => (any::<bool>(), any::<u8>()).prop_map(|(selected, selection)| ClaimWork { selected, selection }),

@@ -54,19 +54,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 #[cfg(any(test, feature = "testing"))]
-pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::QueuedLaneHolder {
-    crate::QueuedLaneHolder::new(crate::store::SessionExecutionLease {
-        session_id: SessionId::from("queued-lane-test"),
-        owner: crate::LeaseOwnerIdentity::opaque("holder", "holder:incarnation"),
-        executor_id: "holder-executor".to_string(),
-        lease_token: "holder-token".to_string(),
-        fencing_token: 7,
-        claimed_at_epoch_ms: 1_000,
-        lease_term_ms: 6_400,
-        expires_at_epoch_ms,
-    })
-}
-
 #[cfg(any(test, feature = "testing"))]
 pub fn process_work_wiring_for_registry(
     registry: Arc<dyn crate::ProcessRegistry>,

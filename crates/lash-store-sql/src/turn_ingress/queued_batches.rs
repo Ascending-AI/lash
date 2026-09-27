@@ -14,7 +14,7 @@ pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_atte
 /// row decoders read by column name so the order is the list's to choose.
 pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delivery_policy,
      work_kind, authority_json, merge_key, enqueued_at_ms,
-     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id";
+     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id";
 
 /// The columns written after allocation under the session lock.
 pub const INSERT_COLUMNS: &str =
@@ -62,7 +62,7 @@ crate::statements! {
     pub struct QueuedBatchStatements @ "queued_work_batch" {
         select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE batch_id = ?1";
 
@@ -73,27 +73,22 @@ crate::statements! {
         /// Every batch of session `?1`, in enqueue order.
         list_by_session = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE session_id = ?1
              ORDER BY enqueue_seq ASC";
 
-        /// Session `?1`'s batches that no live claim holds at `?2`.
-        ///
-        /// A claim is live only while the session-execution lease generation it
-        /// pins still holds the lease, so this is a join against the lease row
-        /// rather than a `claim_token IS NULL` test (ADR 0029).
+        /// Session batches not held by a claim in the current drive epoch.
         list_unclaimed = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE session_id = ?1
                AND (claim_token IS NULL OR NOT EXISTS (
-                    SELECT 1 FROM session_execution_leases sel
-                    WHERE sel.session_id = ?1
-                      AND sel.lease_token IS NOT NULL
-                      AND sel.lease_expires_at_ms > ?2
-                      AND sel.lease_fencing_token
+                    SELECT 1 FROM session_meta meta
+                    WHERE meta.session_id = ?1
+                      AND meta.drive_admission_id IS NOT NULL
+                      AND meta.drive_epoch
                           = queued_work_batches.claim_session_lease_generation
                ))
              ORDER BY enqueue_seq ASC";
@@ -104,12 +99,13 @@ crate::statements! {
         select_head_candidate = "SELECT enqueue_seq, batch_id, session_id, source_key,
                     delivery_policy, work_kind, authority_json, merge_key,
                     enqueued_at_ms, claim_fencing_token, claim_token,
-                    claim_session_lease_generation, claim_id
+                    claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE session_id = ?1
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?3
                )
              ORDER BY enqueue_seq ASC
              LIMIT 1";
@@ -125,6 +121,7 @@ crate::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?3
                )";
 
         /// Session `?1`'s unclaimed batches for generation `?2` whose
@@ -132,10 +129,11 @@ crate::statements! {
         /// must be contiguous over.
         select_span = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
              FROM queued_work_batches
              WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
+               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
+                    OR claim_owner_incarnation_id <> ?5)
                AND enqueue_seq BETWEEN ?3 AND ?4
              ORDER BY enqueue_seq ASC";
 
@@ -154,6 +152,7 @@ crate::statements! {
                  claim_token = ?4,
                  claim_fencing_token = ?6,
                  claim_session_lease_generation = ?5,
+                 claim_owner_incarnation_id = ?8,
                  obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN 'delivered' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
@@ -169,6 +168,7 @@ crate::statements! {
                AND (
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?5
+                    OR claim_owner_incarnation_id <> ?8
                )";
 
         /// The first payload of batch `?2` of session `?1`, if claim `?3`/`?4`
@@ -200,6 +200,7 @@ crate::statements! {
              SET claim_id = ?4,
                  claim_token = ?5,
                  claim_session_lease_generation = 0,
+                 claim_owner_incarnation_id = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
@@ -226,7 +227,8 @@ crate::statements! {
     pub struct BatchRootVerbStatements @ "queued_work_batch" {
         release_batches = "UPDATE queued_work_batches SET
             claim_id = NULL,
-            claim_token = NULL, claim_session_lease_generation = 0
+            claim_token = NULL, claim_session_lease_generation = 0,
+            claim_owner_incarnation_id = NULL
             WHERE session_id = ?1 AND claim_token IS NOT NULL";
         delete_batch = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND batch_id = ?2";
     }

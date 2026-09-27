@@ -31,7 +31,7 @@ async fn assert_composition(store: Arc<dyn RuntimePersistence>, session: &str, a
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let lease = claim_session_execution_lease_for_test(&store, &session_id, "composition").await;
+    let lease = seal_claim_authority_for_test(&store, &session_id, "composition").await;
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),

@@ -22,7 +22,6 @@ use lash_store_sql::turn_ingress::{
     closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements, run_specs::RunSpecStatements,
-    session_execution_leases::SessionExecutionLeaseStatements,
     tool_intent_submissions::ToolIntentSubmissionStatements,
     turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
@@ -111,8 +110,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) queued_items: QueuedItemStatements,
     /// `queued_work_items`, SQLite only.
     pub(crate) queued_items_sqlite: QueuedItemSqliteStatements,
-    /// `session_execution_leases`, shared.
-    pub(crate) leases: SessionExecutionLeaseStatements,
     /// `turn_cancel_requests`, shared.
     pub(crate) cancel_requests: CancelRequestStatements,
     /// `turn_cancel_requests`, SQLite only.
@@ -153,7 +150,6 @@ impl TurnIngressSql {
             queued_batches_sqlite: QueuedBatchSqliteStatements::render(dialect),
             queued_items: QueuedItemStatements::render(dialect),
             queued_items_sqlite: QueuedItemSqliteStatements::render(dialect),
-            leases: SessionExecutionLeaseStatements::render(dialect),
             cancel_requests: CancelRequestStatements::render(dialect),
             cancel_requests_sqlite: CancelRequestSqliteStatements::render(dialect),
             bindings: CancellationBindingStatements::render(dialect),

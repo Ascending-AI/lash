@@ -30,11 +30,10 @@ use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectGroupChildCommitOutcome, EffectGroupHandle, EffectHost,
     EffectJournalRetirement, ExecutionScope, GroupChildBinding, GroupChildFinalCommit,
-    GroupExecutors, GroupSettlement, LoserPolicy, QueuedLaneAcquisition, QueuedLaneProbe,
-    RankedGroupSettlement, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
-    ToolChildHost, ToolIntentOutcomeSink, ToolIntentPreparation,
+    GroupExecutors, GroupSettlement, LoserPolicy, RankedGroupSettlement, Resolution,
+    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
+    SegmentProgress, ToolChildHost, ToolIntentOutcomeSink, ToolIntentPreparation,
 };
 use crate::{RuntimeError, RuntimeErrorCode, SessionId};
 
@@ -115,15 +114,6 @@ pub trait EffectLayer: Send + Sync + 'static {
         deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn acquire_queued_lane(
-        &self,
-        inner: &dyn AwaitEventResolver,
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        inner.acquire_queued_lane(lane, cancel).await
     }
 }
 
@@ -229,16 +219,6 @@ impl LayeredEffectHost {
 impl AwaitEventResolver for LayeredEffectHost {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         self.inner.await_event_authority_binding_id()
-    }
-
-    async fn acquire_queued_lane(
-        &self,
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        self.layer
-            .acquire_queued_lane(self.inner.await_event_resolver(), lane, cancel)
-            .await
     }
 
     async fn prepare_completion_key(
@@ -523,16 +503,6 @@ impl<'run> super::ScopeBoundController for LayeredController<'run> {
 impl AwaitEventResolver for LayeredController<'_> {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         self.inner.as_ref().await_event_authority_binding_id()
-    }
-
-    async fn acquire_queued_lane(
-        &self,
-        lane: Arc<dyn QueuedLaneProbe>,
-        cancel: CancellationToken,
-    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        self.layer
-            .acquire_queued_lane(self.inner.as_ref(), lane, cancel)
-            .await
     }
 
     async fn prepare_completion_key(

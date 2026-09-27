@@ -400,7 +400,7 @@ async fn commit_initialized_session(
     // Lane-less by construction: the session is being created before it
     // owns an execution lane. A guard for another session cannot authorize
     // this commit.
-    let result = commit_runtime_state_with_fresh_session_execution_lease(
+    let result = commit_runtime_state_without_session_lease(
         Arc::clone(&materialized.store_binding),
         commit,
         &materialized.runtime.runtime_lease_owner,

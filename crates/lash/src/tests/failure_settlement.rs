@@ -5,7 +5,7 @@
 //!
 //! * A deterministic failure is an outcome: a direct turn records it as a
 //!   failed turn.
-//! * A replay refusal parks the direct turn until its input is withdrawn.
+//! * A replay refusal parks the direct turn until its parked root is cancelled.
 //! * An accepted input is withdrawable by its send receipt before it drives.
 //! * Cancellation keeps settling `Stopped { Cancelled }`.
 //!
@@ -191,9 +191,9 @@ impl lash_core::plugin::ProtocolSessionPlugin for DivergingBeforeLlmCall {
 }
 
 /// FIG-3586, FIG-3600: a replay refusal parks the sent root without a failed
-/// turn report. Reattaching observes the same park and withdrawal clears it.
+/// turn report. Reattaching observes the same park; a root cancel clears it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -> Result<()> {
+async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() -> Result<()> {
     const SESSION: &str = "direct-replay-refusal";
     let backend = TestBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -209,22 +209,26 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
         .id("parked-turn")
         .await?;
     let input_id = handle.input_id().clone();
-    let first = tokio::time::timeout(std::time::Duration::from_secs(10), handle.outcome())
+    let first = tokio::time::timeout(std::time::Duration::from_secs(30), handle.outcome())
         .await
         .expect("the first send answers its park")?;
     let reobserved = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(30),
         session.root("parked-turn").outcome(),
     )
     .await
     .expect("the root handle observes the same park")?;
+    let park_id = match &first.status {
+        crate::TurnStatus::Parked(parked) => parked.park_id,
+        other => panic!("expected the first send to park: {other:?}"),
+    };
     for outcome in [first, reobserved] {
         assert!(matches!(
             outcome.status,
             crate::TurnStatus::Parked(crate::ParkedTurn {
-                reason: lash_core::store::ParkReason::ReplayDivergence { .. },
+                reason: lash_core::store::ParkReason::ReplayDivergence { ref message },
                 ..
-            })
+            }) if message.contains("diverged from its journal")
         ));
         assert!(outcome.output.is_none(), "a park has no terminal report");
         let status = core.drain_status(false).await?;
@@ -245,20 +249,35 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
     );
     let pending = session.durable().pending_turn_inputs().await?;
     assert_eq!(pending.len(), 1);
-    // The park blocks the session's admission, so its input stays pending
-    // and no other root drives it (FIG-3600).
+    // The parked drive keeps the input held under its sealed epoch until the
+    // input is withdrawn; no other root may drive it (FIG-3600).
     assert!(
         matches!(
             &pending[0].status,
-            lash_core::PendingTurnInputReadStatus::Pending
+            lash_core::PendingTurnInputReadStatus::Held { drive_epoch } if *drive_epoch > 0
         ),
-        "the parked turn's input stays pending: {:?}",
+        "the parked turn's input stays held: {:?}",
         pending[0].status
     );
     let cancelled = session.cancel(crate::CancelTarget::Input(input_id)).await?;
     assert!(
-        matches!(cancelled, crate::CancelReceipt::Withdrawn(_)),
+        matches!(cancelled, crate::CancelReceipt::Requested { .. }),
         "{cancelled:?}"
+    );
+    let cancelled = core
+        .parked_work()
+        .cancel(
+            &crate::ParkedWorkRef::Turn {
+                session_id: SessionId::from(SESSION),
+                turn_id: lash_core::TurnId::from("parked-turn"),
+            },
+            park_id,
+        )
+        .await
+        .expect("cancel the parked root");
+    assert_eq!(
+        cancelled.terminal.kind,
+        lash_core::store::RootTerminalKind::Cancelled
     );
     let status = core.drain_status(false).await?;
     assert_eq!(

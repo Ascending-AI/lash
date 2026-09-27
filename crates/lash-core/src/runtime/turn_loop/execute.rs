@@ -60,7 +60,7 @@ struct PreparedTurnAbortContext<'abort, 'run> {
     claims: &'abort LogicalTurnClaims,
     scoped_effect_controller: &'abort ScopedEffectController<'run>,
     lease: TurnLeaseScope<'abort>,
-    session_execution_fence: Option<crate::SessionExecutionLeaseAuthority>,
+    session_execution_fence: Option<crate::ClaimAuthority>,
     turn_control: &'abort ActiveTurnControl,
     turn_graph_appends: TurnGraphAppendDraft,
     observer: &'abort TurnObserver,
@@ -366,8 +366,7 @@ impl LashRuntime {
         let _local_stop_forwarding = local_stop
             .forward_to(Arc::clone(&turn_control), Arc::clone(&turn_control_host))
             .await;
-        let session_execution_fence =
-            session_execution_lease.map(SessionExecutionLeaseGuard::fence);
+        let session_execution_fence = session_execution_lease.map(DriveClaimGuard::fence);
         let turn_policy = self.state.effective_policy().clone();
         let session_protocol_turn_options = self.state.effective_protocol_turn_options().clone();
         let effective_protocol_turn_options = protocol_turn_options

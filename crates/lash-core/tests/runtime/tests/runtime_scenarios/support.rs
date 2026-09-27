@@ -4,13 +4,12 @@ const SEED: u64 = 0x5_5c01;
 pub(crate) use std::collections::HashMap;
 
 pub(crate) use helpers::RecordingStore;
-pub(crate) use lash_core::store::{
-    QueuedWorkStore, SessionCommitStore, SessionExecutionLeaseStore, TurnInputStore,
-};
+pub(crate) use lash_core::store::{QueuedWorkStore, SessionCommitStore, TurnInputStore};
+pub(crate) use lash_core::testing::RuntimePersistenceTestClaimExt;
 pub(crate) use lash_core::{
-    LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, StoreError, TurnInput,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress, TurnInputState,
+    ClaimAuthority, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit,
+    StoreError, TurnInput, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress,
+    TurnInputState,
 };
 
 #[path = "support/checkpoint.rs"]
@@ -142,7 +141,7 @@ struct RuntimeScenarioContext {
     /// turn-cancellation promises a deferral fixture settles.
     turn_control: lash_core::TurnCancellationAuthority,
     owner: Option<LeaseOwnerIdentity>,
-    lease: Option<SessionExecutionLease>,
+    lease: Option<ClaimAuthority>,
     state: RuntimeSessionState,
     enqueued_turn_inputs: HashMap<&'static str, PendingTurnInput>,
     command_claim: Option<QueuedWorkClaim>,
@@ -234,21 +233,16 @@ impl RuntimeScenarioContext {
         let owner = lease_owner(self.host_behavior.lease_owner_id);
         let lease = self
             .store()
-            .try_claim_session_execution_lease(
-                &self.session_id,
-                &owner,
-                "ensure-lease-executor",
-                60_000,
-            )
+            .seal_claim_epoch_for_test(&self.session_id, &owner, "scenario-drive", 0)
             .await
-            .expect("claim session execution lease")
+            .expect("seal scenario drive epoch")
             .acquired()
-            .expect("session execution lease");
+            .expect("scenario drive epoch sealed");
         self.owner = Some(owner);
         self.lease = Some(lease);
     }
 
-    fn owner_and_lease(&self) -> (&LeaseOwnerIdentity, &SessionExecutionLease) {
+    fn owner_and_lease(&self) -> (&LeaseOwnerIdentity, &ClaimAuthority) {
         (
             self.owner
                 .as_ref()

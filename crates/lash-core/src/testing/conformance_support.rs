@@ -12,9 +12,6 @@ pub use crate::runtime::{
     reconcile_pruned_trigger_deliveries_interleaved, record_token_usage_shared,
     stage_token_ledger_shared,
 };
-pub use lash_core_effect::queued_lane_wait::{
-    QueuedLaneGiveUp, QueuedLaneWait, QueuedLaneWaitStep,
-};
 
 /// Project a store commit refusal through the production runtime boundary.
 ///

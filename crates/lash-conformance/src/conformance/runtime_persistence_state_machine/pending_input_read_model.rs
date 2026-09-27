@@ -5,15 +5,15 @@ pub(super) fn pending_input_reads(model: &ReferenceModel) -> Vec<crate::PendingT
     let live_lease_expiry = model
         .current_lease
         .as_ref()
-        .map(|lease| lease.expires_at_epoch_ms);
+        .map(|lease| lease.fencing_token);
     let mut inputs = model
         .inputs
         .values()
         .map(|modeled| {
             let input = modeled.input.clone();
             match live_lease_expiry {
-                Some(lease_expires_at_ms) if held.contains(&input.input_id) => {
-                    crate::PendingTurnInputRead::held(input, lease_expires_at_ms)
+                Some(drive_epoch) if held.contains(&input.input_id) => {
+                    crate::PendingTurnInputRead::held(input, drive_epoch)
                 }
                 _ => crate::PendingTurnInputRead::pending(input),
             }

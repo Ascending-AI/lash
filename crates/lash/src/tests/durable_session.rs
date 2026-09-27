@@ -1383,11 +1383,9 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         .find(|read| read.input.input_id == accepted.input_id)
         .expect("a held input is still reported by the Durable Session, not hidden");
     match row.status {
-        lash_core::runtime::PendingTurnInputReadStatus::Held {
-            lease_expires_at_ms,
-        } => assert!(
-            lease_expires_at_ms > 0,
-            "a held row carries the matching live lease's expiry"
+        lash_core::runtime::PendingTurnInputReadStatus::Held { drive_epoch } => assert!(
+            drive_epoch > 0,
+            "a held row carries the matching sealed drive epoch"
         ),
         ref other => panic!("the claimed input must read as held, got {other:?}"),
     }

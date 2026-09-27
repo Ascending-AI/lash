@@ -79,20 +79,20 @@ pub(crate) fn pending_turn_input_row_from_sql(
 /// claim is pinned to.
 pub(crate) struct PendingTurnInputReadRow {
     row: PendingTurnInputRow,
-    lease_expires_at_ms: Option<u64>,
+    drive_epoch: Option<u64>,
 }
 
 pub(crate) fn pending_turn_input_read_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<PendingTurnInputReadRow> {
     let input = pending_turn_input_row_from_sql(row)?;
-    let lease_expires_at_ms = row
+    let drive_epoch = row
         .get::<_, Option<i64>>(15)?
-        .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
+        .map(|value| u64_from_sql("PendingTurnInputRead", "drive_epoch", value))
         .transpose()?;
     Ok(PendingTurnInputReadRow {
         row: input,
-        lease_expires_at_ms,
+        drive_epoch,
     })
 }
 
@@ -118,10 +118,8 @@ pub(crate) fn pending_turn_input_read_from_row(
     read: PendingTurnInputReadRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
     let input = pending_turn_input_from_row(read.row)?;
-    Ok(match read.lease_expires_at_ms {
-        Some(lease_expires_at_ms) => {
-            lash_core_execution::PendingTurnInputRead::held(input, lease_expires_at_ms)
-        }
+    Ok(match read.drive_epoch {
+        Some(drive_epoch) => lash_core_execution::PendingTurnInputRead::held(input, drive_epoch),
         None => lash_core_execution::PendingTurnInputRead::pending(input),
     })
 }

@@ -451,7 +451,7 @@ pub trait RootStore: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct RootInputClaimRequest {
     pub session_id: SessionId,
-    pub lease: crate::SessionExecutionLeaseAuthority,
+    pub lease: crate::ClaimAuthority,
     pub owner: crate::LeaseOwnerIdentity,
     pub root: TurnId,
     pub head: InputId,
