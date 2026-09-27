@@ -151,18 +151,21 @@ impl ProcessLifecycle for ParentEndFault {
         self.inner.terminal_publication(process_id).await
     }
 
-    async fn list_pending_parent_end_plans(
-        &self,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<ParentEndPlan>, PluginError> {
-        self.inner.list_pending_parent_end_plans(limit).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError> {
         self.inner.get_parent_end_plan(parent).await
+    }
+
+    async fn get_parent_end_plan_by_key(
+        &self,
+        parent_kind: &str,
+        parent_id: &str,
+    ) -> Result<Option<ParentEndPlan>, PluginError> {
+        self.inner
+            .get_parent_end_plan_by_key(parent_kind, parent_id)
+            .await
     }
 
     async fn list_parent_end_children(

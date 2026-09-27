@@ -1098,9 +1098,9 @@ fn processes_area_witnesses_b() {
     variant_witness(|value: &lash::runtime::RuntimeEffectKind| {
         matches!(value, lash::runtime::RuntimeEffectKind::ToolParentEnd)
     });
-    // W0682: lash::process::ProcessRegistry::list_pending_parent_end_plans [function]
+    // W0682: lash::process::ProcessRegistry::get_parent_end_plan_by_key [function]
     fn meth_0682<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::list_pending_parent_end_plans;
+        let _ = T::get_parent_end_plan_by_key;
     }
     // W0686: lash::plugins::ProcessRunOutcome::is_terminal [function]
     let _ = lash::plugins::ProcessRunOutcome::is_terminal;

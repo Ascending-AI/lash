@@ -172,7 +172,7 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
     );
 
     worker
-        .drive_pending_parent_end_plans()
+        .settle_parent_end_plan(&plan)
         .await
         .expect("settle the re-derived row");
     assert_eq!(
@@ -193,9 +193,9 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
         .await
         .expect("second redrive pass");
     worker
-        .drive_pending_parent_end_plans()
+        .settle_parent_end_plan(&plan)
         .await
-        .expect("second sweep pass");
+        .expect("second apply is a no-op");
     let settled = registry
         .get_parent_end_plan(&turn_parent("committed-turn"))
         .await
@@ -275,8 +275,13 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
         "the cursor walks past the stuck scopes and the committed turn gets its row"
     );
 
+    let plan = registry
+        .get_parent_end_plan(&turn_parent("zz-committed-turn"))
+        .await
+        .expect("read the re-derived ledger row")
+        .expect("the committed turn's row exists");
     worker
-        .drive_pending_parent_end_plans()
+        .settle_parent_end_plan(&plan)
         .await
         .expect("settle the re-derived row");
     assert_eq!(

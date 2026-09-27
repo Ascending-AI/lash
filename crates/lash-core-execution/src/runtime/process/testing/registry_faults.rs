@@ -622,18 +622,21 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         self.inner.terminal_publication(process_id).await
     }
 
-    async fn list_pending_parent_end_plans(
-        &self,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::ParentEndPlan>, crate::PluginError> {
-        self.inner.list_pending_parent_end_plans(limit).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &crate::ScopeId,
     ) -> Result<Option<crate::ParentEndPlan>, crate::PluginError> {
         self.inner.get_parent_end_plan(parent).await
+    }
+
+    async fn get_parent_end_plan_by_key(
+        &self,
+        parent_kind: &str,
+        parent_id: &str,
+    ) -> Result<Option<crate::ParentEndPlan>, crate::PluginError> {
+        self.inner
+            .get_parent_end_plan_by_key(parent_kind, parent_id)
+            .await
     }
 
     async fn list_parent_end_children(

@@ -202,3 +202,40 @@ pub(crate) fn started_detached(
     registration.lifetime = crate::LifetimeDecision::Detached;
     registration
 }
+
+/// One due-obligation pass over `stores`' `ParentEnd` ledger, built the way
+/// the deployment's reconcile tick wires it (ADR 0109 §1.5): a
+/// [`ParentEndRelay`](lash_core::runtime::drive::ParentEndRelay) over the
+/// store set's ledger, the registry the claims name rows in, and a native
+/// process port — the same `deliver_cancel` the law's native executions read
+/// their cancel request from.
+///
+/// This is the sweep's delivery half: the worker pass records the missing
+/// ledger rows (`redrive_missing_opener_parent_end_rows`), and this claims
+/// each armed row, applies its plan and settles it — or retries it under its
+/// backoff when the delivery cannot run.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the store set's ports and the pass bound are established"
+)]
+pub(crate) async fn deliver_due_parent_end_obligations(
+    stores: &Arc<dyn crate::StoreSet>,
+) -> lash_core::engine::RelayPass {
+    let registry = stores.process_registry();
+    let clock = stores.clock();
+    let relay = lash_core::runtime::drive::ParentEndRelay::new(
+        stores.obligation_ledger(crate::store::ObligationKind::ParentEnd),
+        Arc::clone(&registry),
+        Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+            &registry,
+        ))),
+        Arc::clone(&clock),
+    );
+    lash_core::runtime::drive::relay::relay_due(
+        &relay,
+        clock.as_ref(),
+        std::num::NonZeroUsize::new(256).expect("parent-end page bound is non-zero"),
+    )
+    .await
+    .expect("the parent-end obligation pass runs")
+}

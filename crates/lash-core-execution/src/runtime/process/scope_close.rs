@@ -11,9 +11,10 @@
 //! A sink built with a process-work port also **applies** the plan the row
 //! records (FIG-3822): it delivers `ParentEnded` to each live `Until` child
 //! through the engine before recording the child's cancel request, then
-//! settles the row. A sink without one only records; a host that runs no
-//! processes has nothing to deliver to, and the reconcile tick applies the
-//! plan of any close whose apply was lost.
+//! settles the row. A sink without one records the row and settles it at
+//! once when no process lives `Until` the scope: its `ParentEnd` obligation
+//! (ADR 0109 §3) owes no cancel. A plan with a child stays owed for the
+//! relay of a deployment that can deliver it.
 
 use std::sync::Arc;
 
@@ -78,10 +79,30 @@ impl RegistryScopeClose {
                 Err(error) => Err(error),
             }
         } else {
-            self.registry.record_parent_end(scope).await.map(|_| ())
+            match self.registry.record_parent_end(scope).await {
+                Ok(()) => settle_childless_plan(self.registry.as_ref(), scope).await,
+                Err(error) => Err(error),
+            }
         };
         result.map_err(|error| StoreError::Backend(format!("close scope `{scope}`: {error}")))
     }
+}
+
+/// Settle `scope`'s recorded plan when no process lives `Until` it: every
+/// child's cancel is then vacuously delivered, so the plan's obligation owes
+/// nothing (ADR 0109 §3).
+async fn settle_childless_plan(
+    registry: &dyn ProcessRegistry,
+    scope: &ScopeId,
+) -> Result<(), crate::PluginError> {
+    if registry
+        .list_parent_end_children(scope, None, std::num::NonZeroUsize::MIN)
+        .await?
+        .is_empty()
+    {
+        registry.settle_parent_end_plan(scope).await?;
+    }
+    Ok(())
 }
 
 #[async_trait::async_trait]

@@ -18,13 +18,6 @@ const T0: u64 = 2_000_000;
 
 type Transcript = Vec<String>;
 
-fn plan_key(scope: &ScopeId) -> ObligationKey {
-    ObligationKey::ParentEnd {
-        parent_kind: scope.storage_kind().to_owned(),
-        parent_id: scope.storage_id(),
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "test support: a backend that cannot open or answer panics the harness with its name by design"
@@ -176,14 +169,17 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
             .record_parent_end(scope)
             .await
             .expect("record the plan");
-        plan_ids.push(
-            stores
-                .obligation_ledger(ObligationKind::ParentEnd)
-                .arm(&plan_key(scope), T0)
-                .await
-                .expect("arm the plan")
-                .expect("the plan owes nothing yet"),
-        );
+        // The record armed the plan's `ParentEnd` obligation (ADR 0109 §3).
+        let plan = registry
+            .get_parent_end_plan(scope)
+            .await
+            .expect("read the plan")
+            .expect("the plan is recorded");
+        out.push(format!(
+            "recording a plan arms its obligation -> {:?}",
+            plan.obligation_state
+        ));
+        plan_ids.push(plan.obligation_id.expect("the record armed the plan"));
     }
     out.push(cleanup(
         "cleanup with every obligation due",

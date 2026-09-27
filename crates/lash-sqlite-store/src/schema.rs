@@ -1319,9 +1319,6 @@ CREATE INDEX IF NOT EXISTS idx_parent_end_plans_obligation_due
 CREATE INDEX IF NOT EXISTS idx_parent_end_plans_obligation_stalled
     ON parent_end_plans(obligation_id)
     WHERE obligation_state = 'stalled';
-CREATE INDEX IF NOT EXISTS idx_parent_end_plans_pending
-    ON parent_end_plans(ended_at_ms, parent_kind, parent_id)
-    WHERE settled_at_ms IS NULL;
 
 CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     replay_key          TEXT PRIMARY KEY,

@@ -163,6 +163,26 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "parent_end_detection_bounds__test",
+    crate_features = [],
+    crate_name = "parent_end_detection_bounds",
+    crate_root = "tests/parent_end_detection_bounds.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-sim", "parent_end_detection_bounds", "//crates/lash-sim:parent_end_detection_bounds__test"),
+    extra_compile_data = [
+        "//crates/lash-postgres-store:package_files",
+        "//crates/lash-sqlite-store:package_files",
+    ],
+    library = ":lash-sim",
+    library_crate_name = "lash_sim",
+    manifest_dir = "crates/lash-sim",
+    package_name = "lash-sim",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "possession_conservation__test",
     crate_features = [],
     crate_name = "possession_conservation",
@@ -335,6 +355,7 @@ lash_batch_test(
     tests = [
         ":lash-sim__bin__unit_test",
         ":logical_turn__test",
+        ":parent_end_detection_bounds__test",
         ":possession_conservation__test",
         ":process_lifecycle_vocabulary__test",
         ":retention_classification__test",

@@ -318,46 +318,13 @@ impl DurableProcessWorker {
         }
     }
 
-    /// Settle every parent scope whose ledger row is still pending.
-    ///
-    /// One failing row never aborts the page: the row stays pending and the
-    /// next pass retries it, so a single unreachable child cannot starve every
-    /// other parent's children of their cancel.
-    pub(super) async fn drive_pending_parent_end_plans(&self) -> Result<(), PluginError> {
-        let mut deferred: Vec<ScopeId> = Vec::new();
-        loop {
-            let plans = self
-                .config
-                .process_registry()
-                .list_pending_parent_end_plans(page_bound())
-                .await?;
-            let unfinished = plans
-                .iter()
-                .filter(|plan| !deferred.contains(&plan.parent))
-                .count();
-            if unfinished == 0 {
-                return Ok(());
-            }
-            for plan in plans {
-                if deferred.contains(&plan.parent) {
-                    continue;
-                }
-                if let Err(error) = self.settle_parent_end_plan(&plan).await {
-                    tracing::warn!(
-                        parent_kind = plan.parent.storage_kind(),
-                        parent_id = plan.parent.storage_id(),
-                        error = %error,
-                        "parent-end plan stays pending for the next sweep pass",
-                    );
-                    deferred.push(plan.parent);
-                }
-            }
-        }
-    }
-
     /// Settle one closed scope through the one engine-neutral application
     /// every engine runs (FIG-3822). A native execution reads its cancel
     /// request from the registry, so its port delivers nothing more.
+    ///
+    /// The row's `ParentEnd` obligation is its durable owner (ADR 0109):
+    /// this apply marks it `delivered` when it is still `due`, and the
+    /// reconcile pass's relay retries whatever an apply here could not.
     pub async fn settle_parent_end_plan(&self, plan: &ParentEndPlan) -> Result<(), PluginError> {
         let now_ms = self.now_ms();
         let wiring = self.process_wiring();

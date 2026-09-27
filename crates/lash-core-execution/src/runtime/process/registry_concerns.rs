@@ -594,11 +594,6 @@ pub trait ProcessLifecycle: Send + Sync {
         process_id: &ProcessId,
     ) -> Result<Option<ProcessTerminalPublication>, PluginError>;
 
-    async fn list_pending_parent_end_plans(
-        &self,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ParentEndPlan>, PluginError>;
-
     /// Load the ledger row for one parent scope, settled or not.
     ///
     /// Registration reads this to fence a late start: a start whose starter
@@ -606,6 +601,17 @@ pub trait ProcessLifecycle: Send + Sync {
     async fn get_parent_end_plan(
         &self,
         parent: &crate::ScopeId,
+    ) -> Result<Option<ParentEndPlan>, PluginError>;
+
+    /// Load the ledger row keyed `(parent_kind, parent_id)` — the key a
+    /// `ParentEnd` obligation's claim names (ADR 0109). `None` when no row
+    /// carries the key. A row whose typed payload this build cannot decode
+    /// is [`PluginError::StoredDataCorrupt`], which the relay stalls
+    /// `undecodable` rather than failing its due page.
+    async fn get_parent_end_plan_by_key(
+        &self,
+        parent_kind: &str,
+        parent_id: &str,
     ) -> Result<Option<ParentEndPlan>, PluginError>;
 
     /// Page the children this parent-end sweep still has to cancel.

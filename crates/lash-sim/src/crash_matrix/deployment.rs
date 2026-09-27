@@ -788,8 +788,20 @@ impl CrashProcessPort {
     }
 }
 
+/// What the process-work port answers at an armed site: a refusal for good
+/// is a terminal engine error (the engine has nothing that could ever take
+/// the delivery), a retryable failure an opaque one a later attempt may
+/// clear.
 fn port_failure(effect: ArmEffect, site: HostSite) -> lash_core::PluginError {
-    lash_core::PluginError::Invoke(format!("crash matrix: {effect:?} at {site:?}"))
+    match effect {
+        ArmEffect::Refuse => lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::EngineServiceUnregistered,
+            format!("crash matrix: {site:?} refused for good"),
+        )),
+        ArmEffect::Crash | ArmEffect::FailRetryable => {
+            lash_core::PluginError::Invoke(format!("crash matrix: {effect:?} at {site:?}"))
+        }
+    }
 }
 
 #[async_trait::async_trait]

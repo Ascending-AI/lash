@@ -39,6 +39,7 @@
 mod admission;
 mod close;
 mod control;
+mod parent_end_relay;
 mod park;
 mod reconcile;
 pub mod relay;
@@ -47,11 +48,11 @@ pub mod scope_close;
 mod turn_config;
 
 pub use control::{ControlIntentRelay, intent_drive_request};
+pub use parent_end_relay::ParentEndRelay;
 pub use park::StoreParkRecovery;
 pub use reconcile::{
     DrainHandOverPass, ReconcileParts, ReconcileProcesses, drain_hand_over_slot,
-    reconcile_drive_request, reconcile_once, reconcile_parent_end_plans_slot,
-    reconcile_session_drives,
+    reconcile_drive_request, reconcile_once, reconcile_session_drives,
 };
 pub use scope_close::{ScopeCloseRelay, deliver_scope_close, scope_close_relay};
 pub(crate) use turn_config::provider_binding_unavailable;

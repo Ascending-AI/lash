@@ -7,7 +7,7 @@ Accepted 2026-09-27 (FIG-3600 S8). It records Sam's S8 rulings of that date.
 leader lease). The per-ledger slices under *Slice plan* build the rest, and
 each slice updates this status when it lands. Landed: S8-D, the two-phase
 session delete (§4); S8-S, scope close on the root row (§3, §6); S8-C,
-control intents.
+control intents; S8-P, parent-end plans (§3).
 
 **S8-T (process terminal publication) is implemented.** Every transaction
 that makes a process terminal arms the row's `ProcessTerminal` obligation;

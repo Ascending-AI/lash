@@ -4,8 +4,9 @@
 //!
 //! The projection is index material only: injective, comparable, never
 //! parsed. Rows are injected straight into `lash_parent_end_plans` so each
-//! refusal reaches `list_pending_parent_end_plans`/`get_parent_end_plan`
-//! exactly as a stored row would.
+//! refusal reaches `get_parent_end_plan_by_key`/`get_parent_end_plan`
+//! exactly as a stored row would — the keyed read is the one the ParentEnd
+//! obligation's relay makes, and a row that refuses it stalls `undecodable`.
 
 use std::sync::Arc;
 
@@ -131,7 +132,7 @@ async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
     inject(&pool, kind, id, &old_payload).await;
 
     let error = registry
-        .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+        .get_parent_end_plan_by_key(kind, id)
         .await
         .expect_err("an old-format row must fail closed, not decode");
     clean_injected(&pool, kind, id).await;
@@ -165,7 +166,7 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
     inject(&pool, kind, &id, &payload).await;
 
     let error = registry
-        .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+        .get_parent_end_plan_by_key(kind, &id)
         .await
         .expect_err("a parent-scope row must refuse");
     clean_injected(&pool, kind, &id).await;
@@ -195,7 +196,7 @@ async fn an_unsupported_payload_version_is_refused() {
     inject(&pool, kind, &id, &payload).await;
 
     let error = registry
-        .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+        .get_parent_end_plan_by_key(kind, &id)
         .await
         .expect_err("a newer payload version must refuse");
     clean_injected(&pool, kind, &id).await;
@@ -226,7 +227,7 @@ async fn a_payload_that_disagrees_with_its_projection_is_refused() {
     inject(&pool, kind, id, &payload).await;
 
     let error = registry
-        .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+        .get_parent_end_plan_by_key(kind, id)
         .await
         .expect_err("a projection/payload disagreement must refuse");
     clean_injected(&pool, kind, id).await;

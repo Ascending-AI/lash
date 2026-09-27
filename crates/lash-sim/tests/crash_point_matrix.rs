@@ -67,7 +67,6 @@ crash_matrix! {
     parent_end_after_state_commit => (ParentEnd, AfterStateCommit);
     parent_end_during_engine_delivery => (ParentEnd, DuringEngineDelivery);
     parent_end_after_delivery_before_settle => (ParentEnd, AfterDeliveryBeforeSettle);
-    #[ignore = "FIG-3600 S8-P"]
     parent_end_delivery_refused => (ParentEnd, DeliveryRefused);
 
     session_delete_after_state_commit => (SessionDelete, AfterStateCommit);

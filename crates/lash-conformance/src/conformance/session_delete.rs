@@ -55,13 +55,6 @@ async fn arm(stores: &Arc<dyn StoreSet>, key: ObligationKey, now_ms: u64) -> Obl
         .expect("the row exists and owes nothing")
 }
 
-fn plan_key(scope: &ScopeId) -> ObligationKey {
-    ObligationKey::ParentEnd {
-        parent_kind: scope.storage_kind().to_owned(),
-        parent_id: scope.storage_id(),
-    }
-}
-
 /// L-D7: the close's acknowledgement arms the session's `SessionDelete`
 /// obligation in its own transaction, due at once; an unacknowledged close
 /// arms nothing, and a repeated close keeps the one obligation.
@@ -197,13 +190,21 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
         ScopeId::turn(other.clone(), root.clone()),
         ScopeId::queue_drain(other.clone(), "cleanup-drain"),
     ];
+    // Recording a plan arms its `ParentEnd` obligation in the same
+    // transaction (ADR 0109 §3).
     let mut plans = Vec::new();
     for scope in own.iter().chain(foreign.iter()) {
         registry
             .record_parent_end(scope)
             .await
             .expect("record the scope's plan");
-        plans.push(arm(&stores, plan_key(scope), now).await);
+        let plan = registry
+            .get_parent_end_plan(scope)
+            .await
+            .expect("read the scope's plan")
+            .expect("the plan is recorded");
+        assert_eq!(plan.obligation_state, Some(ObligationState::Due));
+        plans.push(plan.obligation_id.expect("the record armed the plan"));
     }
     assert_eq!(
         ledger

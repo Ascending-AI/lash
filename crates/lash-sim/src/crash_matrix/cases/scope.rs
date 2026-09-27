@@ -11,8 +11,9 @@
 //! **Parent-end plans.** The plan's producer is the registry's scope-close
 //! sink closing a scope the host owns (a root that never ran, so no drive
 //! closes it): it records the plan and applies it, delivering each `Until`
-//! child's cancel. The host dies inside that apply, and the recovery tick's
-//! parent-end slot is the plan's only owner.
+//! child's cancel. The host dies inside that apply, and the plan's
+//! `ParentEnd` obligation (ADR 0109 §3), claimed by the recovery tick's due
+//! pass, is its only owner.
 
 use std::sync::Arc;
 
@@ -222,7 +223,7 @@ async fn produce_parent_end(
 }
 
 /// The number of poisoned plans ahead of the victim: one page of the
-/// parent-end slot (64) and one more.
+/// recovery tick's due pass (64) and one more.
 const POISONED_PLANS: usize = 65;
 
 pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Staged, String> {
@@ -316,7 +317,10 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
                 .crash_once_matching(HostSite::DeliverCancelBefore, format!("{child}/"));
             produce_parent_end(&world, &session, "victim").await?;
             notes.push(format!("poisoned_plans={POISONED_PLANS}"));
-            crash_and_restart(&world).await?
+            // §1.8's bound is the pass that claims the rows, so it counts
+            // from the deployment that can run one: the seeded outage between
+            // the crash and the restart runs no pass.
+            crash_and_restart(&world).await?.map(|_| world.now_ms())
         }
         other => return Err(format!("parent end has no {other:?} cell")),
     };

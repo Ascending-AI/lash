@@ -166,18 +166,19 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         super::terminal_publication::get(&self.pool, process_id).await
     }
 
-    async fn list_pending_parent_end_plans(
-        &self,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::ParentEndPlan>, PluginError> {
-        parent_end::list_pending(&self.pool, limit, self.fleet_format).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &lash_core_execution::ScopeId,
     ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
         parent_end::get(&self.pool, parent, self.fleet_format).await
+    }
+
+    async fn get_parent_end_plan_by_key(
+        &self,
+        parent_kind: &str,
+        parent_id: &str,
+    ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
+        parent_end::get_by_key(&self.pool, parent_kind, parent_id, self.fleet_format).await
     }
 
     async fn list_parent_end_children(

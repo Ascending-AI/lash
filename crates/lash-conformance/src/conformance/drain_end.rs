@@ -367,6 +367,14 @@ async fn run_sweep(world: &DrainEndWorld) {
         .drive_pending_processes()
         .await
         .expect("the parent-end sweep runs");
+    // The worker's pass re-derives and arms the missing ledger rows; the
+    // obligation pass is what delivers them — the same `relay_due` the
+    // deployment's reconcile tick runs (ADR 0109).
+    let pass = crate::deliver_due_parent_end_obligations(&world.stores).await;
+    assert_eq!(
+        pass.stalled, 0,
+        "no parent-end obligation stalls in a healthy world: {pass:?}"
+    );
 }
 
 /// The drain's own end evidence.
@@ -1563,6 +1571,14 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
         .drive_pending_processes()
         .await
         .expect("the parent-end sweep runs");
+    // The worker's pass arms the ledger rows; the obligation pass is what
+    // delivers them — the same `relay_due` the deployment's reconcile tick
+    // runs (ADR 0109).
+    let pass = crate::deliver_due_parent_end_obligations(&world.stores).await;
+    assert_eq!(
+        pass.stalled, 0,
+        "no parent-end obligation stalls in a healthy world: {pass:?}"
+    );
     assert_eq!(
         cancel_origin(&child(&world.registry, &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),

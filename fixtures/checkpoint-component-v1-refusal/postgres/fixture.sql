@@ -2268,13 +2268,6 @@ CREATE INDEX idx_lash_parent_end_plans_obligation_stalled ON lash_durable_read_f
 
 
 --
--- Name: idx_lash_parent_end_plans_pending; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_parent_end_plans_pending ON lash_durable_read_fixture.lash_parent_end_plans USING btree (ended_at_ms, parent_kind, parent_id) WHERE (settled_at_ms IS NULL);
-
-
---
 -- Name: idx_lash_pending_turn_input_order; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 

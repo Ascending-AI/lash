@@ -74,8 +74,6 @@ pub enum ReconcileArm {
     Parks,
     /// Sessions with open ingress re-asked for a drive (O2).
     Drives,
-    /// The FIG-3822 parent-end plan slot.
-    ParentEndPlans,
     /// The FIG-3799 drain hand-over slot.
     DrainHandOver,
     /// Due obligations claimed through a kind's due index (ADR 0109 §1.4).
@@ -138,8 +136,6 @@ pub struct ReconcileTick {
     pub parks: Option<ParkReconcileReport>,
     /// The drive arm.
     pub drives: DriveReconcileReport,
-    /// The FIG-3822 slot.
-    pub parent_end_plans: SlotPass,
     /// The FIG-3799 slot.
     pub drain_hand_over: SlotPass,
     /// Every arm failure, in arm order.

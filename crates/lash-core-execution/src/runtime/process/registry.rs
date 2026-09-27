@@ -100,6 +100,13 @@ pub struct ParentEndPlan {
     pub ended_at_ms: u64,
     /// `None` while children remain to settle.
     pub settled_at_ms: Option<u64>,
+    /// The store→engine obligation the row carries (ADR 0109): `None` only
+    /// on a row written before obligations armed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obligation_id: Option<crate::store::ObligationId>,
+    /// Where that obligation stands; `None` exactly when `obligation_id` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obligation_state: Option<crate::store::ObligationState>,
 }
 
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;

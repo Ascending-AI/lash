@@ -62,20 +62,23 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         crate::ProcessCompletionOutcome::Committed(_)
     ));
     let pending = registry
-        .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+        .get_parent_end_plan(&parent_scope)
         .await
-        .expect("list pending parent-end ledger rows");
+        .expect("read the parent-end ledger row")
+        .expect("the terminal append writes one ledger row for the ended scope");
     assert_eq!(
-        pending
-            .iter()
-            .map(|plan| plan.parent.clone())
-            .collect::<Vec<_>>(),
-        vec![parent_scope.clone()],
-        "the terminal append writes exactly one ledger row for the ended scope"
+        pending.parent,
+        parent_scope.clone(),
+        "the row is keyed by the scope it ends"
     );
     assert!(
-        pending[0].settled_at_ms.is_none(),
+        pending.settled_at_ms.is_none(),
         "a freshly written ledger row is unsettled"
+    );
+    assert!(
+        pending.obligation_id.is_some()
+            && pending.obligation_state == Some(lash_core::store::ObligationState::Due),
+        "the record arms the row's ParentEnd obligation due immediately (ADR 0109 §3)"
     );
 
     // The sweep's children query is index-served and returns exactly the
@@ -183,22 +186,20 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         .settle_parent_end_plan(&parent_scope)
         .await
         .expect("settling a parent-end ledger row is idempotent");
+    let settled = registry
+        .get_parent_end_plan(&parent_scope)
+        .await
+        .expect("read settled ledger row")
+        .expect("a settled row is retained, not deleted");
     assert!(
-        registry
-            .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
-            .await
-            .expect("parent-end ledger row cleared")
-            .is_empty()
-    );
-    assert!(
-        registry
-            .get_parent_end_plan(&parent_scope)
-            .await
-            .expect("read settled ledger row")
-            .expect("a settled row is retained, not deleted")
-            .settled_at_ms
-            .is_some(),
+        settled.settled_at_ms.is_some(),
         "settlement stamps the row rather than deleting the fence"
+    );
+    assert_eq!(
+        settled.obligation_state,
+        Some(lash_core::store::ObligationState::Delivered),
+        "the settle that applied the plan also delivered the due obligation \
+         the row owed (ADR 0109)"
     );
     let settled_prune = registry
         .prune_terminal_processes(

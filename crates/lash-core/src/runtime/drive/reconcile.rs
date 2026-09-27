@@ -2,12 +2,12 @@
 //! guaranteed owner of every piece of session work whose owner was lost.
 //!
 //! One tick, [`reconcile_once`], is engine-neutral and idempotent. It runs
-//! four arms, each bounded by the tick's page and resuming from its own
+//! three arms, each bounded by the tick's page and resuming from its own
 //! cursor, so a tick never serializes the fleet and one arm's failure never
 //! stops another. Due obligations — among them control intents' engine
-//! halves and the scope closes a terminal write armed (ADR 0109 §3) — are
-//! claimed through every registered kind's due index before the leader-only
-//! arms, not scanned out of their tables:
+//! halves, parent-end plans and the scope closes a terminal write armed
+//! (ADR 0109 §3) — are claimed through every registered kind's due index
+//! before the leader-only arms, not scanned out of their tables:
 //!
 //! 1. **Parks (O3).** The engine's own view of stalled work becomes lash
 //!    parks: [`SessionControlEngine::reconcile_parks`] reads what the engine
@@ -20,9 +20,7 @@
 //!    fire-and-forget; a process that dies between the two, a lost send, or a
 //!    re-ask the engine deduplicated all leave a durable row nothing drives,
 //!    and this arm asks again.
-//! 3. **Parent-end plans (FIG-3822).** A named slot:
-//!    [`reconcile_parent_end_plans_slot`].
-//! 4. **Drain hand-over (FIG-3799).** Every live process of a generation an
+//! 3. **Drain hand-over (FIG-3799).** Every live process of a generation an
 //!    operator marked draining is woken to hand its open wait to a successor
 //!    on the newest build: [`drain_hand_over_slot`].
 //!
@@ -203,15 +201,8 @@ pub async fn reconcile_once(
         }
     }
 
-    // 3–4. The slots other slices fill.
+    // 3. The slot other slices fill.
     if let Some(processes) = parts.processes {
-        match reconcile_parent_end_plans_slot(&processes, parts.sessions, page, parts.clock).await {
-            Ok(pass) => report.parent_end_plans = pass,
-            Err(error) => report.failures.push(ReconcileFailure {
-                arm: ReconcileArm::ParentEndPlans,
-                error: error.to_string(),
-            }),
-        }
         match drain_hand_over_slot(&processes, cursor.drain.as_ref(), page).await {
             Ok(hand_over) => {
                 report.drain_hand_over = hand_over.pass;
@@ -227,40 +218,6 @@ pub async fn reconcile_once(
         }
     }
     report
-}
-
-/// **FIG-3822 slot.** Apply every recorded but unapplied parent-end plan,
-/// at most `page` of them.
-///
-/// A plan is left unapplied when the execution that recorded it was killed
-/// or paused between the record and the apply, or when a process ended off
-/// any workflow (a never-started child folded cancelled, an externally
-/// owned abandon). This slot is that plan's only recovery owner: there is no
-/// second background actor. It is idempotent (each child's cancel is
-/// delivered under its per-scope key, and the first request stands) and one
-/// failed plan never aborts the page.
-///
-/// A root whose close step never recorded its plan has nothing to find
-/// here: a released root's scope is closed by its control intent's delivery, and a root the
-/// engine gave up on before its close recorded anything is not re-derived.
-pub async fn reconcile_parent_end_plans_slot(
-    processes: &ReconcileProcesses<'_>,
-    sessions: &dyn SessionStoreFactory,
-    page: NonZeroUsize,
-    clock: &dyn Clock,
-) -> Result<SlotPass, crate::PluginError> {
-    let _ = sessions;
-    let report = crate::reconcile_parent_end_plans(
-        processes.registry,
-        processes.port,
-        page,
-        clock.timestamp_ms(),
-    )
-    .await?;
-    Ok(SlotPass {
-        handled: report.applied.len(),
-        deferred: report.deferred.len(),
-    })
 }
 
 /// What one pass of the drain hand-over slot did, and where the next resumes.

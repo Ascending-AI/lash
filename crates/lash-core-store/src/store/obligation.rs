@@ -318,7 +318,8 @@ impl ClaimToken {
 }
 
 /// Where an armed obligation stands (`obligation_state`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ObligationState {
     /// Waiting for its next attempt at `obligation_due_at_ms`.
     Due,

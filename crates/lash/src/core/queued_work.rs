@@ -419,10 +419,12 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
             );
         // Which recovery duties this deployment runs this tick (ADR 0109
         // §1.7). The obligation slices register their relays here: scope
-        // close is S8-S's (ADR 0109 §3).
+        // close is S8-S's (ADR 0109 §3), and the parent-end ledger row is its
+        // ParentEnd obligation, delivered through the same process registry
+        // and port the drain slot sees.
         let duties = self.config.recovery.duties().await;
-        // The process-terminal relay needs this tick's process port, so it
-        // joins the relays the core registers without one.
+        // The process-terminal and parent-end relays need this tick's process
+        // port, so they join the relays the core registers without one.
         let mut relays = self.relays(&work).await;
         if let (Some(registry), Some(port)) =
             (self.config.env.process_registry(), process_port.as_ref())
@@ -438,6 +440,16 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                     Arc::clone(port),
                 ),
             ));
+            relays.push(Arc::new(lash_core::runtime::drive::ParentEndRelay::new(
+                self.config
+                    .env
+                    .core
+                    .backend()
+                    .obligation_ledger(lash_core::store::ObligationKind::ParentEnd),
+                Arc::clone(registry),
+                Arc::clone(port),
+                Arc::clone(&self.config.env.core.clock),
+            )));
         }
         let report = lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {

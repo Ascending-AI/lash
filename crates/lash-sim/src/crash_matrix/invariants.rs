@@ -110,8 +110,8 @@ impl std::fmt::Debug for Expected {
 
 /// One obligation ledger the settled-or-stalled invariant reads.
 ///
-/// Today's probes read the ledgers `main` has: control intents' obligations,
-/// pending parent-end plans and in-flight turns. An S8 slice that arms an ADR 0109
+/// Today's probes read control intents' obligations, in-flight turns and the
+/// parent-end plans' `ParentEnd` obligations. An S8 slice that arms an ADR 0109
 /// obligation on its ledger adds a probe here that reads its
 /// `ObligationLedger`: a `due` or `claimed` row is unsettled, a `delivered`
 /// row settled, and a `stalled` row with its `StallReason` is a typed stall
@@ -122,8 +122,13 @@ pub trait ObligationProbe: Send + Sync {
     fn kind(&self) -> &'static str;
 
     /// Every obligation of this kind that is neither settled nor stalled
-    /// with a typed reason, described.
-    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String>;
+    /// with a typed reason, described. `expected` names the rows a ledger
+    /// that has no cross-row read keys its obligations by.
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        expected: &Expected,
+    ) -> Result<Vec<String>, String>;
 }
 
 /// Control intents whose ADR 0109 `ControlIntent` obligation is neither
@@ -137,7 +142,11 @@ impl ObligationProbe for ControlIntentProbe {
         "control_intent"
     }
 
-    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        _expected: &Expected,
+    ) -> Result<Vec<String>, String> {
         let intents = world
             .backend()
             .session_store_factory()
@@ -177,7 +186,12 @@ impl ObligationProbe for ControlIntentProbe {
     }
 }
 
-/// Recorded parent-end plans no pass has settled.
+/// Parent-end plans whose `ParentEnd` obligation (ADR 0109 §3) is still
+/// due or claimed. The ledger is read by key, so the probe reads the plan of
+/// every scope the case names: the scopes it expects closed and the parents
+/// of its children. A `stalled` plan is typed (a refused child stalls its
+/// plan, never the rows behind it); a recorded plan that owes no obligation
+/// is only settled when it is stamped settled.
 struct ParentEndPlanProbe;
 
 #[async_trait::async_trait]
@@ -186,22 +200,36 @@ impl ObligationProbe for ParentEndPlanProbe {
         "parent_end"
     }
 
-    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
-        let pending = world
-            .backend()
-            .process_registry()
-            .list_pending_parent_end_plans(PAGE)
-            .await
-            .map_err(|error| format!("list pending parent-end plans: {error}"))?;
-        Ok(pending
-            .into_iter()
-            .map(|plan| {
-                format!(
-                    "parent-end plan of `{}` (ended at {}) is unsettled",
-                    plan.parent, plan.ended_at_ms
-                )
-            })
-            .collect())
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        expected: &Expected,
+    ) -> Result<Vec<String>, String> {
+        let registry = world.backend().process_registry();
+        let mut scopes: Vec<&ScopeId> = expected
+            .closed_scopes
+            .iter()
+            .chain(expected.children.iter().map(|child| &child.parent))
+            .collect();
+        scopes.sort_by_key(|scope| scope.storage_id());
+        scopes.dedup();
+        let mut unsettled = Vec::new();
+        for scope in scopes {
+            let plan = registry
+                .get_parent_end_plan(scope)
+                .await
+                .map_err(|error| format!("read the parent-end plan of `{scope}`: {error}"))?;
+            let Some(plan) = plan else { continue };
+            match plan.obligation_state {
+                Some(ObligationState::Delivered | ObligationState::Stalled) => {}
+                None if plan.settled_at_ms.is_some() => {}
+                state => unsettled.push(format!(
+                    "parent-end plan of `{scope}` (ended at {}) is unsettled: obligation {:?} is {state:?}",
+                    plan.ended_at_ms, plan.obligation_id
+                )),
+            }
+        }
+        Ok(unsettled)
     }
 }
 
@@ -215,7 +243,11 @@ impl ObligationProbe for TurnProbe {
         "ingress"
     }
 
-    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        _expected: &Expected,
+    ) -> Result<Vec<String>, String> {
         let counts = world
             .backend()
             .session_store_factory()
@@ -245,7 +277,11 @@ impl ObligationProbe for SessionDeleteProbe {
         "session_delete"
     }
 
-    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        _expected: &Expected,
+    ) -> Result<Vec<String>, String> {
         let mut closed: Vec<SessionId> = world
             .backend()
             .session_store_factory()
@@ -298,7 +334,11 @@ impl ObligationProbe for ProcessTerminalProbe {
         "process_terminal"
     }
 
-    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        _expected: &Expected,
+    ) -> Result<Vec<String>, String> {
         let registry = world.backend().process_registry();
         let processes = registry
             .list_processes(&lash_core::ProcessListFilter {
@@ -572,7 +612,7 @@ pub async fn check(world: &CrashWorld, expected: &Expected) -> Vec<String> {
     let mut violations = Vec::new();
     check_inputs(world, expected, &mut violations).await;
     for probe in obligation_probes() {
-        match probe.unsettled(world).await {
+        match probe.unsettled(world, expected).await {
             Ok(unsettled) => violations.extend(
                 unsettled
                     .into_iter()

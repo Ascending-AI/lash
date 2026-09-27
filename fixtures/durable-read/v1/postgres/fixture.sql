@@ -1239,7 +1239,7 @@ INSERT INTO lash_durable_read_fixture.lash_node_anchors VALUES ('n_03531bbc4371c
 -- Data for Name: lash_parent_end_plans; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL, 'parent_end:ec6e1abc21624ec1bdcbd61e896f363c', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
 
 
 --
@@ -2280,13 +2280,6 @@ CREATE UNIQUE INDEX idx_lash_parent_end_plans_obligation_id ON lash_durable_read
 --
 
 CREATE INDEX idx_lash_parent_end_plans_obligation_stalled ON lash_durable_read_fixture.lash_parent_end_plans USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
-
-
---
--- Name: idx_lash_parent_end_plans_pending; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_parent_end_plans_pending ON lash_durable_read_fixture.lash_parent_end_plans USING btree (ended_at_ms, parent_kind, parent_id) WHERE (settled_at_ms IS NULL);
 
 
 --

@@ -483,8 +483,7 @@ pub const MATRIX: &[CaseSpec] = &[
         DetectionBound::LostImmediateSqliteFailover,
         "a plan whose cancels were delivered but which never settled settles",
     ),
-    s8(
-        S8Slice::P,
+    today(
         Seam::ParentEnd,
         CrashPoint::DeliveryRefused,
         DetectionBound::StalledInClaimingPass,

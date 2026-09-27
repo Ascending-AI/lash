@@ -1,11 +1,14 @@
 //! Applying a parent-end plan (ADR 0094, FIG-3822): one engine-neutral body
-//! that every engine runs, on the live path as a recorded step right after
-//! the ending, and from the reconcile pass for a plan a dead execution left
-//! unapplied.
+//! that every engine runs — on the live path as a recorded step right after
+//! the ending, and as the delivery its `ParentEnd` obligation carries when a
+//! reconcile pass relays it (ADR 0109: the ledger row is the obligation, and
+//! the relay claims, delivers and settles it through the generic machinery).
 //!
 //! A plan is a ledger row and nothing else: its work is the query for the
 //! parent's live `Until` children that carry no cancel request yet. Applying
-//! it delivers `ParentEnded` to each of them, then marks the row settled.
+//! it delivers `ParentEnded` to each of them, then marks the row settled —
+//! and settling also marks a still-`due` obligation `delivered`, since the
+//! apply is the delivery that obligation owes.
 //!
 //! **Delivery precedes the registry write.** The children query stops
 //! returning a child once its cancel request is recorded. If the registry
@@ -96,7 +99,18 @@ pub async fn apply_parent_end_plan(
         after = Some(last.id.clone());
         for child in &children {
             let key = parent_end_delivery_key(parent, &child.id);
-            delivery.deliver_cancel(&child.id, &request, &key).await?;
+            // A refused-for-good deliver (ADR 0109 §2: the record itself
+            // refuses the obligation — an invalid record, a parked child, a
+            // terminal row) is still applied state: the child will never
+            // watch the registry for a request that was never written, so
+            // the request is recorded to keep "a cancel is owed until it is
+            // recorded" true. A retryable error ends the apply so the
+            // obligation backs off and retries the page.
+            match delivery.deliver_cancel(&child.id, &request, &key).await {
+                Ok(()) => {}
+                Err(error) if error.is_terminal() => {}
+                Err(error) => return Err(error),
+            }
             match registry
                 .request_process_cancel(
                     &child.id,
@@ -161,51 +175,4 @@ pub async fn end_session_roots(
         total.planned |= application.planned;
     }
     Ok(total)
-}
-
-/// What one reconcile pass over unapplied plans did.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ParentEndReconcileReport {
-    /// Plans this pass applied and settled.
-    pub applied: Vec<ScopeId>,
-    /// Children those applications delivered to.
-    pub delivered: u32,
-    /// Plans left pending, with why; the next pass retries them.
-    pub deferred: Vec<(ScopeId, String)>,
-}
-
-/// One bounded, idempotent pass over plans that are recorded but not
-/// applied: the ending's execution died between the record and the apply,
-/// or the ending was written off any execution (a never-started child
-/// folded Cancelled, an externally owned abandon). The engine-neutral
-/// reconcile pass (ADR 0104 O2, decision 70) calls it on every tick; it is
-/// not a background actor of its own.
-///
-/// One failing plan never aborts the page: it stays pending for the next
-/// pass, so one unreachable child cannot starve every other parent.
-pub async fn reconcile_parent_end_plans(
-    registry: &dyn ProcessRegistry,
-    delivery: &dyn ProcessWorkSubstrate,
-    page: NonZeroUsize,
-    now_ms: u64,
-) -> Result<ParentEndReconcileReport, PluginError> {
-    let mut report = ParentEndReconcileReport::default();
-    for plan in registry.list_pending_parent_end_plans(page).await? {
-        match apply_parent_end_plan(registry, delivery, &plan.parent, now_ms).await {
-            Ok(application) => {
-                report.delivered = report.delivered.saturating_add(application.delivered);
-                report.applied.push(plan.parent);
-            }
-            Err(error) => {
-                tracing::warn!(
-                    parent_kind = plan.parent.storage_kind(),
-                    parent_id = plan.parent.storage_id(),
-                    error = %error,
-                    "parent-end plan stays pending for the next reconcile pass",
-                );
-                report.deferred.push((plan.parent, error.to_string()));
-            }
-        }
-    }
-    Ok(report)
 }

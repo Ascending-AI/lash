@@ -556,6 +556,14 @@ async fn recovery_sweep(
         .drive_pending_processes()
         .await
         .expect("the recovery sweep runs");
+    // The worker's pass re-derives and arms the missing ledger rows; the
+    // obligation pass is what delivers them — the same `relay_due` the
+    // deployment's reconcile tick runs (ADR 0109).
+    let pass = crate::deliver_due_parent_end_obligations(stores).await;
+    assert_eq!(
+        pass.stalled, 0,
+        "no parent-end obligation stalls in a healthy world: {pass:?}"
+    );
 }
 
 /// A process living `Until` `root`'s turn scope, registered while the root

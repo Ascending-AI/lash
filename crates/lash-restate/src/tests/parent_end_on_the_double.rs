@@ -393,14 +393,10 @@ async fn a_root_end_cancels_its_cancel_children_once_on_restate() {
         "another root's child is untouched"
     );
     assert_eq!(world.cancel_invocations(&bystander), 0);
-    assert!(
-        world
-            .registry
-            .list_pending_parent_end_plans(PAGE)
-            .await
-            .expect("list pending plans")
-            .is_empty(),
-        "no plan is left for a reconcile pass"
+    assert_eq!(
+        plan.obligation_state,
+        Some(lash_core::store::ObligationState::Delivered),
+        "the close's apply delivered the plan's obligation: {plan:?}"
     );
     world.harness.finish().await;
 }
@@ -720,17 +716,18 @@ async fn a_lost_parent_end_delivery_is_retried_and_delivered_once() {
 }
 
 /// A plan recorded by an ending whose execution died before applying it is
-/// applied exactly once by the engine-neutral reconcile tick's parent-end
-/// arm, and the next tick finds nothing to do.
+/// delivered exactly once by the reconcile tick's ParentEnd obligation
+/// relay, and the next tick finds nothing due.
 #[tokio::test]
-async fn an_unapplied_plan_is_applied_once_by_reconcile() {
+async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
     let world = Arc::new(World::start("reconcile").await);
     let parent = ScopeId::turn(world.session_id.clone(), world.root("reconcile-root"));
     let child = world.register_until_child("reconcile-child", &parent).await;
     let detached = world
         .register_detached_child("reconcile-detached", &parent)
         .await;
-    // The ending's execution recorded the plan and died before applying it.
+    // The ending's execution recorded the plan and died before applying it:
+    // the row's armed obligation is what the reconcile pass finds.
     world
         .registry
         .record_parent_end(&parent)
@@ -751,6 +748,15 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
     let scopes = lash_core::engine::NoScopeClose;
     let drain = world.backend.generation_drain();
     let generation = world.backend.build_generation().clone();
+    let relay = Arc::new(lash_core::drive::ParentEndRelay::new(
+        world
+            .backend
+            .obligation_ledger(lash_core::store::ObligationKind::ParentEnd),
+        Arc::clone(&world.registry),
+        Arc::clone(wiring.port()),
+        Arc::clone(&clock),
+    ));
+    let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![relay];
     let parts = lash_core::drive::ReconcileParts {
         sessions: sessions.as_ref(),
         work: &work,
@@ -763,7 +769,7 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
         }),
         clock: clock.as_ref(),
         duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
-        relays: &[],
+        relays: &relays,
     };
     let first = lash_core::drive::reconcile_once(
         &parts,
@@ -772,23 +778,27 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
         "parent-end-tick-1",
     )
     .await;
+    let parent_end_pass = |tick: &lash_core::engine::ReconcileTick| {
+        tick.obligations
+            .iter()
+            .find(|(kind, _)| *kind == lash_core::store::ObligationKind::ParentEnd)
+            .map(|(_, pass)| *pass)
+            .unwrap_or_default()
+    };
     assert_eq!(
         (
-            first.parent_end_plans.handled,
-            first.parent_end_plans.deferred
+            parent_end_pass(&first).claimed,
+            parent_end_pass(&first).delivered
         ),
-        (1, 0),
-        "the tick applied the unapplied plan: {:?}",
+        (1, 1),
+        "the tick claimed and delivered the unapplied plan's obligation: {:?}",
         first.failures
     );
     let second =
         lash_core::drive::reconcile_once(&parts, &first.next, PAGE, "parent-end-tick-2").await;
     assert_eq!(
-        (
-            second.parent_end_plans.handled,
-            second.parent_end_plans.deferred
-        ),
-        (0, 0),
+        parent_end_pass(&second).claimed,
+        0,
         "nothing is left for the next tick"
     );
 

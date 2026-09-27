@@ -121,16 +121,23 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
         recorded,
         "repetition preserves the first ending rather than restamping it"
     );
-    assert_eq!(
+    let pending = registry
+        .get_parent_end_plan(&turn)
+        .await
+        .expect("read the ledger row after the repeated record")
+        .expect("the repeat left the one row");
+    assert!(
+        pending.settled_at_ms.is_none()
+            && pending.obligation_state == Some(lash_core::store::ObligationState::Due),
+        "the repeat kept the first row unsettled with its obligation still due"
+    );
+    assert!(
         registry
-            .list_pending_parent_end_plans(PAGE)
+            .get_parent_end_plan(&other_turn)
             .await
-            .expect("page pending ledger rows")
-            .into_iter()
-            .map(|plan| plan.parent)
-            .collect::<Vec<_>>(),
-        vec![turn.clone()],
-        "the repeat left one row, and the turn that never ended has none"
+            .expect("read the other turn's ledger row")
+            .is_none(),
+        "the turn that never ended has none"
     );
 
     assert_eq!(
@@ -200,13 +207,16 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
         settled,
         "a repeat on a settled row neither reopens it nor restamps its ending"
     );
-    assert!(
+    assert_eq!(
         registry
-            .list_pending_parent_end_plans(PAGE)
+            .get_parent_end_plan(&turn)
             .await
-            .expect("page pending ledger rows after settlement")
-            .is_empty(),
-        "a settled row is not pending, including after a repeated record"
+            .expect("read the settled row after the repeated record")
+            .expect("the settled row survives")
+            .obligation_state,
+        Some(lash_core::store::ObligationState::Delivered),
+        "the settle delivered the obligation the row owed, and a repeated \
+         record does not re-arm it"
     );
 }
 

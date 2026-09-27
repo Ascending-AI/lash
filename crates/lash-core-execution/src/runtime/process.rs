@@ -102,8 +102,8 @@ pub use observer_intent::{
 };
 pub use op_scope::ProcessOpScope;
 pub use parent_end::{
-    ParentEndApplication, ParentEndReconcileReport, apply_parent_end_plan, end_parent_scope,
-    end_session_roots, parent_end_delivery_key, parent_end_requester, reconcile_parent_end_plans,
+    ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_roots,
+    parent_end_delivery_key, parent_end_requester,
 };
 pub use references::ProcessLiveReferenceView;
 #[cfg(any(test, feature = "testing"))]
