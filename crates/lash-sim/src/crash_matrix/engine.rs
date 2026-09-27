@@ -214,27 +214,22 @@ impl Engine {
     }
 
     /// Move the clock for the recovery interval's next tick, `period` after
-    /// its last at `last_tick_ms`, and answer the tick's time. The double's
-    /// virtual clock moves `period` on. A live world's store clock also flows
-    /// with wall time, including the harness's own waits since the last
-    /// tick, so it moves only as far as `last_tick_ms + period`: the interval
-    /// fires every `T`, as a deployment's does, whatever the harness spent.
+    /// its last at `last_tick_ms`, and answer the tick's time. Both engines'
+    /// clocks also move between ticks: a live world's store clock flows with
+    /// wall time, and the double's virtual clock flows at wall speed and
+    /// fires the timers its idle server reaches — each including the
+    /// harness's own waits for the engine to settle. So the clock moves only
+    /// as far as `last_tick_ms + period`: the interval fires every `T`, as a
+    /// deployment's does, whatever the harness spent, and a detection bound
+    /// measured at the tick is the interval's, not the harness's.
     pub fn advance_tick(&self, last_tick_ms: u64, period: Duration) -> u64 {
-        match self {
-            Self::Double(double) => {
-                double.server().advance(period);
-                double.server().now_ms()
-            }
-            Self::Live(live) => {
-                let due = last_tick_ms
-                    .saturating_add(u64::try_from(period.as_millis()).unwrap_or(u64::MAX));
-                let now = live.now_ms();
-                if due > now {
-                    live.advance(Duration::from_millis(due - now));
-                }
-                live.now_ms()
-            }
+        let due =
+            last_tick_ms.saturating_add(u64::try_from(period.as_millis()).unwrap_or(u64::MAX));
+        let now = self.now_ms();
+        if due > now {
+            self.advance(Duration::from_millis(due - now));
         }
+        self.now_ms()
     }
 
     #[must_use]

@@ -350,12 +350,21 @@ Every duty stays idempotent under two overlapping leaders.
 
 ### 1.8 Detection bounds the sim asserts
 
-With tick `T` = 10 s ±10%, TTL 15 s, follower retry 5.5 s:
+With tick `T` = 10 s ±10% (so consecutive passes are at most 11 s apart),
+the leader lease's TTL 15 s and follower retry 5.5 s, and the relay's
+`claim_ttl` 60 s:
 
 - **Immediate.** A producer's obligation is attempted before its call returns.
 - **Lost immediate attempt.** Claimed by `due_at + T` on PostgreSQL, by
   `due_at + T + 20.5 s` on SQLite across a leader failover.
-- **Lapsed claim.** Retaken by `claimed_at + claim_ttl + T`.
+- **Lapsed claim.** Retaken by `claimed_at + claim_ttl + T` (71 s): the
+  claim lapses at `claimed_at + claim_ttl`, and the first due pass at or
+  after the lapse retakes it. The bound is exact, not padded: a pass that
+  lands just before the lapse, followed by the longest interval, retakes the
+  row a hair under it. It holds only while the interval keeps its cadence —
+  a pass fires every `T` from the last, whatever the pass itself or a
+  harness waiting on the engine spent — which is how the crash matrix
+  measures it on both engines (FIG-3899).
 - **Retryable failure.** Attempt `n + 1` at `min(2^(n−1) s, 15 min)` after
   attempt `n`, plus at most `T`; `stalled` after `attempt_ceiling` attempts
   (≈ 1 h 47 min at the defaults), never later.
