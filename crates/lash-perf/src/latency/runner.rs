@@ -291,7 +291,7 @@ pub(crate) async fn run_case(
             .map_err(|error| anyhow::anyhow!("build the latency process worker: {error}"))?;
             let deployment = env
                 .restate
-                .serve(engine.endpoint_builder(worker).build())
+                .serve(&engine, engine.endpoint_builder(worker).build())
                 .await?;
             let observer = build_observer(&env.restate, &stores_dir).await?;
             CaseTopology {

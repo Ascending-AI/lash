@@ -427,25 +427,6 @@ async fn wait_for_endpoint(addr: SocketAddr) -> anyhow::Result<()> {
     }
 }
 
-async fn register_restate_deployment(admin_url: &str, endpoint_url: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::builder().http2_prior_knowledge().build()?;
-    let response = client
-        .post(format!("{}/deployments", admin_url.trim_end_matches('/')))
-        .json(&serde_json::json!({
-            "uri": endpoint_url,
-            "force": true,
-            "breaking": true,
-        }))
-        .send()
-        .await?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Restate deployment registration failed: {status} {body}");
-    }
-    Ok(())
-}
-
 async fn run_restate(
     args: &Args,
     producers: &[lash_conformance::ToolBatchProducer],
@@ -488,7 +469,12 @@ async fn run_restate(
     let listener = tokio::net::TcpListener::bind(bind).await?;
     let server = tokio::spawn(HttpServer::new(endpoint).serve(listener));
     wait_for_endpoint(bind).await?;
-    register_restate_deployment(&admin_url, &endpoint_url).await?;
+    backend
+        .register_deployment(&endpoint_url)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!("register the probe deployment at {endpoint_url}: {error}")
+        })?;
 
     let ingress = lash_restate::RestateIngressClient::new(ingress_url.clone());
     let admin = lash_restate::RestateAdminClient::new(admin_url.clone());

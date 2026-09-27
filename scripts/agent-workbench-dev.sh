@@ -243,27 +243,27 @@ wait_tcp() {
   done
 }
 
-json_string() {
-  local value="$1"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  printf '"%s"' "$value"
-}
-
 register_deployment() {
   local admin_url="$1"
   local endpoint_url="$2"
-  local payload
-  payload="$(printf '{"uri":%s,"force":false,"breaking":false}' "$(json_string "$endpoint_url")")"
   local deadline=$((SECONDS + 60))
   local last_response=""
+  local status=0
+  # Registration goes through the host binary's `register-deployment`
+  # subcommand — `RestateEngine::register_deployment` — so the namespace
+  # collision guard applies to this launcher exactly as it does to a host
+  # that registers itself (FIG-3912). Exit 2 is the guard's permanent
+  # refusal; every other failure retries inside the readiness window.
   until last_response="$(
-    curl --http2-prior-knowledge -fsS \
-      -H 'content-type: application/json' \
-      -X POST \
-      --data "$payload" \
-      "${admin_url%/}/deployments" 2>&1
+    env "RESTATE_INGRESS_URL=$restate_ingress_url" \
+      "RESTATE_ADMIN_URL=$admin_url" \
+      "$workbench_bin" register-deployment "$endpoint_url" 2>&1
   )"; do
+    status=$?
+    if (( status == 2 )); then
+      printf '%s\n' "$last_response" >&2
+      return 1
+    fi
     require_workbench_alive "during Restate deployment registration"
     if (( SECONDS >= deadline )); then
       printf '%s\n' "$last_response" >&2
@@ -271,20 +271,14 @@ register_deployment() {
     fi
     sleep 1
   done
-  registered_deployment_id="$(printf '%s' "$last_response" | python3 -c '
-import json
-import re
-import sys
-
-try:
-    document = json.load(sys.stdin)
-except (json.JSONDecodeError, UnicodeDecodeError):
-    raise SystemExit(1)
-deployment_id = document.get("id") if isinstance(document, dict) else None
-if not isinstance(deployment_id, str) or not re.fullmatch(r"dp_[A-Za-z0-9]+", deployment_id):
-    raise SystemExit(1)
-print(deployment_id)
-')" || return 1
+  # The engine's registration answers no deployment id; read it back from
+  # the registry the registration just wrote.
+  registered_deployment_id="$(
+    deployment_registry_records "$admin_url" | awk -F '\t' -v target="${endpoint_url%/}" '
+      $2 == target { print $1; found = 1; exit }
+      END { if (!found) exit 1 }
+    '
+  )" || return 1
   require_workbench_alive "after Restate deployment registration"
 }
 

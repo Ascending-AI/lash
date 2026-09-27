@@ -19607,7 +19607,6 @@
         "lash-internal-provider-openai",
         "lash-internal-sqlite-store",
         "lash-runtime",
-        "reqwest",
         "restate-sdk",
         "serde",
         "serde_json",

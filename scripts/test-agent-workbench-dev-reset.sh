@@ -238,6 +238,20 @@ printf '%s\n' "$((count + 1))" > "$MOCK_STATE/build-count"
 mkdir -p "$CARGO_TARGET_DIR/judged"
 cat > "$CARGO_TARGET_DIR/judged/agent-workbench" <<'BIN'
 #!/usr/bin/env bash
+# `register-deployment <endpoint-url>` is the launcher's registration step,
+# run through this binary so the real one applies the engine's collision
+# guard. Emulate its observable effect — the admin POST it makes after the
+# guard passes — so the launcher's retries, fault handling and id read-back
+# exercise the same mock surface.
+if [[ "${1:-}" = register-deployment ]]; then
+  uri="${2:?register-deployment requires an endpoint URL}"
+  curl --http2-prior-knowledge -fsS \
+    -H 'content-type: application/json' \
+    -X POST \
+    --data "$(printf '{"uri":"%s","force":true}' "$uri")" \
+    "${RESTATE_ADMIN_URL%/}/deployments"
+  exit $?
+fi
 trap 'exit 0' TERM INT
 start="$(awk '{print $22}' "/proc/$$/stat")"
 printf '%s %s\n' "$$" "$start" > "$MOCK_STATE/spawned-${AGENT_WORKBENCH_ADDR##*:}"
@@ -402,8 +416,8 @@ grep -Eq '^owned_restate_deployment_id=dp_mock[0-9]+$' "$reset_file" \
 grep -Eq '^owned_restate_registry_hash=[0-9a-f]{64}$' "$reset_file" \
   || fail "fresh owned SQLite stack did not record its exact Restate registry snapshot"
 pid_identity "$pid_file" || fail "fresh SQLite workbench is not alive"
-[[ "$(<"$mock_state/registration-payloads")" = '{"uri":"http://127.0.0.1:9101","force":false,"breaking":false}' ]] \
-  || fail "fresh registration did not disable replacement on a v2 admin URL"
+[[ "$(<"$mock_state/registration-payloads")" = '{"uri":"http://127.0.0.1:9101","force":true}' ]] \
+  || fail "fresh registration did not carry the stack's endpoint URI"
 
 fresh_pid_record="$(<"$pid_file")"
 fresh_build_count="$(<"$mock_state/build-count")"
@@ -484,8 +498,8 @@ run_launcher "$data_sqlite" "$port_sqlite" restart --reset-dev-state \
 pid_identity "$pid_file" || fail "replacement SQLite workbench is not alive"
 [[ "$(<"$pid_file")" != "$old_pid_record" ]] || fail "reset reused the old process identity"
 assert_count 2 "$mock_state/registration-payloads"
-if grep -Eq '"force":true|"breaking":true' "$mock_state/registration-payloads"; then
-  fail "registration payload enabled force or breaking"
+if grep -Fvq '"uri":"http://127.0.0.1:9101"' "$mock_state/registration-payloads"; then
+  fail "a registration targeted a foreign endpoint URI"
 fi
 grep -Fq "rm $old_restate_id restate" "$mock_state/docker-rm.log" \
   || fail "reset did not remove the exact old Restate container"

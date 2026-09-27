@@ -19,7 +19,6 @@ clap = { workspace = true, features = ["derive", "env"] }
 lash = { workspace = true, features = ["restate", "rlm"] }
 lash-provider-openai = { workspace = true }
 lash-sqlite-store = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls"] }
 restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

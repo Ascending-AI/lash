@@ -43,13 +43,11 @@ impl LiveRestateEndpoint {
     ) -> Self {
         let listener = std::net::TcpListener::bind(addr)
             .unwrap_or_else(|error| panic!("bind mutable Restate endpoint {addr}: {error}"));
-        let mut endpoint =
-            Self::start_on_listener(admin_url, listener, state, backend, process_worker, false)
-                .await;
-        endpoint.deployment_id =
-            register_restate_deployment_request(admin_url, &endpoint.endpoint_url, true, true)
-                .await;
-        endpoint
+        // The engine registers with `force`, which replaces the deployment
+        // already admitted at this reused URI. `breaking` is not exposed:
+        // both fixtures are the same build, so their service definitions
+        // never differ breakingly.
+        Self::start_on_listener(admin_url, listener, state, backend, process_worker, true).await
     }
 
     async fn start_on_listener(
@@ -70,6 +68,7 @@ impl LiveRestateEndpoint {
             .expect("configure immutable workbench Restate endpoint listener");
         let (shutdown, stop) = tokio::sync::oneshot::channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+        let registration_backend = Arc::clone(&backend);
         let thread = std::thread::Builder::new()
             .name(format!("restate-endpoint-{addr}"))
             .stack_size(STACK_BUDGET_BYTES)
@@ -111,7 +110,7 @@ impl LiveRestateEndpoint {
             .recv_timeout(std::time::Duration::from_secs(15))
             .expect("owned Restate endpoint runtime did not become ready");
         let deployment_id = if register {
-            register_restate_deployment(admin_url, &endpoint_url).await
+            register_restate_deployment(&registration_backend, admin_url, &endpoint_url).await
         } else {
             String::new()
         };
@@ -435,48 +434,68 @@ pub(crate) fn record_fixture_owned_endpoint(addr: SocketAddr) {
     .expect("append fixture endpoint manifest");
 }
 
-#[derive(Deserialize)]
-struct RestateDeploymentRegistration {
-    id: String,
-}
-
-pub(crate) async fn register_restate_deployment(admin_url: &str, endpoint_url: &str) -> String {
-    register_restate_deployment_request(admin_url, endpoint_url, false, false).await
-}
-
-async fn register_restate_deployment_request(
+/// Register `endpoint_url` through `backend` — the fixture's serving engine —
+/// so the registration sees the same authority, namespace and collision guard
+/// a host's own registration would (FIG-3912), then read the admitted
+/// deployment's id back from the admin registry.
+pub(crate) async fn register_restate_deployment(
+    backend: &crate::WorkbenchRestateBackend,
     admin_url: &str,
     endpoint_url: &str,
-    force: bool,
-    breaking: bool,
 ) -> String {
+    backend
+        .register_deployment(endpoint_url)
+        .await
+        .expect("register the fixture Restate deployment");
+    fixture_deployment_id(admin_url, endpoint_url).await
+}
+
+#[derive(Deserialize)]
+struct RestateDeploymentRecord {
+    id: String,
+    uri: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RestateDeploymentRegistry {
+    deployments: Vec<RestateDeploymentRecord>,
+}
+
+async fn fixture_deployment_id(admin_url: &str, endpoint_url: &str) -> String {
     let client = reqwest::Client::builder()
         .http2_prior_knowledge()
         .build()
         .expect("build Restate admin client");
     let response = client
-        .post(format!("{}/deployments", admin_url.trim_end_matches('/')))
-        .json(&json!({
-            "uri": endpoint_url,
-            "force": force,
-            "breaking": breaking,
-        }))
+        .get(format!("{}/deployments", admin_url.trim_end_matches('/')))
         .send()
         .await
-        .expect("register deployment with Restate admin API");
+        .expect("list Restate deployments");
     let status = response.status();
     let body = response
         .bytes()
         .await
-        .expect("read Restate deployment registration response");
+        .expect("read Restate deployment registry");
     assert!(
         status.is_success(),
-        "Restate deployment registration failed: {status} {}",
+        "Restate deployment registry read failed: {status} {}",
         String::from_utf8_lossy(&body)
     );
-    serde_json::from_slice::<RestateDeploymentRegistration>(&body)
-        .expect("decode Restate deployment registration response")
+    let registry: RestateDeploymentRegistry =
+        serde_json::from_slice(&body).expect("decode Restate deployment registry response");
+    let expected = endpoint_url.trim_end_matches('/');
+    registry
+        .deployments
+        .iter()
+        .find(|record| {
+            record
+                .uri
+                .as_deref()
+                .is_some_and(|uri| uri.trim_end_matches('/') == expected)
+        })
+        .unwrap_or_else(|| panic!("no Restate deployment registered at {endpoint_url}"))
         .id
+        .clone()
 }
 
 pub(crate) async fn restate_invocation_status_with_deployment(

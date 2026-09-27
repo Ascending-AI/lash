@@ -80,15 +80,19 @@ impl LocalRestate {
     /// server. The deployment serves until the returned handle drops.
     pub(crate) async fn serve(
         &self,
+        engine: &RestateEngine,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
-        self.serve_at(SocketAddr::from(([127, 0, 0, 1], 0)), endpoint)
+        self.serve_at(engine, SocketAddr::from(([127, 0, 0, 1], 0)), endpoint)
             .await
     }
 
-    /// Serve `endpoint` at `addr` and register it with the server.
+    /// Serve `endpoint` at `addr` and register it with the server, which
+    /// refuses it when another deployment holds the engine's namespace's
+    /// names.
     pub(crate) async fn serve_at(
         &self,
+        engine: &RestateEngine,
         addr: SocketAddr,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
@@ -105,29 +109,16 @@ impl LocalRestate {
                 })
                 .await;
         });
-        register_deployment(&self.admin_url, &uri).await?;
+        engine
+            .register_deployment(&uri)
+            .await
+            .with_context(|| format!("register the Restate deployment at {uri}"))?;
         Ok(LocalDeployment {
             addr: local,
             stop: Some(stop),
             serving,
         })
     }
-}
-
-/// Register `uri` as this server's deployment, replacing any earlier one.
-pub(crate) async fn register_deployment(admin_url: &str, uri: &str) -> Result<()> {
-    let response = reqwest::Client::new()
-        .post(format!("{}/deployments", admin_url.trim_end_matches('/')))
-        .json(&serde_json::json!({ "uri": uri, "force": true }))
-        .send()
-        .await
-        .context("register the endpoint with the Restate admin API")?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        bail!("Restate refused the deployment at {uri}: {status} {body}");
-    }
-    Ok(())
 }
 
 /// A served, registered endpoint. Dropping it stops serving.

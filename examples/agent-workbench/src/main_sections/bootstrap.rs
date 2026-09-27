@@ -77,6 +77,42 @@ pub(crate) async fn build_search_mcp(
     ))
 }
 
+/// The `register-deployment <endpoint-url>` subcommand: the dev launcher's
+/// registration step, run as an invocation of this binary so
+/// `scripts/agent-workbench-dev.sh` keeps owning when registration happens —
+/// a fresh `up` registers, a restart does not — while the registration
+/// itself goes through [`RestateEngine::register_deployment`] and its
+/// namespace collision guard (FIG-3898) exactly as the serving engine would
+/// do it. The store set is a scratch in-memory one: registration reads only
+/// the engine's authority, namespace and admin connection, never the stores.
+///
+/// A `NameTaken` refusal is permanent, so it exits 2 for the launcher to
+/// stop retrying; every other failure is an ordinary nonzero exit.
+pub(crate) async fn register_deployment_command(endpoint_url: &str) -> AnyhowResult<()> {
+    let ingress_url =
+        std::env::var("RESTATE_INGRESS_URL").context("RESTATE_INGRESS_URL is required")?;
+    let admin_url = std::env::var("RESTATE_ADMIN_URL").context("RESTATE_ADMIN_URL is required")?;
+    let authority = lash_restate::RestateAuthorityId::new(
+        std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
+    )
+    .map_err(|error| anyhow!("RESTATE_AUTHORITY_ID: {error}"))?;
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .context("open the registration engine's scratch store set")?;
+    let engine = lash_restate::RestateEngine::new(
+        Arc::new(stores),
+        lash::restate::config(ingress_url, admin_url, authority),
+    );
+    match engine.register_deployment(endpoint_url).await {
+        Ok(()) => Ok(()),
+        Err(error @ lash_restate::RestateRegistrationError::NameTaken { .. }) => {
+            eprintln!("{error}");
+            std::process::exit(2)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub(crate) async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt::init();

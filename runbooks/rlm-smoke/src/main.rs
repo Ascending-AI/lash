@@ -524,6 +524,7 @@ async fn main() -> Result<()> {
     .context("build the RLM smoke process worker")?;
     let _deployment = restate
         .serve_at(
+            &engine,
             std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
             engine.endpoint_builder(worker).build(),
         )

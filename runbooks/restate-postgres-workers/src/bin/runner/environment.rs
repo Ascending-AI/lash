@@ -525,34 +525,23 @@ pub(super) async fn wait_for_s3(store: &impl lash::persistence::AttachmentStore)
     )
 }
 
+/// Register the worker deployment through the engine's namespace guard
+/// (FIG-3898): a name another authority holds refuses the registration
+/// outright, while an unreachable or not-yet-consistent admin API retries.
 pub(super) async fn register_restate_deployment(
-    admin_url: &str,
+    backend: &lash_restate::RestateEngine,
     deployment_url: &str,
 ) -> Result<()> {
-    let client = reqwest::Client::builder()
-        .http2_prior_knowledge()
-        .build()
-        .context("build Restate admin client")?;
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut last_error = None;
     while Instant::now() < deadline {
-        match client
-            .post(format!("{}/deployments", admin_url.trim_end_matches('/')))
-            .json(&json!({
-                "uri": deployment_url,
-                "force": true,
-                "breaking": true,
-            }))
-            .send()
-            .await
-        {
-            Ok(response) if response.status().is_success() => return Ok(()),
-            Ok(response) => {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                last_error = Some(format!("{status}: {body}"));
+        match backend.register_deployment(deployment_url).await {
+            Ok(()) => return Ok(()),
+            Err(error @ lash_restate::RestateRegistrationError::NameTaken { .. }) => {
+                return Err(anyhow::Error::new(error)
+                    .context("register the worker deployment with Restate"));
             }
-            Err(err) => last_error = Some(err.to_string()),
+            Err(error) => last_error = Some(error.to_string()),
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }

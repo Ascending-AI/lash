@@ -199,5 +199,14 @@ fn main() -> AnyhowResult<()> {
         .thread_stack_size(stack_bytes)
         .build()
         .context("build agent-workbench tokio runtime")?
-        .block_on(async_main())
+        .block_on(async {
+            let mut args = std::env::args().skip(1);
+            if args.next().as_deref() == Some("register-deployment") {
+                let endpoint_url = args
+                    .next()
+                    .context("usage: agent-workbench register-deployment <endpoint-url>")?;
+                return register_deployment_command(&endpoint_url).await;
+            }
+            async_main().await
+        })
 }

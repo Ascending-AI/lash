@@ -399,6 +399,9 @@ jobs:
       - name: Check workers-E2E proxy health target
         run: python3 scripts/check_restate_workers_proxy_health_target.py
 
+      - name: Check Restate deployment registration boundary
+        run: python3 scripts/check_restate_deployment_registration.py
+
       # The feature-lane graph replaces per-lane Cargo legs, so the resolution
       # it compiles has to be Cargo's own. This re-derives every distinct lane
       # request with `cargo tree` and diffs it against the generator's resolver;
@@ -509,6 +512,7 @@ jobs:
           python3 scripts/test_check_judged_build_geometry.py
           python3 scripts/test_restate_workers_e2e_coverage.py
           python3 scripts/test_check_restate_workers_proxy_health_target.py
+          python3 scripts/test_check_restate_deployment_registration.py
           python3 scripts/test_runtime_perf_percentiles.py
           python3 scripts/test_runtime_perf_diff.py
           python3 scripts/test_perfreport.py

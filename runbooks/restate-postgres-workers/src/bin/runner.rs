@@ -373,15 +373,25 @@ async fn async_main() -> Result<()> {
         reset_trace_dir(dir)?;
     }
 
-    let attachment_store = s3_store_from_env()?;
-    wait_for_s3(&attachment_store).await?;
+    let attachment_store = Arc::new(s3_store_from_env()?);
+    wait_for_s3(attachment_store.as_ref()).await?;
     let mock_provider_base_url = env("MOCK_PROVIDER_BASE_URL", "http://mock-provider:18001");
     wait_for_mock_provider(&mock_provider_base_url).await?;
 
     let admin_url = env("RESTATE_ADMIN_URL", "http://restate:9070");
     let deployment_url = env("WORKER_DEPLOYMENT_URL", "http://worker-proxy:18100");
-    register_restate_deployment(&admin_url, &deployment_url).await?;
     let ingress_url = env("RESTATE_INGRESS_URL", "http://restate:8080");
+    // Register through the engine the workers run on — same store set, same
+    // authority — so the namespace guard (FIG-3898) applies to this
+    // registration exactly as it would to a worker's own.
+    let registration_engine = e2e_backend(
+        &storage,
+        attachment_store.clone(),
+        ingress_url.clone(),
+        admin_url.clone(),
+        restate_authority_id()?,
+    );
+    register_restate_deployment(&registration_engine, &deployment_url).await?;
     let watchdog = tokio::spawn(runner_stall_watchdog(
         storage.pool().clone(),
         admin_url.clone(),
@@ -448,7 +458,7 @@ async fn async_main() -> Result<()> {
         let output = segment_one.as_ref().context("segment 1 output missing")?;
         assert_trigger_delivery(storage.pool(), &output.trigger_process_id).await?;
     }
-    assert_attachments_round_trip(storage.pool(), &attachment_store, &responses).await?;
+    assert_attachments_round_trip(storage.pool(), attachment_store.as_ref(), &responses).await?;
     if selection.includes(WorkflowSegment::One) {
         assert_reopened_session_agrees(
             &storage,

@@ -137,7 +137,11 @@ mod restate_tests {
             .expect("drive startup recovery");
 
         wait_for_endpoint_socket(local_probe_addr).await;
-        register_restate_deployment(&admin_url, &endpoint_url).await;
+        harness
+            .backend
+            .register_deployment(&endpoint_url)
+            .await
+            .expect("register the agent-service E2E Restate deployment");
 
         let chat = state
             .with_db(|db| db.create_chat("Restate E2E", "mock-model", None))
@@ -528,28 +532,5 @@ finish("done via Restate E2E");
             );
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-    }
-
-    async fn register_restate_deployment(admin_url: &str, endpoint_url: &str) {
-        let client = reqwest::Client::builder()
-            .http2_prior_knowledge()
-            .build()
-            .expect("build Restate admin client");
-        let response = client
-            .post(format!("{}/deployments", admin_url.trim_end_matches('/')))
-            .json(&json!({
-                "uri": endpoint_url,
-                "force": true,
-                "breaking": true,
-            }))
-            .send()
-            .await
-            .expect("register deployment with Restate admin API");
-        assert!(
-            response.status().is_success(),
-            "Restate deployment registration failed: {} {}",
-            response.status(),
-            response.text().await.unwrap_or_default()
-        );
     }
 }

@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 /// The addresses `scripts/ci/with-service.sh restate` exports.
 #[derive(Clone, Debug)]
@@ -53,16 +53,23 @@ impl LocalRestate {
     /// server. The deployment serves until the returned handle drops.
     pub async fn serve(
         &self,
+        engine: &lash_restate::RestateEngine,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
-        self.serve_at(std::net::SocketAddr::from(([127, 0, 0, 1], 0)), endpoint)
-            .await
+        self.serve_at(
+            engine,
+            std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+            endpoint,
+        )
+        .await
     }
 
-    /// Serve `endpoint` at `addr` and register it with the server. The
-    /// deployment serves until the returned handle drops.
+    /// Serve `endpoint` at `addr` and register it with the server, which
+    /// refuses it when another deployment holds the engine's namespace's
+    /// names. The deployment serves until the returned handle drops.
     pub async fn serve_at(
         &self,
+        engine: &lash_restate::RestateEngine,
         addr: std::net::SocketAddr,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
@@ -78,20 +85,10 @@ impl LocalRestate {
                 })
                 .await;
         });
-        let response = reqwest::Client::new()
-            .post(format!(
-                "{}/deployments",
-                self.admin_url.trim_end_matches('/')
-            ))
-            .json(&serde_json::json!({ "uri": uri, "force": true }))
-            .send()
+        engine
+            .register_deployment(&uri)
             .await
-            .context("register the endpoint with the Restate admin API")?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            bail!("Restate refused the deployment at {uri}: {status} {body}");
-        }
+            .with_context(|| format!("register the Restate deployment at {uri}"))?;
         Ok(LocalDeployment {
             stop: Some(stop),
             serving,

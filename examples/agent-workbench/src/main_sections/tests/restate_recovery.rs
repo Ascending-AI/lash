@@ -1986,7 +1986,27 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     let mut first = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
     let first_pid = first.id();
     wait_for_endpoint_socket(endpoint_bind).await;
-    let deployment_id = register_restate_deployment(&admin_url, &endpoint_url).await;
+    // The registration runs in this test process while the serving endpoint
+    // lives in the child, so it needs its own engine — a scratch store set
+    // suffices because registration reads only the configured authority,
+    // namespace and admin connection.
+    let registration_engine = lash_restate::RestateEngine::new(
+        Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("open the recovery registration scratch store set"),
+        ),
+        lash::restate::config(
+            ingress_url.clone(),
+            admin_url.clone(),
+            lash_restate::RestateAuthorityId::new(
+                std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
+            )
+            .expect("valid Restate authority id"),
+        ),
+    );
+    let deployment_id =
+        register_restate_deployment(&registration_engine, &admin_url, &endpoint_url).await;
     // The first owner sends the turn once its handlers are registered, as the
     // browser's send would reach it.
     std::fs::write(data_dir.join(RECOVERY_E2E_START_TURN), turn_id.as_str())

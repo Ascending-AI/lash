@@ -4086,7 +4086,6 @@ dependencies = [
  "lash-internal-provider-openai",
  "lash-internal-sqlite-store",
  "lash-runtime",
- "reqwest 0.13.4",
  "restate-sdk",
  "serde",
  "serde_json",

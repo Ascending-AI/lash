@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 
 use super::LatencyWorkerArgs;
 use super::provider::{LatencyProviderKind, ProviderTiming, latency_provider};
-use super::restate::{LocalRestate, register_deployment};
+use super::restate::LocalRestate;
 
 /// Serve lash's Restate services for the latency run and park until killed.
 pub(crate) async fn run(args: LatencyWorkerArgs) -> Result<()> {
@@ -75,7 +75,10 @@ pub(crate) async fn run(args: LatencyWorkerArgs) -> Result<()> {
             .serve(listener)
             .await;
     });
-    register_deployment(&restate.admin_url, &format!("http://{addr}")).await?;
+    engine
+        .register_deployment(&format!("http://{addr}"))
+        .await
+        .with_context(|| format!("register the latency worker deployment at {addr}"))?;
     std::fs::write(&args.ready_file, addr.to_string())
         .with_context(|| format!("write {}", args.ready_file.display()))?;
     // Serve until the parent kills the process.
