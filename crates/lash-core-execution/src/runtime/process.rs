@@ -117,9 +117,9 @@ pub use registry::{
     ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport,
     ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistry,
     ProcessRegistryBinding, ProcessRetention, ProcessScopeFenceHosts, ProcessSegmentKey,
-    ProcessToolIntents, ProcessWakeOutbox, ProcessWorklistCursor, ProcessWorklistPage,
-    ProjectionWatermark, SegmentStartMarker, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery,
-    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    ProcessTerminalPublication, ProcessToolIntents, ProcessWakeOutbox, ProcessWorklistCursor,
+    ProcessWorklistPage, ProjectionWatermark, SegmentStartMarker, WAKE_ENQUEUING_STALE_AFTER_MS,
+    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     reconcile_pruned_trigger_deliveries,
 };

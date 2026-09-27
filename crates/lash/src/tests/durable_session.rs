@@ -819,6 +819,16 @@ impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
     ) -> std::result::Result<(), lash_core::PluginError> {
         Ok(())
     }
+
+    async fn publish_process_terminal(
+        &self,
+        process_id: &lash_core::ProcessId,
+        output: &lash_core::ProcessAwaitOutput,
+        key: &str,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        let _ = (process_id, output, key);
+        Ok(())
+    }
 }
 
 /// Read the persisted checkpoint's `tool_state` component bytes.

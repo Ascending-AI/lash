@@ -236,6 +236,21 @@ crate::statements! {
 
         /// Obligation `?1`'s state.
         obligation_select_state = "SELECT obligation_state FROM processes WHERE obligation_id = ?1";
+
+        /// Settle process `?1`'s terminal publication delivered at `?2`,
+        /// whatever claim holds it: the engine published the terminal itself
+        /// (ADR 0109 §1.4, a delivery that settles its own row). A relay
+        /// holding a claim then settles `ClaimLost`.
+        obligation_settle_published = "UPDATE processes
+             SET obligation_state = 'delivered', obligation_claim_token = NULL,
+                 obligation_due_at_ms = NULL, obligation_stall_reason = NULL,
+                 obligation_last_error = NULL, obligation_settled_at_ms = ?2
+             WHERE process_id = ?1 AND obligation_state IN ('due', 'claimed', 'stalled')";
+
+        /// Process `?1`'s terminal publication obligation: its id and state,
+        /// or no row while it owes none.
+        obligation_select_by_process = "SELECT obligation_id, obligation_state FROM processes
+             WHERE process_id = ?1 AND obligation_id IS NOT NULL";
     }
 }
 

@@ -1420,6 +1420,7 @@ mod process_registry_core;
 mod process_registry_replay;
 mod process_session_turn_cancel;
 mod process_start_replay_on_the_double;
+mod process_terminal_obligation_on_the_double;
 mod process_workflow;
 mod recording_context;
 mod restate_redrive;

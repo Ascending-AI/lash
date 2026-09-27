@@ -15,6 +15,14 @@
 //! (L-E4/L-E6). Pause, the admin query, and resume are this engine's
 //! mechanism, and the park is the engine-neutral fact.
 //!
+//! A paused segment of a process that is already terminal holds nothing: the
+//! terminal is stored, and its publication to the process's waiters is the
+//! `ProcessTerminal` obligation (ADR 0109 §3), which the relay delivers
+//! through the root workflow's shared `complete_terminal` whether or not any
+//! segment's `run` still exists. Once that publication is delivered the pass
+//! kills the paused invocation; until then it leaves it, so a waiter is
+//! always served before the invocation goes.
+//!
 //! A process already refusing on a divergence keeps that park and its
 //! reason: its body refused first, and the pause only followed. A resume
 //! ([`resume_parked_process`]) retries the paused invocation over its kept
@@ -23,7 +31,7 @@
 
 use std::sync::Arc;
 
-use lash_core::store::{EnginePark, ParkReason, ProcessParkWrite};
+use lash_core::store::{EnginePark, ObligationState, ParkReason, ProcessParkWrite};
 use lash_core::{
     PluginError, ProcessContinuationStore, ProcessExecutionWriteAuthority, ProcessRecord,
     ProcessRegistry, ProcessSegmentKey,
@@ -38,8 +46,12 @@ use crate::services::LashService;
 pub struct ProcessParkReconcileReport {
     /// Processes this pass parked or re-parked for an exhausted invocation.
     pub parked: Vec<ProcessId>,
-    /// Paused invocations left as they were: the process is terminal, gone,
-    /// never started, or already refusing on its own park.
+    /// Terminal processes whose paused segment this pass killed: their
+    /// terminal publication was delivered, so the invocation held nothing.
+    pub released: Vec<ProcessId>,
+    /// Paused invocations left as they were: the process is gone, never
+    /// started, already refusing on its own park, or terminal with its
+    /// publication still owed.
     pub unchanged: usize,
 }
 
@@ -64,10 +76,11 @@ pub async fn reconcile_process_parks(
                 "read paused process invocations from Restate: {error}"
             ))
         })?;
-    reconcile_process_invocations(registry, continuations, paused).await
+    reconcile_process_invocations(admin, registry, continuations, paused).await
 }
 
 pub(crate) async fn reconcile_process_invocations(
+    admin: &RestateAdminClient,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
     paused: Vec<RestatePausedInvocation>,
@@ -81,7 +94,15 @@ pub(crate) async fn reconcile_process_invocations(
             report.unchanged += 1;
             continue;
         };
-        if record.is_terminal() || record.is_refusing_park() {
+        if record.is_terminal() {
+            if release_terminal_segment(admin, registry, &record, &invocation).await? {
+                report.released.push(record.id);
+            } else {
+                report.unchanged += 1;
+            }
+            continue;
+        }
+        if record.is_refusing_park() {
             report.unchanged += 1;
             continue;
         }
@@ -115,6 +136,40 @@ pub(crate) async fn reconcile_process_invocations(
         report.parked.push(record.id);
     }
     Ok(report)
+}
+
+/// Kill the paused segment `invocation` of terminal `record` once its
+/// terminal publication is delivered. `false` while the publication is still
+/// owed: the relay delivers it first.
+async fn release_terminal_segment(
+    admin: &RestateAdminClient,
+    registry: &Arc<dyn ProcessRegistry>,
+    record: &ProcessRecord,
+    invocation: &RestatePausedInvocation,
+) -> Result<bool, PluginError> {
+    let delivered = registry
+        .terminal_publication(&record.id)
+        .await?
+        .is_none_or(|publication| publication.state == ObligationState::Delivered);
+    if !delivered {
+        return Ok(false);
+    }
+    admin
+        .kill_invocation(&invocation.invocation_id())
+        .await
+        .map_err(|error| {
+            PluginError::Session(format!(
+                "kill terminal process `{}`'s paused invocation `{}`: {error}",
+                record.id, invocation.id
+            ))
+        })?;
+    tracing::info!(
+        event = "process.paused_segment_released",
+        process_id = record.id.as_str(),
+        invocation_id = invocation.id.as_str(),
+        "a terminal process's paused segment was killed after its terminal was published"
+    );
+    Ok(true)
 }
 
 /// Resume the paused invocation holding `process_id`'s park: a fresh retry

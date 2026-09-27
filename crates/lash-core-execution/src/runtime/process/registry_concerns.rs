@@ -485,6 +485,21 @@ pub trait ProcessEventLog: ProcessQuery {
     ) -> Result<Vec<ProcessEvent>, PluginError>;
 }
 
+/// Where one terminal process's publication to its engine waiters stands
+/// (ADR 0109 §3, `ProcessTerminal`).
+///
+/// The terminal transaction arms it on the process row; the engine settles it
+/// when the process's terminal promise resolved, from the journal that
+/// published it or from the relay that retries a publication the journal
+/// never made.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessTerminalPublication {
+    /// The obligation the terminal transaction armed.
+    pub id: crate::store::ObligationId,
+    /// Where it stands.
+    pub state: crate::store::ObligationState,
+}
+
 /// Durable execution lifecycle transitions.
 ///
 /// The started fact, wait markers, the abandon request and caller-departure
@@ -558,6 +573,26 @@ pub trait ProcessLifecycle: Send + Sync {
     /// no-op that preserves the first `ended_at_ms`, including on a row that
     /// is already settled.
     async fn record_parent_end(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
+
+    /// Record that the engine published `process_id`'s stored terminal to its
+    /// waiters itself (ADR 0109 §3, `ProcessTerminal`). Every transaction that
+    /// makes a process terminal arms the row's terminal-publication
+    /// obligation; an engine that resolved the process's terminal promise in
+    /// the journal that stored the terminal settles it here, delivered,
+    /// whatever claim a relay holds on it (that relay then settles
+    /// `ClaimLost`), so no relay publishes it again. `false` when the row owes
+    /// no publication: not terminal, already delivered, or gone.
+    async fn settle_terminal_publication(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<bool, PluginError>;
+
+    /// `process_id`'s terminal publication, or `None` while the row owes
+    /// none: not terminal, or gone.
+    async fn terminal_publication(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<ProcessTerminalPublication>, PluginError>;
 
     async fn list_pending_parent_end_plans(
         &self,

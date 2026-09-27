@@ -174,7 +174,9 @@ pub(crate) async fn save_process_tx(
         .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
-    Ok(())
+    // The transaction that makes a process terminal arms its terminal
+    // publication (ADR 0109 §3): the row is the obligation.
+    crate::process_registry::terminal_publication::arm_tx(tx, record).await
 }
 
 pub(crate) async fn next_process_change_seq_tx(

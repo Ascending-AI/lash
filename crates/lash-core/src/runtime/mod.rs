@@ -42,6 +42,7 @@ pub(crate) use lash_core_store::input_normalization as io;
 pub mod drive;
 mod durable_queue;
 mod lifecycle;
+pub mod process_terminal;
 pub mod recovery_lease;
 use claim_settlement::TurnClaimSettlement;
 #[cfg(feature = "testing")]
@@ -314,14 +315,14 @@ pub use process::{
     ProcessSessionDeleteReport, ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration,
     ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan, ProcessStartReceipt,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, ProcessToolIntents,
-    ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan, ProcessValueSelector,
-    ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeOutbox,
-    ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorklistCursor,
-    ProcessWorklistPage, ProjectionWatermark, RecoveryContract, RegistryScopeClose,
-    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
-    SegmentHandover, SegmentStartMarker, SessionId, SessionObserverIntentSource, SessionScope,
-    SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
+    ProcessTerminalPublication, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
+    ProcessToolIntents, ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan,
+    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
+    ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot,
+    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryContract,
+    RegistryScopeClose, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
+    ScopeStorageError, SegmentHandover, SegmentStartMarker, SessionId, SessionObserverIntentSource,
+    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
     UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,

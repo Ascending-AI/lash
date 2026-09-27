@@ -115,6 +115,7 @@ impl RestateSessionControl {
             report.resumed_drives.push(key.as_str().into());
         } else if service == Some(crate::LashService::ProcessWorkflow) {
             let pass = crate::process::park_reconcile::reconcile_process_invocations(
+                &self.admin,
                 &self.processes,
                 &self.continuations,
                 vec![invocation],

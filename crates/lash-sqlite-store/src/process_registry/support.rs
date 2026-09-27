@@ -519,7 +519,9 @@ impl SqliteProcessRegistry {
             ],
         )
         .map_err(process_sqlite_error)?;
-        Ok(())
+        // The transaction that makes a process terminal arms its terminal
+        // publication (ADR 0109 §3): the row is the obligation.
+        super::terminal_publication::arm_conn(conn, record)
     }
 
     pub(crate) fn next_change_seq_conn(

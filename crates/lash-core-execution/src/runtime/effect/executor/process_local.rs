@@ -466,6 +466,16 @@ mod terminal_wait_tests {
         ) -> Result<(), crate::PluginError> {
             unreachable!("terminal-wait witness does not deliver cancels")
         }
+
+        async fn publish_process_terminal(
+            &self,
+            process_id: &crate::ProcessId,
+            output: &crate::ProcessAwaitOutput,
+            key: &str,
+        ) -> Result<(), crate::PluginError> {
+            let _ = (process_id, output, key);
+            Ok(())
+        }
     }
 
     #[tokio::test]

@@ -308,6 +308,16 @@ mod served_only_outside_a_run {
         ) -> Result<(), lash_core::PluginError> {
             Ok(())
         }
+
+        async fn publish_process_terminal(
+            &self,
+            process_id: &lash_core::ProcessId,
+            output: &lash_core::ProcessAwaitOutput,
+            key: &str,
+        ) -> Result<(), lash_core::PluginError> {
+            let _ = (process_id, output, key);
+            Ok(())
+        }
     }
 
     /// What the effects answered: the process start's result, the sleep's

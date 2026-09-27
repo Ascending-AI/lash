@@ -608,6 +608,20 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         self.inner.record_parent_end(parent).await
     }
 
+    async fn settle_terminal_publication(
+        &self,
+        process_id: &crate::ProcessId,
+    ) -> Result<bool, crate::PluginError> {
+        self.inner.settle_terminal_publication(process_id).await
+    }
+
+    async fn terminal_publication(
+        &self,
+        process_id: &crate::ProcessId,
+    ) -> Result<Option<crate::ProcessTerminalPublication>, crate::PluginError> {
+        self.inner.terminal_publication(process_id).await
+    }
+
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,

@@ -1712,6 +1712,17 @@ impl crate::ProcessWorkSubstrate for RegistrationOnlyProcessWork {
     ) -> Result<(), PluginError> {
         self.inner.deliver_cancel(process_id, request, key).await
     }
+
+    async fn publish_process_terminal(
+        &self,
+        process_id: &crate::ProcessId,
+        output: &crate::ProcessAwaitOutput,
+        key: &str,
+    ) -> Result<(), PluginError> {
+        self.inner
+            .publish_process_terminal(process_id, output, key)
+            .await
+    }
 }
 
 #[cfg(test)]

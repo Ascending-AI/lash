@@ -8,8 +8,9 @@
 //!
 //! The mid-journal cell kills the deployment at a seeded step of the process
 //! workflow's run. The invocation-lost cell loses the run between its
-//! terminal write and the promise's resolution, which only S8-T's
-//! process-terminal obligation recovers.
+//! terminal write and the promise's resolution; the terminal transaction's
+//! `ProcessTerminal` obligation (ADR 0109 §3) recovers it, and the relay
+//! publishes the stored terminal to the waiter.
 
 use std::sync::Arc;
 
@@ -30,8 +31,10 @@ const PROCESS: &str = "main";
 /// The journal commands of the process workflow's run the mid-journal cut
 /// draws from: after the input command (0) come the segment admission and
 /// start, the sleep's frontier, call and timer, the terminal write, the
-/// parent-end step, the two promise completions and the output — 12 more.
-const RUN_JOURNAL_CUTS: u64 = 12;
+/// parent-end step, the two promise completions, the peek that proves the
+/// terminal promise stored, the publication's settle step and the output —
+/// 14 more.
+const RUN_JOURNAL_CUTS: u64 = 14;
 
 /// The run step after the terminal write and before the terminal promise is
 /// resolved: the window S-14 names.

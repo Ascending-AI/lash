@@ -70,6 +70,10 @@ const RETIRE_STEP: &str = "lash.segment.retire";
 /// The journal name of the step that applies an ended process's parent-end
 /// plan: the step right after its terminal completion (FIG-3822).
 const PARENT_END_STEP: &str = "lash.process.parent-end";
+/// The journal name of the step that settles the process's terminal
+/// publication once this execution published the terminal itself (ADR 0109
+/// §3, `ProcessTerminal`).
+const PUBLISHED_STEP: &str = "lash.process.terminal.published";
 /// The handover a later segment resumes from, read once and journaled, so a
 /// redrive replays the runner from the recorded handover even after the
 /// segment retired it (FIG-3809).
@@ -266,6 +270,16 @@ impl lash_core::ProcessWorkSubstrate for RegistryReadCancel {
     ) -> Result<(), PluginError> {
         Ok(())
     }
+
+    async fn publish_process_terminal(
+        &self,
+        process_id: &lash_core::ProcessId,
+        output: &lash_core::ProcessAwaitOutput,
+        key: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        let _ = (process_id, output, key);
+        Ok(())
+    }
 }
 
 impl<R> Clone for LashProcessWorkflowImpl<R> {
@@ -435,12 +449,19 @@ impl<R> LashProcessWorkflowImpl<R>
 where
     R: RestateProcessRunner,
 {
-    /// Publish a terminal this segment reached: the root segment on the
+    /// Publish the terminal this segment stored and settle its
+    /// `ProcessTerminal` obligation (ADR 0109 §3). The root segment on the
     /// stable lane is the stable root and resolves the process's terminal
-    /// promise itself; every other segment — a later one, or any segment on
-    /// a generation lane — completes it on the stable root
+    /// promise itself; every other segment — a later one, or any segment on a
+    /// generation lane — completes it on the stable root
     /// `LashProcessWorkflow/<pid>`, whose terminal promise outlives every
-    /// segment's lane (FIG-3795).
+    /// segment's lane (FIG-3795). The settle is a step after the publication
+    /// is durable — the root peeks the promise it resolved, whose answer
+    /// Restate sends only once it stored the resolution, and a routed call
+    /// returns only once the root's handler resolved it — so a delivered row
+    /// always names a resolved promise. An execution that stops before the
+    /// settle leaves the obligation due, and the relay publishes the stored
+    /// terminal instead.
     async fn deliver_segment_terminal(
         &self,
         context: &WorkflowContext<'_>,
@@ -450,6 +471,9 @@ where
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
         if segment_ordinal == 0 && *self.route.lane() == Lane::Stable {
             resolve_process_terminal_promise(context, &self.authority_id, process_id, &output)?;
+            let key = restate_process_terminal_await_key(&self.authority_id, process_id)
+                .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
+            context.peek_promise::<String>(&key.promise_key()).await?;
         } else {
             routed_workflow::<_, _, ()>(
                 context,
@@ -463,6 +487,26 @@ where
             )
             .call()
             .await?;
+        }
+        let registry = &self.registry;
+        let Json(settled) = context
+            .run_json_or_retry_send::<Result<bool, String>, _>(
+                PUBLISHED_STEP.to_string(),
+                async move {
+                    match registry.settle_terminal_publication(process_id).await {
+                        Ok(settled) => Ok(Ok(settled)),
+                        Err(error) => step_fault(error),
+                    }
+                },
+            )
+            .await
+            .map_err(HandlerError::from)?;
+        if let Err(refusal) = settled {
+            tracing::warn!(
+                process_id = process_id.as_str(),
+                refusal = %refusal,
+                "process terminal publication stays due for the relay"
+            );
         }
 
         // FIG-811: the handover remains replay authority until the terminal
@@ -1068,11 +1112,11 @@ where
             }
             SegmentAdmission::Ended { output } => {
                 // The process ended before this segment could carry it on: run
-                // nothing, republish the stored terminal (FIG-3820).
+                // nothing (FIG-3820). Its terminal's publication is the
+                // `ProcessTerminal` obligation the terminal transaction armed
+                // (ADR 0109 §3), not this segment's.
                 resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::SegmentFinished)?;
-                return self
-                    .deliver_segment_terminal(&ctx, &process_id, input.segment_ordinal, *output)
-                    .await;
+                return Ok(Json(RestateProcessWorkflowOutput::Terminal { output }));
             }
             SegmentAdmission::MissingHandover => {
                 return self

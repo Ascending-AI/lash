@@ -22,6 +22,7 @@ pub use registration::{
     process_registry_fresh_instances, registration_and_observers_are_atomic,
 };
 pub mod status_filters;
+mod terminal_publication;
 mod turn_parent_end;
 
 use super::process_change_horizon::changes_after_full_relist_if_required;
@@ -692,6 +693,13 @@ pub async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     parent_end::terminal_completion_atomically_retains_parent_end_plan(registry).await;
+}
+
+/// Every transaction that makes a process terminal arms its `ProcessTerminal`
+/// obligation once (ADR 0109 §3), whichever completion wrote it, and the
+/// engine that published the terminal settles it delivered, once.
+pub async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn ProcessRegistry>) {
+    terminal_publication::a_terminal_write_arms_its_publication_once(registry).await;
 }
 
 /// A turn scope has no terminal row to ride, so its ledger row is recorded

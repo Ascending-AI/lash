@@ -22,6 +22,8 @@ mod prune;
 #[path = "process_registry/prune_api.rs"]
 pub(crate) mod prune_api;
 mod retention;
+#[path = "process_registry/terminal_publication.rs"]
+pub(crate) mod terminal_publication;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
 use crate::process_sql::{list_processes_sql, process_sql};

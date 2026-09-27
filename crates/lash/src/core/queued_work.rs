@@ -367,7 +367,23 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         // Which recovery duties this deployment runs this tick (ADR 0109
         // §1.7). The obligation slices register their relays here.
         let duties = self.config.recovery.duties().await;
-        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> = Vec::new();
+        let mut relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
+            Vec::new();
+        if let (Some(registry), Some(port)) =
+            (self.config.env.process_registry(), process_port.as_ref())
+        {
+            relays.push(Arc::new(
+                lash_core::runtime::process_terminal::ProcessTerminalRelay::new(
+                    self.config
+                        .env
+                        .core
+                        .backend()
+                        .obligation_ledger(lash_core::store::ObligationKind::ProcessTerminal),
+                    Arc::clone(registry),
+                    Arc::clone(port),
+                ),
+            ));
+        }
         let report = lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: self.config.store_factory.as_ref(),
