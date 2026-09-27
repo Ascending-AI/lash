@@ -277,7 +277,7 @@ pub(super) async fn emit_cron_occurrence_with_effect_controller(
     scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
 ) -> HandlerResult<Json<CronEmitReport>> {
     // A wake the occurrence delivers is a root the engine starts on its own.
-    super::watch_session_roots(&state, &request.session_id);
+    super::watch_session_roots(&state, &request.session_id).await;
     let report = state
         .core
         .triggers()

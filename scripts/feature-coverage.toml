@@ -419,8 +419,6 @@ commands = [
 [[lane]]
 name = "host-features"
 features = [
-  "agent-service/restate:on",
-  "agent-service/restate:off",
   "agent-workbench/provider-wire-fixtures:on",
   "agent-workbench/provider-wire-fixtures:off",
   "slack-clone/e2e:on",
@@ -429,8 +427,6 @@ features = [
   "slack-clone/live-e2e:off",
 ]
 commands = [
-  ["cargo", "check", "-p", "agent-service", "--all-targets", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "agent-service", "--all-targets", "--no-default-features", "--features", "restate", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "provider-wire-fixtures", "--locked"],
   ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--locked"],

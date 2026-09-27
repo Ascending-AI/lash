@@ -68,19 +68,16 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
-const ABANDONED_LEASE_TTL_MS: u64 = 100;
-const LEASE_TEST_START_MS: u64 = 1_700_000_000_000;
+/// Long enough that the double's virtual clock, which also flows at wall
+/// speed, cannot expire the lease before the test advances it.
+const ABANDONED_LEASE_TTL_MS: u64 = 60_000;
 
 /// ADR 0077: a replacement worker is refused while a dead holder's lease is
 /// still live, then admits and completes after the TTL expires.
 #[tokio::test]
 async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
-    let data_dir = tempfile::tempdir().expect("successor persistence tempdir");
-    let clock = Arc::new(lash::testing::TestClock::new(LEASE_TEST_START_MS));
-    let store_factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions"))
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let store_factory = double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-successor-persistence")
         .complete(|_| async {
@@ -91,12 +88,11 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         .build()
         .into_handle();
     let state = recoverable_chat_test_state_with_dependencies(
-        data_dir.path(),
+        &double,
         64,
         provider,
         detached_trigger_store(),
         store_factory.clone(),
-        Some(inert_queued_work_port()),
     )
     .await;
     let session_id = state.current_session_id();
@@ -120,15 +116,11 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         .expect("park the materialized session");
     assert_eq!(parked.session_id(), session_id);
     drop(parked);
-    let store = lash_sqlite_store::Store::open_with_clock(
-        &data_dir
-            .path()
-            .join("lash-sessions")
-            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-        Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
-    )
-    .await
-    .expect("open the durable session catalog");
+    let store = double
+        .stores()
+        .open_store()
+        .await
+        .expect("open the durable session catalog");
     let dead_lease =
         lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
             &store,
@@ -147,7 +139,9 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
         "replacement recovery must wait for the dead holder TTL"
     );
-    clock.advance(ABANDONED_LEASE_TTL_MS + 1);
+    double
+        .server()
+        .advance(Duration::from_millis(ABANDONED_LEASE_TTL_MS + 1));
 
     let successor = state
         .core
@@ -244,24 +238,19 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
 /// dead boot incarnation's live lease to expire before recovery.
 #[tokio::test]
 async fn same_worker_successor_waits_for_dead_boot_ttl() {
-    let data_dir = tempfile::tempdir().expect("same-turn successor tempdir");
-    let clock = Arc::new(lash::testing::TestClock::new(LEASE_TEST_START_MS));
-    let store_factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions"))
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let store_factory = double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-same-turn-successor")
         .complete_error("the append-only restart gate must not call the provider")
         .build()
         .into_handle();
     let state = recoverable_chat_test_state_with_dependencies(
-        data_dir.path(),
+        &double,
         64,
         provider,
         detached_trigger_store(),
         store_factory.clone(),
-        Some(inert_queued_work_port()),
     )
     .await;
     let session_id = state.current_session_id();
@@ -276,15 +265,11 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         .await
         .expect("park restart-gate session before simulating process loss");
 
-    let store = lash_sqlite_store::Store::open_with_clock(
-        &data_dir
-            .path()
-            .join("lash-sessions")
-            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-        Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
-    )
-    .await
-    .expect("open restart-gate store");
+    let store = double
+        .stores()
+        .open_store()
+        .await
+        .expect("open restart-gate store");
     let dead_boot = lash::persistence::LeaseOwnerIdentity::opaque(
         "agent-workbench-test-worker",
         "agent-workbench-dead-boot",
@@ -307,7 +292,9 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
         "the same stable owner still needs expiry of the dead incarnation"
     );
-    clock.advance(ABANDONED_LEASE_TTL_MS + 1);
+    double
+        .server()
+        .advance(Duration::from_millis(ABANDONED_LEASE_TTL_MS + 1));
 
     let successor = state
         .core
@@ -396,13 +383,13 @@ impl lash::runtime::RuntimeTurnPhaseProbe for AppendPreCommitBarrier {
 /// publication.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_live_writers_rebase_appends_into_durable_graph_order() {
-    let data_dir = tempfile::tempdir().expect("concurrent append tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-concurrent-append")
         .complete_error("the append gate must not call the provider")
         .build()
         .into_handle();
-    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
     let left = state
         .core
@@ -545,23 +532,18 @@ pub(super) fn gated_first_call_provider(
     (provider, entered_rx, release)
 }
 
-/// A test state whose session work drives in the waiter's task: a send's
-/// follower drives the root it waits on, so a test sees the turn run without a
-/// Restate server behind the session.
+/// A test state on `double`: the double's engine drives every accepted send
+/// through its `LashSession` service.
 pub(crate) async fn queued_send_test_state(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     provider: ProviderHandle,
 ) -> AppState {
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
     recoverable_chat_test_state_with_dependencies(
-        data_dir,
+        double,
         64,
         provider,
         detached_trigger_store(),
-        store_factory,
-        Some(inert_queued_work_port()),
+        double.stores().session_store_factory(),
     )
     .await
 }
@@ -677,13 +659,13 @@ async fn slow_session_delete_retention_call(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn slow_delete_retention_is_bounded_and_can_be_retried() {
-    let data_dir = tempfile::tempdir().expect("slow delete tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-slow-delete")
         .complete_error("the slow delete test must not call the provider")
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     state.restate_ingress_url = spawn_slow_session_delete_retention_restate().await;
     let old_session_id = state.current_session_id();
     state
@@ -736,13 +718,13 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_live() {
-    let data_dir = tempfile::tempdir().expect("ambiguous delete tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-ambiguous-delete")
         .complete_error("the ambiguous delete test must not call the provider")
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     state.restate_ingress_url = spawn_ambiguous_session_delete_restate().await;
     let old_session_id = state.current_session_id();
     state
@@ -826,13 +808,13 @@ async fn tombstone_then_fail_delete_call(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating() {
-    let data_dir = tempfile::tempdir().expect("reconciled delete tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-reconciled-delete")
         .complete_error("the reconciled delete test must not call the provider")
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     let old_session_id = state.current_session_id();
     state
         .open_session(&old_session_id, "test")
@@ -883,13 +865,13 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
-    let data_dir = tempfile::tempdir().expect("non-current delete tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-non-current-delete")
         .complete_error("the non-current delete test must not call the provider")
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     let retired_session_id = state.current_session_id();
     state
         .open_session(&SessionId::from(&retired_session_id), "test")
@@ -965,7 +947,6 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visible() {
-    let data_dir = tempfile::tempdir().expect("terminal delete failure tempdir");
     // The turn the still-live session accepts after the failed delete runs.
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-terminal-delete-failure")
@@ -976,7 +957,8 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
         })
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     let (restate_ingress_url, mut restate_requests) =
         spawn_terminally_failed_session_delete_restate().await;
     state.restate_ingress_url = restate_ingress_url;
@@ -1155,13 +1137,13 @@ fn active_turn_idle_claim_is_atomic_per_session() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
-    let data_dir = tempfile::tempdir().expect("user queued-claim race tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-user-queued-claim-race")
         .complete_error("a send that loses the claim race must not call the provider")
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
     let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
@@ -1271,13 +1253,13 @@ impl TraceSink for PanickingTurnAdmissionTrace {
 
 #[tokio::test]
 async fn a_panicked_turn_submission_cleans_up_and_publishes_failure() {
-    let data_dir = tempfile::tempdir().expect("panicked-send tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-panicked-send")
         .complete_error("a panicked admission must not reach the provider")
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
     state.trace_sink = Some(Arc::new(PanickingTurnAdmissionTrace));
@@ -1318,7 +1300,6 @@ async fn a_panicked_turn_submission_cleans_up_and_publishes_failure() {
 /// into a queue that can never drain.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
-    let data_dir = tempfile::tempdir().expect("dropped-send tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-dropped-send")
         .complete(|_| async {
@@ -1328,7 +1309,8 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
         })
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
     let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
     state.trace_sink = Some(Arc::new(TurnAdmissionGate {
@@ -1410,10 +1392,10 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
 /// The session drive and the root follower settle both sends in order.
 #[tokio::test]
 async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
-    let data_dir = tempfile::tempdir().expect("queued send tempdir");
     let (provider, mut provider_entered, release) =
         gated_first_call_provider("workbench-queued-concurrent-send");
-    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
 
     let Json(first) = send_turn(
@@ -1514,8 +1496,10 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
                 if rows
                     == vec![
                         ("user".to_string(), "first send".to_string()),
-                        ("user".to_string(), "second send".to_string()),
                         ("assistant".to_string(), "answer 0".to_string()),
+                        // The queued send is the next turn's input: the
+                        // engine admits it once the running turn settled.
+                        ("user".to_string(), "second send".to_string()),
                         ("assistant".to_string(), "answer 1".to_string()),
                     ]
                 {
@@ -1549,10 +1533,10 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
 /// and completes normally once its provider resumes.
 #[tokio::test]
 async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() {
-    let data_dir = tempfile::tempdir().expect("losing race tempdir");
     let (provider, mut provider_entered, release) =
         gated_first_call_provider("workbench-losing-commit-race");
-    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
 
     let Json(accepted) = send_turn(

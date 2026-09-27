@@ -41,13 +41,13 @@ async fn settled_assistant_rows(
 #[tokio::test]
 async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     const BARE_PROSE_REPLY: &str = "bare prose answer";
-    let data_dir = tempfile::tempdir().expect("bare prose tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("recoverable-chat-bare-prose")
         .complete(|_| async { Ok(text_response(BARE_PROSE_REPLY)) })
         .build()
         .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
     let session = state
         .core
@@ -138,7 +138,6 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
 async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     const REASONED_REPLY: &str = "FIG-1406 reasoned prose answer";
     const REPLY_REASONING: &str = "FIG-1406 private deliberation";
-    let data_dir = tempfile::tempdir().expect("reasoned prose tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("recoverable-chat-reasoned-prose")
         .complete(|_| async {
@@ -154,7 +153,8 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
         })
         .build()
         .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
     let session = state
         .core
@@ -245,7 +245,6 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
 async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     const MID_TURN_PROSE: &str = "FIG-1406 mid-turn thinking out loud";
     const FINAL_REPLY: &str = "FIG-1406 answer after a code step";
-    let data_dir = tempfile::tempdir().expect("mid-turn prose tempdir");
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let provider = lash::testing::TestProvider::builder()
         .kind("recoverable-chat-mid-turn-prose")
@@ -271,7 +270,8 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
         })
         .build()
         .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
     let session = state
         .core

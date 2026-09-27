@@ -500,7 +500,6 @@ async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
 /// A served turn must reach the model with the TypeScript prompt.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect() {
-    let data_dir = tempfile::tempdir().expect("temp dir");
     let served_prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let provider = {
         let served_prompts = Arc::clone(&served_prompts);
@@ -522,7 +521,8 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
             .into_handle()
     };
 
-    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
 
     run_turn_through_the_workbench_open_path(
@@ -676,9 +676,9 @@ fn every_dev_provider_scenario_reaches_a_finish() {
 /// ADR 0096: this ran once per dialect; TypeScript is the sole RLM language.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
-    let data_dir = tempfile::tempdir().expect("temp dir");
     let provider = failure_provider::DevProviderScenario::CodeFailure.provider();
-    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
 
     tokio::time::timeout(
@@ -770,9 +770,9 @@ async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
         "<typescript>\nconst findings = { summary: \"second pass\" };\nfinish(findings.summary);\n</typescript>"
             .to_string(),
     ];
-    let data_dir = tempfile::tempdir().expect("temp dir");
     let provider = scripted_cells_provider("session-globals", cells);
-    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
 
     for (index, prompt) in ["bind it", "read it back", "rebind and read"]
@@ -817,10 +817,12 @@ async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
 async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects() {
     let first = "<typescript>\nconst findings = { summary: \"survived\" };\nfinish(\"bound\");\n</typescript>";
     let second = "<typescript>\nfinish(findings.summary);\n</typescript>";
-    let data_dir = tempfile::tempdir().expect("temp dir");
+    // One double outlives both host processes: its stores are what the
+    // second reopens.
+    let double = crate::tests::test_double_backend(0).await;
     let session_id = {
         let state = queued_send_test_state(
-            data_dir.path(),
+            &double,
             scripted_cells_provider("session-globals-restart", vec![first.to_string()]),
         )
         .await;
@@ -837,7 +839,7 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
 
     // A second host process over the same durable store.
     let state = queued_send_test_state(
-        data_dir.path(),
+        &double,
         scripted_cells_provider("session-globals-restart", vec![second.to_string()]),
     )
     .await;
@@ -874,9 +876,9 @@ async fn a_name_no_one_has_is_still_refused_in_both_dialects() {
         "<typescript>\nfinish(nowhere);\n</typescript>".to_string(),
         "<typescript>\nfinish(\"recovered\");\n</typescript>".to_string(),
     ];
-    let data_dir = tempfile::tempdir().expect("temp dir");
+    let double = crate::tests::test_double_backend(0).await;
     let state = queued_send_test_state(
-        data_dir.path(),
+        &double,
         scripted_cells_provider("session-globals-unknown", cells),
     )
     .await;

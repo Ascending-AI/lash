@@ -1,8 +1,10 @@
 //! Context-overflow recovery harness (`runbooks/context-overflow-recovery`).
 //!
-//! One process, one SQLite scratch store, no container and no token. Driven by
-//! `scripts/context-overflow-recovery-e2e.sh`, which owns the artifact
-//! directory and the exact gates.
+//! One process, one SQLite scratch store set and a local `restate-server`,
+//! the zero-infra engine (ADR 0104 §4); no container and no token. Driven by
+//! `scripts/context-overflow-recovery-e2e.sh`, which runs it under
+//! `scripts/ci/with-service.sh restate` and owns the artifact directory and
+//! the exact gates.
 //!
 //! The scenario is FIG-1272's whole claim, end to end:
 //!
@@ -291,30 +293,36 @@ struct Harness {
     core: lash::LashCore,
     provider_calls: Arc<AtomicUsize>,
     tool_bytes: Arc<AtomicUsize>,
+    _deployment: lash_restate_postgres_workers_e2e::local_restate::LocalDeployment,
     _scratch: tempfile::TempDir,
 }
 
 impl Harness {
+    /// A core on lash-restate's engine over a scratch SQLite store set, its
+    /// endpoint served and registered with the local server: each arm is a
+    /// deployment of its own, so its scripted provider is the one the server
+    /// drives its turns with.
     async fn new(script: Script) -> Result<Self> {
-        let scratch = tempfile::tempdir().context("scratch dir for the SQLite backend")?;
+        let restate = lash_restate_postgres_workers_e2e::local_restate::LocalRestate::from_env()?;
+        let scratch = tempfile::tempdir().context("scratch dir for the SQLite store set")?;
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool_bytes = Arc::new(AtomicUsize::new(0));
 
-        let backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::open(scratch.path().join("sessions"))
-                .await
-                .context("open the SQLite backend")?,
-        );
+        let stores = lash_sqlite_store::SqliteStoreSet::open(scratch.path().join("sessions"))
+            .await
+            .context("open the SQLite store set")?;
+        let engine = restate.engine(Arc::new(stores));
+        let backend = lash::Backend::new(engine.clone());
         let rlm = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &backend.as_ref().clone().into(),
+            &backend,
         );
 
-        let core = lash::LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, rlm)
+        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
             .provider(scripted_provider(script, Arc::clone(&provider_calls)))
             .model(
                 lash::ModelSpec::builder("context-overflow-recovery-mock")
@@ -340,11 +348,20 @@ impl Harness {
                 format!("context-overflow-recovery:{}", std::process::id()),
             ))
             .context("build the context-overflow-recovery core")?;
+        let worker = lash::durability::DurableProcessWorker::new(
+            core.durable_process_worker_config()
+                .context("the core's process worker config")?,
+        )
+        .context("build the process worker")?;
+        let deployment = restate
+            .serve(engine.endpoint_builder(worker).build())
+            .await?;
 
         Ok(Self {
             core,
             provider_calls,
             tool_bytes,
+            _deployment: deployment,
             _scratch: scratch,
         })
     }

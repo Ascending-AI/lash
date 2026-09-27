@@ -13,6 +13,12 @@ publish = false
 [lints]
 workspace = true
 
+# cargo-shear resolves `use` statements per crate directory and cannot see
+# `examples/shared/local_restate.rs`, which `src/main.rs` pulls in with
+# `#[path]`; that file is the only user of `restate-sdk` here.
+[package.metadata.cargo-shear]
+ignored = ["restate-sdk"]
+
 [dependencies]
 axum = "0.8"
 futures-util = { workspace = true }
@@ -20,14 +26,16 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = "0.15"
-lash = { workspace = true, features = ["rlm", "sqlite"] }
+lash = { workspace = true, features = ["restate", "rlm", "sqlite"] }
 lash-provider-openai = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
+restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [dev-dependencies]
+lash-restate-test = { workspace = true }

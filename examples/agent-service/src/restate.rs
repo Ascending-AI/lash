@@ -2,7 +2,6 @@
     deprecated,
     reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
 )]
-#![cfg(feature = "restate")]
 
 //! The Restate deployment's live end-to-end test. The service binds no turn
 //! workflow of its own: a chat message goes through the session's `send()`,
@@ -23,6 +22,7 @@ mod restate_tests {
     use serde_json::json;
 
     use crate::board::BoardState;
+    use crate::chat_discard::AgentServiceChatDiscard as _;
     use crate::db::AppDb;
     use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
     use crate::effect_groups::{
@@ -31,7 +31,7 @@ mod restate_tests {
         get_effect_group, run_effect_group,
     };
     use crate::routes::{SendMessageRequest, send_message, settings};
-    use crate::state::{AgentServiceDurability, AppStateData};
+    use crate::state::AppStateData;
     use axum::Router;
     use axum::routing::{get, post};
     use lash::direct::LlmOutputPart;
@@ -97,6 +97,7 @@ mod restate_tests {
         let endpoint = harness
             .backend
             .endpoint_builder(harness.process_worker.clone())
+            .bind(harness.chat_discard.serve())
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
             .build();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -402,6 +403,7 @@ mod restate_tests {
         state: AppStateData,
         process_worker: lash::durability::DurableProcessWorker,
         backend: Arc<lash_restate::RestateEngine>,
+        chat_discard: crate::chat_discard::AgentServiceChatDiscardImpl,
     }
 
     async fn live_restate_test_state(
@@ -445,7 +447,7 @@ finish("done via Restate E2E");
         let backend = Arc::new(lash_restate::RestateEngine::new(
             Arc::new(stores),
             lash::restate::config(
-                ingress_url,
+                ingress_url.clone(),
                 admin_url,
                 lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
             ),
@@ -498,19 +500,19 @@ finish("done via Restate E2E");
                 .expect("process worker config"),
         )
         .expect("valid test native substrate config");
-        let state = AppStateData::from_shared_db(
-            core,
-            backend.turn_work_driver(),
-            app_db,
-            "mock-model".to_string(),
-            None,
-            AgentServiceDurability::Restate,
-            std::env::var("RESTATE_INGRESS_URL").ok(),
-        );
+        let restate = lash_restate::RestateConnection::new(ingress_url);
+        let chat_discard = crate::chat_discard::AgentServiceChatDiscardImpl::new(
+            &core,
+            restate.clone(),
+            lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
+        )
+        .await;
+        let state = AppStateData::new(core, app_db, "mock-model".to_string(), None, restate);
         LiveRestateTestHarness {
             state,
             process_worker,
             backend,
+            chat_discard,
         }
     }
 

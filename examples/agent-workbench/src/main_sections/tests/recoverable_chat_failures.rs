@@ -5,13 +5,13 @@ use lash::rlm::RlmSendBuilderExt;
 #[tokio::test]
 async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
     const INTERNAL_PROVIDER_FAILURE: &str = "provider rejected credentials for secret account";
-    let data_dir = tempfile::tempdir().expect("provider failure tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("recoverable-chat-provider-failure")
         .complete_error(INTERNAL_PROVIDER_FAILURE)
         .build()
         .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
     let session = state
         .core

@@ -97,23 +97,19 @@ appended to the retained log:
 (
   . ./env.sh
   export OPENROUTER_API_KEY="<inert placeholder; this row makes no provider call>"
-  export AGENT_SERVICE_DURABILITY=restate
   export RESTATE_AUTHORITY_ID="$authority_id"
   export AGENT_SERVICE_ADDR="127.0.0.1:$app_port"
   export AGENT_SERVICE_RESTATE_ADDR="127.0.0.1:$endpoint_port"
   export RESTATE_INGRESS_URL="http://127.0.0.1:$ingress_port"
   export AGENT_SERVICE_DATA_DIR="$data_dir"
   export AGENT_SERVICE_TRACE="$data_dir/trace.jsonl"
-  exec cargo run -p agent-service --features restate --profile judged --locked
+  exec cargo run -p agent-service --profile judged --locked
 ) >>"$host_log" 2>&1 &
 host_pid=$!
 ```
 
-`--features restate` is not optional: both `/api/effect-groups` routes are compiled behind
-that feature, so a host built without it answers 404 and the row scores a contract violation
-that is really a boot mistake. `RESTATE_AUTHORITY_ID` is required under Restate durability and
-must stay one value for the whole run, or the binary exits at once with `RESTATE_AUTHORITY_ID
-is required for Restate durability`. The API key is inert on purpose: the binary refuses to
+`RESTATE_AUTHORITY_ID` is required and must stay one value for the whole run, or the binary
+exits at once with `RESTATE_AUTHORITY_ID is required`. The API key is inert on purpose: the binary refuses to
 start without `OPENROUTER_API_KEY`, while this path opens no session and makes no provider
 call, and any provider request invalidates the row.
 

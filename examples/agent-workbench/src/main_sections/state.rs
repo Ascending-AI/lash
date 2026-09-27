@@ -1134,16 +1134,6 @@ impl lash::process::ProcessEventSink for ChannelProcessEventSink {
     }
 }
 
-/// Session work with no background drive: a test drains queued work by hand,
-/// and a send still has its input driven, in the task that waits on it
-/// (FIG-3600 S5b).
-#[cfg(test)]
-pub(crate) fn inert_queued_work_port() -> Arc<dyn lash::runtime::SessionWorkEngine> {
-    Arc::new(lash::runtime::InlineSessionWork::new(
-        lash::formats::build_generation(),
-    ))
-}
-
 // Process work is now resolved through LashCore's substrate port.
 // The AppState no longer mirrors that driver as a second source of truth.
 

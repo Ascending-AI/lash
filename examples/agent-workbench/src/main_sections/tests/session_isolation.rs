@@ -7,15 +7,10 @@ fn concurrent_sessions_isolate_transcripts_triggers_and_processes() {
     });
 }
 async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() {
-    let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-session-isolation-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let backend = test_file_backend(&data_dir);
-    let process_registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
-    let trigger_store = backend.trigger_store();
-    let core = test_workbench_core(backend);
+    let double = crate::tests::test_double_backend(0).await;
+    let trigger_store = double.stores().trigger_store();
+    let core = test_workbench_core(double.lash_backend());
+    crate::tests::install_test_process_worker(&double, &core);
     let session_a_id = "workbench-isolation-a";
     let session_b_id = "workbench-isolation-b";
     let session_a = core
@@ -83,8 +78,8 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
     let session_a_scope = SessionId::from(session_a_id);
     let session_b_scope = SessionId::from(session_b_id);
     let (report_a, report_b) = tokio::join!(
-        emit_test_button_trigger_for_session(&core, ButtonChoice::Blue, &session_a_scope),
-        emit_test_button_trigger_for_session(&core, ButtonChoice::Blue, &session_b_scope),
+        emit_test_button_trigger_for_session(&double, &core, ButtonChoice::Blue, &session_a_scope),
+        emit_test_button_trigger_for_session(&double, &core, ButtonChoice::Blue, &session_b_scope),
     );
     assert_eq!(report_a.started_process_ids().len(), 1);
     assert_eq!(report_b.started_process_ids().len(), 1);
@@ -92,14 +87,13 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
         report_a.started_process_ids()[0],
         report_b.started_process_ids()[0]
     );
-    let awaiter = lash::process::NativeProcessWork::for_registry(Arc::clone(&process_registry));
     for process_id in report_a
         .started_process_ids()
         .into_iter()
         .chain(report_b.started_process_ids())
     {
-        awaiter
-            .await_terminal(&process_id)
+        core.processes()
+            .await_output(&process_id)
             .await
             .expect("isolated trigger process terminal");
     }
@@ -123,5 +117,4 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
 
     session_a.close().await.expect("close session A");
     session_b.close().await.expect("close session B");
-    let _ = std::fs::remove_dir_all(data_dir);
 }

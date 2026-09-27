@@ -98,7 +98,9 @@ async fn run_task_with_shutdown_witness(
             None => crate::wire_log::Recorder::start(telemetry.capture.clone()).await,
         }
         .context("start request recorder")?;
+        let substrate = RunSubstrate::open().await?;
         let core = build_turn_core(
+            &substrate,
             task,
             model,
             api_key,
@@ -110,14 +112,14 @@ async fn run_task_with_shutdown_witness(
             provider_retries,
             &recorder.base_url,
             shutdown_witness,
-        )
-        .await?;
-        Ok::<_, anyhow::Error>((core, recorder))
+        )?;
+        let substrate = substrate.serve(&core).await?;
+        Ok::<_, anyhow::Error>((core, recorder, substrate))
     }
     .await;
     let mut cleanup_error = None;
     let result = match prepared {
-        Ok((core, recorder)) => {
+        Ok((core, recorder, substrate)) => {
             let result = tokio::time::timeout(
                 std::time::Duration::from_secs(turn_wall_limit_secs),
                 run_turn(&core, task, run, channel, &telemetry),
@@ -140,6 +142,7 @@ async fn run_task_with_shutdown_witness(
                 }
             }
             drop(recorder);
+            drop(substrate);
             result
         }
         Err(error) => Ok(Err(error)),
@@ -320,8 +323,99 @@ async fn run_turn(
     ))
 }
 
+/// A run's engine: lash-restate's engine over a fresh SQLite memory store
+/// set, on a private local restate-server (ADR 0104). The engine binds lash's
+/// services under stable names, so one server serves one core's deployment at
+/// a time; every run, concurrent ones included, gets a server of its own.
+/// Unit tests run on the Restate test double instead.
+struct RunSubstrate {
+    backend: lash::Backend,
+    engine: Serving,
+}
+
+enum Serving {
+    #[cfg_attr(
+        test,
+        expect(dead_code, reason = "unit tests run on the Restate test double")
+    )]
+    Local {
+        engine: Arc<lash::restate::RestateEngine>,
+        server: crate::local_restate::LocalRestateServer,
+    },
+    #[cfg(test)]
+    Double(lash_restate_test::RestateTestBackend),
+}
+
+/// A served run substrate: the core's endpoint is registered with the run's
+/// server until this drops. Fields drop in order: the deployment, then the
+/// server.
+enum ServedSubstrate {
+    Local {
+        _deployment: crate::local_restate::LocalDeployment,
+        _server: crate::local_restate::LocalRestateServer,
+    },
+    #[cfg(test)]
+    Double {
+        _double: lash_restate_test::RestateTestBackend,
+    },
+}
+
+impl RunSubstrate {
+    async fn open() -> Result<Self> {
+        #[cfg(test)]
+        {
+            let double = lash_restate_test::backend(0, lash_restate_test::ServerConfig::default())
+                .await
+                .context("build the Restate test double")?;
+            Ok(Self {
+                backend: double.lash_backend(),
+                engine: Serving::Double(double),
+            })
+        }
+        #[cfg(not(test))]
+        {
+            let server = crate::local_restate::LocalRestateServer::spawn("toolbench").await?;
+            let stores = lash::sqlite::SqliteStoreSet::memory()
+                .await
+                .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
+            let engine = server.restate().engine(Arc::new(stores));
+            Ok(Self {
+                backend: lash::Backend::new(engine.clone()),
+                engine: Serving::Local { engine, server },
+            })
+        }
+    }
+
+    /// Serve `core`'s turns and processes on this substrate's engine.
+    async fn serve(self, core: &LashCore) -> Result<ServedSubstrate> {
+        let worker = lash::durability::DurableProcessWorker::new(
+            core.durable_process_worker_config()
+                .context("toolbench process worker config")?,
+        )
+        .context("build the toolbench process worker")?;
+        match self.engine {
+            Serving::Local { engine, server } => {
+                let deployment = server
+                    .restate()
+                    .serve(engine.endpoint_builder(worker).build())
+                    .await?;
+                Ok(ServedSubstrate::Local {
+                    _deployment: deployment,
+                    _server: server,
+                })
+            }
+            #[cfg(test)]
+            Serving::Double(double) => {
+                double.install_process_worker(worker);
+                Ok(ServedSubstrate::Double { _double: double })
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-async fn build_turn_core(
+fn build_turn_core(
+    substrate: &RunSubstrate,
     task: &Task,
     model: &str,
     api_key: &str,
@@ -355,15 +449,11 @@ async fn build_turn_core(
     } else {
         lash::TurnBudget::Unbounded
     };
-    // Every run is its own in-process substrate: a fresh SQLite memory
-    // backend the core owns and drops with it.
-    let backend = Arc::new(
-        lash::sqlite::SqliteBackend::memory()
-            .await
-            .map_err(|error| anyhow::anyhow!("open a SQLite memory backend: {error}"))?,
-    );
+    // Every run is its own substrate: a fresh SQLite memory store set on a
+    // private restate-server, dropped with the run.
+    let backend = substrate.backend.clone();
     let builder = match channel {
-        crate::ChannelSelection::Standard => LashCore::standard_builder(backend.into(), budget),
+        crate::ChannelSelection::Standard => LashCore::standard_builder(backend, budget),
         crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
             let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(if channel == crate::ChannelSelection::Cell {
@@ -380,8 +470,8 @@ async fn build_turn_core(
             config.lashlang_language_features.label_annotations = false;
             config.lashlang_abilities.sleep = false;
             config.continue_as_soft_warn_tokens = None;
-            let factory = lash::rlm::RlmProtocolPluginFactory::new(config, &backend.clone().into());
-            LashCore::rlm_builder(backend.into(), budget, factory)
+            let factory = lash::rlm::RlmProtocolPluginFactory::new(config, &backend);
+            LashCore::rlm_builder(backend, budget, factory)
         }
     };
     let shutdown_marker =

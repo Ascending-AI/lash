@@ -46,10 +46,6 @@ use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmTransportError, ProviderFailureKind, ProviderOptions,
     ProviderReliability, TransportRetryVerdict,
 };
-use lash::runtime::{
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-};
 use lash_remote_protocol::{RemoteSessionObservationEventPayload, RemoteTurnEvent};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -445,30 +441,24 @@ async fn drive_reference_turn(
 /// The recoverable-chat test state with its runtime facets overridable: an
 /// explicit live-replay store shrinks the replay window so a trimmed-gap
 /// recovery is deterministic, and an optional effect layer over the
-/// backend's journaling host lets a test crash and re-drive turn effects the
-/// way a durable workflow engine does.
+/// backend's journaling host lets a test observe or fault turn effects.
+///
+/// The core runs over `double`'s engine, which drives every accepted input
+/// through its `LashSession` service; the double's process worker is this
+/// core's, so a turn's processes run in the double's `LashProcessWorkflow`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn recoverable_chat_test_state_with_replay_store(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     channel_capacity: usize,
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    queued_work_driver: Option<Arc<dyn lash::runtime::SessionWorkEngine>>,
     context_window_tokens: usize,
     live_replay_store: Option<Arc<dyn lash::observe::LiveReplayStore>>,
-    effect_layer: Option<Arc<dyn lash::testing::EffectLayer>>,
 ) -> AppState {
-    let sqlite = test_file_backend(data_dir);
-    let mut decorated = DecoratedBackend::over(sqlite.into())
+    let decorated = DecoratedBackend::over(double.lash_backend())
         .with_catalog(Arc::clone(&store_factory))
         .with_trigger_store(Arc::clone(&trigger_store));
-    if let Some(layer) = effect_layer {
-        decorated = decorated.with_effect_layer(layer);
-    }
-    if let Some(driver) = queued_work_driver {
-        decorated = decorated.with_queued_work(driver);
-    }
     let backend: lash::Backend = decorated.into();
     let model = with_workbench_model_capability(
         lash::ModelSpec::builder("test-model")
@@ -485,6 +475,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     let core = core_builder
         .build(crate::test_core_owner())
         .expect("build test core");
+    install_test_process_worker(double, &core);
     let process_observer = core
         .processes()
         .observer()
@@ -619,61 +610,6 @@ fn redrive_provider(
     (provider, calls)
 }
 
-/// A crash layer over a SQLite effect host: the
-/// `fail_on_llm_call`-th LLM effect dies before it reaches the journal, the
-/// way a crashed workflow invocation leaves a turn mid-flight with its journal
-/// intact. The recovery drive under the same turn id replays each journaled
-/// effect instead of re-executing it — the provider is never re-bought and the
-/// already-admitted input is never re-applied — then resumes executing where
-/// the journal ends; the deployment's journal refuses a replayed envelope that
-/// diverges from the recorded one.
-struct RedriveCrashLayer {
-    llm_effects: AtomicUsize,
-    answered_llm_effects: AtomicUsize,
-    fail_on_llm_call: usize,
-}
-
-impl RedriveCrashLayer {
-    fn failing_on_llm_call(ordinal: usize) -> Self {
-        Self {
-            llm_effects: AtomicUsize::new(0),
-            answered_llm_effects: AtomicUsize::new(0),
-            fail_on_llm_call: ordinal,
-        }
-    }
-
-    /// LLM effects the journal answered, live or replayed.
-    fn answered_llm_effects(&self) -> usize {
-        self.answered_llm_effects.load(Ordering::SeqCst)
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::testing::EffectLayer for RedriveCrashLayer {
-    async fn execute_effect(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if !matches!(&envelope.command, RuntimeEffectCommand::LlmCall { .. }) {
-            return inner.execute_effect(envelope, local_executor).await;
-        }
-        if self.llm_effects.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_on_llm_call {
-            return Err(RuntimeEffectControllerError::foreign(
-                "reference_transport_drive_crashed",
-                // A crash is a live fault: the drive aborts and the redrive
-                // replays the journal.
-                lash::runtime::TurnFailureCause::LiveFault,
-                "injected crash: the drive dies mid-turn with its journal intact",
-            ));
-        }
-        let outcome = inner.execute_effect(envelope, local_executor).await?;
-        self.answered_llm_effects.fetch_add(1, Ordering::SeqCst);
-        Ok(outcome)
-    }
-}
-
 /// Apply wire items until one turn-scoped event for `turn_id` has landed —
 /// the point a mid-stream disconnect provably leaves applied events ahead of
 /// the persisted checkpoint.
@@ -704,9 +640,9 @@ async fn apply_through_turn_activity(
 async fn one_output_identity_per_turn_across_disconnect_and_redelivery() {
     const FIRST_ANSWER: &str = "first canonical answer";
     const SECOND_ANSWER: &str = "second canonical answer";
-    let data_dir = tempfile::tempdir().expect("reference transport tempdir");
+    let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_provider(
-        data_dir.path(),
+        &double,
         16,
         prose_provider(
             "reference-transport-disconnect",
@@ -806,16 +742,13 @@ async fn one_output_identity_per_turn_across_disconnect_and_redelivery() {
 async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     const FIRST_ANSWER: &str = "trimmed first answer";
     const SECOND_ANSWER: &str = "trimmed second answer";
-    let data_dir = tempfile::tempdir().expect("reference transport tempdir");
+    let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_replay_store(
-        data_dir.path(),
+        &double,
         16,
         prose_provider("reference-transport-trim", &[FIRST_ANSWER, SECOND_ANSWER]),
         detached_trigger_store(),
-        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.path().join("lash-sessions"),
-        )),
-        None,
+        double.stores().session_store_factory(),
         4096,
         Some(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
             lash::observe::InMemoryLiveReplayStoreConfig {
@@ -823,7 +756,6 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
                 ..lash::observe::InMemoryLiveReplayStoreConfig::default()
             },
         ))),
-        None,
     )
     .await;
     let session_id = state.current_session_id();
@@ -933,9 +865,9 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
 async fn a_retried_attempt_replaces_partial_prose_on_the_same_row() {
     const SUPERSEDED: &str = "superseded partial from the failed attempt";
     const ANSWER: &str = "answer from the retried attempt";
-    let data_dir = tempfile::tempdir().expect("reference transport tempdir");
+    let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_provider(
-        data_dir.path(),
+        &double,
         16,
         retried_attempt_provider(SUPERSEDED, ANSWER),
     )
@@ -1007,27 +939,32 @@ async fn a_retried_attempt_replaces_partial_prose_on_the_same_row() {
 #[tokio::test]
 async fn a_redriven_turn_keeps_its_output_identity() {
     const CRASHED_PARTIAL: &str = "partial prose from the crashed drive";
+    const LOST_ANSWER: &str = "answer the crashed drive never journaled";
     const REDRIVEN_ANSWER: &str = "answer from the recovery re-drive";
     const NEXT_ANSWER: &str = "answer from the queued drain";
-    let data_dir = tempfile::tempdir().expect("reference transport tempdir");
-    let layer = Arc::new(RedriveCrashLayer::failing_on_llm_call(2));
-    let (provider, provider_calls) =
-        redrive_provider(CRASHED_PARTIAL, &[REDRIVEN_ANSWER, NEXT_ANSWER]);
+    let (provider, provider_calls) = redrive_provider(
+        CRASHED_PARTIAL,
+        &[LOST_ANSWER, REDRIVEN_ANSWER, NEXT_ANSWER],
+    );
+    let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_replay_store(
-        data_dir.path(),
+        &double,
         16,
         provider,
         detached_trigger_store(),
-        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.path().join("lash-sessions"),
-        )),
-        None,
+        double.stores().session_store_factory(),
         4096,
         None,
-        Some(Arc::clone(&layer) as Arc<dyn lash::testing::EffectLayer>),
     )
     .await;
     let session_id = state.current_session_id();
+    // The root's handler dies before the server stores its second model
+    // call's result, on its first attempt: the server replays the root, the
+    // first call's result comes back from the journal and the second runs
+    // anew.
+    double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResult {
+        name: Some(format!("lash:{session_id}:turn-one:1:1:llm_call:6")),
+    });
     let session = state
         .core
         .session(session_id.clone())
@@ -1046,12 +983,15 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         &TurnId::from("turn-one"),
     )
     .await;
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     assert_eq!(
-        layer.answered_llm_effects() - provider_calls.load(Ordering::SeqCst),
+        double.server().stats().crashes,
         1,
-        "the first model call replays from the journal",
+        "the root crashed on its second model call"
     );
+    // The first model call replays from the journal: the provider answered
+    // it once, and the second call twice — the crashed attempt and the
+    // redrive.
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
     assert_eq!(
         transport.output_keys(),
         vec!["workbench-assistant:turn-one".to_string()]
@@ -1062,6 +1002,11 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         .expect("turn-one output row");
     assert_eq!(row.settled_text(), Some(REDRIVEN_ANSWER));
     assert_eq!(row.provisional_text(), "", "stale partial text is cleared");
+    assert!(
+        !row.rendered().unwrap_or_default().contains(LOST_ANSWER),
+        "the crashed attempt's answer must not survive: {:?}",
+        row.rendered()
+    );
 
     let retried = session
         .send(lash::TurnInput::text("the question"))
@@ -1070,7 +1015,7 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         .await
         .expect("same-id retry observes the settled root");
     assert_eq!(retried.assistant_message(), Some(REDRIVEN_ANSWER));
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
     assert_eq!(
         transport.output_keys(),
         vec!["workbench-assistant:turn-one".to_string()]

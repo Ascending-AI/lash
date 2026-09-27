@@ -43,13 +43,13 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let session_id = lash::SessionId::from("workbench-tool-loss");
 
     // Seed a checkpoint that records the tool, on a core that has its source.
-    let seeding_core = explicit_durable_test_facets(&data_dir)
+    let seeding_core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(
             lash::testing::TestProvider::builder()
                 .kind("workbench-test")
@@ -78,7 +78,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
     seeded.close().await.expect("close the seeded session");
 
     // The workbench's own core has no such source.
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(
             lash::testing::TestProvider::builder()
                 .kind("workbench-test")

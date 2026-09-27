@@ -6,16 +6,16 @@
 
 use super::*;
 
-#[test]
-fn done_stream_items_are_transient_and_not_snapshotted() {
+#[tokio::test]
+async fn done_stream_items_are_transient_and_not_snapshotted() {
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-transient-done-{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
+    let double = crate::tests::test_double_backend(0).await;
+    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -24,7 +24,7 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
         .into_handle();
     let model = test_model();
     let event_tx = SessionEventRegistry::new(16);
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
@@ -77,16 +77,16 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-#[test]
-fn trigger_dispatch_done_does_not_clear_an_active_turn() {
+#[tokio::test]
+async fn trigger_dispatch_done_does_not_clear_an_active_turn() {
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-trigger-dispatch-done-{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-trigger-dispatch-done-test")
         .complete_error("trigger dispatch done test should not call the provider")
@@ -94,7 +94,7 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         .into_handle();
     let model = test_model();
     let event_tx = SessionEventRegistry::new(16);
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())

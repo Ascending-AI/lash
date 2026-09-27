@@ -1,7 +1,6 @@
 use super::*;
 use lash::SessionId;
 
-use lash::persistence::SessionStoreFactory;
 use lash::triggers::TriggerStore;
 
 #[test]
@@ -16,27 +15,13 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let db_path = crate::tests::sessions_root(&data_dir).join("process-registry.db");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
+    let double = crate::tests::test_double_backend(0).await;
+    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
         session_store_factory.clone();
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &db_path,
-            db_path.with_extension("sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(
-            &crate::tests::sessions_root(&data_dir).join("triggers.db"),
-        )
-        .await
-        .expect("open trigger store"),
-    );
+    let process_registry = double.engine_stores().process_registry();
+    let trigger_store = double.stores().trigger_store();
     let provider = trigger_registration_provider();
     let model = lash::ModelSpec::builder("test-model")
         .context_window_tokens(4096)
@@ -44,20 +29,27 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .expect("model spec");
     let sessions = WorkbenchSessions::fresh();
     let session_id = sessions.current();
-    let core = inline_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");
+    crate::tests::install_test_process_worker(&double, &core);
     let session = core
         .session(session_id.clone())
         .open()
         .await
         .expect("open session");
     register_test_trigger(&session).await;
-    let trigger_records =
-        assert_remote_trigger_subscription_records_round_trip(&data_dir, &session_id).await;
+    // The wakes the trigger's processes deliver stay queued while the host's
+    // turn is active: the engine admits none of them during this test.
+    let _hold = double.hold_session_drive(&session_id).await;
+    let trigger_records = assert_remote_trigger_subscription_records_round_trip(
+        double.stores().trigger_store().as_ref(),
+        &session_id,
+    )
+    .await;
     assert_eq!(trigger_records.len(), 1);
     let trigger_record = &trigger_records[0];
     let tool_names = session
@@ -78,22 +70,24 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         "mid-turn-trigger-contract",
         WorkbenchTurnKind::User,
     );
-    let first_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
-    let second_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
+    let first_report = emit_test_button_trigger(&double, &core, ButtonChoice::Red).await;
+    let second_report = emit_test_button_trigger(&double, &core, ButtonChoice::Red).await;
     assert_remote_trigger_emit_report_round_trip(&first_report);
     assert_remote_trigger_emit_report_round_trip(&second_report);
     assert_eq!(first_report.started_process_ids().len(), 1);
     assert_eq!(second_report.started_process_ids().len(), 1);
-    let awaiter = lash::process::NativeProcessWork::for_registry(Arc::clone(&process_registry));
     for process_id in first_report
         .started_process_ids()
         .into_iter()
         .chain(second_report.started_process_ids())
     {
-        tokio::time::timeout(Duration::from_secs(5), awaiter.await_terminal(&process_id))
-            .await
-            .expect("trigger process should finish promptly")
-            .expect("trigger process should finish");
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            core.processes().await_output(&process_id),
+        )
+        .await
+        .expect("trigger process should finish promptly")
+        .expect("trigger process should finish");
     }
 
     trigger_store
@@ -111,7 +105,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .await
         .expect("execute disable")
         .expect("disable trigger");
-    let disabled_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
+    let disabled_report = emit_test_button_trigger(&double, &core, ButtonChoice::Red).await;
     assert!(disabled_report.started_process_ids().is_empty());
     trigger_store
         .execute_command(
@@ -128,11 +122,11 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .await
         .expect("execute enable")
         .expect("re-enable trigger");
-    let reenabled_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
+    let reenabled_report = emit_test_button_trigger(&double, &core, ButtonChoice::Red).await;
     let reenabled_process_id = reenabled_report.started_process_ids()[0].clone();
     tokio::time::timeout(
         Duration::from_secs(5),
-        awaiter.await_terminal(&reenabled_process_id),
+        core.processes().await_output(&reenabled_process_id),
     )
     .await
     .expect("re-enabled trigger process should finish promptly")
@@ -152,7 +146,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .await
         .expect("execute delete")
         .expect("delete trigger");
-    let deleted_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
+    let deleted_report = emit_test_button_trigger(&double, &core, ButtonChoice::Red).await;
     assert!(deleted_report.started_process_ids().is_empty());
 
     let handles = session
@@ -305,10 +299,10 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
 /// safe redrive into a fresh evaluation.
 #[tokio::test]
 async fn host_cutoff_preserves_a_live_sessions_safe_redrive() {
-    let data_dir = tempfile::tempdir().expect("receipt prune tempdir");
     let trigger_store = crate::tests::memory_trigger_store();
+    let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;

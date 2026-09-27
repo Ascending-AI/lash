@@ -3,8 +3,9 @@ set -euo pipefail
 
 # Deterministic companion for runbooks/context-overflow-recovery (FIG-1272).
 #
-# No container, no token, no network: a SQLite scratch store and a scripted
-# provider. One TypeScript row, as runbooks/RULES.md requires since FIG-3023,
+# No container, no token, no network beyond loopback: a SQLite scratch store
+# set, a scripted provider and a local restate-server, the zero-infra effect
+# engine `scripts/ci/with-service.sh restate` runs (ADR 0104 section 4). One TypeScript row, as runbooks/RULES.md requires since FIG-3023,
 # with its own artifact directory and its own fresh data directory (the harness
 # makes one per run).
 
@@ -66,10 +67,12 @@ fi
 staging="$artifact_root/context-overflow-recovery/.observed"
 mkdir -p "$staging"
 if [[ -f .kiln.bazelrc ]]; then
-  kiln run //runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin \
+  "$repo/scripts/ci/with-service.sh" restate -- \
+    kiln run //runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin \
     2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
 else
-  cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
+  "$repo/scripts/ci/with-service.sh" restate -- \
+    cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
     --bin lash-e2e-context-overflow-recovery \
     2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
 fi

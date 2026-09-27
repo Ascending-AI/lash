@@ -20,8 +20,8 @@ tool failure, and a parked wait survives a workbench process restart.
 **Deterministic companion.** Run
 `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=approval --test_arg=--nocapture` plus the three named
 tests in `src/main_sections/tests/approvals.rs`. These use a scripted provider
-and a file-backed `SqliteEffectHost`; this judged run uses the production
-Restate deployment and a real model from `.env`.
+and the Restate test double over a file SQLite store set; this judged run uses
+the production Restate deployment and a real model from `.env`.
 
 ## FIG-1346 — deterministic out-of-band completion across reopen and redrive
 

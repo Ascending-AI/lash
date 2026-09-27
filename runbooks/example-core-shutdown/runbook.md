@@ -53,13 +53,13 @@ runbook claims stopped intake and completed SDK grace only.
 
 ## Focused and compile gates
 
-Run one workspace feature-graph check covering the optional Restate and
-valid-empty branches:
+Run one workspace feature-graph check covering the optional valid-empty
+branch:
 
 ```sh
 . ./env.sh
 cargo check --workspace --all-targets --locked \
-  --features agent-service/restate,agent-workbench/provider-wire-fixtures
+  --features agent-workbench/provider-wire-fixtures
 ```
 
 Run the focused finite-owner and cleanup-result tests and require four executed

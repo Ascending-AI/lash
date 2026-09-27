@@ -8,14 +8,15 @@ use crate::bot::ledger::{DetailWrite, ProviderFailure, Stage};
 use crate::bot::runtime::{session_id, thread_session_id};
 use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
 
-use super::support::{Script, Step, TestPlatform, bot_dir, only_event, scratch, start_bot};
+use super::support::{BotHost, Script, Step, TestPlatform, bot_dir, only_event, scratch};
 
 #[tokio::test]
 async fn a_mention_runs_one_turn_and_posts_one_reply() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("I am here.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("mention-turn").await;
     let user = platform.identify("ada").await;
@@ -74,7 +75,8 @@ async fn the_same_event_id_delivered_twice_runs_one_turn_and_posts_one_reply() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("Once only.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("dedupe").await;
     let user = platform.identify("ada").await;
@@ -129,7 +131,8 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("Caught up.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("ambient").await;
     let ada = platform.identify("ada").await;
@@ -216,7 +219,8 @@ async fn the_bot_ignores_app_authored_messages_and_its_own_replies() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("Hello back.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("self-guard").await;
     let user = platform.identify("ada").await;
@@ -273,7 +277,8 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("Noted.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let secrets = platform.channel("secrets").await;
     let public = platform.channel("public").await;
@@ -329,7 +334,8 @@ async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("The deploy target was EU west.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("thread-fork").await;
     let ada = platform.identify("ada").await;
@@ -406,7 +412,8 @@ async fn a_thread_reply_waits_for_midflight_root_admission_and_forks_from_that_t
         Step::Gated("Root admission completed.".to_string()),
         Step::Text("Thread answer from the root boundary.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-root-admission-race").await;
     let ada = platform.identify("ada").await;
     let grace = platform.identify("grace").await;
@@ -484,7 +491,8 @@ async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_rec
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("Recovered from the authoritative root.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     bot.set_thread_root_wait_budget(std::time::Duration::ZERO);
     let channel = platform.channel("thread-missing-root-recovery").await;
     let ada = platform.identify("ada").await;
@@ -606,7 +614,8 @@ async fn a_terminal_unroutable_root_fails_fast_without_spending_the_wait_budget(
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("must not run");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     bot.set_thread_root_wait_budget(std::time::Duration::from_secs(60));
     let channel = platform.channel("thread-terminal-root").await;
     let ada = platform.identify("ada").await;
@@ -676,7 +685,8 @@ async fn a_thread_fork_shares_a_committed_channel_turn_by_provenance() {
         Step::Text("Channel answer.".to_string()),
         Step::Text("Thread answer.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-committed-root").await;
     let ada = platform.identify("ada").await;
     let root = platform.say(&channel, &ada, "retained channel fact").await;
@@ -736,7 +746,8 @@ async fn the_child_prompt_names_its_thread_root_among_the_inherited_prefix() {
         Step::Text("Channel answer.".to_string()),
         Step::Text("Thread answer.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-root-recall").await;
     let ada = platform.identify("ada").await;
 
@@ -839,7 +850,8 @@ async fn the_seeded_root_label_starts_its_line_behind_copied_queued_context() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("Thread answer.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-queued-root-label").await;
     let ada = platform.identify("ada").await;
     let grace = platform.identify("grace").await;
@@ -889,11 +901,12 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let script = Script::new([
         Step::Text("Older answer.".to_string()),
         Step::Text("Later answer.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("recovery-retains-applied-turn").await;
     let ada = platform.identify("ada").await;
 
@@ -1002,12 +1015,13 @@ async fn thread_open_rederives_a_missing_root_boundary_from_its_application() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let script = Script::new([
         Step::Text("Root turn answer.".to_string()),
         Step::Text("Later channel answer.".to_string()),
         Step::Text("Thread answer.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-rederives-root-boundary").await;
     let ada = platform.identify("ada").await;
 
@@ -1107,7 +1121,8 @@ async fn thread_and_channel_traffic_are_isolated_after_the_fork() {
         Step::Text("Thread answer one.".to_string()),
         Step::Text("Thread answer two.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-isolation").await;
     let ada = platform.identify("ada").await;
     let root = platform.say(&channel, &ada, "shared before fork").await;
@@ -1185,7 +1200,8 @@ async fn a_thread_event_is_deduplicated_in_the_shared_ledger() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("Once in thread.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-dedupe").await;
     let ada = platform.identify("ada").await;
     let root = platform.say(&channel, &ada, "root").await;
@@ -1223,7 +1239,8 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("I saw the thread context.");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let channel = platform.channel("thread-ambient").await;
     let ada = platform.identify("ada").await;
     let root = platform.say(&channel, &ada, "channel root fact").await;
@@ -1321,7 +1338,8 @@ async fn a_mention_can_drive_the_standard_tool_loop() {
         },
         Step::Text("There are channels, and #tooling has traffic.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("tooling").await;
     let user = platform.identify("ada").await;
@@ -1369,7 +1387,8 @@ async fn an_envelope_with_the_wrong_verification_token_is_rejected() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("never");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("spoofed").await;
     let user = platform.identify("ada").await;
@@ -1396,7 +1415,8 @@ async fn an_empty_model_answer_is_absorbed_rather_than_posted() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("   ");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("quiet").await;
     let user = platform.identify("ada").await;
@@ -1425,7 +1445,8 @@ async fn a_provider_rejection_surfaces_as_typed_provider_error() {
     let script = Script::provider_error(
         "cannot materialize attachment MIME `application/x-unknown`; providers accepting this MIME/source: none",
     );
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
 
     let channel = platform.channel("provider-error").await;
     let user = platform.identify("ada").await;

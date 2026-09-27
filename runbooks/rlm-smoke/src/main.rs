@@ -26,6 +26,8 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 /// TypeScript is the sole RLM language (ADR 0096).
 const RLM_LANGUAGE_ID: &str = "typescript";
 
+mod local_restate;
+
 #[derive(Debug, Parser)]
 #[command(about = "Live-model RLM smoke host with workspace-jailed tools")]
 struct Args {
@@ -457,8 +459,6 @@ async fn main() -> Result<()> {
     let workspace = WorkspaceTools::new(&args.workspace, args.sandbox_image.clone())?;
     let prompt = std::fs::read_to_string(args.scenario_dir.join("prompt.md"))
         .context("read scenario prompt")?;
-    let _port_guard = std::net::TcpListener::bind(("127.0.0.1", args.port))
-        .with_context(|| format!("reserve row port {}", args.port))?;
 
     let provider = ProviderHandle::new(
         OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
@@ -469,20 +469,22 @@ async fn main() -> Result<()> {
             })
             .into_components(),
     );
-    // One SQLite file backend under the data directory holds the sessions,
-    // the effect journal and the compiled Lashlang artifacts.
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(args.data_dir.join("sessions"))
-            .await
-            .context("open the RLM smoke SQLite backend")?,
-    );
+    // One SQLite file store set under the data directory holds the sessions
+    // and the compiled Lashlang artifacts; the local restate-server's engine
+    // journals every turn over it (ADR 0104).
+    let restate = local_restate::LocalRestate::from_env()?;
+    let stores = lash_sqlite_store::SqliteStoreSet::open(args.data_dir.join("sessions"))
+        .await
+        .context("open the RLM smoke SQLite store set")?;
+    let engine = restate.engine(Arc::new(stores));
+    let backend = lash::Backend::new(engine.clone());
     let protocol = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        &backend.clone().into(),
+        &backend,
     );
     let trace_path = args.artifact_dir.join("trace.jsonl");
     let mut trace_context = lash::tracing::TraceContext {
@@ -492,7 +494,7 @@ async fn main() -> Result<()> {
     trace_context
         .metadata
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
-    let core = LashCore::rlm_builder(backend.into(), lash::TurnBudget::bounded(12), protocol)
+    let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), protocol)
         .no_progress_budget(lash::NoProgressBudget::bounded(4))
         .plugins(lash::plugins::runtime_plugin_stack())
         .provider(provider)
@@ -513,6 +515,19 @@ async fn main() -> Result<()> {
             args.session_id.clone(),
         ))
         .context("build RLM smoke core")?;
+    // The engine's endpoint serves on the row's port: the server drives the
+    // turn in its handlers, and this host only sends (D5).
+    let worker = lash::durability::DurableProcessWorker::new(
+        core.durable_process_worker_config()
+            .context("the RLM smoke process worker config")?,
+    )
+    .context("build the RLM smoke process worker")?;
+    let _deployment = restate
+        .serve_at(
+            std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
+            engine.endpoint_builder(worker).build(),
+        )
+        .await?;
     let session = core
         .session(&args.session_id)
         .plugin_option(

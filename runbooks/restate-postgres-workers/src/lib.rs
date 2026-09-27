@@ -1,5 +1,6 @@
 use lash::ProcessId;
 use lash::SessionId;
+pub mod local_restate;
 mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;

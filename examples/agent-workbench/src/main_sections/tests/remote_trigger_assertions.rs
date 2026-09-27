@@ -7,14 +7,9 @@ use lash::SessionId;
 // the other test sections here.
 
 pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
-    data_dir: &std::path::Path,
+    store: &dyn lash::triggers::TriggerStore,
     session_id: &SessionId,
 ) -> Vec<lash::triggers::TriggerSubscriptionRecord> {
-    let store = lash_sqlite_store::SqliteTriggerStore::open(
-        &crate::tests::sessions_root(data_dir).join("triggers.db"),
-    )
-    .await
-    .expect("open trigger store for remote DTO round trip");
     let filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
     let remote_filter = lash_remote_protocol::RemoteTriggerSubscriptionFilter::from(filter.clone());
     remote_filter
@@ -25,7 +20,8 @@ pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
         .expect("remote trigger subscription filter should convert back");
     assert_eq!(round_trip_filter, filter);
 
-    let records = lash::triggers::TriggerStore::list_subscriptions(&store, filter)
+    let records = store
+        .list_subscriptions(filter)
         .await
         .expect("list persisted trigger subscriptions for remote DTO round trip");
     let remote_list =

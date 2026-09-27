@@ -123,7 +123,12 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
         shutdown_called: Arc::clone(&shutdown_called),
     });
     let temp = tempfile::tempdir().expect("temporary trace directory");
-    let core = standard_core(
+    // The Restate test double stands in for the live core's private server.
+    let double = lash_restate_test::backend(0, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate double");
+    let core = core_builders::standard_core_over(
+        double.lash_backend(),
         provider,
         model_spec(DEFAULT_STANDARD_MODEL, 128).expect("model metadata"),
         StandardCoreSpec {
@@ -135,7 +140,6 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
             shutdown_witness: Some(witness),
         },
     )
-    .await
     .expect("build core");
     let session = core
         .session("slack-live-e2e-full-channel")

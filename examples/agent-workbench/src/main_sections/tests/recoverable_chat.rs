@@ -5,7 +5,7 @@ use lash::TurnId;
 use lash::rlm::RlmSendBuilderExt;
 
 pub(crate) async fn recoverable_chat_test_state(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     channel_capacity: usize,
 ) -> AppState {
     let provider = lash::testing::TestProvider::builder()
@@ -17,16 +17,16 @@ pub(crate) async fn recoverable_chat_test_state(
         })
         .build()
         .into_handle();
-    recoverable_chat_test_state_with_provider(data_dir, channel_capacity, provider).await
+    recoverable_chat_test_state_with_provider(double, channel_capacity, provider).await
 }
 
 pub(crate) async fn recoverable_chat_test_state_with_provider(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     channel_capacity: usize,
     provider: ProviderHandle,
 ) -> AppState {
     recoverable_chat_test_state_with_provider_and_trigger_store(
-        data_dir,
+        double,
         channel_capacity,
         provider,
         detached_trigger_store(),
@@ -35,7 +35,7 @@ pub(crate) async fn recoverable_chat_test_state_with_provider(
 }
 
 pub(crate) async fn recoverable_chat_test_state_with_trigger_store(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
 ) -> AppState {
     let provider = lash::testing::TestProvider::builder()
@@ -47,50 +47,39 @@ pub(crate) async fn recoverable_chat_test_state_with_trigger_store(
         })
         .build()
         .into_handle();
-    recoverable_chat_test_state_with_provider_and_trigger_store(
-        data_dir,
-        16,
-        provider,
-        trigger_store,
-    )
-    .await
+    recoverable_chat_test_state_with_provider_and_trigger_store(double, 16, provider, trigger_store)
+        .await
 }
 
 async fn recoverable_chat_test_state_with_provider_and_trigger_store(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     channel_capacity: usize,
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
 ) -> AppState {
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
     recoverable_chat_test_state_with_dependencies(
-        data_dir,
+        double,
         channel_capacity,
         provider,
         trigger_store,
-        store_factory,
-        None,
+        double.stores().session_store_factory(),
     )
     .await
 }
 
 pub(crate) async fn recoverable_chat_test_state_with_dependencies(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     channel_capacity: usize,
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    queued_work_driver: Option<Arc<dyn lash::runtime::SessionWorkEngine>>,
 ) -> AppState {
     recoverable_chat_test_state_with_dependencies_and_context(
-        data_dir,
+        double,
         channel_capacity,
         provider,
         trigger_store,
         store_factory,
-        queued_work_driver,
         4096,
     )
     .await
@@ -98,23 +87,20 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     channel_capacity: usize,
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    queued_work_driver: Option<Arc<dyn lash::runtime::SessionWorkEngine>>,
     context_window_tokens: usize,
 ) -> AppState {
     recoverable_chat_test_state_with_replay_store(
-        data_dir,
+        double,
         channel_capacity,
         provider,
         trigger_store,
         store_factory,
-        queued_work_driver,
         context_window_tokens,
-        None,
         None,
     )
     .await
@@ -311,46 +297,11 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
     }
 }
 
-struct RetiringQueuedWorkRunHandle {
-    pub(super) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    pub(super) session_to_retire: Mutex<Option<String>>,
-}
-
-impl RetiringQueuedWorkRunHandle {
-    pub(super) fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
-        Self {
-            store_factory,
-            session_to_retire: Mutex::new(None),
-        }
-    }
-
-    pub(super) fn retire_on_next_run(&self, session_id: &SessionId) {
-        *self.session_to_retire.lock_recover() = Some(session_id.to_string());
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::runtime::QueuedWorkRunHandle for RetiringQueuedWorkRunHandle {
-    async fn run_queued_work(
-        &self,
-        _request: lash::runtime::QueuedWorkRunRequest,
-    ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
-        let session_id = self.session_to_retire.lock_recover().take();
-        if let Some(session_id) = session_id {
-            self.store_factory
-                .delete_session(&SessionId::from(session_id))
-                .await
-                .map_err(|error| {
-                    lash::runtime::QueuedWorkRunError::terminal(
-                        lash::plugins::PluginError::Session(error.to_string()),
-                    )
-                })?;
-        }
-        Ok(())
-    }
-}
-
-pub(crate) async fn retire_workbench_session(state: &AppState, session_id: &SessionId) {
+pub(crate) async fn retire_workbench_session(
+    double: &lash_restate_test::RestateTestBackend,
+    state: &AppState,
+    session_id: &SessionId,
+) {
     drop(
         state
             .core
@@ -359,11 +310,7 @@ pub(crate) async fn retire_workbench_session(state: &AppState, session_id: &Sess
             .await
             .expect("open session before retirement"),
     );
-    let administration = state.core.session_administration().await;
-    let context = administration
-        .delete_context(session_id)
-        .expect("issue inline session deletion");
-    lash::LashCore::delete_session(context)
+    crate::tests::delete_session_in_handler(double, &state.core, session_id)
         .await
         .expect("retire session");
 }
@@ -377,10 +324,10 @@ pub(crate) fn assert_deleted_session_conflict(error: &AppError, session_id: &Ses
 #[test]
 fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
     run_async_test_on_stack_budget("retired-session-reset-cron-cancel-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state(&double, 16).await;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         let error = crate::restate::cancel_cron_jobs_for_session(&state, &session_id, "reset")
             .await
@@ -393,11 +340,9 @@ fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
 #[test]
 fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
     run_async_test_on_stack_budget("retired-session-reset-cron-close-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
+        let double = crate::tests::test_double_backend(0).await;
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                data_dir.path().join("lash-sessions"),
-            ));
+            double.stores().session_store_factory();
         let trigger_store = Arc::new(RetiringSubscriptionListTriggerStore::new(Arc::clone(
             &store_factory,
         )));
@@ -411,12 +356,11 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
             .build()
             .into_handle();
         let state = recoverable_chat_test_state_with_dependencies(
-            data_dir.path(),
+            &double,
             16,
             provider,
             trigger_store.clone(),
             store_factory,
-            None,
         )
         .await;
         let session_id = state.current_session_id();
@@ -432,60 +376,14 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
 }
 
 #[test]
-#[ignore = "FIG-3600 S5a: a session command now settles through the session drive, asynchronously; the workbench refresh path that waited on a synchronous drain is rewritten onto send() in S5b"]
-fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
-    run_async_test_on_stack_budget("retired-session-tool-refresh-close-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                data_dir.path().join("lash-sessions"),
-            ));
-        let retiring_run_handle =
-            Arc::new(RetiringQueuedWorkRunHandle::new(Arc::clone(&store_factory)));
-        let queued_work_driver = Arc::new(lash::runtime::NativeQueuedWork::new(
-            retiring_run_handle.clone(),
-        ));
-        let provider = lash::testing::TestProvider::builder()
-            .kind("retired-session-tool-refresh-close-test")
-            .complete(|_| async {
-                Ok(text_response(
-                    "<typescript>\nfinish(\"canonical answer\");\n</typescript>",
-                ))
-            })
-            .build()
-            .into_handle();
-        let state = recoverable_chat_test_state_with_dependencies(
-            data_dir.path(),
-            16,
-            provider,
-            detached_trigger_store(),
-            store_factory,
-            Some(queued_work_driver),
-        )
-        .await;
-        let session_id = state.current_session_id();
-        retiring_run_handle.retire_on_next_run(&session_id);
-
-        let error = Box::pin(enqueue_tool_catalog_refresh(
-            &state,
-            "close_retirement_race",
-        ))
-        .await
-        .expect_err("tool-catalog refresh close must preserve a concurrent retirement");
-
-        assert_deleted_session_conflict(&error, &session_id);
-    });
-}
-
-#[test]
 fn retired_session_admission_precedes_attachment_reads_and_submission() {
     run_async_test_on_stack_budget("retired-session-send-turn-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = recoverable_chat_test_state(&double, 16).await;
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         state.restate_ingress_url = restate_ingress_url;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         let error = send_turn(
             State(state.clone()),
@@ -518,10 +416,10 @@ fn retired_session_admission_precedes_attachment_reads_and_submission() {
 #[test]
 fn observing_a_retired_session_returns_the_typed_conflict() {
     run_async_test_on_stack_budget("retired-session-observations-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state(&double, 16).await;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         let error = session_observations(
             State(state),
@@ -540,10 +438,10 @@ fn observing_a_retired_session_returns_the_typed_conflict() {
 #[test]
 fn enqueuing_turn_input_to_a_retired_session_returns_the_typed_conflict() {
     run_async_test_on_stack_budget("retired-session-turn-input-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state(&double, 16).await;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         let error = enqueue_turn_input(
             State(state),
@@ -565,10 +463,10 @@ fn enqueuing_turn_input_to_a_retired_session_returns_the_typed_conflict() {
 #[test]
 fn retired_session_cancel_and_tool_refresh_return_the_typed_conflict() {
     run_async_test_on_stack_budget("retired-session-secondary-surfaces-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state(&double, 16).await;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         let cancel_error = state
             .cancel_turns_for_session(&session_id)
@@ -588,10 +486,11 @@ fn retired_session_http_refusals_record_structured_admission_evidence() {
     run_async_test_on_stack_budget("retired-session-refusal-evidence-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let trace_path = data_dir.path().join("refusals.jsonl");
-        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = recoverable_chat_test_state(&double, 16).await;
         state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         let state_error = app_state(
             State(state.clone()),
@@ -710,10 +609,10 @@ fn retired_session_http_refusals_record_structured_admission_evidence() {
 #[test]
 fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
     run_async_test_on_stack_budget("retired-session-settlement-callers-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state(&double, 16).await;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         type TerminalizeResult = Result<Result<(), AppError>, Box<dyn std::any::Any + Send>>;
         let cases: Vec<(&str, TerminalizeResult)> = vec![
@@ -932,8 +831,8 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     // RLM's printed-image projection can commit more than one stored image
     // part on a single message. Feed that production projection to the browser
     // gate so its numbered-alt branch is covered from the real wire shape.
-    let data_dir = tempfile::tempdir().expect("multi-attachment browser tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 4).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 4).await;
     let session = state
         .core
         .session(state.current_session_id())
@@ -1259,8 +1158,8 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
 
 #[tokio::test]
 async fn product_event_route_lag_emits_durable_ordered_resync() {
-    let data_dir = tempfile::tempdir().expect("workbench lag tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 1).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 1).await;
     let session_id = state.current_session_id();
     let response = session_events(
         State(state.clone()),
@@ -1322,8 +1221,8 @@ async fn product_event_route_lag_emits_durable_ordered_resync() {
 
 #[tokio::test]
 async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_log() {
-    let data_dir = tempfile::tempdir().expect("workbench state merge tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
     let session = state
         .core
@@ -1383,8 +1282,8 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
 
 #[tokio::test]
 async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_reconciled() {
-    let data_dir = tempfile::tempdir().expect("single user row tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig972";
 
@@ -1547,8 +1446,8 @@ impl lash::persistence::AttachmentStore for VanishingAttachmentStore {
 
 #[tokio::test]
 async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
-    let data_dir = tempfile::tempdir().expect("submit failure projection tempdir");
-    let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state(&double, 16).await;
     let attachments = Arc::new(VanishingAttachmentStore {
         inner: test_attachment_store(),
         reads: std::sync::atomic::AtomicUsize::new(0),
@@ -1631,7 +1530,8 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         })
         .build()
         .into_handle();
-    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     state.event_tx = SessionEventRegistry::persistent(product_events_path.clone(), 16)
         .expect("open persistent product event registry");
     let session_id = state.current_session_id();
@@ -1817,7 +1717,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         .build()
         .into_handle();
     let mut reloaded_state =
-        recoverable_chat_test_state_with_provider(data_dir.path(), 16, reload_provider).await;
+        recoverable_chat_test_state_with_provider(&double, 16, reload_provider).await;
     reloaded_state.event_tx = SessionEventRegistry::persistent(product_events_path, 16)
         .expect("reload persistent product event registry");
     let Json(reloaded) = Box::pin(app_state(
@@ -1846,8 +1746,8 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
 
 #[tokio::test]
 async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill() {
-    let data_dir = tempfile::tempdir().expect("attachment backfill tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig994";
     let attachment = lash::attachments::AttachmentRef {
@@ -1957,7 +1857,8 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
 #[tokio::test]
 async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     let data_dir = tempfile::tempdir().expect("attachment replay tempdir");
-    let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state(&double, 16).await;
     let active_turns_path = data_dir.path().join("active-turns.json");
     state.active_turns =
         ActiveTurns::persistent(active_turns_path.clone()).expect("persistent active turns");
@@ -2032,8 +1933,8 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
 
 #[tokio::test]
 async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
-    let data_dir = tempfile::tempdir().expect("committed attachment snapshot tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
     let attachment = lash::attachments::AttachmentRef {
         id: lash::attachments::AttachmentId::parse("sha256:fig994-committed")
@@ -2142,7 +2043,6 @@ fn user_row_attachments(snapshot: &StateReadSnapshot) -> Vec<(String, Vec<(Strin
 
 #[tokio::test]
 async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth() {
-    let data_dir = tempfile::tempdir().expect("send turn projection tempdir");
     let (provider_entered_tx, mut provider_entered_rx) = mpsc::unbounded_channel();
     let provider_release = Arc::new(tokio::sync::Notify::new());
     let provider_release_for_completion = Arc::clone(&provider_release);
@@ -2181,7 +2081,8 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         })
         .build()
         .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
     let turn_text = "exercise the user-facing send path";
 
@@ -2336,8 +2237,8 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
 
 #[tokio::test]
 async fn workbench_settled_turn_cancels_preserve_execution_done() {
-    let data_dir = tempfile::tempdir().expect("workbench cancel identity tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
     let session = state
         .core
@@ -2386,7 +2287,8 @@ async fn workbench_settled_turn_cancels_preserve_execution_done() {
 async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output() {
     let data_dir = tempfile::tempdir().expect("product event tempdir");
     let path = data_dir.path().join("product-events.json");
-    let mut state = recoverable_chat_test_state(data_dir.path(), 4).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state(&double, 4).await;
     state.event_tx =
         SessionEventRegistry::persistent(path.clone(), 4).expect("persistent product events");
     let session_id = state.current_session_id();
@@ -2449,7 +2351,7 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
 }
 
 pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_store(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
 ) -> AppState {
@@ -2463,12 +2365,11 @@ pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_s
         .build()
         .into_handle();
     recoverable_chat_test_state_with_dependencies(
-        data_dir,
+        double,
         16,
         provider,
         trigger_store,
         store_factory,
-        None,
     )
     .await
 }

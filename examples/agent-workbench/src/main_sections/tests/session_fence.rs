@@ -130,8 +130,8 @@ fn a_confirmed_retirement_is_never_lifted() {
 #[test]
 fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
     run_async_test_on_stack_budget("session-fence-retiring-admission-test", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state(&double, 16).await;
         let session_id = state.current_session_id();
         let query = SessionQuery {
             session_id: Some(session_id.clone()),
@@ -174,7 +174,7 @@ fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
 
         // Once the durable tombstone exists, a delete retry is refused like any
         // other use.
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
         let error = state
             .admit_session_id_for_delete(&session_id, "api.session.delete")
             .await
@@ -191,13 +191,13 @@ fn a_delete_that_lands_between_admission_and_claim_refuses_the_send() {
 }
 
 async fn a_delete_that_lands_between_admission_and_claim_refuses_the_send_inner() {
-    let data_dir = tempfile::tempdir().expect("delete-vs-submit race tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-delete-vs-submit-race")
         .complete_error("a send that loses to the delete must not call the provider")
         .build()
         .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
     // The rendezvous: the send passes its admission read and stops at the
@@ -309,7 +309,6 @@ fn deleting_a_session_with_a_running_turn_cancels_it_before_retiring() {
 }
 
 async fn deleting_a_session_with_a_running_turn_cancels_it_before_retiring_inner() {
-    let data_dir = tempfile::tempdir().expect("running-turn delete tempdir");
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-running-turn-delete")
         .complete(|_| async {
@@ -326,7 +325,8 @@ finish(await handle);
         })
         .build()
         .into_handle();
-    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
     let old_session_id = state.current_session_id();
@@ -419,10 +419,10 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
     run_async_test_on_stack_budget("session-fence-route-sweep-test", || async {
         use futures_util::TryFutureExt as _;
 
-        let data_dir = tempfile::tempdir().expect("route sweep tempdir");
-        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state(&double, 16).await;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &session_id).await;
+        retire_workbench_session(&double, &state, &session_id).await;
 
         let query = || SessionQuery {
             session_id: Some(session_id.clone()),

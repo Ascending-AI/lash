@@ -376,7 +376,7 @@ pub(super) async fn record_cron_tick_outcome_with_effect_controller(
 ) -> HandlerResult<String> {
     let idempotency_key = cron_tick_outcome_key(job_key, &scheduled_for);
     // A wake the occurrence delivers is a root the engine starts on its own.
-    super::watch_session_roots(&state, &request.session_id);
+    super::watch_session_roots(&state, &request.session_id).await;
     let report = state
         .core
         .triggers()

@@ -27,8 +27,8 @@ persistence sink, so a client can observe an activity before its corresponding
 app row exists; clients must not perform read-after-see database reads. Once the
 HTTP 200 stream has started, a failed turn or a client that disconnects produces
 a silently truncated stream, with the error reported only in the server logs.
-That behavior is deliberate for this raw transport lane. It serves both
-durability modes: the session's engine drives the turn either way.
+That behavior is deliberate for this raw transport lane: the session's engine
+drives the turn, and the route only watches it.
 
 Validate the example build and unit tests:
 
@@ -74,36 +74,34 @@ OPENROUTER_MODEL_VARIANT=high
 AGENT_SERVICE_ADDR=127.0.0.1:3000
 AGENT_SERVICE_DATA_DIR=.agent-service
 AGENT_SERVICE_TRACE=.agent-service/trace.jsonl
-AGENT_SERVICE_DURABILITY=local
 ```
 
-The durability mode can also be passed as `--durability local`. Both modes keep
-their stores in one SQLite store set under `$AGENT_SERVICE_DATA_DIR/lash-sessions`.
-Local durability opens that root as a file `SqliteBackend`, its effect journal
-beside the stores. Restate durability opens the same root as a `SqliteStoreSet`
-and runs a `RestateEngine` over it: every turn is driven by lash's
-`LashSession` service in a Restate handler. Restate mode is feature-gated and
-uses these local defaults:
+The service keeps its stores in one SQLite store set under
+`$AGENT_SERVICE_DATA_DIR/lash-sessions` and runs a `RestateEngine` over it
+(ADR 0104: Restate is the only effect engine, and zero-infra is a local
+`restate-server`). Every turn is driven by lash's `LashSession` service in a
+Restate handler. It uses these local defaults:
 
 | Path | App | Restate endpoint | Ingress | Admin |
 | --- | --- | --- | --- | --- |
 | App run | `127.0.0.1:3000` | `127.0.0.1:9080` | `127.0.0.1:8080` | `127.0.0.1:9070` |
 | Live E2E | in-process test | `127.0.0.1:19080` | `127.0.0.1:18080` | `127.0.0.1:19070` |
 
-For the app run, start Restate on the host network, run the feature-gated binary,
-then register the endpoint:
+For the app run, start Restate on the host network, run the binary, then
+register the endpoint:
 
 ```bash
 docker run --rm --network host restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
 OPENROUTER_API_KEY=... \
-AGENT_SERVICE_DURABILITY=restate \
 AGENT_SERVICE_RESTATE_ADDR=127.0.0.1:9080 \
 RESTATE_INGRESS_URL=http://127.0.0.1:8080 \
 RESTATE_AUTHORITY_ID=agent-service-local \
-cargo run -p agent-service --features restate -- --durability restate
+cargo run -p agent-service
 
 restate deployments register http://127.0.0.1:9080
 ```
+
+`RESTATE_AUTHORITY_ID` is required: the service refuses to boot without it.
 
 If you run Restate in Docker bridge mode instead, bind the app endpoint to a
 container-reachable interface such as `AGENT_SERVICE_RESTATE_ADDR=0.0.0.0:9080`
@@ -127,7 +125,7 @@ The recipe starts `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0
 `AGENT_SERVICE_E2E_ENDPOINT_BIND`, or `AGENT_SERVICE_E2E_ENDPOINT_URL` if your
 local Docker networking needs different addresses.
 
-In Restate mode the Axum app still serves `AGENT_SERVICE_ADDR`, the same process
+The Axum app serves `AGENT_SERVICE_ADDR`, the same process
 also serves a Restate endpoint on `AGENT_SERVICE_RESTATE_ADDR`, and the chat
 route hands each message to the chat session's `send(input).id(turn_id)`: the
 session's engine asks lash's `LashSession` service, through
@@ -138,11 +136,13 @@ moves and choose a different value for every independent Restate state. The endp
 among them the generic `LashProcessWorkflow` over the service's process worker
 and the store set's process registry, so background process starts from a turn
 are reconstructed from the SQLite durable-core catalog instead of running in the
-route process. The service binds only its effect-group demo workflow beside
-them: it runs no turn itself. The chat id names the session and the turn id
+route process. The service binds only its own workflows beside them: the
+effect-group demo, and the chat-discard workflow its fork compensator calls to
+delete a half-built fork's session through the engine (a session delete's close
+is a journaled effect, so it runs in a handler). It runs no turn itself. The chat id names the session and the turn id
 names the root, so Restate replay and Lash's final commit address the same
 operation. The route follows the input through the send handle
-(`outcome_into`), the same way in both durability modes, and maps all four
+(`outcome_into`) and maps all four
 statuses: an Answered root's reply is persisted, while a Failed, Cancelled or
 Parked root is reported on the stream, and a retryable refusal is marked
 retryable there. The raw activity route accepts before it responds, so a

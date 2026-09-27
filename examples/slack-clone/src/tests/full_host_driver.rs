@@ -1,7 +1,7 @@
 //! The full-host E2E driver reads the bot's storage where the bot writes it.
 //!
 //! `scripts/slack-clone-full-host-e2e.py` asserts over the stores themselves —
-//! the platform database, the bot's event ledger and the SQLite backend's
+//! the platform database, the bot's event ledger and the SQLite store set's
 //! session catalog — rather than over an API, so it carries its own picture of
 //! the bot's data layout. It runs only on the manual full-profile dispatch, so
 //! a layout that moves under it would otherwise surface there, after the move
@@ -10,12 +10,12 @@
 
 use std::collections::BTreeSet;
 
-use crate::bot::runtime::{PRIOR_STORE_LAYOUT, SESSIONS_ROOT, open_backend};
+use crate::bot::runtime::{PRIOR_STORE_LAYOUT, SESSIONS_ROOT, open_stores};
 
 /// The driver as checked in, read as data.
 const DRIVER: &str = include_str!("../../../../scripts/slack-clone-full-host-e2e.py");
 
-/// The session catalog the SQLite backend keeps under its sessions root.
+/// The session catalog the SQLite store set keeps under its sessions root.
 const SESSION_CATALOG: &str = "durable-core.db";
 
 fn tables(connection: &rusqlite::Connection) -> BTreeSet<String> {
@@ -62,13 +62,13 @@ fn the_driver_reads_no_store_the_bot_refuses_as_an_earlier_layout() {
 #[tokio::test]
 async fn every_table_the_driver_reads_is_one_the_bot_creates() {
     let data_dir = tempfile::tempdir().expect("bot data dir");
-    let _backend = open_backend(data_dir.path())
+    let _stores = open_stores(data_dir.path())
         .await
-        .expect("open the bot's backend");
+        .expect("open the bot's store set");
     let catalog = data_dir.path().join(SESSIONS_ROOT).join(SESSION_CATALOG);
     assert!(
         catalog.is_file(),
-        "the backend keeps no session catalog at {}",
+        "the store set keeps no session catalog at {}",
         catalog.display()
     );
     for component in [SESSIONS_ROOT, SESSION_CATALOG] {
@@ -80,10 +80,10 @@ async fn every_table_the_driver_reads_is_one_the_bot_creates() {
 
     let mut created = tables(&rusqlite::Connection::open(&catalog).expect("open session catalog"));
     // The attach checkpoint reads the badge's bytes out of this table by the
-    // reference's id; it has to be the backend's, not one the test supplies.
+    // reference's id; it has to be the store set's, not one the test supplies.
     assert!(
         created.contains("attachment_blobs"),
-        "the backend's session catalog keeps no attachment_blobs table"
+        "the store set's session catalog keeps no attachment_blobs table"
     );
     created.extend(schema_tables(crate::platform::db::SCHEMA));
     created.extend(schema_tables(crate::bot::ledger::SCHEMA));

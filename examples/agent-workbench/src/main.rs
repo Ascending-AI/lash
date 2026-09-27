@@ -5,6 +5,9 @@ mod approvals;
 mod deferred_tools;
 mod execution_graphs;
 mod failure_provider;
+#[cfg(feature = "provider-wire-fixtures")]
+#[path = "../../shared/local_restate.rs"]
+mod local_restate;
 mod mail;
 #[path = "../../shared/prior_store_layout.rs"]
 mod prior_store_layout;

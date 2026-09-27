@@ -20,10 +20,17 @@ fn fresh_data_dir_boot_reaches_listener() {
     let stdout_path = output_dir.path().join("stdout.log");
     let stderr_path = output_dir.path().join("stderr.log");
     let addr = unused_local_addr();
+    let endpoint_addr = unused_local_addr();
+    // No restate-server runs here: a fresh boot opens its stores, binds its
+    // Restate endpoint and serves its HTTP surface without calling Restate.
+    let unreachable_restate = format!("http://{}", unused_local_addr());
 
     let child = Command::new(env!("CARGO_BIN_EXE_agent-service"))
         .env("OPENROUTER_API_KEY", "test-key")
-        .env("AGENT_SERVICE_DURABILITY", "local")
+        .env("RESTATE_AUTHORITY_ID", "agent-service-fresh-boot")
+        .env("RESTATE_INGRESS_URL", &unreachable_restate)
+        .env("RESTATE_ADMIN_URL", &unreachable_restate)
+        .env("AGENT_SERVICE_RESTATE_ADDR", endpoint_addr.to_string())
         .env("AGENT_SERVICE_DATA_DIR", data_dir.path())
         .env("AGENT_SERVICE_ADDR", addr.to_string())
         .stdout(Stdio::from(

@@ -341,6 +341,7 @@ fn workbench_standard_compaction_projects_the_prompt_under_its_session_window() 
         };
         let manager = Arc::new(lash::testing::MockSessionManager::default());
         let context_window_tokens = state.policy.context_window_tokens();
+        let double = crate::tests::test_double_backend(0).await;
         let ctx = lash::plugins::TurnTransformContext {
             session_id: state.session_id.clone(),
             state: state.read_view().expect("snapshot frame scope resolves"),
@@ -353,14 +354,14 @@ fn workbench_standard_compaction_projects_the_prompt_under_its_session_window() 
             session_lifecycle: manager.clone(),
             session_graph: manager,
             scoped_effect_controller: lash::durability::EffectHost::scoped_static(
-                crate::tests::memory_effect_host().as_ref(),
+                double.restate().restate_effect_host().as_ref(),
                 lash::runtime::AdmittedScope::turn(
                     "workbench-standard-compaction-session",
                     "workbench-standard-compaction-turn",
                 ),
             )
             .expect("build standard compaction turn scope")
-            .expect("the SQLite host lends an owned controller"),
+            .expect("the Restate host lends a fenced controller"),
             direct_completions: lash::runtime::DirectCompletionClient::from_fn(|_, _| {
                 Err(lash::plugins::PluginError::Session(
                     "direct completions are unavailable in this test".to_string(),

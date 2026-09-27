@@ -1,15 +1,13 @@
 //! Deterministic embedding acceptance for the host-facing fork/rewind API.
 
 use lash::SessionId;
-use std::sync::Arc;
 
 use lash::persistence::{
     LeaseOwnerIdentity, RuntimeCommit, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory as _,
+    SessionStoreCreateRequest,
 };
 use lash::process::{
-    ProcessInput, ProcessObserverBy, ProcessObserverRegistry as _, ProcessProvenance,
-    ProcessRegistrar as _, ProcessRegistration, RecoveryContract,
+    ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, RecoveryContract,
 };
 use lash::provider::LlmResponse;
 use lash::runtime::SessionPolicy;
@@ -32,14 +30,10 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .context_window_tokens(8_192)
         .build()
         .expect("valid test model");
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("SQLite memory backend"),
-    );
-    let stores = backend.session_store_factory();
-    let processes = backend.process_registry();
-    let core = LashCore::standard_builder(backend.into(), TurnBudget::Unbounded)
+    let double = crate::state::test_support::test_double().await;
+    let stores = double.engine_stores().session_store_factory();
+    let processes = double.engine_stores().process_registry();
+    let core = LashCore::standard_builder(double.lash_backend(), TurnBudget::Unbounded)
         .provider(provider)
         .model(model.clone())
         .commit_budget(CommitBudget::bounded(1024 * 1024, 512))
@@ -49,6 +43,9 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             "test-boot",
         ))
         .expect("fork contract core");
+    // A session delete closes the session as a journaled effect, so it runs in
+    // the service's own discard workflow, as the service deletes a chat.
+    crate::state::test_support::serve_chat_discard(&double, &core).await;
 
     let source_policy = SessionPolicy {
         provider_id: "agent-service-fork-contract".to_string(),
@@ -244,19 +241,23 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .map(|record| record.id)
         .collect::<Vec<_>>();
 
-    let administration = core.session_administration().await;
-    let context = administration
-        .delete_context(SOURCE_SESSION)
-        .expect("source session delete context");
-    let deletion = LashCore::delete_session(context)
+    crate::chat_discard::discard_chat_session(&double.ingress(), SOURCE_SESSION)
         .await
         .expect("delete superseded source session");
-    let deleted = deletion
-        .deleted()
-        .expect("nothing the close left is undelivered, so the delete runs in the call");
-    assert_eq!(deleted.session_id, SOURCE_SESSION);
-    let process_delete = deleted.process.as_ref().expect("process cleanup report");
-    assert_eq!(process_delete.removed_observer_count, 1);
+    assert!(
+        processes
+            .list_observed_by(
+                &SessionId::from(SOURCE_SESSION),
+                &lash::process::ProcessListFilter {
+                    status: lash::process::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("read the deleted source's observations")
+            .is_empty(),
+        "the delete removes the source's process observer"
+    );
     assert!(
         core.session(SOURCE_SESSION)
             .durable()
@@ -281,10 +282,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     );
 
     // Selection is a snapshot: deleting its source does not revoke it.
-    let context = administration
-        .delete_context(EXPLICIT_BRANCH)
-        .expect("selected source delete context");
-    LashCore::delete_session(context)
+    crate::chat_discard::discard_chat_session(&double.ingress(), EXPLICIT_BRANCH)
         .await
         .expect("delete selected source after selection");
     let rewound = core

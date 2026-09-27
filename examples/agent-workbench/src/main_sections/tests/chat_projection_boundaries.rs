@@ -201,8 +201,8 @@ fn only_the_running_turns_own_candidate_is_withheld() {
 /// each `/api/state` rebuild re-sank the event rows under the newest chat.
 #[tokio::test]
 async fn a_host_event_row_renders_where_it_happened_not_under_the_newest_turn() {
-    let data_dir = tempfile::tempdir().expect("event ordering tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
     let first_turn = TurnId::from("workbench-turn-before-the-event");
     let later_turn = TurnId::from("workbench-turn-after-the-event");

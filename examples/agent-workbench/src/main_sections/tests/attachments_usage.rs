@@ -34,27 +34,41 @@ fn workbench_ui_exposes_attachment_and_usage_affordances() {
 }
 
 #[test]
-fn attachment_usage_gate_sqlite() {
-    run_async_test_on_stack_budget("workbench-attachment-usage-sqlite-gate", || async {
+fn attachment_usage_gate() {
+    run_async_test_on_stack_budget("workbench-attachment-usage-gate", || async {
         let data_dir = std::env::temp_dir().join(format!(
-            "agent-workbench-attachment-usage-sqlite-{}",
+            "agent-workbench-attachment-usage-{}",
             uuid::Uuid::new_v4()
         ));
-        std::fs::create_dir_all(&data_dir).expect("create SQLite gate data dir");
-        let first = test_file_backend(&data_dir);
-        let resumed = test_file_backend(&data_dir);
+        std::fs::create_dir_all(&data_dir).expect("create gate data dir");
+        // The gate's stores are the SQLite store set on disk, whose
+        // attachment store is durable; the engine is the Restate double's
+        // over them. Two handles on that engine: the first core and the core
+        // the resumed web process builds over the same stores.
+        let stores: Arc<dyn lash::StoreSet> = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+                .await
+                .expect("open the gate's SQLite store set"),
+        );
+        let double = lash_restate_test::backend_with(
+            0,
+            lash_restate_test::ServerConfig::default(),
+            move |_| stores,
+        )
+        .await
+        .expect("build the Restate double over the gate's store set");
 
         Box::pin(run_attachment_usage_gate(
             &data_dir,
             GateBackend {
-                backend: first.into(),
+                backend: double.lash_backend(),
             },
             GateBackend {
-                backend: resumed.into(),
+                backend: double.lash_backend(),
             },
         ))
         .await;
-        std::fs::remove_dir_all(&data_dir).expect("remove SQLite gate data dir");
+        std::fs::remove_dir_all(&data_dir).expect("remove gate data dir");
     });
 }
 

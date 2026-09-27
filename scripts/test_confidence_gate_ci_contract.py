@@ -2689,10 +2689,7 @@ derive_mutation_jobs() {{
         )
         self.assertNotIn("run-seal-harness", check_job)
         self.assertNotIn("cargo fetch", check_job)
-        for foreign in (
-            "cargo check -p agent-service --features restate --all-targets --locked",
-            "cargo check -p lash-runtime --no-default-features --locked",
-        ):
+        for foreign in ("cargo check -p lash-runtime --no-default-features --locked",):
             self.assertNotIn(foreign, check_job)
 
         # Every gate that moved is pinned to the job that now owns it. Asserting

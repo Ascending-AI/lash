@@ -37,6 +37,10 @@ use slack_api::SlackApi;
 pub struct BotConfig {
     /// Where the bot's HTTP server listens.
     pub addr: SocketAddr,
+    /// Where the bot serves its Restate endpoint. Stable across restarts:
+    /// the local restate-server resumes a previous boot's in-flight turns
+    /// against the deployment they started on.
+    pub restate_endpoint_addr: SocketAddr,
     /// Origin of the platform's Web API.
     pub api_base_url: String,
     /// URL the platform should POST events to. Defaults to `http://<addr>` plus
@@ -65,8 +69,14 @@ impl BotConfig {
             .unwrap_or_else(|_| "127.0.0.1:3041".to_string())
             .parse()
             .context("parse SLACK_CLONE_BOT_ADDR")?;
+        let restate_endpoint_addr: SocketAddr =
+            std::env::var("SLACK_CLONE_BOT_RESTATE_ENDPOINT_ADDR")
+                .unwrap_or_else(|_| "127.0.0.1:3046".to_string())
+                .parse()
+                .context("parse SLACK_CLONE_BOT_RESTATE_ENDPOINT_ADDR")?;
         Ok(Self {
             addr,
+            restate_endpoint_addr,
             api_base_url: std::env::var("SLACK_CLONE_API_BASE_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:3040".to_string()),
             public_url: std::env::var("SLACK_CLONE_BOT_PUBLIC_URL").ok(),
@@ -123,7 +133,42 @@ pub async fn run(config: BotConfig) -> Result<()> {
         );
     }
     let (provider, model) = configured_provider()?;
-    let built = runtime::build_core(&runtime_config, provider, model, Arc::clone(&api)).await?;
+    // The engine is the local restate-server's, over the bot's SQLite store
+    // set (ADR 0104): the server drives every channel turn in the endpoint's
+    // handlers, and the bot only sends.
+    let restate = crate::local_restate::LocalRestate::from_env(
+        "`scripts/slack-clone-dev.sh up`, which runs a restate-server beside the bot",
+    )?;
+    let stores = runtime::open_stores(&runtime_config.data_dir).await?;
+    let engine = restate.engine(Arc::new(stores));
+    let built = runtime::build_core(
+        &runtime_config,
+        lash::Backend::new(engine.clone()),
+        provider,
+        model,
+        Arc::clone(&api),
+    )
+    .await?;
+    let worker = lash::durability::DurableProcessWorker::new(
+        built
+            .core
+            .durable_process_worker_config()
+            .context("the bot's process worker config")?,
+    )
+    .context("build the bot's process worker")?;
+    // Served before the recovery pass below, which sends turns the server
+    // then drives through this endpoint.
+    let _deployment = restate
+        .serve_at(
+            config.restate_endpoint_addr,
+            engine.endpoint_builder(worker).build(),
+        )
+        .await?;
+    log_out!(
+        "slack-clone-bot Restate endpoint on http://{} registered with {}",
+        config.restate_endpoint_addr,
+        restate.admin_url
+    );
     // The operator surface holds the plugin factory, so MCP integrations can be
     // attached and detached while the bot serves. The bot's own boot wires only
     // the bundled stdio server; the HTTP one arrives through this API, behind

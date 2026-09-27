@@ -4,27 +4,21 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
     let data_dir =
         std::env::temp_dir().join(format!("agent-workbench-reset-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
+    let double = crate::tests::test_double_backend(0).await;
+    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
+    let process_registry = double.engine_stores().process_registry();
     let provider = trigger_registration_provider();
     let model = test_model();
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");
+    crate::tests::install_test_process_worker(&double, &core);
     let process_observer = core
         .processes()
         .observer()
@@ -72,10 +66,13 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         .await
         .expect("open old session");
     register_test_trigger(&session).await;
-    let started = emit_test_button_trigger(&state.core, ButtonChoice::Red).await;
+    let started = emit_test_button_trigger(&double, &state.core, ButtonChoice::Red).await;
     assert_remote_trigger_emit_report_round_trip(&started);
-    let trigger_records =
-        assert_remote_trigger_subscription_records_round_trip(&data_dir, &old_session_id).await;
+    let trigger_records = assert_remote_trigger_subscription_records_round_trip(
+        double.stores().trigger_store().as_ref(),
+        &old_session_id,
+    )
+    .await;
     assert_eq!(trigger_records.len(), 1);
     assert_eq!(started.started_process_ids().len(), 1);
     let old_work_before_reset = state
@@ -184,8 +181,10 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
     // normal wake delivery before this test's manual retirement/route probe;
     // raw catalog deletion must continue to refuse a live closure pin.
     tokio::time::timeout(Duration::from_secs(20), async {
-        lash::process::NativeProcessWork::for_registry(Arc::clone(&process_registry))
-            .await_terminal(&started.started_process_ids()[0])
+        state
+            .core
+            .processes()
+            .await_output(&started.started_process_ids()[0])
             .await
             .expect("trigger process finishes before manual retirement");
         loop {
@@ -260,25 +259,19 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
 // roster's current on a tombstone every surface refuses.
 
 use super::recoverable_chat_tests::recoverable_chat_test_state;
-use lash::process::{ProcessLifecycle, ProcessRegistrar};
 
 /// Enough terminal processes that the durable delete of this session is real
 /// work: the reproduction carried 460 of them and 1843 events.
 const BUSY_SESSION_PROCESS_COUNT: usize = 300;
 
 async fn register_terminal_processes(
-    data_dir: &std::path::Path,
+    double: &lash_restate_test::RestateTestBackend,
     session_id: &SessionId,
     count: usize,
 ) {
-    // The same SQLite registry file the workbench state opened, so these rows
-    // are the session's own work rather than a second registry's.
-    let registry = lash_sqlite_store::SqliteProcessRegistry::open(
-        &crate::tests::sessions_root(data_dir).join("process-registry.db"),
-        data_dir.join("lash-sessions"),
-    )
-    .await
-    .expect("open the workbench process registry");
+    // The registry the workbench state's engine runs over, so these rows are
+    // the session's own work rather than a second registry's.
+    let registry = double.engine_stores().process_registry();
     for _ in 0..count {
         let process_id = registry
             .register_process(lash::process::ProcessRegistration::new(
@@ -332,13 +325,12 @@ fn captured_restate_paths(requests: &mut mpsc::UnboundedReceiver<Value>) -> Vec<
 #[test]
 fn resetting_a_busy_session_hands_the_page_a_replacement_session() {
     run_async_test_on_stack_budget("workbench-reset-busy-session", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = recoverable_chat_test_state(&double, 16).await;
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         state.restate_ingress_url = restate_ingress_url;
         let old_session_id = state.current_session_id();
-        register_terminal_processes(data_dir.path(), &old_session_id, BUSY_SESSION_PROCESS_COUNT)
-            .await;
+        register_terminal_processes(&double, &old_session_id, BUSY_SESSION_PROCESS_COUNT).await;
         live_cron_job_keys(&state, &old_session_id);
 
         let Json(snapshot) = Box::pin(reset_chat(
@@ -377,8 +369,8 @@ fn resetting_a_busy_session_hands_the_page_a_replacement_session() {
 #[test]
 fn a_reset_of_an_already_retired_session_hands_back_its_replacement() {
     run_async_test_on_stack_budget("workbench-reset-already-retired", || async {
-        let data_dir = tempfile::tempdir().expect("tempdir");
-        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = recoverable_chat_test_state(&double, 16).await;
         let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
         state.restate_ingress_url = restate_ingress_url;
         let old_session_id = state.current_session_id();
@@ -418,8 +410,8 @@ fn a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombstone() {
 }
 
 async fn a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombstone_inner() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
-    let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state(&double, 16).await;
     let (restate_ingress_url, mut restate_requests, delete_gate) =
         spawn_restate_ingress_capture_with_delete_gate().await;
     state.restate_ingress_url = restate_ingress_url;

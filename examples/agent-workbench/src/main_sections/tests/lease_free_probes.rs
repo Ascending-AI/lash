@@ -72,8 +72,8 @@ impl TraceSink for RecordedTraceNames {
 /// retry against (FIG-3144).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn probes_answer_while_the_session_execution_lane_is_held() {
-    let data_dir = tempfile::tempdir().expect("lease-free probe tempdir");
-    let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state(&double, 16).await;
     let traces = Arc::new(RecordedTraceNames::default());
     state.trace_sink = Some(Arc::clone(&traces) as Arc<dyn TraceSink>);
     let session_id = state.current_session_id();
@@ -159,8 +159,8 @@ async fn probes_answer_while_the_session_execution_lane_is_held() {
 /// a turn, and the attach still answers without contending (FIG-3151).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_observation_stream_attaches_while_the_session_execution_lane_is_held() {
-    let data_dir = tempfile::tempdir().expect("lease-free observation tempdir");
-    let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state(&double, 16).await;
     let traces = Arc::new(RecordedTraceNames::default());
     state.trace_sink = Some(Arc::clone(&traces) as Arc<dyn TraceSink>);
     let session_id = state.current_session_id();

@@ -2,7 +2,6 @@
     deprecated,
     reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
 )]
-#![cfg(feature = "restate")]
 
 use axum::Json;
 use axum::extract::{Path as AxumPath, State};
@@ -18,7 +17,7 @@ use lash_restate::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{AgentServiceDurability, AppError, AppResult, AppStateData};
+use crate::state::{AppError, AppResult, AppStateData};
 
 const CHILD_DURATIONS_MS: [u64; 3] = [25, 60_000, 60_000];
 
@@ -136,13 +135,8 @@ pub(crate) async fn run_effect_group(
     State(state): State<AppStateData>,
     Json(request): Json<EffectGroupRunRequest>,
 ) -> AppResult<Json<EffectGroupRunReport>> {
-    validate_state_and_run_id(&state, &request.run_id)?;
-    let ingress = RestateIngressClient::new(
-        state
-            .restate_ingress_url()
-            .unwrap_or_else(|| panic!("Restate durability validates the ingress URL"))
-            .to_string(),
-    );
+    validate_run_id(&request.run_id).map_err(AppError::bad_request)?;
+    let ingress = state.restate_ingress();
     ensure_group_is_new(&ingress, &request.run_id).await?;
     let workflow: EffectGroupWorkflowResult = ingress
         .call_workflow_json(
@@ -173,23 +167,9 @@ pub(crate) async fn get_effect_group(
     State(state): State<AppStateData>,
     AxumPath(run_id): AxumPath<String>,
 ) -> AppResult<Json<EffectGroupRunReport>> {
-    validate_state_and_run_id(&state, &run_id)?;
-    let ingress = RestateIngressClient::new(
-        state
-            .restate_ingress_url()
-            .unwrap_or_else(|| panic!("Restate durability validates the ingress URL"))
-            .to_string(),
-    );
+    validate_run_id(&run_id).map_err(AppError::bad_request)?;
+    let ingress = state.restate_ingress();
     read_effect_group_report(&ingress, run_id).await.map(Json)
-}
-
-fn validate_state_and_run_id(state: &AppStateData, run_id: &str) -> AppResult<()> {
-    if state.durability() != AgentServiceDurability::Restate {
-        return Err(AppError::bad_request(
-            "effect groups require AGENT_SERVICE_DURABILITY=restate",
-        ));
-    }
-    validate_run_id(run_id).map_err(AppError::bad_request)
 }
 
 fn validate_run_id(run_id: &str) -> Result<(), String> {

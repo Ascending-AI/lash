@@ -4,7 +4,6 @@ use lash::rlm::RlmSendBuilderExt;
 
 #[tokio::test]
 async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_task() {
-    let data_dir = tempfile::tempdir().expect("multi-frame send projection tempdir");
     let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let response_index_for_completion = Arc::clone(&response_index);
     let provider = lash::testing::TestProvider::builder()
@@ -30,7 +29,8 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         })
         .build()
         .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
     let initial_prompt = "switch through three frames";
 
@@ -237,7 +237,8 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         })
         .build()
         .into_handle();
-    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let product_events_path = data_dir.path().join("product-events.json");
     state.event_tx = SessionEventRegistry::persistent(product_events_path, 16)
         .expect("open persistent product event registry");
@@ -413,7 +414,8 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
         })
         .build()
         .into_handle();
-    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let product_events_path = data_dir.path().join("product-events.json");
     state.event_tx = SessionEventRegistry::persistent(product_events_path, 16)
         .expect("open persistent product event registry");

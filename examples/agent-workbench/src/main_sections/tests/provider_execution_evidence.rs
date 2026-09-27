@@ -199,8 +199,8 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
             .base_delay_ms(0)
             .max_delay_ms(0);
         provider.set_options(provider_options);
-        let data_dir = tempfile::tempdir().expect("provider evidence workbench tempdir");
-        let state = recoverable_chat_test_state_with_provider(data_dir.path(), 64, provider).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state = recoverable_chat_test_state_with_provider(&double, 64, provider).await;
         let session_id = state.current_session_id();
         let session = state
             .core

@@ -15,15 +15,14 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
-lash-restate = { workspace = true, optional = true }
+lash-restate = { workspace = true }
 lash-remote-protocol = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-sqlite-store = { workspace = true }
-lash = { workspace = true, features = ["rlm"] }
+lash = { workspace = true, features = ["rlm", "restate"] }
 lash-provider-openai = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls", "http2"], optional = true }
-restate-sdk = { workspace = true, optional = true }
+restate-sdk = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -33,8 +32,7 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash = { workspace = true, features = ["rlm", "testing"] }
+lash-restate-test = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
+reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 tempfile = { workspace = true }
-
-[features]
-restate = ["dep:lash-restate", "dep:reqwest", "dep:restate-sdk", "lash/restate"]

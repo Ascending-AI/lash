@@ -369,15 +369,48 @@ fn wrapped_server_config(api_base_url: &str, pid_file: &std::path::Path) -> McpS
     }
 }
 
+/// A bot runtime on the Restate test double, which stands in for the local
+/// restate-server the bot runs beside. Dereferences to the runtime; the
+/// double drops after it.
+struct TestRuntime {
+    runtime: BotRuntime,
+    _double: lash_restate_test::RestateTestBackend,
+}
+
+impl std::ops::Deref for TestRuntime {
+    type Target = BotRuntime;
+
+    fn deref(&self) -> &BotRuntime {
+        &self.runtime
+    }
+}
+
+/// A bot core on the Restate test double; dereferences to the core.
+struct TestCore {
+    core: lash::LashCore,
+    _double: lash_restate_test::RestateTestBackend,
+}
+
+impl std::ops::Deref for TestCore {
+    type Target = lash::LashCore;
+
+    fn deref(&self) -> &lash::LashCore {
+        &self.core
+    }
+}
+
 async fn build_core(
     root: &std::path::Path,
     api_base_url: &str,
     script: &Script,
     server: McpServerConfig,
-) -> lash::LashCore {
-    build_runtime(root, api_base_url, script, Some(server))
-        .await
-        .core
+) -> TestCore {
+    let TestRuntime { runtime, _double } =
+        build_runtime(root, api_base_url, script, Some(server)).await;
+    TestCore {
+        core: runtime.core,
+        _double,
+    }
 }
 
 /// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
@@ -391,7 +424,7 @@ async fn build_runtime(
     api_base_url: &str,
     script: &Script,
     server: Option<McpServerConfig>,
-) -> BotRuntime {
+) -> TestRuntime {
     let mut config = RuntimeConfig::new(root);
     config.trace_to_stderr = false;
     if let Some(server) = server {
@@ -404,9 +437,30 @@ async fn build_runtime(
         .context_window_tokens(200_000)
         .build()
         .expect("valid model");
-    runtime::build_core(&config, script.provider(), model, api)
+    let stores: Arc<dyn lash::StoreSet> = Arc::new(
+        runtime::open_stores(root)
+            .await
+            .expect("open the bot's store set"),
+    );
+    let double =
+        lash_restate_test::backend_with(0, lash_restate_test::ServerConfig::default(), move |_| {
+            stores
+        })
         .await
-        .expect("build MCP-enabled core")
+        .expect("build the Restate double over the bot's store set");
+    let runtime = runtime::build_core(
+        &config,
+        double.lash_backend(),
+        script.provider(),
+        model,
+        api,
+    )
+    .await
+    .expect("build MCP-enabled core");
+    TestRuntime {
+        runtime,
+        _double: double,
+    }
 }
 
 fn transcript_text(session: &lash::LashSession) -> String {

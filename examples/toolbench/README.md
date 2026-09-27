@@ -25,6 +25,11 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
   OpenAI-compatible provider's OpenRouter reasoning-effort encoding.
 - `--repetitions N` and `--runs N` are aliases in both paired and single modes.
 - `--concurrency N` bounds active tasks and preflight probes (default: 1).
+  Every run starts a private local `restate-server` as its engine (ADR 0104)
+  over a fresh SQLite memory store set, so concurrent runs never share one.
+  Set `LASH_RESTATE_SERVER_BIN` to the pinned binary
+  (`python3 scripts/ci/restate_suite.py server-path`); `just toolbench` sets it,
+  and otherwise `restate-server` on `PATH` is used.
 - Repeat `--task ID` to select tasks; duplicate selections run once and unknown
   IDs are errors. `--allow-partial` permits failed tasks or excluded cohorts.
 

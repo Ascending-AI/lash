@@ -57,11 +57,11 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create queued-work controls dir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-        );
+        let double = crate::tests::test_double_backend(0).await;
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            double.stores().session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies(
-            &data_dir,
+            &double,
             16,
             lash::testing::TestProvider::builder()
                 .kind("workbench-queued-controls-test")
@@ -70,7 +70,6 @@ fn workbench_lists_and_controls_individual_queued_batches() {
                 .into_handle(),
             detached_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_port()),
         )
         .await;
         let session_id = state.current_session_id();
@@ -80,6 +79,9 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             .open()
             .await
             .expect("open queued-work controls session");
+        // The engine admits none of the batches while the test lists and
+        // controls them.
+        let _hold = double.hold_session_drive(&session_id).await;
         let cursor = session.observe().current_observation().cursor;
         let store = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
@@ -168,11 +170,11 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create targeted wake dir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-        );
+        let double = crate::tests::test_double_backend(0).await;
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            double.stores().session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies_and_context(
-            &data_dir,
+            &double,
             16,
             lash::testing::TestProvider::builder()
                 .kind("workbench-targeted-wake-test")
@@ -185,7 +187,6 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 .into_handle(),
             detached_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged. It must still run one
             // row per wake.
@@ -523,11 +524,11 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create wake single-reply dir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-        );
+        let double = crate::tests::test_double_backend(0).await;
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            double.stores().session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies_and_context(
-            &data_dir,
+            &double,
             16,
             lash::testing::TestProvider::builder()
                 .kind("workbench-wake-single-reply-test")
@@ -536,9 +537,6 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 .into_handle(),
             detached_trigger_store(),
             Arc::clone(&store_factory),
-            // The engine drives the wake's session in the background, as a
-            // deployment's does; the workbench follows the root it starts.
-            None,
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged. It must still run one
             // row per wake.
@@ -546,6 +544,10 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         )
         .await;
         let session_id = state.current_session_id();
+        // The workbench follows every root the engine starts on this session,
+        // as its boot does: the watch is in place before the wake exists, so
+        // a drive the engine starts on its own is followed too.
+        crate::restate::watch_session_roots(&state, &session_id).await;
         let registry = state.core.process_registry();
         let process_id = registry
             .register_process(
@@ -590,9 +592,8 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .wake_delivery
             .expect("wake single-reply delivery");
 
-        // The workbench follows every root the engine starts on this session;
-        // delivering the wake asks the engine to drive it.
-        crate::restate::watch_session_roots(&state, &session_id);
+        // Delivering the wake asks the engine to drive it; the engine's own
+        // sweep may already have.
         state
             .core
             .processes()
@@ -678,12 +679,12 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create wake keeps-previous dir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-        );
+        let double = crate::tests::test_double_backend(0).await;
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            double.stores().session_store_factory();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let state = recoverable_chat_test_state_with_dependencies_and_context(
-            &data_dir,
+            &double,
             16,
             lash::testing::TestProvider::builder()
                 .kind("workbench-wake-keeps-previous-test")
@@ -712,9 +713,6 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                 .into_handle(),
             detached_trigger_store(),
             Arc::clone(&store_factory),
-            // The engine drives the wake's session in the background, as a
-            // deployment's does; the workbench follows the root it starts.
-            None,
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged. It must still run one
             // row per wake.
@@ -815,7 +813,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .wake_delivery
             .expect("wake keeps-previous delivery");
 
-        crate::restate::watch_session_roots(&state, &session_id);
+        crate::restate::watch_session_roots(&state, &session_id).await;
         state
             .core
             .processes()

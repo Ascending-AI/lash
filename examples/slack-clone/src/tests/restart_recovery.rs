@@ -20,7 +20,7 @@ use crate::store::SqliteHandle;
 use crate::wire::events::{RETRY_NUM_HEADER, RETRY_REASON_HEADER};
 
 use super::support::{
-    BOT_TOKEN, Script, Step, TestPlatform, bot_dir, only_event, scratch, serve_bot, start_bot,
+    BOT_TOKEN, BotHost, Script, Step, TestPlatform, bot_dir, only_event, scratch, serve_bot,
 };
 
 #[tokio::test]
@@ -28,6 +28,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let channel = platform.channel("restart").await;
     let ada = platform.identify("ada").await;
     let mention = platform.mention();
@@ -35,7 +36,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
     // --- First process: fold context, then answer a mention. ---
     let first_script = Script::prose("Before the restart.");
     let first_mention = {
-        let bot = start_bot(&platform, &bot_dir, &first_script).await;
+        let bot = host.start(&platform, &first_script).await;
         platform.say(&channel, &ada, "the migration finished").await;
         for envelope in platform.drain_envelopes().await {
             bot.ingest(envelope, None).await.expect("fold context");
@@ -65,7 +66,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
 
     // --- Second process: same durable stores, brand new in-memory state. ---
     let second_script = Script::prose("After the restart.");
-    let bot = start_bot(&platform, &bot_dir, &second_script).await;
+    let bot = host.start(&platform, &second_script).await;
     let recovered = bot.recover().await.expect("recovery pass").settled;
     assert!(
         recovered.is_empty(),
@@ -144,6 +145,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let channel = platform.channel("owed").await;
     let ada = platform.identify("ada").await;
     let mention = platform.mention();
@@ -181,7 +183,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
         .expect("record the owed reply");
 
     let script = Script::prose("should never run");
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     let recovered = bot.recover().await.expect("recovery pass").settled;
     assert_eq!(recovered.len(), 1);
     assert!(
@@ -223,6 +225,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let channel = platform.channel("double-post").await;
     let ada = platform.identify("ada").await;
     let mention = platform.mention();
@@ -232,7 +235,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
     let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
 
     let script = Script::prose("Posted once.");
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     bot.ingest(app_mention.clone(), None)
         .await
         .expect("handle mention");
@@ -370,7 +373,8 @@ async fn the_webhook_endpoint_answers_the_url_verification_handshake() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let script = Script::prose("hi");
-    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
     let (request_url, _server) = serve_bot(Arc::clone(&bot)).await;
 
     // Registration drives the platform's real handshake against the bot's real
@@ -425,6 +429,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let channel = platform.channel("accepted-crash").await;
     let ada = platform.identify("ada").await;
     let mention = platform.mention();
@@ -473,7 +478,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
 
     // The next boot.
     let script = Script::prose("Because the cache is cold.");
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     let recovered = bot.recover().await.expect("recovery pass").settled;
     assert_eq!(recovered.len(), 2, "both accepted rows are picked up");
 
@@ -538,6 +543,7 @@ async fn a_reply_lost_with_its_process_is_recovered_from_the_committed_transcrip
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let channel = platform.channel("lost-reply").await;
     let ada = platform.identify("ada").await;
     let mention = platform.mention();
@@ -547,7 +553,7 @@ async fn a_reply_lost_with_its_process_is_recovered_from_the_committed_transcrip
     let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
 
     let script = Script::prose("Still here.");
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     bot.ingest(app_mention.clone(), None)
         .await
         .expect("handle mention");
@@ -702,14 +708,13 @@ async fn the_api_client_form_encodes_read_methods_and_uses_json_only_for_posting
 /// Stage the state a process killed mid-mention-turn actually leaves behind, and
 /// return the blocked bot's turn task plus the mention envelope.
 ///
-/// The dead boot is modelled by a bot whose turn is *held open inside the model
-/// call*. From the store's point of view that is indistinguishable from a killed
-/// process during its lease TTL, which is the window the defect lives in: the
-/// queued input is claimed, the claim is pinned to a live lease generation, and
-/// that lease is owned by a different incarnation than any new boot's.
+/// The dying boot is modelled by a bot whose turn is *held open inside the model
+/// call*: the engine admitted the queued input and its turn is still running,
+/// which is the window the defect lives in. [`BotHost::kill_boot_mid_turn`]
+/// then turns it into a dead boot.
 async fn stage_interrupted_mention_turn(
     platform: &TestPlatform,
-    bot_dir: &std::path::Path,
+    host: &BotHost,
 ) -> (
     Arc<crate::bot::channel::ChannelBot>,
     Script,
@@ -732,7 +737,7 @@ async fn stage_interrupted_mention_turn(
     // The dying boot: ambient context folded, then a mention turn that never
     // returns.
     let script = Script::new([Step::Gated("never delivered".to_string())]);
-    let dying = start_bot(platform, bot_dir, &script).await;
+    let dying = host.start(platform, &script).await;
     for envelope in envelopes {
         if super::support::event_kind(&envelope) == "message"
             && !envelope.event.text().contains(&mention)
@@ -747,7 +752,7 @@ async fn stage_interrupted_mention_turn(
             let _ = dying.ingest(app_mention, None).await;
         }
     });
-    // Wait for the runtime to be *inside* the turn: input claimed, lease held.
+    // Wait for the runtime to be *inside* the turn: the input is admitted.
     script.wait_gated().await;
     (dying, script, turn, app_mention, channel)
 }
@@ -762,12 +767,13 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let (_dying, dying_script, turn, app_mention, channel) =
-        stage_interrupted_mention_turn(&platform, &bot_dir).await;
+        stage_interrupted_mention_turn(&platform, &host).await;
 
-    // The new boot, inside the dead boot's lease TTL.
+    // The new boot, while the previous boot's turn still holds the session.
     let script = Script::prose("Recovered answer.");
-    let reborn = start_bot(&platform, &bot_dir, &script).await;
+    let reborn = host.start(&platform, &script).await;
     let report = reborn.recover().await.expect("recovery pass");
 
     assert_eq!(
@@ -808,44 +814,44 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
     turn.abort();
 }
 
+/// Settle `event_id` on a boot's recovery pass: the pass either answers it or
+/// defers it while its turn has not settled, and a deferred event is retried.
+async fn settle_on_recovery(bot: &crate::bot::channel::ChannelBot, event_id: &str) -> Disposition {
+    let report = bot.recover().await.expect("recovery pass");
+    if report.deferred.is_empty() {
+        let settled = report
+            .settled
+            .into_iter()
+            .next()
+            .expect("the recovery pass settles the interrupted mention");
+        return settled;
+    }
+    assert_eq!(report.deferred, vec![event_id.to_string()]);
+    bot.retry_deferred(event_id.to_string(), std::time::Duration::from_secs(30))
+        .await
+        .expect("deferred retry")
+}
+
 #[tokio::test]
-async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
+async fn a_mention_interrupted_by_a_dead_boot_is_answered_once_by_the_next_boot() {
     // The other half: deferral is only correct if something later settles it.
+    // The dead boot's turn is not lost with its process: the server keeps it and
+    // re-drives the interrupted attempt on the next boot's deployment.
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let (dying, dying_script, turn, app_mention, channel) =
-        stage_interrupted_mention_turn(&platform, &bot_dir).await;
+        stage_interrupted_mention_turn(&platform, &host).await;
+    let dead = host.kill_boot_mid_turn(dying, &dying_script, turn).await;
 
     let script = Script::prose("The queue backed up; it is draining now.");
-    let reborn = start_bot(&platform, &bot_dir, &script).await;
-    let report = reborn.recover().await.expect("recovery pass");
-    assert_eq!(report.deferred, vec![app_mention.event_id.clone()]);
-
-    // The dead boot really is gone, and its lease TTL elapses. Its turn ran on
-    // its own core's engine, which dies with the core: the gate it waits on is
-    // released only after nothing is left to answer it.
-    turn.abort();
-    let _ = turn.await;
-    drop(dying);
-    dying_script.release_gate();
-    assert!(
-        super::support::expire_session_leases(&bot_dir) > 0,
-        "a session-execution lease row should have been expired"
-    );
-
-    let outcome = reborn
-        .retry_deferred(
-            app_mention.event_id.clone(),
-            std::time::Duration::from_secs(30),
-        )
-        .await
-        .expect("deferred retry");
-    // The interrupted turn never committed on the dead boot: the new boot's
-    // engine runs it once the lease lapses. Whether the retry waits on that
-    // turn or reads its committed answer depends only on when the engine
-    // finished relative to the retry; either way this boot's model answered,
-    // exactly once.
+    let reborn = host.start(&platform, &script).await;
+    drop(dead);
+    let outcome = settle_on_recovery(&reborn, &app_mention.event_id).await;
+    // Whether recovery waits on the re-driven turn or reads its committed
+    // answer depends only on when the engine finished relative to the pass;
+    // either way this boot's model answered, exactly once.
     assert!(
         matches!(
             outcome,
@@ -854,7 +860,7 @@ async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
                 ..
             }
         ),
-        "the deferred mention must be answered by the new boot's turn: {outcome:?}"
+        "the interrupted mention must be answered by the new boot's turn: {outcome:?}"
     );
     assert_eq!(script.calls(), 1);
 
@@ -886,16 +892,17 @@ async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
 }
 
 #[tokio::test]
-async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery() {
+async fn a_thread_mention_interrupted_by_a_dead_boot_uses_the_same_recovery() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let channel = platform.channel("interrupted-thread").await;
     let ada = platform.identify("ada").await;
     let root = platform.say(&channel, &ada, "the shard is cobalt").await;
 
     let dying_script = Script::new([Step::Gated("never delivered".to_string())]);
-    let dying = start_bot(&platform, &bot_dir, &dying_script).await;
+    let dying = host.start(&platform, &dying_script).await;
     for envelope in platform.drain_envelopes().await {
         dying.ingest(envelope, None).await.expect("fold root");
     }
@@ -916,18 +923,11 @@ async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery()
         }
     });
     dying_script.wait_gated().await;
+    let dead = host.kill_boot_mid_turn(dying, &dying_script, turn).await;
 
     let reborn_script = Script::prose("The shard is cobalt.");
-    let reborn = start_bot(&platform, &bot_dir, &reborn_script).await;
-    let report = reborn.recover().await.expect("thread recovery pass");
-    assert_eq!(report.deferred, vec![app_mention.event_id.clone()]);
-    assert!(matches!(
-        report.settled.first(),
-        Some(Disposition::Deferred {
-            reason: "session_admission_contended",
-            ..
-        })
-    ));
+    let reborn = host.start(&platform, &reborn_script).await;
+    drop(dead);
     let record = reborn
         .ledger()
         .get(app_mention.event_id.clone())
@@ -938,24 +938,19 @@ async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery()
     let root_ts = root.to_string();
     assert_eq!(record.thread_ts.as_deref(), Some(root_ts.as_str()));
 
-    turn.abort();
-    let _ = turn.await;
-    drop(dying);
-    dying_script.release_gate();
-    assert!(super::support::expire_session_leases(&bot_dir) > 0);
-    let outcome = reborn
-        .retry_deferred(app_mention.event_id, std::time::Duration::from_secs(30))
-        .await
-        .expect("settle deferred thread mention");
-    // As in the channel case, the new boot's engine answers the thread mention
-    // once the lease lapses, whether the retry waits on it or reads it back.
-    assert!(matches!(
-        outcome,
-        Disposition::Replied {
-            source: ReplySource::Turn | ReplySource::Transcript,
-            ..
-        }
-    ));
+    let outcome = settle_on_recovery(&reborn, &app_mention.event_id).await;
+    // As in the channel case, the new boot's engine answers the thread mention,
+    // whether recovery waits on it or reads it back.
+    assert!(
+        matches!(
+            outcome,
+            Disposition::Replied {
+                source: ReplySource::Turn | ReplySource::Transcript,
+                ..
+            }
+        ),
+        "{outcome:?}"
+    );
     assert_eq!(reborn_script.calls(), 1);
     assert!(reborn_script.saw("the shard is cobalt"));
     let replies = platform.thread_messages(&channel, root).await;
@@ -974,11 +969,12 @@ async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let script = Script::new([
         Step::Gated("Root admission completed.".to_string()),
         Step::Text("Caught up with the root.".to_string()),
     ]);
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     // Deterministically model the production 45s exhaustion without sleeping.
     bot.set_thread_root_wait_budget(std::time::Duration::ZERO);
     let (request_url, _server) = serve_bot(Arc::clone(&bot)).await;
@@ -1086,8 +1082,9 @@ async fn recovery_folds_a_late_root_before_re_driving_its_unavailable_reply() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let script = Script::prose("Recovered through the boot entry.");
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     bot.set_thread_root_wait_budget(std::time::Duration::ZERO);
     let channel = platform.channel("root-before-reply-recovery").await;
     let ada = platform.identify("ada").await;
@@ -1177,6 +1174,7 @@ async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
+    let host = BotHost::open(&bot_dir).await;
     let channel = platform.channel("silent-commit").await;
     let ada = platform.identify("ada").await;
     let mention = platform.mention();
@@ -1187,7 +1185,7 @@ async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
 
     // An empty answer still commits the turn and consumes the input.
     let script = Script::prose("   ");
-    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let bot = host.start(&platform, &script).await;
     let disposition = bot
         .ingest(app_mention.clone(), None)
         .await

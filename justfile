@@ -37,8 +37,10 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
+# Every run starts a private restate-server, the pinned binary.
 toolbench model='z-ai/glm-5.3-flash' *args:
-  kiln run //examples/toolbench:toolbench -- --model "{{model}}" {{args}}
+  LASH_RESTATE_SERVER_BIN="$(python3 "{{repo}}/scripts/ci/restate_suite.py" server-path)" \
+    kiln run //examples/toolbench:toolbench -- --model "{{model}}" {{args}}
 
 rlm-smoke-e2e:
   bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
@@ -159,7 +161,7 @@ agent-service-restate-e2e:
   RESTATE_AUTHORITY_ID="${RESTATE_AUTHORITY_ID:-agent-service-e2e:${LASH_GATE_WORKTREE_SLUG}:${run_token}}" \
   AGENT_SERVICE_E2E_ENDPOINT_BIND="$endpoint_bind" \
   AGENT_SERVICE_E2E_ENDPOINT_URL="$endpoint_url" \
-  cargo test -p agent-service --features restate \
+  cargo test -p agent-service \
     live_restate_ingress_runs_agent_turn_and_process_workflow_end_to_end -- --ignored --nocapture
 
 agent-workbench-restate-e2e:

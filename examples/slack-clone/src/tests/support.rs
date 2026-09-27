@@ -50,9 +50,8 @@ pub enum Step {
     },
     /// Announce arrival, block until released, then finish with this text.
     ///
-    /// Holds a turn open at a point where the runtime has already claimed the
-    /// queued input and taken the session-execution lease — the state a process
-    /// killed mid-turn leaves behind.
+    /// Holds a turn open inside its model call, after the engine admitted the
+    /// queued input — the state a process killed mid-turn leaves behind.
     Gated(String),
     /// Reject the request with a terminal provider failure.
     ProviderError {
@@ -433,41 +432,156 @@ impl TestPlatform {
     }
 }
 
-/// Restart tests call this twice with the same `data_dir`: the second call is a
-/// new process's worth of state, rebuilt from the same durable stores.
-pub async fn start_bot(
-    platform: &TestPlatform,
-    data_dir: &Path,
-    script: &Script,
-) -> Arc<ChannelBot> {
-    let api = Arc::new(SlackApi::new(&platform.base_url, BOT_TOKEN).expect("build api client"));
-    let auth = api.auth_test().await.expect("auth.test");
-    let identity = BotIdentity {
-        bot_user_id: auth.user_id,
-        bot_id: auth.bot_id,
-        handle: auth.user,
-        team_id: auth.team_id,
-    };
-    let ledger_database =
-        SqliteHandle::open(&data_dir.join("events.db"), ledger::SCHEMA).expect("open test ledger");
-    let mut runtime_config = RuntimeConfig::new(data_dir.join("lash"));
-    runtime_config.trace_to_stderr = false;
-    let model = ModelSpec::builder("mock/model")
-        .context_window_tokens(200_000)
-        .build()
-        .expect("valid mock model metadata");
-    let built = runtime::build_core(&runtime_config, script.provider(), model, Arc::clone(&api))
+/// One bot deployment's durable side: the bot's SQLite store set under
+/// `<bot_dir>/lash`, with the Restate test double as the engine that drives
+/// its turns.
+///
+/// The double stands in for the local restate-server the bot runs beside, so
+/// it outlives any one boot: restart tests start a second bot from the same
+/// host, a new process's worth of state over the same stores and server.
+pub struct BotHost {
+    bot_dir: PathBuf,
+    double: lash_restate_test::RestateTestBackend,
+}
+
+impl BotHost {
+    /// The host over `bot_dir`'s stores, created if absent.
+    pub async fn open(bot_dir: &Path) -> Self {
+        let stores: Arc<dyn lash::StoreSet> = Arc::new(
+            runtime::open_stores(&bot_dir.join("lash"))
+                .await
+                .expect("open the bot's store set"),
+        );
+        let double = lash_restate_test::backend_with(
+            0,
+            lash_restate_test::ServerConfig::default(),
+            move |_| stores,
+        )
+        .await
+        .expect("build the Restate double over the bot's store set");
+        Self {
+            bot_dir: bot_dir.to_path_buf(),
+            double,
+        }
+    }
+
+    /// Kill a boot whose mention turn is held inside the model call by a
+    /// [`Step::Gated`] step of `script`.
+    ///
+    /// Every attempt the boot's deployment is running ends with the process:
+    /// the turn's attempt is cut inside the model call, before the server
+    /// stores its result, and the session drive waiting on it suspends. The
+    /// server keeps both invocations and holds them back while the bot is
+    /// down; the gate is released only once nothing of that boot is left to
+    /// answer it. Returns once the dead boot's session driver is released,
+    /// so the next [`start`](Self::start) installs its own. Dropping the
+    /// returned [`DeadBoot`] brings the deployment back: the server re-drives
+    /// the held invocations on the boot running by then.
+    pub async fn kill_boot_mid_turn(
+        &self,
+        bot: Arc<ChannelBot>,
+        script: &Script,
+        turn: JoinHandle<()>,
+    ) -> DeadBoot {
+        let server = self.double.server();
+        let mut holds = Vec::new();
+        let mut cut = 0;
+        for invocation in server.invocations() {
+            if invocation.status == "completed" {
+                continue;
+            }
+            // `Service/key/handler`; only a keyed invocation can be held.
+            let mut parts = invocation.target.splitn(2, '/');
+            let (Some(service), Some(rest)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            let Some((key, _handler)) = rest.rsplit_once('/') else {
+                continue;
+            };
+            let hold = server.hold(service, key);
+            tokio::pin!(hold);
+            // One poll places the hold; it then waits for the running attempt
+            // to stop, which for the turn is the cut below.
+            let placed = tokio::select! {
+                biased;
+                hold = &mut hold => Some(hold),
+                () = std::future::ready(()) => None,
+            };
+            if service == lash_restate_test::TURN_DRIVER_SERVICE
+                && invocation.status == "running"
+                && server.crash(&invocation.id)
+            {
+                cut += 1;
+            }
+            holds.push(match placed {
+                Some(hold) => hold,
+                None => hold.await,
+            });
+        }
+        assert_eq!(
+            cut, 1,
+            "the dead boot's turn attempt is cut in its model call"
+        );
+        turn.abort();
+        let _ = turn.await;
+        drop(bot);
+        script.release_gate();
+        let slot = self.double.restate().session_work_engine().driver_slot();
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while slot.installed().is_some() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the dead boot's session driver is released");
+        DeadBoot { _holds: holds }
+    }
+
+    /// Boot a bot over this host's stores and engine.
+    pub async fn start(&self, platform: &TestPlatform, script: &Script) -> Arc<ChannelBot> {
+        let data_dir = &self.bot_dir;
+        let api = Arc::new(SlackApi::new(&platform.base_url, BOT_TOKEN).expect("build api client"));
+        let auth = api.auth_test().await.expect("auth.test");
+        let identity = BotIdentity {
+            bot_user_id: auth.user_id,
+            bot_id: auth.bot_id,
+            handle: auth.user,
+            team_id: auth.team_id,
+        };
+        let ledger_database = SqliteHandle::open(&data_dir.join("events.db"), ledger::SCHEMA)
+            .expect("open test ledger");
+        let mut runtime_config = RuntimeConfig::new(data_dir.join("lash"));
+        runtime_config.trace_to_stderr = false;
+        let model = ModelSpec::builder("mock/model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("valid mock model metadata");
+        let built = runtime::build_core(
+            &runtime_config,
+            self.double.lash_backend(),
+            script.provider(),
+            model,
+            Arc::clone(&api),
+        )
         .await
         .expect("build test core");
-    let bot = Arc::new(ChannelBot::new(
-        built.core,
-        api,
-        EventLedger::new(ledger_database),
-        identity,
-        VERIFICATION_TOKEN.to_string(),
-    ));
-    bot.refresh_directory().await.expect("preload directory");
-    bot
+        let bot = Arc::new(ChannelBot::new(
+            built.core,
+            api,
+            EventLedger::new(ledger_database),
+            identity,
+            VERIFICATION_TOKEN.to_string(),
+        ));
+        bot.refresh_directory().await.expect("preload directory");
+        bot
+    }
+}
+
+/// A boot [`BotHost::kill_boot_mid_turn`] killed: the server holds back the
+/// invocations its deployment was running until this drops.
+#[must_use = "dropping a dead boot lets the server re-drive its invocations"]
+pub struct DeadBoot {
+    _holds: Vec<lash_restate_test::Hold>,
 }
 
 /// Serve a bot's webhook router on an ephemeral port, returning its request URL.
@@ -481,47 +595,6 @@ pub async fn serve_bot(bot: Arc<ChannelBot>) -> (String, JoinHandle<()>) {
         let _ = axum::serve(listener, router).await;
     });
     (format!("http://{addr}{}", webhook::EVENTS_PATH), handle)
-}
-
-/// Simulate the session-execution lease TTL elapsing.
-///
-/// The defect this guards against only appears inside a previous boot's lease TTL
-/// (30s by default), and the fix's liveness only appears once that TTL passes.
-/// Waiting 30 seconds in a test is not an option, and sleeping is not the property
-/// under test — the property is what the *store state* makes possible. So this
-/// backdates every lease row, which is precisely what wall-clock time does.
-///
-/// Test-only surgery, and deliberately blunt: the bot has no business expiring its
-/// own leases, so this lives here rather than behind a product API.
-pub fn expire_session_leases(bot_dir: &Path) -> usize {
-    let root = bot_dir.join("lash").join("lash-sessions");
-    let mut expired = 0;
-    let mut stack = vec![root];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            if path.extension().and_then(|ext| ext.to_str()) != Some("db") {
-                continue;
-            }
-            let Ok(connection) = rusqlite::Connection::open(&path) else {
-                continue;
-            };
-            expired += connection
-                .execute(
-                    "UPDATE session_execution_leases SET lease_expires_at_ms = 1",
-                    [],
-                )
-                .unwrap_or(0);
-        }
-    }
-    expired
 }
 
 /// A scratch directory that cleans itself up.

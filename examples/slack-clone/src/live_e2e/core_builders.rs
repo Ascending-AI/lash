@@ -125,14 +125,64 @@ pub(super) fn echo_tools() -> Arc<dyn ToolProvider> {
     ))
 }
 
-/// A fresh SQLite memory backend: each live-E2E core is its own substrate.
-async fn memory_backend() -> Result<lash::Backend> {
-    Ok(Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .map_err(|error| anyhow::anyhow!("open a SQLite memory backend: {error}"))?,
+/// A live-E2E core on a substrate of its own: a SQLite memory store set
+/// journaled by a private local restate-server, with the core's endpoint
+/// served and registered there (ADR 0104). The engine binds lash's services
+/// under stable names, so the swap's two concurrently running cores each get
+/// their own server.
+///
+/// Dereferences to the core. Fields drop in order: the core, then its
+/// deployment, then the server.
+pub(super) struct LiveCore {
+    core: LashCore,
+    _deployment: crate::local_restate::LocalDeployment,
+    _server: crate::local_restate::LocalRestateServer,
+}
+
+impl std::ops::Deref for LiveCore {
+    type Target = LashCore;
+
+    fn deref(&self) -> &LashCore {
+        &self.core
+    }
+}
+
+/// A private restate-server and the engine over a fresh SQLite memory store
+/// set that reaches it.
+async fn live_engine(
+    label: &str,
+) -> Result<(
+    crate::local_restate::LocalRestateServer,
+    Arc<lash::restate::RestateEngine>,
+)> {
+    let server = crate::local_restate::LocalRestateServer::spawn(label).await?;
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
+    let engine = server.restate().engine(Arc::new(stores));
+    Ok((server, engine))
+}
+
+/// Serve `core`'s endpoint on `server` and hand back the live core.
+async fn serve_live_core(
+    server: crate::local_restate::LocalRestateServer,
+    engine: &lash::restate::RestateEngine,
+    core: LashCore,
+) -> Result<LiveCore> {
+    let worker = lash::durability::DurableProcessWorker::new(
+        core.durable_process_worker_config()
+            .context("live-E2E process worker config")?,
     )
-    .into())
+    .context("build the live-E2E process worker")?;
+    let deployment = server
+        .restate()
+        .serve(engine.endpoint_builder(worker).build())
+        .await?;
+    Ok(LiveCore {
+        core,
+        _deployment: deployment,
+        _server: server,
+    })
 }
 
 /// Everything `standard_core` needs beside the provider and model: the turn
@@ -150,19 +200,29 @@ pub(super) async fn standard_core(
     provider: ProviderHandle,
     model: ModelSpec,
     spec: StandardCoreSpec<'_>,
+) -> Result<LiveCore> {
+    let (server, engine) = live_engine("slack-live-standard").await?;
+    let core = standard_core_over(lash::Backend::new(engine.clone()), provider, model, spec)?;
+    serve_live_core(server, &engine, core).await
+}
+
+/// [`standard_core`] over `backend`, which a test hands the Restate double's.
+pub(super) fn standard_core_over(
+    backend: lash::Backend,
+    provider: ProviderHandle,
+    model: ModelSpec,
+    spec: StandardCoreSpec<'_>,
 ) -> Result<LashCore> {
-    let mut builder = LashCore::standard_builder(
-        memory_backend().await?,
-        lash::TurnBudget::bounded(spec.turn_budget),
-    )
-    .provider(provider)
-    .model(model)
-    .generation(generation(spec.output_cap))
-    .instructions(spec.instructions)
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
-    .trace_level(TraceLevel::Extended);
+    let mut builder =
+        LashCore::standard_builder(backend, lash::TurnBudget::bounded(spec.turn_budget))
+            .provider(provider)
+            .model(model)
+            .generation(generation(spec.output_cap))
+            .instructions(spec.instructions)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
+            .trace_level(TraceLevel::Extended);
     if let Some(tools) = spec.tools {
         builder = builder.tools(tools);
     }
@@ -189,8 +249,9 @@ pub(super) async fn rlm_core(
     instructions: &str,
     tools: Arc<dyn ToolProvider>,
     trace_path: PathBuf,
-) -> Result<LashCore> {
-    let backend = memory_backend().await?;
+) -> Result<LiveCore> {
+    let (server, engine) = live_engine("slack-live-rlm").await?;
+    let backend = lash::Backend::new(engine.clone());
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -218,10 +279,11 @@ pub(super) async fn rlm_core(
     {
         builder = builder.plugin(marker);
     }
-    builder
+    let core = builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "slack-clone-live-rlm",
             Uuid::new_v4().to_string(),
         ))
-        .context("build RLM live-E2E core")
+        .context("build RLM live-E2E core")?;
+    serve_live_core(server, &engine, core).await
 }

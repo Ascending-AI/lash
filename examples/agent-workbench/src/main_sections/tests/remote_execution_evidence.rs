@@ -20,8 +20,8 @@ pub(crate) fn browser_projection_trigger_identities() -> serde_json::Value {
 
 #[tokio::test]
 async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement() {
-    let data_dir = tempfile::tempdir().expect("remote recovery facade tempdir");
-    let state = recoverable_chat_test_state(data_dir.path(), 64).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 64).await;
     let session = state
         .core
         .session("workbench-remote-recovery-facades")

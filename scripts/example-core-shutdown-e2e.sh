@@ -96,6 +96,8 @@ wait_reaped() {
   forget_pid "$pid"
 }
 
+# `expected` is matched against the judged binary's path suffix, so a
+# `CARGO_TARGET_DIR` outside the checkout (a Kiln fork's) still matches.
 app_descendant() {
   local runner="$1" expected="$2"
   local attempt parent child child_file cmdline
@@ -163,13 +165,16 @@ assert_count() {
 run_agent_service_signal() {
   local dir="$artifact_root/agent-service-signal"
   mkdir -p "$dir/data"
-  local port marker log trace runner app count
+  local port restate_port marker log trace runner app count
   port="$(free_port)"
+  restate_port="$(free_port)"
   marker="$dir/shutdown.marker"
   log="$dir/host.log"
   trace="$dir/trace.jsonl"
   env OPENROUTER_API_KEY=deterministic-no-network \
     AGENT_SERVICE_ADDR="127.0.0.1:$port" \
+    AGENT_SERVICE_RESTATE_ADDR="127.0.0.1:$restate_port" \
+    RESTATE_AUTHORITY_ID="example-core-shutdown-agent-service-signal-$port" \
     AGENT_SERVICE_DATA_DIR="$dir/data" \
     AGENT_SERVICE_TRACE="$trace" \
     LASH_HOST_SHUTDOWN_MARKER="$marker" \
@@ -177,7 +182,7 @@ run_agent_service_signal() {
   runner=$!
   owned_pids+=("$runner")
   wait_http "http://127.0.0.1:$port/" "$runner" "$log"
-  app="$(app_descendant "$runner" target/judged/agent-service)"
+  app="$(app_descendant "$runner" /judged/agent-service)"
   kill -TERM "$app"
   wait_reaped "$runner" agent-service-signal
   assert_count "$wait_status" 0 agent-service-signal-exit
@@ -195,8 +200,9 @@ run_agent_service_signal() {
 run_agent_service_bind_error() {
   local dir="$artifact_root/agent-service-bind-error"
   mkdir -p "$dir/data"
-  local port marker log trace holder runner count
+  local port restate_port marker log trace holder runner count
   port="$(free_port)"
+  restate_port="$(free_port)"
   marker="$dir/shutdown.marker"
   log="$dir/host.log"
   trace="$dir/trace.jsonl"
@@ -214,6 +220,8 @@ PY
   wait_listener_ready "$holder" "$dir/listener.log"
   env OPENROUTER_API_KEY=deterministic-no-network \
     AGENT_SERVICE_ADDR="127.0.0.1:$port" \
+    AGENT_SERVICE_RESTATE_ADDR="127.0.0.1:$restate_port" \
+    RESTATE_AUTHORITY_ID="example-core-shutdown-agent-service-bind-error-$port" \
     AGENT_SERVICE_DATA_DIR="$dir/data" \
     AGENT_SERVICE_TRACE="$trace" \
     LASH_HOST_SHUTDOWN_MARKER="$marker" \
@@ -244,7 +252,9 @@ run_workbench_signal_with_streams_and_fixture() {
   marker="$dir/shutdown.marker"
   log="$dir/host.log"
   trace="$dir/trace.jsonl"
+  # The valid-empty fixture's nested core runs on a private restate-server.
   env AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
+    LASH_RESTATE_SERVER_BIN="$(python3 "$repo/scripts/ci/restate_suite.py" server-path)" \
     AGENT_WORKBENCH_ADDR="127.0.0.1:$port" \
     AGENT_WORKBENCH_RESTATE_ADDR="127.0.0.1:$restate_port" \
     AGENT_WORKBENCH_DATA_DIR="$dir/data" \
@@ -272,7 +282,7 @@ run_workbench_signal_with_streams_and_fixture() {
   sleep 0.2
   kill -0 "$events"
   kill -0 "$observations"
-  app="$(app_descendant "$runner" target/judged/agent-workbench)"
+  app="$(app_descendant "$runner" /judged/agent-workbench)"
   kill -TERM "$app"
   wait_reaped "$runner" workbench-signal 90
   assert_count "$wait_status" 0 workbench-signal-exit

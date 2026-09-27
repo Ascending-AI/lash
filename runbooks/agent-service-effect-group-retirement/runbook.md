@@ -93,15 +93,13 @@ the shell replaced by Cargo so `$!` remains the exact host PID:
 (
   . ./env.sh
   export OPENROUTER_API_KEY=cov2-unused-no-provider-call
-  export AGENT_SERVICE_DURABILITY=restate
   export AGENT_SERVICE_ADDR="127.0.0.1:$app_port"
   export AGENT_SERVICE_RESTATE_ADDR="127.0.0.1:$old_endpoint_port"
   export RESTATE_INGRESS_URL="http://127.0.0.1:$ingress_port"
   export AGENT_SERVICE_DATA_DIR="$data_dir"
   export AGENT_SERVICE_TRACE="$data_dir/trace.jsonl"
   export RESTATE_AUTHORITY_ID="$authority_id"
-  exec cargo run -p agent-service --features restate --profile judged --locked -- \
-    --durability restate
+  exec cargo run -p agent-service --profile judged --locked
 ) >>"$run_root/agent-service.log" 2>&1 &
 host_pid=$!
 ```
@@ -109,7 +107,7 @@ host_pid=$!
 `RESTATE_AUTHORITY_ID` is required and must stay stable across both boots of this run,
 because they share one Restate state and one data dir. Choose `authority_id` once, before
 Phase 0, and export the identical value in Phase 2. Without it the binary exits
-immediately with `Error: "RESTATE_AUTHORITY_ID is required for Restate durability"`.
+immediately with `Error: "RESTATE_AUTHORITY_ID is required"`.
 
 Poll both app and old endpoint ports. Require
 `ps -o comm= -p "$host_pid"` to equal `agent-service`, then register and inventory the
@@ -222,15 +220,13 @@ old endpoint port down.
 (
   . ./env.sh
   export OPENROUTER_API_KEY=cov2-unused-no-provider-call
-  export AGENT_SERVICE_DURABILITY=restate
   export AGENT_SERVICE_ADDR="127.0.0.1:$app_port"
   export AGENT_SERVICE_RESTATE_ADDR="127.0.0.1:$new_endpoint_port"
   export RESTATE_INGRESS_URL="http://127.0.0.1:$ingress_port"
   export AGENT_SERVICE_DATA_DIR="$data_dir"
   export AGENT_SERVICE_TRACE="$data_dir/trace.jsonl"
   export RESTATE_AUTHORITY_ID="$authority_id"
-  exec cargo run -p agent-service --features restate --profile judged --locked -- \
-    --durability restate
+  exec cargo run -p agent-service --profile judged --locked
 ) >>"$run_root/agent-service.log" 2>&1 &
 host_pid=$!
 ```

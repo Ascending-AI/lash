@@ -412,7 +412,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         // The turns a previous incarnation was following are settled by the
         // session's engine whoever follows them; this process takes them up.
         restate::resume_turn_followers(&state).await;
-        restate::watch_session_roots(&state, &state.current_session_id());
+        restate::watch_session_roots(&state, &state.current_session_id()).await;
         emit_workbench_trace(
             &state.trace_sink,
             None,

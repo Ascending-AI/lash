@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Dev driver for the examples/slack-clone processes: the platform, the bot, and
-# the HTTP-served MCP server the bot can attach at runtime. Mirrors
+# Dev driver for the examples/slack-clone processes: the platform, the local
+# restate-server the bot's turns run on, the bot, and the HTTP-served MCP server
+# the bot can attach at runtime. Mirrors
 # scripts/agent-workbench-dev.sh (detached `up`, `status`, `logs`, `down`, state
 # under a run directory), with the one structural difference that matters here:
 # this example is several processes, and the bot registers itself with the
 # platform at boot, so `up` starts them in order and waits for the registration
 # to land. The MCP server is deliberately *not* wired into the bot's boot: it is
 # an integration an operator attaches over the bot's admin API while it serves.
+#
+# The restate-server is lash's zero-infra effect engine (ADR 0104 section 4):
+# the pinned release binary from `scripts/ci/restate_suite.py server-path`, with
+# its data under the state directory so it outlives a bot restart. The bot
+# serves its Restate endpoint on a stable port and registers it at boot; the
+# server re-drives a killed boot's in-flight turn on the restarted bot.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,13 +43,17 @@ Usage:
   scripts/slack-clone-dev.sh platform-foreground [--port PORT | --addr HOST:PORT]
 
 Defaults:
-  up is detached and idempotent; it starts the platform, waits for it, then
-  starts the bot and waits for the bot to register its Events API request URL,
-  and finally starts the HTTP MCP server the bot can attach at runtime.
+  up is detached and idempotent; it starts the platform and the local
+  restate-server, waits for them, then starts the bot and waits for the bot to
+  register its Events API request URL, and finally starts the HTTP MCP server
+  the bot can attach at runtime.
   The bot's port is the platform port + 1, the MCP server's is the platform
-  port + 2.
+  port + 2. The restate-server's ingress, admin and node ports are the
+  platform port + 3, + 4 and + 5, and the bot serves its Restate endpoint on
+  the platform port + 6.
   Without --port/--addr, SLACK_CLONE_ADDR is used, then 127.0.0.1:3040.
-  State (SQLite stores, traces, pids, logs) lives under .slack-clone/.
+  State (SQLite stores, Restate data, traces, pids, logs) lives under
+  .slack-clone/.
   OPENROUTER_API_KEY is required for the bot; the platform needs no key.
   SLACK_CLONE_MCP_HTTP_TOKEN overrides the HTTP MCP server's bearer token.
   SLACK_CLONE_OPEN=0 suppresses opening a browser.
@@ -152,14 +163,25 @@ mcp_http_addr="$platform_host:$mcp_http_port"
 platform_url="http://$platform_addr"
 bot_url="http://$bot_addr"
 mcp_http_url="http://$mcp_http_addr/mcp"
+# The local restate-server and the bot's Restate endpoint sit above the MCP
+# server.
+restate_ingress_port=$((10#$platform_port + 3))
+restate_admin_port=$((10#$platform_port + 4))
+restate_node_port=$((10#$platform_port + 5))
+restate_endpoint_port=$((10#$platform_port + 6))
+validate_port "bot Restate endpoint" "$restate_endpoint_port"
+restate_ingress_url="http://$platform_host:$restate_ingress_port"
+restate_admin_url="http://$platform_host:$restate_admin_port"
 
 state_key="$(printf '%s' "$platform_addr" | tr -c 'A-Za-z0-9_.-' '_')"
 platform_pid_file="$state_dir/platform-$state_key.pid"
 bot_pid_file="$state_dir/bot-$state_key.pid"
 mcp_http_pid_file="$state_dir/mcp-http-$state_key.pid"
+restate_pid_file="$state_dir/restate-$state_key.pid"
 platform_log="$state_dir/platform-$state_key.log"
 bot_log="$state_dir/bot-$state_key.log"
 mcp_http_log="$state_dir/mcp-http-$state_key.log"
+restate_log="$state_dir/restate-$state_key.log"
 data_root="$state_root/$state_key"
 
 # ------------------------------------------------------------- process glue ---
@@ -287,11 +309,53 @@ platform_env() {
     "SLACK_CLONE_DATA_DIR=$data_root/platform"
 }
 
+# The server's data lives under the workspace's data root, so a restarted
+# server keeps every invocation a killed bot left in flight. The authority id
+# is stable for the same reason: it names this workspace's durable state.
+restate_env() {
+  printf '%s\n' \
+    "RESTATE_BASE_DIR=$(cd "$data_root" && pwd)/restate" \
+    "RESTATE_NODE_NAME=n1" \
+    "RESTATE_CLUSTER_NAME=slack-clone-$state_key" \
+    "RESTATE_LISTEN_MODE=tcp" \
+    "RESTATE_BIND_IP=$platform_host" \
+    "RESTATE_BIND_PORT=$restate_node_port" \
+    "RESTATE_INGRESS__BIND_ADDRESS=$platform_host:$restate_ingress_port" \
+    "RESTATE_ADMIN__BIND_ADDRESS=$platform_host:$restate_admin_port" \
+    "RESTATE_DEFAULT_NUM_PARTITIONS=1" \
+    "RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE=256MB" \
+    "RESTATE_LOG_FILTER=warn,restate=info" \
+    "RESTATE_LOG_FORMAT=compact" \
+    "RESTATE_LOG_DISABLE_ANSI_CODES=true"
+}
+
 bot_env() {
   printf '%s\n' \
     "SLACK_CLONE_BOT_ADDR=$bot_addr" \
     "SLACK_CLONE_API_BASE_URL=$platform_url" \
-    "SLACK_CLONE_BOT_DATA_DIR=$data_root/bot"
+    "SLACK_CLONE_BOT_DATA_DIR=$data_root/bot" \
+    "SLACK_CLONE_BOT_RESTATE_ENDPOINT_ADDR=$platform_host:$restate_endpoint_port" \
+    "RESTATE_INGRESS_URL=$restate_ingress_url" \
+    "RESTATE_ADMIN_URL=$restate_admin_url" \
+    "RESTATE_AUTHORITY_ID=slack-clone:$state_key"
+}
+
+restate_ready() {
+  curl -fsS "$restate_admin_url/health" >/dev/null 2>&1 \
+    && curl -fsS "$restate_ingress_url/restate/health" >/dev/null 2>&1
+}
+
+wait_restate() {
+  local deadline=$((SECONDS + 60))
+  until restate_ready; do
+    require_alive restate "$restate_pid_file" "$restate_log"
+    if (( SECONDS >= deadline )); then
+      log "restate-server never became healthy; last log lines:"
+      tail -n 40 "$restate_log" >&2 || true
+      return 1
+    fi
+    sleep 0.2
+  done
 }
 
 mcp_http_env() {
@@ -370,6 +434,23 @@ run_up() {
       || require_alive platform "$platform_pid_file" "$platform_log"
   fi
 
+  if pid_alive restate "$restate_pid_file"; then
+    log "restate-server already running on $restate_ingress_url"
+  else
+    local restate_server
+    restate_server="$(python3 "$repo_root/scripts/ci/restate_suite.py" server-path)" \
+      || die "could not locate the pinned restate-server binary"
+    mkdir -p "$data_root/restate"
+    mapfile -t env_pairs < <(restate_env)
+    # The invoker reaches the bot's endpoint on loopback directly; a proxy in
+    # the caller's environment would route its calls through the proxy.
+    start_detached restate "$restate_pid_file" "$restate_log" \
+      -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY \
+      -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
+      "${env_pairs[@]}" "$restate_server" --no-logo
+  fi
+  wait_restate || die "the restate-server is not ready"
+
   # The bot also loads a repo-root .env itself, so only warn when neither source
   # can supply a key — a false alarm here reads as a real failure.
   if [[ "${SLACK_CLONE_E2E_PROVIDER:-}" != "scripted-v1" ]] \
@@ -404,11 +485,13 @@ run_up() {
   log "platform: $platform_url"
   log "bot:      $bot_url (events at $bot_url/slack/events)"
   log "mcp:      $mcp_http_url (attach it via POST $bot_url/admin/mcp/servers)"
+  log "restate:  $restate_admin_url (admin), $restate_ingress_url (ingress)"
   open_browser "$platform_url"
 }
 
 run_status() {
   local platform_state="stopped" bot_state="stopped" mcp_http_state="stopped"
+  local restate_state="stopped"
   local record="" pid=""
   if pid_alive platform "$platform_pid_file"; then
     record="$(read_pid_file "$platform_pid_file")"
@@ -425,9 +508,15 @@ run_status() {
     read -r pid _ <<<"$record"
     mcp_http_state="running ($pid)"
   fi
+  if pid_alive restate "$restate_pid_file"; then
+    record="$(read_pid_file "$restate_pid_file")"
+    read -r pid _ <<<"$record"
+    restate_state="running ($pid)"
+  fi
   printf 'platform  %-24s %s\n' "$platform_addr" "$platform_state"
   printf 'bot       %-24s %s\n' "$bot_addr" "$bot_state"
   printf 'mcp-http  %-24s %s\n' "$mcp_http_addr" "$mcp_http_state"
+  printf 'restate   %-24s %s\n' "$platform_host:$restate_ingress_port" "$restate_state"
   if health="$(curl -fsS "$platform_url/healthz" 2>/dev/null)"; then
     printf 'health    %s\n' "$health"
   fi
@@ -438,6 +527,7 @@ run_logs() {
   [[ -f "$platform_log" ]] && files+=("$platform_log")
   [[ -f "$bot_log" ]] && files+=("$bot_log")
   [[ -f "$mcp_http_log" ]] && files+=("$mcp_http_log")
+  [[ -f "$restate_log" ]] && files+=("$restate_log")
   ((${#files[@]})) || die "no logs yet for $platform_addr"
   if (( follow_logs )); then
     tail -n 40 -F "${files[@]}"
@@ -450,10 +540,12 @@ run_down() {
   # Bot first: it is the guest, and stopping the platform under it would only
   # make its shutdown noisier. The MCP server outlives the bot on the way down
   # so an in-flight tool call fails against a live server rather than a
-  # half-torn-down socket.
+  # half-torn-down socket. The restate-server goes last: nothing is left to
+  # drive, and its data stays under the state directory for the next `up`.
   stop_one bot "$bot_pid_file"
   stop_one mcp-http "$mcp_http_pid_file"
   stop_one platform "$platform_pid_file"
+  stop_one restate "$restate_pid_file"
 }
 
 case "$action" in

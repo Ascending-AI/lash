@@ -33,7 +33,8 @@ chat turns driven by the native tool loop (`LashCore::standard_builder(backend, 
 
 ```bash
 export OPENROUTER_API_KEY=sk-...          # the bot needs a model; the platform does not
-just slack-clone                          # platform :3040, bot :3041, HTTP MCP server :3042
+just slack-clone                          # platform :3040, bot :3041, HTTP MCP server :3042,
+                                          # restate-server :3043-3045, bot's Restate endpoint :3046
 ```
 
 Open <http://127.0.0.1:3040>, pick a display name, and open a second tab with a
@@ -579,9 +580,13 @@ Two ignore rules are worth calling out, because both are real production bugs:
 
 What the bot uses today:
 
-- **One SQLite file backend** (`SqliteBackend::open` on the sessions root).
-  Committed transcripts, accepted inputs and the effect journal share that
-  root and survive a restart together. This is the load-bearing choice.
+- **The Restate engine over one SQLite file store set.** The store set
+  (`SqliteStoreSet::open` on the sessions root) holds committed transcripts,
+  accepted inputs and attachments. The engine is a local `restate-server`,
+  lash's zero-infra effect engine (ADR 0104), which `just slack-clone` starts
+  beside the bot with its data under `.slack-clone/`: it journals every turn and
+  drives it in the handlers of the Restate endpoint the bot serves, and the bot
+  only sends. Both survive a restart together. This is the load-bearing choice.
 - **A durable event ledger** (its own SQLite database), recording the folded
   ambient text, the text each mention sent, and the reply owed, so a new boot can
   replay any of them.
@@ -603,7 +608,7 @@ finishes each one:
 | --- | --- | --- |
 | Before any work | `accepted` | Folds an ambient message; for a mention, sends it and waits on its turn, then posts. |
 | **Mid-turn, inside the dead boot's lease TTL** | `accepted` | **Defers.** The dead boot's lease still fences the session, so this boot cannot open it or its turn cannot settle yet. Retried until the lease lapses; never terminalized. |
-| Mid-turn, after the dead boot's lease lapsed | `accepted` | Re-sends the stored text under the same id; this boot's engine takes the lane over and runs the turn (`ReplySource::Turn`, or `Transcript` if the turn committed before the retry looked). |
+| Mid-turn, after the dead boot's lease lapsed | `accepted` | The restate-server kept the interrupted turn and re-drives it on this boot's endpoint, which takes the lane over once the lease lapses and re-runs only the step the crash cut (`ReplySource::Turn`, or `Transcript` if the turn committed before the retry looked). |
 | After the turn committed, before the reply text was recorded | `accepted` | Finds the input's committed application and reads the answer back out of the transcript (`ReplySource::Transcript`). |
 | After the text was recorded, before the post | `reply_pending` | Posts the recorded text without asking the model again (`ReplySource::Ledger`). |
 | After the post, before recording it | `reply_pending` | Finds its own reply by the `event_id` in the reply's `metadata` and records it. **No second post.** |
@@ -629,6 +634,15 @@ unanswered. The typed application record removes the ambiguity: only a committed
 application makes the transcript authoritative.
 
 #### Why the deferral has to wait, and for how long
+
+The interrupted turn belongs to the server, not to the process that died. Restate
+pins an invocation to the deployment it started on and retries it until that
+deployment answers again, so the bot serves its Restate endpoint on a stable
+address (`SLACK_CLONE_BOT_RESTATE_ENDPOINT_ADDR`, the platform port + 6 under
+`just slack-clone`) and registers it at every boot. The restarted bot's endpoint
+is the one the server re-drives the turn on, from its journal: the steps the dead
+boot recorded are replayed, and only the step the crash cut runs again. What the
+re-driven turn waits for is the session lane.
 
 The lease generation is what fences the stale claim, and it only moves when the
 old lease **lapses**: `acquire_session_execution_lease_conn` sets
@@ -659,19 +673,19 @@ untouched by a failed attempt, so only the deadline ends the loop.
 > `reply_lost_after_commit` rather than silently dropping it. This is now the
 > *only* route to `ReplyLost`.
 
-### The Restate upgrade, precisely
+### What the Restate engine covers, precisely
 
-Replacing the SQLite backend with a `RestateEngine` over the same SQLite
-store set is **half** the change, and it is worth being exact about which half:
+The engine covers **half** of what a crash can cost, and it is worth being exact
+about which half:
 
-- **`bot/runtime.rs::build_core` — the turn.** The engine's session drive becomes
+- **`bot/runtime.rs::build_core` — the turn.** The engine's session drive is
   journalled and replayable: after a restart, the root a send started resumes
   from its recorded steps instead of re-executing. This is what removes the "turn
   committed but its result is gone" case entirely, rather than recovering from it
   after the fact.
-- **`bot/channel.rs::post_reply` — the post.** This is *not* covered by the
-  backend swap. `chat_post_message` is a plain HTTP call outside any effect scope,
-  so the effect host cannot see it or replay it. Closing the
+- **`bot/channel.rs::post_reply` — the post.** This is *not* covered.
+  `chat_post_message` is a plain HTTP call outside any effect scope, so the
+  effect host cannot see it or replay it. Closing the
   crash-between-post-and-record window durably means wrapping the post as a
   journaled effect inside the same scope as the turn, so the journal records
   "posted, ts=…" and a replay returns it instead of posting again.
@@ -680,15 +694,13 @@ Until the second half is done, the metadata lookup described above is what keeps
 the post at-most-once — which is why it is a real mechanism here and not a
 placeholder.
 
-`examples/agent-workbench` has the full Restate harness (`restate.rs`,
+`examples/agent-workbench` has a fuller Restate harness (`restate.rs`,
 `restate_ingress.rs`) and `runbooks/restate-postgres-workers` shows the
-distributed-worker shape. Neither is duplicated here on purpose: this example's
-subject is the *integration* shape, and a Restate deployment alongside it would
-double the reader's setup cost.
+distributed-worker shape.
 
 ## Modes: this is the standard-mode reference
 
-The bot is built with `LashCore::standard_builder(backend, TurnBudget::Unbounded)` over its SQLite backend. Turns are native tool-loop
+The bot is built with `LashCore::standard_builder(backend, TurnBudget::Unbounded)` over the Restate engine and its SQLite store set. Turns are native tool-loop
 turns: the model answers in prose, or calls a host tool and then answers.
 
 Two native tools, both backed by real `conversations.*` calls, so the loop leaves
@@ -875,6 +887,8 @@ with the error code still in the body.
 | `SLACK_CLONE_ADDR` | `127.0.0.1:3040` | platform |
 | `SLACK_CLONE_DATA_DIR` | `.slack-clone/platform` | platform |
 | `SLACK_CLONE_BOT_ADDR` | `127.0.0.1:3041` | bot |
+| `SLACK_CLONE_BOT_RESTATE_ENDPOINT_ADDR` | `127.0.0.1:3046` | bot (its Restate endpoint) |
+| `RESTATE_INGRESS_URL`, `RESTATE_ADMIN_URL`, `RESTATE_AUTHORITY_ID` | set by `scripts/slack-clone-dev.sh` | bot (required) |
 | `SLACK_CLONE_BOT_DATA_DIR` | `.slack-clone/bot` | bot |
 | `SLACK_CLONE_API_BASE_URL` | `http://127.0.0.1:3040` | bot |
 | `SLACK_CLONE_BOT_PUBLIC_URL` | `http://<bot addr>/slack/events` | bot |
@@ -900,10 +914,10 @@ Tracked for follow-up rather than half-built:
   not. A DM is a different session-mapping question again (per user, not per
   channel).
 - **Socket Mode.** Only relevant once the bot runs somewhere Slack cannot reach.
-- **Restate backend, both halves.** The `build_core` swap removes the
-  `ReplyLost` case; journalling `post_reply` as an effect is the separate second
-  half that makes the post durably at-most-once instead of relying on the metadata
-  lookup. See [the upgrade path](#durability-and-the-upgrade-path).
+- **Journalling the post.** Journalling `post_reply` as an effect is the second
+  half of the Restate engine's coverage: it makes the post durably at-most-once
+  instead of relying on the metadata lookup. See
+  [what the engine covers](#what-the-restate-engine-covers-precisely).
 - **A leased delivery outbox**, for a platform running more than one process.
 - **Shortening the recovery wait.** An interrupted mention is answered within one
   session-execution lease TTL (30s by default). A bot that wanted faster resumption

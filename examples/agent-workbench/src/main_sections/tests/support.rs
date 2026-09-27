@@ -1,9 +1,7 @@
 use super::*;
 
-/// A trigger store of its own for a test state whose routes never read the
-/// core's triggers: the trigger store of a fresh SQLite memory store set.
 /// The sessions root of a test data directory, created if absent: the root a
-/// test's file backend and any store the test opens beside it share.
+/// store the test opens beside its core keeps its files under.
 pub(crate) fn sessions_root(data_dir: &std::path::Path) -> std::path::PathBuf {
     let root = data_dir.join("lash-sessions");
     std::fs::create_dir_all(&root).expect("create the test sessions root");
@@ -22,23 +20,163 @@ pub(crate) fn memory_trigger_store() -> Arc<lash_sqlite_store::SqliteTriggerStor
 
 /// The Restate double a workbench test runs on (FIG-3600 S5c): lash-restate's
 /// engine and services over a fresh SQLite memory store set, connected to an
-/// in-process server double. The twin of `test_file_backend`.
+/// in-process server double. Its engine drives every accepted input through
+/// its `LashSession` service, as a deployment's does.
 ///
 /// Keep the returned double alive to the end of the test (FIG-3723); hand
-/// `double.lash_backend()` to the core.
-#[allow(
-    dead_code,
-    reason = "a PREP-F twin the S5c batches move their fixtures onto"
-)]
+/// `double.lash_backend()` to the core. Every core a test builds over one
+/// double shares its stores, so a later core reopens what an earlier wrote.
 pub(crate) async fn test_double_backend(seed: u64) -> lash_restate_test::RestateTestBackend {
     lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate double")
 }
 
-/// A backend with its effect host layered or its process work replaced,
-/// every other port its own, for a test that observes the effect boundary or
-/// the process-event sink.
+/// Serve `core`'s processes on `double`: the double's `LashProcessWorkflow`
+/// runs each process segment on this worker, as a deployment's endpoint runs
+/// them on the worker it was built with.
+pub(crate) fn install_test_process_worker(
+    double: &lash_restate_test::RestateTestBackend,
+    core: &lash::LashCore,
+) {
+    double.install_process_worker(
+        lash::durability::DurableProcessWorker::new(
+            core.durable_process_worker_config()
+                .expect("the test core's process worker config"),
+        )
+        .expect("a valid test process worker"),
+    );
+}
+
+/// Open `session_id` once the engine's drive of it released the session: a
+/// drive that just settled a root may still hold the session's store for a
+/// moment, and an open meanwhile is refused as contended.
+pub(crate) async fn open_session_once_released(
+    core: &lash::LashCore,
+    session_id: &str,
+) -> lash::LashSession {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match core.session(session_id).open().await {
+                Ok(session) => return session,
+                Err(error) if crate::session_open_is_contended(&error) => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("open session `{session_id}`: {error:?}"),
+            }
+        }
+    })
+    .await
+    .expect("the engine's drive releases the session")
+}
+
+/// Work a test runs under a handler's scoped controller.
+pub(crate) type HandlerWork<T> = Arc<
+    dyn for<'a> Fn(
+            lash::runtime::ScopedEffectController<'a>,
+        ) -> std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>
+        + Send
+        + Sync,
+>;
+
+/// Run `work` under `admitted` inside a handler of `double`'s deployment and
+/// return what its last execution produced: a trigger emission, like a
+/// session close, journals its effects, so on the Restate engine it runs in
+/// a handler, as the workbench's own workflows run it.
+pub(crate) async fn run_in_test_handler<T: Send + 'static>(
+    double: &lash_restate_test::RestateTestBackend,
+    admitted: lash::runtime::AdmittedScope,
+    work: HandlerWork<T>,
+) -> T {
+    let outcome = Arc::new(Mutex::new(None));
+    double
+        .run_in_handler(
+            admitted,
+            Arc::new({
+                let outcome = Arc::clone(&outcome);
+                move |scoped| {
+                    let outcome = Arc::clone(&outcome);
+                    let work = Arc::clone(&work);
+                    Box::pin(async move {
+                        let value = work(scoped).await;
+                        *outcome.lock_recover() = Some(value);
+                    })
+                }
+            }),
+        )
+        .await
+        .expect("the test handler completed");
+    outcome
+        .lock_recover()
+        .take()
+        .expect("the test handler produced its outcome")
+}
+
+/// One session deletion issued from a handler: `attempt` receives the
+/// deletion's context and reports its outcome.
+pub(crate) type SessionDeleteAttempt = Arc<
+    dyn for<'a> Fn(
+            lash::SessionDeleteContext<'a>,
+        )
+            -> std::pin::Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>
+        + Send
+        + Sync,
+>;
+
+pub(crate) use super::session_delete_workflow::run_session_delete_in_handler;
+
+/// Delete `session_id` through `core` inside a handler of `double`'s
+/// deployment until the delete is physical. A session whose drive still
+/// runs is only closing (ADR 0109 §4), and the delete owes another attempt
+/// once that work ends; the test retries its step, as the workbench's delete
+/// workflow retries its own.
+pub(crate) async fn delete_session_in_handler(
+    double: &lash_restate_test::RestateTestBackend,
+    core: &lash::LashCore,
+    session_id: &SessionId,
+) -> Result<(), String> {
+    // Each call is one attempt of the delete's obligation, which stalls
+    // after its attempt ceiling: a few spaced retries, never a hot loop.
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        let closing = Arc::new(Mutex::new(None));
+        run_session_delete_in_handler(
+            double,
+            core,
+            session_id,
+            Arc::new({
+                let closing = Arc::clone(&closing);
+                move |context| {
+                    let closing = Arc::clone(&closing);
+                    Box::pin(async move {
+                        let deletion = lash::LashCore::delete_session(context)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        if let lash::SessionDeletion::Closing(state) = deletion {
+                            *closing.lock_recover() = Some(format!("{:?}", state.waiting));
+                        }
+                        Ok(())
+                    })
+                }
+            }),
+        )
+        .await?;
+        let Some(waiting) = closing.lock_recover().take() else {
+            return Ok(());
+        };
+        if attempts >= 5 {
+            return Err(format!(
+                "session `{session_id}` stayed closing; its delete waits on {waiting}"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// A backend with its catalog, trigger store or process work replaced, every
+/// other port its own, for a test that decorates a store or observes the
+/// process-event sink.
 pub(crate) struct DecoratedBackend {
     layered: lash::testing::LayeredBackend,
 }
@@ -47,15 +185,6 @@ impl DecoratedBackend {
     pub(crate) fn over(inner: lash::Backend) -> Self {
         Self {
             layered: lash::testing::LayeredBackend::over(inner),
-        }
-    }
-
-    /// Run every effect through `layer` before the backend's host.
-    pub(crate) fn with_effect_layer(self, layer: Arc<dyn lash::testing::EffectLayer>) -> Self {
-        Self {
-            layered: self.layered.map_effect_host(|host| {
-                Arc::new(lash::testing::LayeredEffectHost::new(host, layer))
-            }),
         }
     }
 
@@ -80,16 +209,6 @@ impl DecoratedBackend {
         }
     }
 
-    /// Drive queued turns through `driver` instead of the in-process driver.
-    pub(crate) fn with_queued_work(
-        self,
-        driver: Arc<dyn lash::runtime::SessionWorkEngine>,
-    ) -> Self {
-        Self {
-            layered: self.layered.with_session_work(Some(driver)),
-        }
-    }
-
     /// Drive processes through `wiring`, built over the backend's (possibly
     /// decorated) registry so the two stay one registry.
     pub(crate) fn with_process_work(self, wiring: lash::process::ProcessWorkWiring) -> Self {
@@ -97,16 +216,6 @@ impl DecoratedBackend {
             layered: self.layered.wire_process_work(|_| wiring),
         }
     }
-}
-
-/// `backend` driven by the inline session-work double
-/// ([`inert_queued_work_port`](crate::inert_queued_work_port)): an accepted
-/// input runs only in the task that waits on it, so a law holds a turn open
-/// and reads what is pending or claimed beside it.
-pub(crate) fn inline_work_backend(backend: lash::Backend) -> lash::Backend {
-    DecoratedBackend::over(backend)
-        .with_queued_work(crate::inert_queued_work_port())
-        .into()
 }
 
 impl From<DecoratedBackend> for lash::Backend {
@@ -135,16 +244,6 @@ pub(crate) async fn standalone_process_registry(
     Arc::new(match wake_delivery {
         Some(config) => registry.with_wake_delivery_config(config),
         None => registry,
-    })
-}
-
-/// The effect host of a fresh SQLite memory backend.
-pub(crate) fn memory_effect_host() -> Arc<dyn lash::durability::EffectHost> {
-    sync_await(async {
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a SQLite memory backend")
-            .effect_host() as Arc<dyn lash::durability::EffectHost>
     })
 }
 

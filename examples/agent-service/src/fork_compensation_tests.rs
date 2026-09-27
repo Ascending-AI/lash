@@ -15,8 +15,11 @@ use crate::state::test_support::{test_core, test_state};
 async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
     let temp = tempfile::tempdir().expect("tempdir");
     let data_dir = temp.path();
-    let core = test_core(data_dir).await;
+    let double = crate::state::test_support::test_double().await;
+    let core = test_core(&double).await;
+    crate::state::test_support::serve_chat_discard(&double, &core).await;
     let state = test_state(
+        &double,
         &core,
         AppDb::open(&data_dir.join("app.db")).expect("app db"),
     );
@@ -72,27 +75,17 @@ async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
         pending.is_empty(),
         "no fork_pending marker may outlive the abort"
     );
-    // No session was ever opened for either chat, so the session store
-    // directory may only contain stores `fork_at` created before failing;
-    // the compensator must have reclaimed every one of them.
-    let session_stores = data_dir.join("lash-sessions");
-    let leftovers: Vec<_> = if session_stores.exists() {
-        std::fs::read_dir(&session_stores)
-            .expect("session store dir")
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .file_type()
-                    .map(|file_type| file_type.is_dir())
-                    .unwrap_or(false)
-            })
-            .map(|entry| entry.file_name())
-            .collect()
-    } else {
-        Vec::new()
-    };
-    assert!(
-        leftovers.is_empty(),
-        "no orphaned session store may remain: {leftovers:?}"
-    );
+    // No session was ever opened for either chat, so the session catalog may
+    // only hold stores `fork_at` created before failing; the compensator must
+    // have reclaimed every one of them.
+    let catalog = rusqlite::Connection::open(
+        double
+            .stores()
+            .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open the session catalog");
+    let leftovers: i64 = catalog
+        .query_row("SELECT count(*) FROM session_meta", [], |row| row.get(0))
+        .expect("count catalogued sessions");
+    assert_eq!(leftovers, 0, "no orphaned session store may remain");
 }

@@ -4,6 +4,9 @@ use lash::SessionId;
 use lash::TurnId;
 
 #[cfg(test)]
+#[path = "tests/session_delete_workflow.rs"]
+mod session_delete_workflow;
+#[cfg(test)]
 #[path = "tests/support.rs"]
 mod support;
 use lash::rlm::RlmSendBuilderExt;
@@ -115,35 +118,6 @@ mod done_stream_items_tests;
 #[cfg(test)]
 #[path = "tests/tool_loss.rs"]
 mod tool_loss_tests;
-/// The file `SqliteBackend` a durable workbench test core runs on, rooted
-/// at the data directory's sessions root.
-pub(super) fn test_file_backend(
-    data_dir: &std::path::Path,
-) -> Arc<lash_sqlite_store::SqliteBackend> {
-    let root = data_dir.join("lash-sessions");
-    Arc::new(sync_await(async move {
-        lash_sqlite_store::SqliteBackend::open(&root)
-            .await
-            .expect("open the workbench test backend")
-    }))
-}
-
-pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::LashCoreBuilder {
-    explicit_durable_test_facets_over(test_file_backend(data_dir))
-}
-
-/// [`explicit_durable_test_facets`] on the inline session-work double
-/// ([`inline_work_backend`]).
-pub(super) fn inline_durable_test_facets(data_dir: &std::path::Path) -> lash::LashCoreBuilder {
-    explicit_durable_test_facets_on(inline_work_backend(test_file_backend(data_dir).into()))
-}
-
-pub(super) fn explicit_durable_test_facets_over(
-    backend: Arc<lash_sqlite_store::SqliteBackend>,
-) -> lash::LashCoreBuilder {
-    explicit_durable_test_facets_on(backend.into())
-}
-
 /// A durable test core over `backend`, whose RLM factory keeps its Lashlang
 /// artifacts in that same backend.
 pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::LashCoreBuilder {
@@ -359,7 +333,8 @@ finish("observed through live replay");
         })
         .build()
         .into_handle();
-    let core = explicit_durable_test_facets(&data_dir)
+    let double = crate::tests::test_double_backend(0).await;
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model.clone())
         .build(crate::test_core_owner())
@@ -447,7 +422,8 @@ finish("gap source");
         })
         .build()
         .into_handle();
-    let core = explicit_durable_test_facets(&data_dir)
+    let double = crate::tests::test_double_backend(0).await;
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model.clone())
         .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
@@ -527,9 +503,9 @@ async fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap_in
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-snapshot-cursor-test")
         .complete(|_request| async {
@@ -541,7 +517,7 @@ finish("snapshot cursor");
         })
         .build()
         .into_handle();
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(test_model())
         .build(crate::test_core_owner())
@@ -676,9 +652,9 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
+    let double = crate::tests::test_double_backend(0).await;
+    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -687,7 +663,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .into_handle();
     let model = test_model();
     let event_tx = SessionEventRegistry::new(16);
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
@@ -815,7 +791,8 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     let provider = catalog_lifecycle_provider();
     let model = test_model();
     let session_id = WorkbenchSessions::fresh().current();
-    let core = explicit_durable_test_facets(&data_dir)
+    let double = crate::tests::test_double_backend(0).await;
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .plugin(Arc::new(
@@ -884,7 +861,8 @@ finish({ test: boxes[0], test2: boxes[1] });
         .into_handle();
     let model = test_model();
     let session_id = WorkbenchSessions::fresh().current();
-    let core = explicit_durable_test_facets(&data_dir)
+    let double = crate::tests::test_double_backend(0).await;
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .plugin(Arc::new(
@@ -928,9 +906,9 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
+    let double = crate::tests::test_double_backend(0).await;
+    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
     let mail_world = mail::MailWorld::new();
     let provider = lash::testing::TestProvider::builder()
@@ -940,7 +918,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .into_handle();
     let model = test_model();
     let sessions = WorkbenchSessions::fresh();
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .plugin(Arc::new(
@@ -1086,9 +1064,10 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let backend = test_file_backend(&data_dir);
+    let double = crate::tests::test_double_backend(0).await;
+    let backend = double.lash_backend();
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-        backend.session_store_factory();
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete(|_| async { Ok(trigger_registration_response()) })
@@ -1106,9 +1085,9 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        &backend.clone().into(),
+        &backend,
     );
-    let core = LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
+    let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
@@ -1946,20 +1925,18 @@ async fn wait_for_endpoint_socket(addr: SocketAddr) {
 }
 
 #[test]
-fn persisted_trigger_route_fires_after_reopening_sqlite_artifact_store() {
+fn persisted_trigger_route_fires_after_reopening_the_core() {
     run_async_test_on_stack_budget("workbench-persisted-trigger-test", || {
-        persisted_trigger_route_fires_after_reopening_sqlite_artifact_store_inner()
+        persisted_trigger_route_fires_after_reopening_the_core_inner()
     });
 }
 
-async fn persisted_trigger_route_fires_after_reopening_sqlite_artifact_store_inner() {
-    let data_dir =
-        std::env::temp_dir().join(format!("agent-workbench-trigger-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+async fn persisted_trigger_route_fires_after_reopening_the_core_inner() {
+    let double = crate::tests::test_double_backend(0).await;
     let session_id = WorkbenchSessions::fresh().current();
 
     {
-        let core = test_workbench_core(test_file_backend(&data_dir));
+        let core = test_workbench_core(double.lash_backend());
         let session = core
             .session(session_id.clone())
             .open()
@@ -1970,24 +1947,21 @@ async fn persisted_trigger_route_fires_after_reopening_sqlite_artifact_store_inn
         drop(core);
     }
 
-    // A fresh backend over the same root: the registered trigger, its
-    // compiled artifacts and the process registry are read back from disk.
-    let backend = test_file_backend(&data_dir);
-    let process_registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
-    let core = test_workbench_core(backend);
+    // A fresh core over the same stores: the registered trigger, its
+    // compiled artifacts and the process registry are read back from them.
+    let core = test_workbench_core(double.lash_backend());
+    crate::tests::install_test_process_worker(&double, &core);
     let _reopened = core
         .session(session_id)
         .open()
         .await
         .expect("reopen session");
-    let report = emit_test_button_trigger(&core, ButtonChoice::Blue).await;
+    let report = emit_test_button_trigger(&double, &core, ButtonChoice::Blue).await;
     assert_eq!(report.started_process_ids().len(), 1);
-    lash::process::NativeProcessWork::for_registry(Arc::clone(&process_registry))
-        .await_terminal(&report.started_process_ids()[0])
+    core.processes()
+        .await_output(&report.started_process_ids()[0])
         .await
         .expect("trigger process should finish");
-
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 /// Waits for the session's engine to apply an enqueued command batch: the
@@ -2020,7 +1994,7 @@ mod queued_work_tests;
 #[cfg(test)]
 #[path = "tests/session_isolation.rs"]
 mod session_isolation_tests;
-fn test_workbench_core(backend: Arc<lash_sqlite_store::SqliteBackend>) -> LashCore {
+fn test_workbench_core(backend: lash::Backend) -> LashCore {
     let provider = trigger_registration_provider();
     let model = test_model();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -2030,9 +2004,9 @@ fn test_workbench_core(backend: Arc<lash_sqlite_store::SqliteBackend>) -> LashCo
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        &backend.clone().into(),
+        &backend,
     );
-    LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
@@ -2084,21 +2058,26 @@ pub(crate) use remote_trigger_assertions_tests::{
 };
 
 async fn emit_test_button_trigger(
+    double: &lash_restate_test::RestateTestBackend,
     core: &LashCore,
     button: ButtonChoice,
 ) -> lash::triggers::TriggerEmitReport {
-    emit_test_button_trigger_with_scope(core, button, None).await
+    emit_test_button_trigger_with_scope(double, core, button, None).await
 }
 
 async fn emit_test_button_trigger_for_session(
+    double: &lash_restate_test::RestateTestBackend,
     core: &LashCore,
     button: ButtonChoice,
     session_id: &SessionId,
 ) -> lash::triggers::TriggerEmitReport {
-    emit_test_button_trigger_with_scope(core, button, Some(session_id)).await
+    emit_test_button_trigger_with_scope(double, core, button, Some(session_id)).await
 }
 
+/// Emit a button occurrence from a handler of `double`'s deployment, as the
+/// workbench's button workflow does.
 async fn emit_test_button_trigger_with_scope(
+    double: &lash_restate_test::RestateTestBackend,
     core: &LashCore,
     button: ButtonChoice,
     session_id: Option<&SessionId>,
@@ -2110,12 +2089,8 @@ async fn emit_test_button_trigger_with_scope(
         button.as_str(),
         uuid::Uuid::new_v4()
     );
-    let scoped_effect_controller = lash::durability::EffectHost::scoped_static(
-        core.effect_host().as_ref(),
-        lash::runtime::AdmittedScope::runtime_operation(format!("trigger:{idempotency_key}")),
-    )
-    .expect("trigger occurrence execution scope")
-    .expect("the backend host lends an owned controller");
+    let admitted =
+        lash::runtime::AdmittedScope::runtime_operation(format!("trigger:{idempotency_key}"));
     let mut request = lash::triggers::TriggerOccurrenceRequest::new(
         BUTTON_TRIGGER_SOURCE_TYPE,
         source_key,
@@ -2130,10 +2105,22 @@ async fn emit_test_button_trigger_with_scope(
     if let Some(session_id) = session_id {
         request = request.for_session(session_id);
     }
-    core.triggers()
-        .emit(request, scoped_effect_controller)
-        .await
-        .expect("emit button trigger occurrence")
+    let core = core.clone();
+    run_in_test_handler(
+        double,
+        admitted,
+        Arc::new(move |scoped| {
+            let core = core.clone();
+            let request = request.clone();
+            Box::pin(async move {
+                core.triggers()
+                    .emit(request, scoped)
+                    .await
+                    .expect("emit button trigger occurrence")
+            })
+        }),
+    )
+    .await
 }
 
 fn trigger_registration_provider() -> ProviderHandle {

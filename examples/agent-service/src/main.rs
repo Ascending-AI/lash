@@ -1,12 +1,9 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
-#[cfg(feature = "restate")]
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::routing::get;
-#[cfg(feature = "restate")]
 use lash::PluginBinding;
 use lash::{
     provider::{ProviderHandle, ProviderOptions},
@@ -15,9 +12,9 @@ use lash::{
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 mod board;
+mod chat_discard;
 mod db;
 mod demo_plugin;
-#[cfg(feature = "restate")]
 mod effect_groups;
 #[cfg(test)]
 mod fork_compensation_tests;
@@ -27,7 +24,6 @@ mod lease_triage;
 #[path = "../../shared/prior_store_layout.rs"]
 mod prior_store_layout;
 mod raw_activities;
-#[cfg(feature = "restate")]
 mod restate;
 mod retention;
 #[cfg(test)]
@@ -64,10 +60,9 @@ fn default_openrouter_model_capability_for(model: lash::ModelSpec) -> lash::Mode
     model.with_capability(default_openrouter_model_capability())
 }
 
+use crate::chat_discard::{AgentServiceChatDiscard, AgentServiceChatDiscardImpl};
 use crate::db::AppDb;
-#[cfg(feature = "restate")]
 use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
-#[cfg(feature = "restate")]
 use crate::effect_groups::{
     AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
     AgentServiceEffectGroupWorkflowImpl,
@@ -77,22 +72,11 @@ use crate::routes::{
     cancel_turn, chat_board, create_chat, fork_chat, index, list_chat_branch_points, list_chats,
     list_messages, pin_chat_branch_point, send_message, settings, update_chat_model,
 };
-use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
-#[cfg(feature = "restate")]
+use crate::state::{AppStateData, anyhow_like};
 use lash::durability::DurableProcessWorker;
-#[cfg(feature = "restate")]
 use lash_restate::RestateEngine;
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
-
-/// The backend the service runs on, which also keeps its RLM factory's
-/// Lashlang artifacts, with the handles on its stores that the service's own
-/// retention pass uses.
-struct ServiceBackend {
-    backend: lash::Backend,
-    store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-}
 
 /// Ask the store whether its durable data opens under this build, before a
 /// single thing is wired.
@@ -171,7 +155,10 @@ fn main() -> anyhow_like::Result<()> {
 async fn async_main() -> anyhow_like::Result<()> {
     let _ = dotenvy::dotenv();
 
-    let durability = AgentServiceDurability::configured()?;
+    // The service takes its configuration from the environment only.
+    if let Some(argument) = std::env::args().nth(1) {
+        return Err(format!("unknown argument `{argument}`"));
+    }
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .map_err(|_| "OPENROUTER_API_KEY is required".to_string())?;
     let model = std::env::var("OPENROUTER_MODEL")
@@ -182,35 +169,20 @@ async fn async_main() -> anyhow_like::Result<()> {
         .unwrap_or_else(|_| "127.0.0.1:3000".to_string())
         .parse()
         .map_err(|err| format!("invalid AGENT_SERVICE_ADDR: {err}"))?;
-    #[cfg(feature = "restate")]
     let restate_endpoint_addr: SocketAddr = std::env::var("AGENT_SERVICE_RESTATE_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:9080".to_string())
         .parse()
         .map_err(|err| format!("invalid AGENT_SERVICE_RESTATE_ADDR: {err}"))?;
-    #[cfg(feature = "restate")]
     let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
     // Parked-root verbs and park recovery run through Restate's admin API.
-    #[cfg(feature = "restate")]
     let restate_admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:9070".to_string());
-    #[cfg(feature = "restate")]
-    let restate_authority_id = (durability == AgentServiceDurability::Restate)
-        .then(|| {
-            std::env::var("RESTATE_AUTHORITY_ID")
-                .map_err(|_| "RESTATE_AUTHORITY_ID is required for Restate durability".to_string())
-                .and_then(|value| {
-                    lash_restate::RestateAuthorityId::new(value).map_err(|error| error.to_string())
-                })
-        })
-        .transpose()?;
-    #[cfg(not(feature = "restate"))]
-    if durability == AgentServiceDurability::Restate {
-        return Err(
-            "AGENT_SERVICE_DURABILITY=restate requires `cargo run -p agent-service --features restate`"
-                .to_string(),
-        );
-    }
+    let restate_authority_id = std::env::var("RESTATE_AUTHORITY_ID")
+        .map_err(|_| "RESTATE_AUTHORITY_ID is required".to_string())
+        .and_then(|value| {
+            lash_restate::RestateAuthorityId::new(value).map_err(|error| error.to_string())
+        })?;
     let data_dir = std::env::var("AGENT_SERVICE_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(".agent-service"));
@@ -265,68 +237,31 @@ async fn async_main() -> anyhow_like::Result<()> {
         .map_err(|err| format!("create session store root: {err}"))?;
     // One SQLite store set under the sessions root keeps the sessions, the
     // process registry, the triggers, the process environments and the
-    // attachments. Local durability is the file `SqliteBackend` there, its
-    // effect journal beside the stores; Restate durability puts the Restate
-    // engine host over the same store set.
-    #[cfg(feature = "restate")]
-    let mut restate_backend: Option<Arc<RestateEngine>> = None;
-    let ServiceBackend {
-        backend,
-        store_factory,
-        attachment_store,
-    } = match durability {
-        AgentServiceDurability::Local => {
-            let backend = Arc::new(
-                lash_sqlite_store::SqliteBackend::open(&session_store_root)
-                    .await
-                    .map_err(|err| err.to_string())?,
-            );
-            ServiceBackend {
-                store_factory: backend.session_store_factory(),
-                attachment_store: backend.attachment_store(),
-                backend: backend.into(),
-            }
-        }
-        AgentServiceDurability::Restate => {
-            #[cfg(feature = "restate")]
-            {
-                let stores = lash_sqlite_store::SqliteStoreSet::open(&session_store_root)
-                    .await
-                    .map_err(|err| err.to_string())?;
-                let store_factory = stores.session_store_factory();
-                let attachment_store =
-                    stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
-                let backend = Arc::new(RestateEngine::new(
-                    Arc::new(stores),
-                    lash::restate::config(
-                        restate_ingress_url.clone(),
-                        restate_admin_url.clone(),
-                        restate_authority_id
-                            .clone()
-                            .unwrap_or_else(|| panic!("Restate authority configured")),
-                    ),
-                ));
-                // Turns run in lash's own `LashSession`/`LashTurn` handlers;
-                // the backend host serves paths outside a workflow scope and
-                // fails loudly if an effect tries to execute without a
-                // handler. The worked example keeps its Sleep-only resolver as
-                // the host's one answer, so no tool-child host is installed —
-                // the same shape the conformance suites use.
-                backend
-                    .restate_effect_host()
-                    .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
-                    .map_err(|err| err.to_string())?;
-                restate_backend = Some(Arc::clone(&backend));
-                ServiceBackend {
-                    backend: backend.into(),
-                    store_factory,
-                    attachment_store,
-                }
-            }
-            #[cfg(not(feature = "restate"))]
-            unreachable!("restate mode is rejected before core construction");
-        }
-    };
+    // attachments; the Restate engine runs every turn and process over it
+    // (ADR 0104).
+    let stores = lash_sqlite_store::SqliteStoreSet::open(&session_store_root)
+        .await
+        .map_err(|err| err.to_string())?;
+    let store_factory = stores.session_store_factory();
+    let attachment_store = stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
+    let restate_backend = Arc::new(RestateEngine::new(
+        Arc::new(stores),
+        lash::restate::config(
+            restate_ingress_url.clone(),
+            restate_admin_url.clone(),
+            restate_authority_id.clone(),
+        ),
+    ));
+    // Turns run in lash's own `LashSession`/`LashTurn` handlers; the backend
+    // host serves paths outside a workflow scope and fails loudly if an
+    // effect tries to execute without a handler. The worked example keeps
+    // its Sleep-only resolver as the host's one answer, so no tool-child host
+    // is installed — the same shape the conformance suites use.
+    restate_backend
+        .restate_effect_host()
+        .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
+        .map_err(|err| err.to_string())?;
+    let backend = lash::Backend::new(restate_backend.clone());
     // An unbound handle is the factory-wide reachability-audit target. Vacuum
     // deliberately uses separately opened, session-bound handles in the
     // retention pass below.
@@ -338,7 +273,6 @@ async fn async_main() -> anyhow_like::Result<()> {
         .map_err(|err| err.to_string())?,
     );
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
-    #[cfg(feature = "restate")]
     let shared_db = Arc::new(Mutex::new(app_db));
     let model_spec = lash::ModelSpec::builder(model.clone())
         .variant(lash::provider::ReasoningSelection::Effort(
@@ -384,86 +318,51 @@ async fn async_main() -> anyhow_like::Result<()> {
         .map_err(|err| err.to_string())?;
     let shutdown_core = core.clone();
     let operation = async {
-        #[cfg(feature = "restate")]
-        let turn_work_driver = match &restate_backend {
-            None => core.turn_work_driver(),
-            Some(backend) => backend.turn_work_driver(),
-        };
-        #[cfg(not(feature = "restate"))]
-        let turn_work_driver = core.turn_work_driver();
-
-        #[cfg(feature = "restate")]
-        let process_worker = if durability == AgentServiceDurability::Restate {
-            let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
-                db: Arc::clone(&shared_db),
-            });
-            Some(
-                DurableProcessWorker::new(
-                    core.durable_process_worker_config_with_plugins([demo_factory])
-                        .map_err(|err| err.to_string())?,
-                )
+        let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
+            db: Arc::clone(&shared_db),
+        });
+        let process_worker = DurableProcessWorker::new(
+            core.durable_process_worker_config_with_plugins([demo_factory])
                 .map_err(|err| err.to_string())?,
-            )
-        } else {
-            None
-        };
+        )
+        .map_err(|err| err.to_string())?;
         // Capture a process facade handle before `core` is moved into the app
         // state, so host-scheduled retention runs through the same
         // `Processes::prune` lever every embedder uses.
         let retention_processes = core.processes();
-        #[cfg(feature = "restate")]
-        let restate_ingress_url =
-            (durability == AgentServiceDurability::Restate).then_some(restate_ingress_url);
-        #[cfg(feature = "restate")]
-        let state = AppStateData::from_shared_db(
+        let restate = lash_restate::RestateConnection::new(restate_ingress_url);
+        let chat_discard =
+            AgentServiceChatDiscardImpl::new(&core, restate.clone(), restate_authority_id).await;
+        let state = AppStateData::new(
             core,
-            turn_work_driver,
             Arc::clone(&shared_db),
             model,
             Some(model_variant),
-            durability,
-            restate_ingress_url,
-        );
-        #[cfg(not(feature = "restate"))]
-        let state = AppStateData::new(
-            core,
-            turn_work_driver,
-            app_db,
-            model,
-            Some(model_variant),
-            durability,
+            restate,
         );
         state
             .recover_pending_chat_forks()
             .await
             .map_err(|err| format!("recover pending chat forks: {err}"))?;
 
-        #[cfg(feature = "restate")]
-        let restate_endpoint = if let Some(restate_backend) = restate_backend {
-            // Lash's own services come from the backend, and `LashSession`
-            // among them drives every chat turn; the service binds only its
-            // effect-group demo workflow beside them.
-            let endpoint = restate_backend
-                .endpoint_builder(
-                    process_worker
-                        .unwrap_or_else(|| panic!("process worker configured for Restate")),
-                )
-                .bind(AgentServiceEffectGroupWorkflowImpl.serve())
-                .build();
-            let _ = restate_backend
-                .process_deployment()
-                .process_work()
-                .admit_pending_processes("agent_service_startup")
-                .await
-                .map_err(|err| err.to_string())?;
-            let listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
-                .await
-                .map_err(|err| format!("bind agent-service Restate endpoint: {err}"))?;
-            println!("agent-service Restate endpoint listening on http://{restate_endpoint_addr}");
-            Some((endpoint, listener))
-        } else {
-            None
-        };
+        // Lash's own services come from the backend, and `LashSession` among
+        // them drives every chat turn; the service binds only its chat-discard
+        // and effect-group demo workflows beside them.
+        let endpoint = restate_backend
+            .endpoint_builder(process_worker)
+            .bind(chat_discard.serve())
+            .bind(AgentServiceEffectGroupWorkflowImpl.serve())
+            .build();
+        let _ = restate_backend
+            .process_deployment()
+            .process_work()
+            .admit_pending_processes("agent_service_startup")
+            .await
+            .map_err(|err| err.to_string())?;
+        let restate_listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
+            .await
+            .map_err(|err| format!("bind agent-service Restate endpoint: {err}"))?;
+        println!("agent-service Restate endpoint listening on http://{restate_endpoint_addr}");
 
         // Keep a state clone for the drain; the router consumes the original.
         let drain_state = state.clone();
@@ -501,29 +400,24 @@ async fn async_main() -> anyhow_like::Result<()> {
         .route(
             "/api/chats/{chat_id}/turns/{turn_id}/cancel",
             axum::routing::post(cancel_turn),
-        );
-        #[cfg(feature = "restate")]
-        let app = app
-            .route(
-                "/api/effect-groups",
-                axum::routing::post(crate::effect_groups::run_effect_group),
-            )
-            .route(
-                "/api/effect-groups/{run_id}",
-                get(crate::effect_groups::get_effect_group),
-            );
-        let app = app.with_state(state);
+        )
+        .route(
+            "/api/effect-groups",
+            axum::routing::post(crate::effect_groups::run_effect_group),
+        )
+        .route(
+            "/api/effect-groups/{run_id}",
+            get(crate::effect_groups::get_effect_group),
+        )
+        .with_state(state);
 
-        println!(
-            "agent-service listening on http://{addr} (durability: {})",
-            durability.as_str()
-        );
+        println!("agent-service listening on http://{addr}");
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|err| err.to_string())?;
         let (host_shutdown, _) = tokio::sync::watch::channel(false);
-        // Host-scheduled store and process retention runs in both durability modes:
-        // whichever durable stores back the deployment are the ones that grow.
+        // Host-scheduled store and process retention: the store set backing the
+        // deployment is what grows.
         let retention_task = crate::retention::spawn_retention(
             drain_state.clone(),
             crate::retention::StoreRetentionTargets {
@@ -534,17 +428,16 @@ async fn async_main() -> anyhow_like::Result<()> {
             retention_processes,
             host_shutdown.subscribe(),
         );
-        #[cfg(feature = "restate")]
-        let restate_task = restate_endpoint.map(|(endpoint, listener)| {
+        let restate_task = {
             let mut shutdown = host_shutdown.subscribe();
             tokio::spawn(async move {
                 restate_sdk::http_server::HttpServer::new(endpoint)
-                    .serve_with_cancel(listener, async move {
+                    .serve_with_cancel(restate_listener, async move {
                         while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
                     })
                     .await;
             })
-        });
+        };
         // This example's first drain step is to stop admitting. Axum's graceful
         // shutdown stops accepting connections and lets in-flight requests finish
         // once a signal arrives.
@@ -560,10 +453,7 @@ async fn async_main() -> anyhow_like::Result<()> {
         if let Err(error) = retention_task.await {
             eprintln!("agent-service: retention task join failed: {error}");
         }
-        #[cfg(feature = "restate")]
-        if let Some(task) = restate_task
-            && let Err(error) = task.await
-        {
+        if let Err(error) = restate_task.await {
             eprintln!("agent-service: Restate endpoint task join failed: {error}");
         }
         serve_result

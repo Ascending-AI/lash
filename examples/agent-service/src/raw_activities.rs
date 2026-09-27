@@ -178,13 +178,13 @@ mod tests {
 
     use super::*;
     use crate::db::AppDb;
-    use crate::state::AgentServiceDurability;
 
     #[tokio::test]
     async fn raw_activity_route_streams_framed_activities_from_a_real_turn() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
-        let state = raw_activity_test_state(data_dir, AgentServiceDurability::Local).await;
+        let double = crate::state::test_support::test_double().await;
+        let state = raw_activity_test_state(data_dir, &double).await;
         let chat = state
             .with_db(|db| db.create_chat("raw activities", "scripted-model", None))
             .await
@@ -257,7 +257,7 @@ mod tests {
 
     async fn raw_activity_test_state(
         data_dir: &std::path::Path,
-        durability: AgentServiceDurability,
+        double: &lash_restate_test::RestateTestBackend,
     ) -> AppStateData {
         let provider = lash::testing::TestProvider::builder()
             .kind("agent-service-raw-activity-script")
@@ -276,16 +276,16 @@ finish("done through raw activities");
             })
             .build()
             .into_handle();
-        let backend = crate::state::test_support::test_backend(data_dir).await;
+        let backend = double.lash_backend();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &backend.clone().into(),
+            &backend,
         );
-        let core = LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
+        let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("scripted-model")
@@ -300,28 +300,14 @@ finish("done through raw activities");
                 "agent-service-raw-activity-test-boot",
             ))
             .expect("core");
-        let turn_work_driver = core.turn_work_driver();
-        #[cfg(not(feature = "restate"))]
-        let state = AppStateData::new(
+        AppStateData::new(
             core,
-            turn_work_driver,
-            AppDb::open(&data_dir.join("app.db")).expect("app db"),
-            "scripted-model".to_string(),
-            None,
-            durability,
-        );
-        #[cfg(feature = "restate")]
-        let state = AppStateData::from_shared_db(
-            core,
-            turn_work_driver,
             Arc::new(Mutex::new(
                 AppDb::open(&data_dir.join("app.db")).expect("app db"),
             )),
             "scripted-model".to_string(),
             None,
-            durability,
-            None,
-        );
-        state
+            double.connection(),
+        )
     }
 }

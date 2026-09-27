@@ -353,9 +353,9 @@ fn runtime_shape_uses_the_shared_terminal_classifier() {
 /// the turn stays in flight for the restored deployment to complete.
 #[tokio::test]
 async fn a_parked_turn_fails_its_attempt_retryably_without_settling() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
+    let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         crate::tests::memory_trigger_store(),
     )
     .await;
@@ -457,14 +457,12 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
     ];
 
     for (case, failure, expected_terminal) in cases {
-        let data_dir = tempfile::tempdir().expect("tempdir");
         let trigger_store = Arc::new(OccurrenceFailureTriggerStore::new(failure))
             as Arc<dyn lash::triggers::TriggerStore>;
-        let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-            data_dir.path(),
-            trigger_store,
-        )
-        .await;
+        let double = crate::tests::test_double_backend(0).await;
+        let state =
+            crate::tests::recoverable_chat_test_state_with_trigger_store(&double, trigger_store)
+                .await;
         let effect_host = state.core.effect_host();
         let scoped_effect_controller = effect_host
             .scoped(lash::runtime::AdmittedScope::runtime_operation(
@@ -509,10 +507,10 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
 
 #[tokio::test]
 async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
     let trigger_store = crate::tests::memory_trigger_store();
+    let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;
@@ -592,7 +590,8 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 /// from deriving and handing the turn scope to the backend's effect host. A
 /// Restate backend binds turn control to its own host; a turn it runs does so
 /// inside its session drive's handler, never on the caller's foreground
-/// (FIG-3600), so only the in-process host runs a turn here.
+/// (FIG-3600): the foreground `send` on the Restate double hands the turn to
+/// that drive, which runs the provider once.
 #[tokio::test]
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
@@ -656,30 +655,27 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
     };
 
-    // A backend whose host journals effects in process runs the turn
-    // through the same facade entry point and executes the local provider
-    // body.
-    let in_process = ownership_core(
-        crate::tests::test_file_backend(&data_dir.path().join("in-process")).into(),
-        "SQLite",
-    );
-    let session = in_process
+    // The foreground entry point on an engine with a server behind it: the
+    // session drive runs the turn and executes the provider body.
+    let double = crate::tests::test_double_backend(0).await;
+    let driven = ownership_core(double.lash_backend(), "Restate double");
+    let session = driven
         .session("workbench-runtime-owned-replay")
         .open()
         .await
-        .expect("open the session on the in-process host");
+        .expect("open the session on the double");
     let handle = session
         .send(lash::TurnInput::text("drive me from the foreground"))
         .await
-        .expect("an in-process host accepts the input");
+        .expect("the engine accepts the input");
     let mut stream = handle.events();
     while let Some(activity) = stream.next_activity().await {
-        activity.expect("the in-process host streams turn activity");
+        activity.expect("the session drive streams turn activity");
     }
     let report = handle
         .output()
         .await
-        .expect("an in-process host executes the turn")
+        .expect("the session drive executes the turn")
         .result;
     assert_eq!(
         report.final_value(),
@@ -688,7 +684,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         1,
-        "the in-process host runs the turn once"
+        "the session drive runs the turn once"
     );
     session.close().await.expect("close the executed session");
 }
@@ -722,9 +718,9 @@ async fn counted_settlement_attempts(
 
 #[tokio::test]
 async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
+    let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         crate::tests::memory_trigger_store(),
     )
     .await;
@@ -763,9 +759,9 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
 
 #[tokio::test]
 async fn turn_body_reader_treats_ambiguous_errors_as_terminal() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
+    let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         crate::tests::memory_trigger_store(),
     )
     .await;

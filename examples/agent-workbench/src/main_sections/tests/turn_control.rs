@@ -1,6 +1,6 @@
 use super::tests::{
-    detached_trigger_store, explicit_durable_test_facets, inline_durable_test_facets,
-    run_async_test_on_stack_budget, spawn_restate_ingress_capture, text_response,
+    detached_trigger_store, explicit_durable_test_facets_on, run_async_test_on_stack_budget,
+    spawn_restate_ingress_capture, text_response,
 };
 use super::*;
 use lash::SessionId;
@@ -96,9 +96,9 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("turn input route test should not call the provider")
@@ -109,7 +109,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .build()
         .expect("model spec");
     let event_tx = SessionEventRegistry::new(16);
-    let core = inline_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
@@ -146,6 +146,9 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = state.current_session_id();
+    // The engine admits none of the inputs: the test asserts which of them
+    // the host's settle leaves pending.
+    let _hold = double.hold_session_drive(&session_id).await;
 
     let no_active = enqueue_turn_input(
         State(state.clone()),
@@ -341,19 +344,28 @@ async fn spawn_restate_admin_with_workflow_status(status: Option<&str>) -> Strin
     format!("http://{addr}")
 }
 
-async fn turn_cancel_test_state(data_dir: &std::path::Path, admin_url: String) -> AppState {
-    turn_cancel_test_state_with_ingress(data_dir, admin_url, "http://127.0.0.1:8080".to_string())
-        .await
+async fn turn_cancel_test_state(
+    double: &lash_restate_test::RestateTestBackend,
+    data_dir: &std::path::Path,
+    admin_url: String,
+) -> AppState {
+    turn_cancel_test_state_with_ingress(
+        double,
+        data_dir,
+        admin_url,
+        "http://127.0.0.1:8080".to_string(),
+    )
+    .await
 }
 
 async fn turn_cancel_test_state_with_ingress(
+    double: &lash_restate_test::RestateTestBackend,
     data_dir: &std::path::Path,
     admin_url: String,
     restate_ingress_url: String,
 ) -> AppState {
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("turn cancellation routing test should not call the provider")
@@ -364,7 +376,7 @@ async fn turn_cancel_test_state_with_ingress(
         .build()
         .expect("model spec");
     let event_tx = SessionEventRegistry::new(16);
-    let core = explicit_durable_test_facets(data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
@@ -416,7 +428,8 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let admin_url = spawn_restate_admin_with_workflow_status(None).await;
-    let mut state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
     let trace_path = data_dir.join("dangling-cancel.jsonl");
     state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
     let session_id = state.current_session_id();
@@ -541,7 +554,8 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let admin_url = spawn_restate_admin_with_workflow_status(Some("suspended")).await;
-    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
     state.track_turn(&session_id, &TurnId::from("live-turn"));
@@ -637,17 +651,10 @@ async fn stop_over_real_process_await_commits_cancelled_terminal_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create Stop-over-process data dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let process_registry = double.engine_stores().process_registry();
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-stop-over-process-await")
         .complete(|_| async {
@@ -668,11 +675,12 @@ finish(await handle);
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
         .expect("build Stop-over-process core");
+    crate::tests::install_test_process_worker(&double, &core);
     let process_observer = core
         .processes()
         .observer()
@@ -784,17 +792,24 @@ finish(await handle);
         matches!(turn.status, lash::TurnStatus::Cancelled),
         "{turn:?}"
     );
-    assert!(matches!(
-        process_registry
-            .get_process(&process_id)
-            .await
-            .expect("process record after Stop")
-            .expect("Stop keeps the process record present")
-            .outcome,
-        Some(lash::process::ProcessAwaitOutput::Settled { ref output })
-            if !output.is_success()
-                && output.value_for_projection()["source"] == "cancellation"
-    ));
+    // The cancelled turn's process settles through the engine's parent-end
+    // cancellation, after the turn's own terminal.
+    let process_outcome = tokio::time::timeout(
+        Duration::from_secs(10),
+        state.core.processes().await_output(&process_id),
+    )
+    .await
+    .expect("the awaited process settles after Stop")
+    .expect("process outcome after Stop");
+    assert!(
+        matches!(
+            &process_outcome,
+            lash::process::ProcessAwaitOutput::Settled { output }
+                if !output.is_success()
+                    && output.value_for_projection()["source"] == "cancellation"
+        ),
+        "{process_outcome:?}"
+    );
     super::tests::wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(10))
         .await;
     assert!(state.active_turns.for_session(&session_id).is_none());
@@ -851,7 +866,8 @@ impl lash::TurnAttach for ConcurrentCancelTerminal {
 fn concurrent_stops_publish_one_done_and_trace_winning_request() {
     run_async_test_on_stack_budget("concurrent-stops", || async {
         let data_dir = tempfile::tempdir().unwrap();
-        let mut state = turn_cancel_test_state(data_dir.path(), String::new()).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = turn_cancel_test_state(&double, data_dir.path(), String::new()).await;
         let trace_path = data_dir.path().join("cancel.jsonl");
         state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
         let session_id = state.current_session_id();
@@ -975,7 +991,8 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let admin_url = spawn_restate_admin_with_workflow_status(None).await;
-    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
     let session_id = state.current_session_id();
     let session = state
         .core
@@ -1133,17 +1150,12 @@ async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inn
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let admin_url = spawn_restate_admin_with_workflow_status(None).await;
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+    let double = crate::tests::test_double_backend(0).await;
     let state =
-        turn_cancel_test_state_with_ingress(&data_dir, admin_url, restate_ingress_url).await;
+        turn_cancel_test_state_with_ingress(&double, &data_dir, admin_url, restate_ingress_url)
+            .await;
     let session_id = state.current_session_id();
-    let registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open the registry the workbench state shares"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
+    let registry = double.engine_stores().process_registry();
 
     for (mode, turn_id) in [
         (WorkbenchTurnCancelMode::Stop, "stop-turn"),
@@ -1262,7 +1274,8 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
     // The admin reports the invocation still running, so the cancel's liveness
     // check keeps the route: this is the retained branch, not the pruned one.
     let admin_url = spawn_restate_admin_with_workflow_status(Some("running")).await;
-    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
     let session_id = state.current_session_id();
     let turn_id = TurnId::from("retained-route-turn");
     state.track_turn_prompt(
@@ -1428,7 +1441,8 @@ async fn a_pending_cancel_probes_the_roots_lash_turn_inner() {
     let turn_id = TurnId::from("plainly-named-turn");
     let key = lash_restate::turn_workflow_key(&session_id, &turn_id);
     let (admin_url, probed) = spawn_restate_admin_recording_probes(key.clone()).await;
-    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
     state.sessions.ensure(&session_id);
     state.sessions.select(&session_id);
     state.track_turn(&session_id, &turn_id);

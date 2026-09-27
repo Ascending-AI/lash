@@ -42,8 +42,9 @@ async fn inject_message_scopes_emission_to_requested_session() {
         .await
         .expect("open trigger store"),
     );
+    let double = crate::tests::test_double_backend(0).await;
     let mut state = recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;
@@ -79,16 +80,9 @@ async fn inject_message_scopes_emission_to_requested_session() {
     };
     let linked =
         lash::rlm::LinkedModule::link(module, environment).expect("link mail-listener process");
-    let artifact_store = lash::persistence::LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::Store::open(
-            &data_dir
-                .path()
-                .join("lash-sessions")
-                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-        )
-        .await
-        .expect("open workbench Lashlang artifact store"),
-    ));
+    // The engine's own stores: the process the trigger starts reads its
+    // module and environment from them.
+    let artifact_store = lash::persistence::LashlangArtifacts::of_backend(&double.lash_backend());
     artifact_store
         .publish_module_artifact(
             &lash::process::ArtifactOwner::host("mail-payload-test"),
@@ -108,20 +102,13 @@ async fn inject_message_scopes_emission_to_requested_session() {
         args: serde_json::Map::new(),
     };
     let process_identity = process_input.process_identity();
-    let process_env_store = lash_sqlite_store::Store::open(
-        &data_dir
-            .path()
-            .join("lash-sessions")
-            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-    )
-    .await
-    .expect("open workbench process environment store");
+    let process_env_store = double.stores().process_env_store();
     let process_env_spec = lash::process::ProcessExecutionEnvSpec::new(
         Default::default(),
         lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
     );
     let process_env_ref = lash::process::publish_process_execution_env(
-        &process_env_store,
+        process_env_store.as_ref(),
         &lash::process::ArtifactOwner::host("mail-payload-test"),
         &process_env_spec,
     )
@@ -199,22 +186,32 @@ async fn inject_message_scopes_emission_to_requested_session() {
     .expect("deserialize delivery");
 
     let operation_id = "workbench-test-mail-delivery";
-    let scoped_effect_controller = lash::durability::EffectHost::scoped_static(
-        state.core.effect_host().as_ref(),
+    // The workbench's mail workflow emits from its handler; so does the test.
+    let report = crate::tests::run_in_test_handler(
+        &double,
         lash::runtime::AdmittedScope::runtime_operation(format!("trigger:{operation_id}")),
+        Arc::new({
+            let state = state.clone();
+            let session_id = SessionId::from(req_session_id);
+            move |scoped| {
+                let state = state.clone();
+                let session_id = session_id.clone();
+                let delivery = delivery.clone();
+                Box::pin(async move {
+                    enqueue_mail_received_trigger_command(
+                        &state,
+                        &session_id,
+                        &delivery,
+                        operation_id,
+                        scoped,
+                    )
+                    .await
+                    .expect("emit mail received trigger command")
+                })
+            }
+        }),
     )
-    .expect("scoped effect controller")
-    .expect("the backend host lends an owned controller");
-
-    let report = enqueue_mail_received_trigger_command(
-        &state,
-        &SessionId::from(req_session_id),
-        &delivery,
-        operation_id,
-        scoped_effect_controller,
-    )
-    .await
-    .expect("emit mail received trigger command");
+    .await;
 
     let deliveries = trigger_store
         .list_deliveries_by_subscription_id(&subscription_id)

@@ -1,7 +1,6 @@
 use super::tests::{
-    DecoratedBackend, detached_trigger_store, explicit_durable_test_facets,
-    explicit_durable_test_facets_on, run_async_test_on_stack_budget, spawn_restate_ingress_capture,
-    test_file_backend,
+    DecoratedBackend, detached_trigger_store, explicit_durable_test_facets_on,
+    run_async_test_on_stack_budget, spawn_restate_ingress_capture,
 };
 use super::*;
 use lash::ProcessId;
@@ -32,10 +31,9 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let sqlite = test_file_backend(&data_dir);
-    let process_registry = sqlite.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
+    let double = crate::tests::test_double_backend(0).await;
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-        sqlite.session_store_factory();
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("await-work route test should not call the provider")
@@ -50,8 +48,8 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     // composition-owned watched decorator, feeding an mpsc channel.
     let (sink_tx, mut sink_rx) = mpsc::channel::<lash::process::ProcessEvent>(16);
     let (fault_tx, _fault_rx) = mpsc::channel::<WorkerFaultNotice>(16);
-    let (watched, wiring) = watched_process_work(Arc::clone(&process_registry), sink_tx, fault_tx);
-    let backend = DecoratedBackend::over(sqlite.into()).with_process_work(wiring);
+    let (watched, wiring) = watched_process_work(&double, sink_tx, fault_tx);
+    let backend = DecoratedBackend::over(double.lash_backend()).with_process_work(wiring);
     let core = explicit_durable_test_facets_on(backend.into())
         .provider(provider)
         .model(model)
@@ -227,17 +225,10 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let process_registry = double.engine_stores().process_registry();
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("orphaned process API test should not call the provider")
@@ -248,7 +239,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         .build()
         .expect("model spec");
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
@@ -1028,17 +1019,10 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let process_registry = double.engine_stores().process_registry();
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("session delete retention test should not call the provider")
@@ -1049,7 +1033,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         .build()
         .expect("model spec");
     let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
@@ -1164,14 +1148,34 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         "every registered row is on the runtime-wide rail before the delete"
     );
 
-    let administration = state.core.session_administration().await;
-    let context = administration
-        .delete_context(&deleted_session_id)
-        .expect("issue inline session deletion");
-    let retention = state
-        .delete_session_and_reclaim_processes(context)
-        .await
-        .expect("delete the session and reclaim its finished work");
+    let reported = Arc::new(Mutex::new(None));
+    crate::tests::run_session_delete_in_handler(
+        &double,
+        &state.core,
+        &deleted_session_id,
+        Arc::new({
+            let state = state.clone();
+            let reported = Arc::clone(&reported);
+            move |context| {
+                let state = state.clone();
+                let reported = Arc::clone(&reported);
+                Box::pin(async move {
+                    let retention = state
+                        .delete_session_and_reclaim_processes(context)
+                        .await
+                        .map_err(|error| format!("{error:?}"))?;
+                    *reported.lock_recover() = Some(retention);
+                    Ok(())
+                })
+            }
+        }),
+    )
+    .await
+    .expect("delete the session and reclaim its finished work");
+    let retention = reported
+        .lock_recover()
+        .take()
+        .expect("the deletion reported its reclaimed work");
     assert_eq!(retention.pruned_processes, 1, "one finished row reclaimed");
     assert_eq!(
         retention.pruned_events, 1,
@@ -1305,22 +1309,30 @@ async fn work_rail_process_ids(state: &AppState) -> Vec<String> {
     ids
 }
 
+/// The Restate process work over `double`'s stores with the app sink on its
+/// registry decorator, as bootstrap's engine config installs it.
 fn watched_process_work(
-    registry: Arc<dyn lash::process::ProcessRegistry>,
+    double: &lash_restate_test::RestateTestBackend,
     sink_tx: tokio::sync::mpsc::Sender<lash::process::ProcessEvent>,
     fault_tx: tokio::sync::mpsc::Sender<WorkerFaultNotice>,
 ) -> (
     Arc<dyn lash::process::ProcessRegistry>,
     lash::process::ProcessWorkWiring,
 ) {
-    let watched = lash::process::watch_process_registry_with_sink(
-        registry,
+    let authority = lash_restate::RestateAuthorityId::new(format!(
+        "lash-restate-test-{}",
+        double.server().config().seed
+    ))
+    .expect("the double's authority id");
+    let wiring = lash_restate::RestateProcessDeployment::new_with_sink(
+        double.connection(),
+        authority,
+        double.engine_stores().process_registry(),
+        double.engine_stores().process_continuations(),
         Some(Arc::new(ChannelProcessEventSink::new(sink_tx, fault_tx))),
-    );
-    let registry = Arc::clone(watched.registry());
-    let process_work = lash::process::NativeProcessWork::for_registry(Arc::clone(&registry));
-    let wiring = lash::process::ProcessWorkWiring::new(watched, Arc::new(process_work));
-    (registry, wiring)
+    )
+    .process_work();
+    (Arc::clone(wiring.registry()), wiring)
 }
 
 #[test]
@@ -1342,17 +1354,10 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
+    let double = crate::tests::test_double_backend(0).await;
+    let process_registry = double.engine_stores().process_registry();
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("work rail window test should not call the provider")
@@ -1362,7 +1367,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())

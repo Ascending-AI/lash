@@ -655,7 +655,7 @@ async fn run_button_trigger(
     )
     .await?;
     // The wake it delivers is a root the engine starts on its own.
-    watch_session_roots(&state, &request.session_id);
+    watch_session_roots(&state, &request.session_id).await;
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
@@ -710,7 +710,7 @@ async fn run_mail_received(
     )
     .await?;
     // The wake it delivers is a root the engine starts on its own.
-    watch_session_roots(&state, &request.session_id);
+    watch_session_roots(&state, &request.session_id).await;
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(

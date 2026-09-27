@@ -13,7 +13,6 @@ use super::*;
 /// for it and must still arrive on the live stream exactly once.
 #[tokio::test]
 async fn the_live_stream_carries_one_user_row_per_input_through_settlement() {
-    let data_dir = tempfile::tempdir().expect("fig3206 live stream tempdir");
     let (provider_entered_tx, mut provider_entered_rx) = mpsc::unbounded_channel();
     let provider_release = Arc::new(tokio::sync::Notify::new());
     let provider_release_for_completion = Arc::clone(&provider_release);
@@ -41,7 +40,8 @@ async fn the_live_stream_carries_one_user_row_per_input_through_settlement() {
         })
         .build()
         .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
     let sent_text = "the send the operator typed";
     let injected_text = "the input injected mid-turn";

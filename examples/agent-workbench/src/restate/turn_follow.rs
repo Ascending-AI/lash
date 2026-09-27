@@ -111,7 +111,7 @@ pub(crate) async fn start_user_turn(
         .await
         .map_err(AppError::session_open)?;
     apply_model_selection_to_session(state, &session, turn_model, "user_turn").await?;
-    watch_session_roots(state, &request.session_id);
+    watch_session_roots(state, &request.session_id).await;
     // Claimed before the send, so the session's watch leaves this root to
     // the follower below.
     let follows = &state.active_turns.follows;
@@ -184,7 +184,7 @@ async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: T
         session_id: session_id.clone(),
         root: turn_id.clone(),
     };
-    watch_session_roots(&state, &session_id);
+    watch_session_roots(&state, &session_id).await;
     let mut backoff = REFOLLOW_BACKOFF;
     loop {
         match state.open_session(&session_id, "turn.resume_follow").await {
@@ -411,20 +411,49 @@ async fn follow_once(
 /// Watch `session_id` for roots the engine starts that no follower here
 /// claimed, and follow each to settlement. One watch per session per process;
 /// it ends when the session can no longer be opened.
-pub(crate) fn watch_session_roots(state: &AppState, session_id: &SessionId) {
+///
+/// The watch subscribes before this returns, so a root the engine starts once
+/// the caller goes on — the send, wake or trigger it is about to admit — is one
+/// the watch sees. An open that fails here is retried by the watch itself.
+pub(crate) async fn watch_session_roots(state: &AppState, session_id: &SessionId) {
     if !state.active_turns.follows.watch(session_id) {
         return;
     }
+    let subscribed = Box::pin(subscribe_session_roots(state, session_id))
+        .await
+        .ok();
     drop(tokio::spawn(run_session_root_watch(
         state.clone(),
         session_id.clone(),
+        subscribed,
     )));
 }
 
-async fn run_session_root_watch(state: AppState, session_id: SessionId) {
+/// A session opened for observation and its update stream from the current
+/// cursor: what a watch reads root starts from.
+type SessionRootSubscription = (
+    lash::LashSession,
+    lash::recoverable_chat::RecoverableChatSubscription,
+);
+
+async fn subscribe_session_roots(
+    state: &AppState,
+    session_id: &SessionId,
+) -> Result<SessionRootSubscription, lash::EmbedError> {
+    let session = state.open_session_for_observation(session_id).await?;
+    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    let updates = session.observe().subscribe_recoverable_chat(cursor);
+    Ok((session, updates))
+}
+
+async fn run_session_root_watch(
+    state: AppState,
+    session_id: SessionId,
+    mut subscribed: Option<SessionRootSubscription>,
+) {
     let follows = state.active_turns.follows.clone();
     loop {
-        watch_until_idle(&state, &session_id).await;
+        watch_until_idle(&state, &session_id, subscribed.take()).await;
         follows.unwatch(&session_id);
         // Work that arrived as the watch was ending takes the watch up again,
         // unless a new watch already has.
@@ -446,26 +475,33 @@ const WATCH_IDLE_CHECK: Duration = Duration::from_secs(1);
 const WATCH_IDLE_CHECKS: u32 = 5;
 
 /// Follow each root the engine starts on `session_id` until the session has
-/// no work left: no followed root, no pending input, no queued work.
-async fn watch_until_idle(state: &AppState, session_id: &SessionId) {
+/// no work left: no followed root, no pending input, no queued work. Reads
+/// from `subscribed` when the caller already subscribed, and subscribes
+/// otherwise.
+async fn watch_until_idle(
+    state: &AppState,
+    session_id: &SessionId,
+    subscribed: Option<SessionRootSubscription>,
+) {
     use lash::recoverable_chat::RecoverableChatUpdate;
 
     let follows = &state.active_turns.follows;
     let mut backoff = REFOLLOW_BACKOFF;
-    let session = loop {
-        match state.open_session_for_observation(session_id).await {
-            Ok(session) => break session,
-            Err(error) => {
-                if AppError::session_open(error).verdict != AppErrorVerdict::Retryable {
-                    return;
+    let (session, mut updates) = match subscribed {
+        Some(subscribed) => subscribed,
+        None => loop {
+            match subscribe_session_roots(state, session_id).await {
+                Ok(subscribed) => break subscribed,
+                Err(error) => {
+                    if AppError::session_open(error).verdict != AppErrorVerdict::Retryable {
+                        return;
+                    }
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(REFOLLOW_BACKOFF_CEILING);
                 }
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(REFOLLOW_BACKOFF_CEILING);
             }
-        }
+        },
     };
-    let cursor = session.observe().recoverable_chat_snapshot().cursor;
-    let mut updates = session.observe().subscribe_recoverable_chat(cursor);
     let mut idle_checks = 0;
     loop {
         let update = tokio::select! {

@@ -158,44 +158,45 @@ pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {
 
 /// Entries directly under the bot's data directory that an earlier store
 /// layout wrote and this build no longer reads: the process environment and
-/// attachment bytes now live in the SQLite backend's session catalog.
+/// attachment bytes now live in the SQLite store set's session catalog.
 pub(crate) const PRIOR_STORE_LAYOUT: &[&str] = &["process-env.db", "attachments"];
 
 /// The directory under the bot's data directory that holds the SQLite
-/// backend's stores.
+/// store set.
 pub(crate) const SESSIONS_ROOT: &str = "lash-sessions";
 
-/// Open the bot's one SQLite backend under `data_dir`, refusing a data
+/// Open the bot's one SQLite store set under `data_dir`, refusing a data
 /// directory an earlier store layout wrote.
-pub(crate) async fn open_backend(data_dir: &Path) -> Result<lash_sqlite_store::SqliteBackend> {
+///
+/// The store set is storage only: the committed transcript, queued turn input
+/// and attachments survive a restart here, while the engine that runs turns
+/// over it is the local restate-server's (ADR 0104).
+pub async fn open_stores(data_dir: &Path) -> Result<lash_sqlite_store::SqliteStoreSet> {
+    std::fs::create_dir_all(data_dir)
+        .with_context(|| format!("create bot data dir {}", data_dir.display()))?;
     crate::prior_store_layout::refuse_prior_store_layout(data_dir, PRIOR_STORE_LAYOUT)?;
-    lash_sqlite_store::SqliteBackend::open(data_dir.join(SESSIONS_ROOT))
+    lash_sqlite_store::SqliteStoreSet::open(data_dir.join(SESSIONS_ROOT))
         .await
-        .map_err(|error| anyhow::anyhow!("open the bot's SQLite backend: {error}"))
+        .map_err(|error| anyhow::anyhow!("open the bot's SQLite store set: {error}"))
 }
 
 /// Durability choices, all of them deliberate for an example:
 ///
-/// * **One SQLite file backend** on the data directory's sessions root —
-///   the committed transcript, any queued turn input not yet drained, and the
-///   effect journal all survive a restart. This is the load-bearing one. The
-///   README documents the Restate upgrade.
-/// * **The engine runs every turn** — each sent message is driven by the
-///   session's engine as soon as it is accepted; the bot waits only on a
-///   mention's turn.
+/// * **One SQLite file store set** on the data directory's sessions root
+///   ([`open_stores`]) holds the committed transcript, any queued turn input
+///   and attachments, so they survive a restart.
+/// * **Restate runs every turn** — `backend` is the engine over that store
+///   set: each sent message is driven by the session's engine as soon as it
+///   is accepted, and the bot waits only on a mention's turn. The host never
+///   drives a turn itself.
 pub async fn build_core(
     config: &RuntimeConfig,
+    backend: lash::Backend,
     provider: ProviderHandle,
     model: ModelSpec,
     api: Arc<SlackApi>,
 ) -> Result<BotRuntime> {
     validate_stdio_commands(&config.mcp_servers)?;
-
-    let data_dir = &config.data_dir;
-    std::fs::create_dir_all(data_dir)
-        .with_context(|| format!("create bot data dir {}", data_dir.display()))?;
-
-    let backend = Arc::new(open_backend(data_dir).await?);
 
     // The factory is built even with no configured servers: it carries this
     // host's sampling, elicitation and roots policy, and a server attached later
@@ -225,7 +226,7 @@ pub async fn build_core(
             status.last_error.as_ref().map_or("none", |f| f.message())
         );
     }
-    let mut builder = LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
+    let mut builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, which writes into that same spec.

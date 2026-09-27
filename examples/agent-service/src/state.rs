@@ -19,54 +19,24 @@ pub(crate) struct AppStateData {
     db: Arc<Mutex<AppDb>>,
     default_model: String,
     default_model_variant: Option<String>,
-    #[cfg_attr(not(feature = "restate"), allow(dead_code))]
-    durability: AgentServiceDurability,
-    #[cfg(feature = "restate")]
-    restate_ingress_url: Option<String>,
+    restate: lash_restate::RestateConnection,
 }
 
 impl AppStateData {
-    // Every parameter is a distinct required collaborator; the repo's
-    // convention for constructors of this shape is the allow, not a config
-    // struct (see `workflow-graph-roundtrip`).
-    #[allow(clippy::too_many_arguments)]
-    #[cfg(feature = "restate")]
-    pub(crate) fn from_shared_db(
+    pub(crate) fn new(
         core: LashCore,
-        turn_work_driver: TurnWorkDriver,
         db: Arc<Mutex<AppDb>>,
         default_model: String,
         default_model_variant: Option<String>,
-        durability: AgentServiceDurability,
-        restate_ingress_url: Option<String>,
+        restate: lash_restate::RestateConnection,
     ) -> Self {
         Self {
+            turn_work_driver: core.turn_work_driver(),
             core,
-            turn_work_driver,
             db,
             default_model,
             default_model_variant,
-            durability,
-            restate_ingress_url,
-        }
-    }
-
-    #[cfg(not(feature = "restate"))]
-    pub(crate) fn new(
-        core: LashCore,
-        turn_work_driver: TurnWorkDriver,
-        db: AppDb,
-        default_model: String,
-        default_model_variant: Option<String>,
-        durability: AgentServiceDurability,
-    ) -> Self {
-        Self {
-            core,
-            turn_work_driver,
-            db: Arc::new(Mutex::new(db)),
-            default_model,
-            default_model_variant,
-            durability,
+            restate,
         }
     }
 
@@ -87,14 +57,9 @@ impl AppStateData {
         self.default_model_variant.as_deref()
     }
 
-    #[cfg(feature = "restate")]
-    pub(crate) fn durability(&self) -> AgentServiceDurability {
-        self.durability
-    }
-
-    #[cfg(feature = "restate")]
-    pub(crate) fn restate_ingress_url(&self) -> Option<&str> {
-        self.restate_ingress_url.as_deref()
+    /// The Restate ingress the service's own workflows are reached through.
+    pub(crate) fn restate_ingress(&self) -> lash_restate::RestateIngressClient {
+        lash_restate::RestateIngressClient::new(self.restate.clone())
     }
 
     pub(crate) async fn open_session(
@@ -170,13 +135,7 @@ impl AppStateData {
     }
 
     pub(crate) async fn discard_pending_chat_fork(&self, chat_id: &str) -> AppResult<()> {
-        let administration = self.core.session_administration().await;
-        let context = administration
-            .delete_context(chat_id)
-            .map_err(|err| AppError::internal(err.to_string()))?;
-        LashCore::delete_session(context)
-            .await
-            .map_err(|err| AppError::internal(err.to_string()))?;
+        crate::chat_discard::discard_chat_session(&self.restate_ingress(), chat_id).await?;
         let chat_id = chat_id.to_string();
         self.with_db(move |db| db.delete_chat(&chat_id)).await
     }
@@ -260,55 +219,6 @@ impl From<lash::EmbedError> for AppError {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AgentServiceDurability {
-    Local,
-    Restate,
-}
-
-impl AgentServiceDurability {
-    pub(crate) fn configured() -> anyhow_like::Result<Self> {
-        let mut args = std::env::args().skip(1);
-        let mut from_args = None;
-        while let Some(arg) = args.next() {
-            if let Some(value) = arg.strip_prefix("--durability=") {
-                from_args = Some(value.to_string());
-                continue;
-            }
-            if arg == "--durability" {
-                let value = args
-                    .next()
-                    .ok_or_else(|| "--durability requires local or restate".to_string())?;
-                from_args = Some(value);
-                continue;
-            }
-            return Err(format!("unknown argument `{arg}`"));
-        }
-
-        let raw = from_args
-            .or_else(|| std::env::var("AGENT_SERVICE_DURABILITY").ok())
-            .unwrap_or_else(|| "local".to_string());
-        Self::parse(&raw)
-    }
-
-    fn parse(value: &str) -> anyhow_like::Result<Self> {
-        match value {
-            "local" => Ok(Self::Local),
-            "restate" => Ok(Self::Restate),
-            other => Err(format!(
-                "invalid durability `{other}`; expected `local` or `restate`"
-            )),
-        }
-    }
-
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Restate => "restate",
-        }
-    }
-}
-
 pub(crate) mod anyhow_like {
     pub(crate) type Result<T> = std::result::Result<T, String>;
 }
@@ -326,20 +236,61 @@ pub(crate) mod test_support {
             .expect("model spec")
     }
 
-    pub(crate) async fn test_core(data_dir: &std::path::Path) -> LashCore {
+    /// The Restate double a service test runs on: lash-restate's engine and
+    /// services over a fresh SQLite memory store set, connected to an
+    /// in-process server double. Keep it alive to the end of the test
+    /// (FIG-3723); every core the test builds runs over its backend, so a
+    /// later core reopens what an earlier one wrote.
+    pub(crate) async fn test_double() -> lash_restate_test::RestateTestBackend {
+        lash_restate_test::backend(0x0a6e_5e7c, lash_restate_test::ServerConfig::default())
+            .await
+            .expect("build the Restate double")
+    }
+
+    /// Serve the service's own chat-discard workflow on `double` for `core`,
+    /// as the deployment's endpoint binds it beside lash's services.
+    pub(crate) async fn serve_chat_discard(
+        double: &lash_restate_test::RestateTestBackend,
+        core: &LashCore,
+    ) {
+        use crate::chat_discard::AgentServiceChatDiscard as _;
+
+        let authority = lash_restate::RestateAuthorityId::new(format!(
+            "lash-restate-test-{}",
+            double.server().config().seed
+        ))
+        .expect("the double's authority id");
+        let discard = crate::chat_discard::AgentServiceChatDiscardImpl::new(
+            core,
+            double.connection(),
+            authority,
+        )
+        .await;
+        double
+            .server()
+            .register(
+                restate_sdk::endpoint::Endpoint::builder()
+                    .bind(discard.serve())
+                    .build(),
+            )
+            .await
+            .expect("register the chat-discard workflow on the double");
+    }
+
+    pub(crate) async fn test_core(double: &lash_restate_test::RestateTestBackend) -> LashCore {
         let provider = lash::testing::TestProvider::builder()
             .kind("agent-service-test-support")
             .build()
             .into_handle();
-        test_core_with_provider(data_dir, provider).await
+        test_core_with_provider(double, provider).await
     }
 
     pub(crate) async fn test_core_with_provider(
-        data_dir: &std::path::Path,
+        double: &lash_restate_test::RestateTestBackend,
         provider: lash::provider::ProviderHandle,
     ) -> LashCore {
         test_core_with_facets(
-            data_dir,
+            double,
             provider,
             None,
             lash::tools::ToolSourcePolicy::Tolerate,
@@ -349,13 +300,15 @@ pub(crate) mod test_support {
 
     /// A core that refuses to serve a chat whose persisted tools have no
     /// source here — the unattended-deployment posture (FIG-3367).
-    pub(crate) async fn test_core_requiring_tool_sources(data_dir: &std::path::Path) -> LashCore {
+    pub(crate) async fn test_core_requiring_tool_sources(
+        double: &lash_restate_test::RestateTestBackend,
+    ) -> LashCore {
         let provider = lash::testing::TestProvider::builder()
             .kind("agent-service-test-support")
             .build()
             .into_handle();
         test_core_with_facets(
-            data_dir,
+            double,
             provider,
             None,
             lash::tools::ToolSourcePolicy::Require,
@@ -364,24 +317,23 @@ pub(crate) mod test_support {
     }
 
     pub(crate) async fn test_core_with_facets(
-        data_dir: &std::path::Path,
+        double: &lash_restate_test::RestateTestBackend,
         provider: lash::provider::ProviderHandle,
         tools: Option<Arc<dyn lash::tools::ToolProvider>>,
         tool_source_policy: lash::tools::ToolSourcePolicy,
     ) -> LashCore {
-        let backend = test_backend(data_dir).await;
+        let backend = double.lash_backend();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &backend.clone().into(),
+            &backend,
         );
-        let mut builder =
-            LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
-                .tool_source_policy(tool_source_policy)
-                .provider(provider);
+        let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+            .tool_source_policy(tool_source_policy)
+            .provider(provider);
         if let Some(tools) = tools {
             builder = builder.tools(tools);
         }
@@ -396,22 +348,10 @@ pub(crate) mod test_support {
             .expect("core")
     }
 
-    /// The Local durability backend the service opens: a file
-    /// `SqliteBackend` on the data directory's sessions root.
-    pub(crate) async fn test_backend(
-        data_dir: &std::path::Path,
-    ) -> Arc<lash_sqlite_store::SqliteBackend> {
-        Arc::new(
-            lash_sqlite_store::SqliteBackend::open(data_dir.join("lash-sessions"))
-                .await
-                .expect("open the Local SQLite backend"),
-        )
-    }
-
     /// A core with an extra host tool source, for seeding a chat whose
     /// checkpoint records a tool a later core will not carry.
     pub(crate) async fn test_core_with_tools(
-        data_dir: &std::path::Path,
+        double: &lash_restate_test::RestateTestBackend,
         tools: Arc<dyn lash::tools::ToolProvider>,
     ) -> LashCore {
         let provider = lash::testing::TestProvider::builder()
@@ -419,7 +359,7 @@ pub(crate) mod test_support {
             .build()
             .into_handle();
         test_core_with_facets(
-            data_dir,
+            double,
             provider,
             Some(tools),
             lash::tools::ToolSourcePolicy::Tolerate,
@@ -427,30 +367,19 @@ pub(crate) mod test_support {
         .await
     }
 
-    pub(crate) fn test_state(core: &LashCore, db: AppDb) -> AppStateData {
-        #[cfg(feature = "restate")]
-        {
-            AppStateData::from_shared_db(
-                core.clone(),
-                core.turn_work_driver(),
-                Arc::new(Mutex::new(db)),
-                "mock-model".to_string(),
-                None,
-                AgentServiceDurability::Local,
-                None,
-            )
-        }
-        #[cfg(not(feature = "restate"))]
-        {
-            AppStateData::new(
-                core.clone(),
-                core.turn_work_driver(),
-                db,
-                "mock-model".to_string(),
-                None,
-                AgentServiceDurability::Local,
-            )
-        }
+    /// The service state over `core`, reaching Restate through `double`.
+    pub(crate) fn test_state(
+        double: &lash_restate_test::RestateTestBackend,
+        core: &LashCore,
+        db: AppDb,
+    ) -> AppStateData {
+        AppStateData::new(
+            core.clone(),
+            Arc::new(Mutex::new(db)),
+            "mock-model".to_string(),
+            None,
+            double.connection(),
+        )
     }
 }
 
@@ -485,6 +414,7 @@ mod session_language_tests {
 
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
+        let double = crate::state::test_support::test_double().await;
         let seen = Arc::new(Mutex::new(Vec::<String>::new()));
         let provider = lash::testing::TestProvider::builder()
             .kind("agent-service-dialect-smuggle")
@@ -507,9 +437,10 @@ mod session_language_tests {
             })
             .build()
             .into_handle();
-        let core = test_core_with_provider(data_dir, provider).await;
+        let core = test_core_with_provider(&double, provider).await;
 
         let service = test_state(
+            &double,
             &core,
             AppDb::open(&data_dir.join("app-smuggle.db")).expect("app db"),
         );
@@ -574,6 +505,7 @@ mod session_language_tests {
     async fn a_reopen_that_lost_a_tool_tells_the_user_once() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
+        let double = crate::state::test_support::test_double().await;
         let db_path = data_dir.join("app-tool-loss.db");
         let chat_id = {
             let mut db = AppDb::open(&db_path).expect("app db");
@@ -584,7 +516,7 @@ mod session_language_tests {
 
         // Seed: a core that carries the source persists the tool in the
         // session's checkpoint.
-        let seeding_core = test_core_with_tools(data_dir, Arc::new(SeedTools)).await;
+        let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
         let seeded = seeding_core
             .session(chat_id.clone())
             .session_spec(lash::SessionSpec::inherit().model(mock_model_spec()))
@@ -603,8 +535,8 @@ mod session_language_tests {
         seeded.close().await.expect("close the seeded session");
 
         // Serve: the service's own core has no such source.
-        let core = test_core(data_dir).await;
-        let service = test_state(&core, AppDb::open(&db_path).expect("app db"));
+        let core = test_core(&double).await;
+        let service = test_state(&double, &core, AppDb::open(&db_path).expect("app db"));
         let session = service
             .open_session(&chat_id, mock_model_spec())
             .await
@@ -681,6 +613,7 @@ mod session_language_tests {
     async fn a_require_core_refuses_to_serve_a_chat_that_lost_a_tool() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
+        let double = crate::state::test_support::test_double().await;
         let db_path = data_dir.join("app-require.db");
         let chat_id = {
             let mut db = AppDb::open(&db_path).expect("app db");
@@ -689,7 +622,7 @@ mod session_language_tests {
                 .id
         };
 
-        let seeding_core = test_core_with_tools(data_dir, Arc::new(SeedTools)).await;
+        let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
         let seeded = seeding_core
             .session(chat_id.clone())
             .session_spec(lash::SessionSpec::inherit().model(mock_model_spec()))
@@ -707,8 +640,8 @@ mod session_language_tests {
             .expect("append a committed message while the tool source is present");
         seeded.close().await.expect("close the seeded session");
 
-        let core = test_core_requiring_tool_sources(data_dir).await;
-        let service = test_state(&core, AppDb::open(&db_path).expect("app db"));
+        let core = test_core_requiring_tool_sources(&double).await;
+        let service = test_state(&double, &core, AppDb::open(&db_path).expect("app db"));
         let refusal = match service.open_session(&chat_id, mock_model_spec()).await {
             Ok(_) => panic!("a Require core must refuse a chat that lost a tool"),
             Err(error) => error.message,
@@ -731,9 +664,11 @@ mod session_language_tests {
     async fn a_chat_reopens_under_the_config_it_recorded() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
-        let core = test_core(data_dir).await;
+        let double = crate::state::test_support::test_double().await;
+        let core = test_core(&double).await;
 
         let service = test_state(
+            &double,
             &core,
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         );

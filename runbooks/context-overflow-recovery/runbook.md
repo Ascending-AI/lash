@@ -40,8 +40,10 @@ reproduce. It emits
 `context-overflow-recovery e2e passed: rows=N` only after the focused contract test and
 every row's gates pass.
 
-**No container or model token.** The store is a SQLite scratch
-directory, fresh per row; the provider is scripted and makes no provider
+**No container or model token.** The store set is a SQLite scratch
+directory, fresh per row, and the engine is a local `restate-server` the
+companion starts through `scripts/ci/with-service.sh restate` (the zero-infra
+effect engine, ADR 0104); the provider is scripted and makes no provider
 network call. In a Kiln fork, the
 companion builds through the shared Bazel pool and runs the harness locally.
 Portable CI uses Cargo because it has no Kiln fork. Do not configure a live

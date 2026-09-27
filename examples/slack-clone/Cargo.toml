@@ -56,10 +56,12 @@ path = "src/bin/live_e2e.rs"
 required-features = ["live-e2e"]
 
 # cargo-shear resolves `use` statements per crate directory and cannot see
-# `examples/shared/ndjson.rs`, which `src/platform/human_api.rs` pulls in with
-# `#[path]`; that file is the only user of `bytes` here.
+# the `examples/shared` files pulled in with `#[path]`:
+# `examples/shared/ndjson.rs` (via `src/platform/human_api.rs`) is the only
+# user of `bytes` here, and `examples/shared/local_restate.rs` the only user of
+# `restate-sdk`.
 [package.metadata.cargo-shear]
-ignored = ["bytes"]
+ignored = ["bytes", "restate-sdk"]
 
 # Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
 # artifact store. `LashCore::standard_builder(TurnBudget::Unbounded)` pre-seeds the standard protocol
@@ -72,13 +74,14 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
-lash = { workspace = true }
+lash = { workspace = true, features = ["restate"] }
 lash-plugin-mcp = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../../crates/lash-sqlite-store", version = "=0.0.0-dev", default-features = false }
 # `form` is not optional here: Slack accepts form-encoded bodies for every Web
 # API method and JSON for only some, so the client's default encoding is form.
 reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }
+restate-sdk = { workspace = true }
 rmcp = { workspace = true, features = [
     "elicitation",
     "macros",
@@ -95,5 +98,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-lash = { workspace = true, features = ["testing"] }
+lash = { workspace = true, features = ["restate", "testing"] }
+lash-restate-test = { workspace = true }
 tempfile = { workspace = true }

@@ -1188,6 +1188,7 @@ mod zero_move_turn_tests {
     async fn a_turn_that_never_plays_leaves_the_board_playable() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
+        let double = crate::state::test_support::test_double().await;
         let seen = Arc::new(Mutex::new(Vec::<String>::new()));
         let provider = scripted_provider(
             "agent-service-zero-move",
@@ -1197,8 +1198,9 @@ mod zero_move_turn_tests {
             ],
             Arc::clone(&seen),
         );
-        let core = test_core_with_provider(data_dir, provider).await;
+        let core = test_core_with_provider(&double, provider).await;
         let state = test_state(
+            &double,
             &core,
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         );
@@ -1260,6 +1262,7 @@ mod zero_move_turn_tests {
     async fn a_turn_that_plays_spends_no_retry() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
+        let double = crate::state::test_support::test_double().await;
         let seen = Arc::new(Mutex::new(Vec::<String>::new()));
         let provider = scripted_provider(
             "agent-service-one-move",
@@ -1269,8 +1272,9 @@ mod zero_move_turn_tests {
             ],
             Arc::clone(&seen),
         );
-        let core = test_core_with_provider(data_dir, provider).await;
+        let core = test_core_with_provider(&double, provider).await;
         let state = test_state(
+            &double,
             &core,
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         );
@@ -1312,8 +1316,10 @@ mod zero_move_turn_tests {
     async fn the_zero_move_policy_is_one_shared_bounded_loop() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
-        let core = crate::state::test_support::test_core(data_dir).await;
+        let double = crate::state::test_support::test_double().await;
+        let core = crate::state::test_support::test_core(&double).await;
         let state = test_state(
+            &double,
             &core,
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         );
@@ -1389,7 +1395,7 @@ mod zero_move_turn_tests {
     }
 }
 
-#[cfg(all(test, feature = "restate"))]
+#[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
@@ -1400,7 +1406,6 @@ mod tests {
 
     use super::*;
     use crate::db::AppDb;
-    use crate::state::AgentServiceDurability;
 
     #[tokio::test]
     async fn message_route_streams_session_observations_with_mock_provider() {
@@ -1423,9 +1428,8 @@ finish("done through route");
             })
             .build()
             .into_handle();
-        let backend: lash::Backend = crate::state::test_support::test_backend(data_dir)
-            .await
-            .into();
+        let double = crate::state::test_support::test_double().await;
+        let backend = double.lash_backend();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
@@ -1449,18 +1453,15 @@ finish("done through route");
                 "test",
             ))
             .expect("core");
-        let turn_work_driver = core.turn_work_driver();
         let db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         ));
-        let state = AppStateData::from_shared_db(
+        let state = AppStateData::new(
             core,
-            turn_work_driver,
             Arc::clone(&db),
             "mock-model".to_string(),
             None,
-            AgentServiceDurability::Local,
-            None,
+            double.connection(),
         );
         let chat = state
             .with_db(|db| db.create_chat("route replay", "mock-model", None))

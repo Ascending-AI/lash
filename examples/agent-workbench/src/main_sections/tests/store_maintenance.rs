@@ -32,6 +32,8 @@ struct StoreMaintenanceFixture {
     pub(super) state: AppState,
     pub(super) session_id: SessionId,
     pub(super) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    /// The Restate double the core runs on, alive for the test (FIG-3723).
+    pub(super) double: lash_restate_test::RestateTestBackend,
 }
 
 struct DeleteFailingWorkbenchAttachmentStore {
@@ -86,29 +88,27 @@ impl lash::persistence::AttachmentStore for DeleteFailingWorkbenchAttachmentStor
     }
 }
 
-/// Build a durable workbench over SQLite with the store factory wired into both
+/// Build a durable workbench on the Restate double with the store set's
+/// catalog wired into both
 /// the core and `AppState`, so the maintenance route sweeps the same catalog the
 /// sessions live in.
-async fn store_maintenance_fixture(
-    data_dir: &std::path::Path,
-    provider: ProviderHandle,
-) -> StoreMaintenanceFixture {
-    std::fs::create_dir_all(data_dir).expect("create store-maintenance data dir");
-    // The backend the shipped workbench opens: its catalog is the
+async fn store_maintenance_fixture(provider: ProviderHandle) -> StoreMaintenanceFixture {
+    // The store set the shipped workbench opens: its catalog is the
     // `AttachmentRootSet`, wired to the process registry so it resolves
     // process-owned attachment intents instead of warning and failing safe, and
     // its attachment store holds the bytes the core writes.
-    let backend = test_file_backend(data_dir);
+    let double = crate::tests::test_double_backend(0).await;
     let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-        backend.session_store_factory();
-    let attachment_store: Arc<dyn lash::persistence::AttachmentStore> = backend.attachment_store();
+        double.stores().session_store_factory();
+    let attachment_store: Arc<dyn lash::persistence::AttachmentStore> =
+        double.stores().attachment_store();
     let model = with_workbench_model_capability(
         lash::ModelSpec::builder("test-model")
             .context_window_tokens(4096)
             .build()
             .expect("store-maintenance model spec"),
     );
-    let core = explicit_durable_test_facets_on(crate::tests::inline_work_backend(backend.into()))
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())
@@ -148,6 +148,7 @@ async fn store_maintenance_fixture(
         state,
         session_id,
         attachment_store,
+        double,
     }
 }
 
@@ -187,18 +188,17 @@ fn store_maintenance_vacuum_reclaims_only_settled_rows() {
 /// it still intends to resume would otherwise silently drop work the caller was
 /// told had been accepted.
 async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
-    let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-store-maintenance-vacuum-{}",
-        uuid::Uuid::new_v4()
-    ));
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-store-maintenance")
         .complete_error("the vacuum test must not call the provider")
         .build()
         .into_handle();
-    let fixture = store_maintenance_fixture(&data_dir, provider).await;
+    let fixture = store_maintenance_fixture(provider).await;
     let state = fixture.state.clone();
     let session_id = fixture.session_id.clone();
+    // The engine admits no pending input while the test asserts what stays
+    // pending across the vacuum.
+    let _hold = fixture.double.hold_session_drive(&session_id).await;
 
     let Json(retained) = enqueue_turn_input(
         State(state.clone()),
@@ -329,7 +329,6 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
     assert_eq!(empty.status, StatusCode::BAD_REQUEST);
 
     drop(state);
-    std::fs::remove_dir_all(&data_dir).expect("remove store-maintenance vacuum data dir");
 }
 
 #[test]
@@ -347,10 +346,6 @@ fn store_maintenance_reclaims_only_unreferenced_attachments() {
 /// thing standing between the referenced blob and deletion is the root set the
 /// route hands the sweep.
 async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
-    let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-store-maintenance-reclaim-{}",
-        uuid::Uuid::new_v4()
-    ));
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-store-maintenance")
         .complete(|_request| async {
@@ -360,7 +355,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
         })
         .build()
         .into_handle();
-    let fixture = store_maintenance_fixture(&data_dir, provider).await;
+    let fixture = store_maintenance_fixture(provider).await;
     let state = fixture.state.clone();
     let session_id = fixture.session_id.clone();
     let attachment_store = Arc::clone(&fixture.attachment_store);
@@ -499,7 +494,6 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
     }
 
     drop(state);
-    std::fs::remove_dir_all(&data_dir).expect("remove store-maintenance reclaim data dir");
 }
 
 #[test]
@@ -510,16 +504,12 @@ fn store_maintenance_serves_incomplete_sweep_with_failure_counts() {
 }
 
 async fn store_maintenance_serves_incomplete_sweep_with_failure_counts_inner() {
-    let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-store-maintenance-incomplete-{}",
-        uuid::Uuid::new_v4()
-    ));
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-store-maintenance")
         .complete_error("the incomplete-sweep test must not call the provider")
         .build()
         .into_handle();
-    let fixture = store_maintenance_fixture(&data_dir, provider).await;
+    let fixture = store_maintenance_fixture(provider).await;
     let inner = Arc::clone(&fixture.attachment_store);
     let orphan = inner
         .put(
@@ -566,7 +556,6 @@ async fn store_maintenance_serves_incomplete_sweep_with_failure_counts_inner() {
         .expect("the failed delete leaves the blob intact");
 
     drop(state);
-    std::fs::remove_dir_all(&data_dir).expect("remove incomplete-sweep data dir");
 }
 
 #[test]
@@ -586,16 +575,12 @@ fn store_maintenance_refuses_an_empty_root_set() {
 /// the bytes stay, and only a second request carrying the explicit
 /// authorization deletes them.
 async fn store_maintenance_refuses_an_empty_root_set_inner() {
-    let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-store-maintenance-empty-roots-{}",
-        uuid::Uuid::new_v4()
-    ));
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-store-maintenance")
         .complete_error("the empty-root-set test must not call the provider")
         .build()
         .into_handle();
-    let fixture = store_maintenance_fixture(&data_dir, provider).await;
+    let fixture = store_maintenance_fixture(provider).await;
     let state = fixture.state.clone();
     let attachment_store = Arc::clone(&fixture.attachment_store);
 
@@ -666,7 +651,6 @@ async fn store_maintenance_refuses_an_empty_root_set_inner() {
     }
 
     drop(state);
-    std::fs::remove_dir_all(&data_dir).expect("remove store-maintenance empty-roots data dir");
 }
 
 #[test]

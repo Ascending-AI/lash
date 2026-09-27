@@ -1,28 +1,9 @@
 use super::*;
 
-/// The file backend an approval test runs on: its effect journal is the
-/// durable host the parked approval resumes through.
-async fn approval_backend(
-    data_dir: &std::path::Path,
-    clock: Option<Arc<lash::testing::TestClock>>,
-) -> Arc<lash_sqlite_store::SqliteBackend> {
-    let root = data_dir.join("lash-sessions");
-    let backend = match clock {
-        Some(clock) => {
-            lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-                &root,
-                lash_sqlite_store::SqliteBackendOptions::default(),
-                clock,
-            )
-            .await
-        }
-        None => lash_sqlite_store::SqliteBackend::open(&root).await,
-    };
-    Arc::new(backend.expect("open the approval test backend"))
-}
-
+/// An approval test's core over `backend`, a Restate double's: the engine's
+/// journal is the durable host the parked approval resumes through.
 async fn approval_test_core(
-    backend: &Arc<lash_sqlite_store::SqliteBackend>,
+    backend: &lash::Backend,
     provider: ProviderHandle,
     approvals: approvals::WorkbenchApprovals,
 ) -> LashCore {
@@ -33,9 +14,9 @@ async fn approval_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        &backend.clone().into(),
+        backend,
     );
-    LashCore::rlm_builder(backend.clone().into(), lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend.clone(), lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
@@ -77,7 +58,8 @@ fn approval_approve_resumes_parked_lashlang_instruction_with_success() {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
-        let backend = approval_backend(directory.path(), None).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let backend = double.lash_backend();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-approve")
             .complete(|_| async {
@@ -132,10 +114,6 @@ finish(result);
             .find(|candidate| *candidate == &key)
             .cloned()
             .expect("approval wait is discoverable among all session waits");
-        assert!(discovered.iter().any(|candidate| matches!(
-            &candidate.wait,
-            lash::AwaitEventWaitIdentity::TurnCancelGate
-        )));
         let accepted = core
             .completions()
             .resolve(
@@ -201,7 +179,8 @@ fn a_decided_but_unresolved_approval_repairs_on_retry() {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
-        let backend = approval_backend(directory.path(), None).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let backend = double.lash_backend();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-repair")
             .complete(|_| async {
@@ -241,20 +220,9 @@ finish(result);
             "the decided row no longer lists as pending"
         );
 
-        let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(
-                &directory
-                    .path()
-                    .join("lash-sessions")
-                    .join("process-registry.db"),
-                directory.path().join("processes-sessions"),
-            )
-            .await
-            .expect("open process registry"),
-        ) as Arc<dyn lash::process::ProcessRegistry>;
-        let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(directory.path().join("sessions")),
-        );
+        let process_registry = double.engine_stores().process_registry();
+        let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            double.stores().session_store_factory();
         let state = AppState {
             unknown_turn_terminals: UnknownTurnTerminals::default(),
             core,
@@ -307,7 +275,8 @@ fn approval_denial_preserves_typed_failure_fields_through_lashlang_bridge() {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
-        let backend = approval_backend(directory.path(), None).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let backend = double.lash_backend();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-deny")
             .complete(|_| async {
@@ -383,7 +352,8 @@ fn approval_restart_reopens_the_ledger_and_durable_effect_host() {
         let approval_path = directory.path().join("approvals.db");
         let approvals =
             approvals::WorkbenchApprovals::open(&approval_path).expect("open approval ledger");
-        let backend = approval_backend(directory.path(), None).await;
+        let double = crate::tests::test_double_backend(0).await;
+        let backend = double.lash_backend();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-restart")
             .complete(|_| async {
@@ -396,7 +366,7 @@ finish(result.status);
             })
             .build()
             .into_handle();
-        let core = approval_test_core(&backend, provider, approvals.clone()).await;
+        let core = approval_test_core(&backend, provider.clone(), approvals.clone()).await;
         let session = core
             .session("approval-restart")
             .open()
@@ -422,23 +392,21 @@ finish(result.status);
             .expect("parked approval survives reopen");
         assert_eq!(after_restart.key, before_restart.key);
         assert_eq!(after_restart.arguments, before_restart.arguments);
-        // Fresh handles on the same backend root: what the next process
-        // opens after the loss.
-        let reopened_effect_host = backend
-            .reopen()
-            .await
-            .expect("reopen durable backend after process loss")
-            .effect_host();
+        // A fresh core over the same engine and stores: what the next
+        // process builds after the loss.
+        let reopened_core =
+            approval_test_core(&backend, provider, reopened_approvals.clone()).await;
         assert_eq!(
-            lash::runtime::AwaitEventResolver::resolve_await_event(
-                reopened_effect_host.as_ref(),
-                &reopened_approvals
-                    .completion_key(&after_restart.key)
-                    .expect("read reopened completion key"),
-                approvals::approval_resolution(&after_restart),
-            )
-            .await
-            .expect("resolve through reopened effect host"),
+            reopened_core
+                .completions()
+                .resolve(
+                    reopened_approvals
+                        .completion_key(&after_restart.key)
+                        .expect("read reopened completion key"),
+                    approvals::approval_resolution(&after_restart),
+                )
+                .await
+                .expect("resolve through the reopened core"),
             lash::ResolveOutcome::Accepted
         );
         reopened_approvals
@@ -455,10 +423,9 @@ finish(result.status);
 async fn async_completion_reopen_and_redrive(resolution: lash::Resolution, slug: &str) {
     let directory = tempfile::tempdir().expect("async completion directory");
     let approval_path = directory.path().join("approvals.db");
-    let clock = Arc::new(lash::testing::TestClock::new(1_000_000));
     let approvals = approvals::WorkbenchApprovals::open(&approval_path).unwrap();
-    let backend = approval_backend(directory.path(), Some(clock.clone())).await;
-    let effect_host = backend.effect_host();
+    let double = crate::tests::test_double_backend(0).await;
+    let backend = double.lash_backend();
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let provider = lash::testing::TestProvider::builder()
         .kind("async-completion-redrive")
@@ -498,15 +465,11 @@ try {
     turn.abort();
     assert!(turn.await.unwrap_err().is_cancelled());
     drop(core);
-    drop(effect_host);
-    drop(backend);
     drop(approvals);
-    // Worker loss leaves the effect claim leased. Expire it without waiting.
-    clock.advance(60_000);
+    // The caller is gone; the parked turn is the engine's, and a fresh core
+    // over the same engine and stores resolves and re-attaches to it.
     let approvals = approvals::WorkbenchApprovals::open(&approval_path).unwrap();
-    let backend = approval_backend(directory.path(), Some(clock.clone())).await;
     let core = approval_test_core(&backend, provider, approvals.clone()).await;
-    let session = core.session(&session_id).open().await.unwrap();
     let key = approvals.completion_key(&pending.key).unwrap();
     assert_eq!(
         core.completions()
@@ -515,6 +478,13 @@ try {
             .unwrap(),
         lash::ResolveOutcome::Accepted
     );
+    // The resolution resumes the parked turn in the engine's drive; the
+    // session opens once that turn settled.
+    core.turn_work_driver()
+        .await_terminal(&lash::TurnAddress::new(&session_id, "async-turn"))
+        .await
+        .expect("the resumed turn settles");
+    let session = crate::tests::open_session_once_released(&core, &session_id).await;
     let output = session
         .send(lash::TurnInput::text("Apply async change"))
         .id("async-turn")
@@ -640,7 +610,8 @@ try {
         approvals,
     )
     .await;
-    let session = reopened.session(&session_id).open().await.unwrap();
+    // The engine's drive may still hold the session as the reopen lands.
+    let session = crate::tests::open_session_once_released(&reopened, &session_id).await;
     assert_eq!(
         serde_json::to_value(session.read_view().active_events()).unwrap(),
         before_reopen,

@@ -1,5 +1,7 @@
 mod accounting;
 mod grading;
+#[path = "../../shared/local_restate.rs"]
+mod local_restate;
 mod provenance;
 mod provider_log;
 mod reconcile;

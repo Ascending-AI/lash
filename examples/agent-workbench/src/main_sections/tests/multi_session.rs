@@ -15,7 +15,6 @@ use lash::SessionId;
 /// A created session takes its place beside the boot session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_created_session_runs_beside_the_ambient_default() {
-    let data_dir = tempfile::tempdir().expect("temp dir");
     let provider = scripted_cells_provider(
         "workbench-multi-session",
         vec![
@@ -23,7 +22,8 @@ async fn a_created_session_runs_beside_the_ambient_default() {
             "<typescript>\nfinish(\"ambient answer\");\n</typescript>".to_string(),
         ],
     );
-    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
     let ambient_session_id = state.current_session_id();
 
     let Json(created) = create_session(
@@ -121,7 +121,8 @@ async fn selecting_a_session_moves_the_query_less_default() {
     let data_dir = tempfile::tempdir().expect("temp dir");
     let session_id_path = data_dir.path().join("session-id");
     let provider = scripted_cells_provider("workbench-session-switch", Vec::new());
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     state.sessions = WorkbenchSessions::persistent(session_id_path.clone()).expect("roster");
     let boot_session_id = state.current_session_id();
     state.sessions.ensure(&boot_session_id);
@@ -184,9 +185,12 @@ async fn selecting_a_session_moves_the_query_less_default() {
 async fn the_session_roster_survives_the_web_process() {
     let data_dir = tempfile::tempdir().expect("temp dir");
     let session_id_path = data_dir.path().join("session-id");
+    // One double outlives both host processes: its stores are what the
+    // second reopens.
+    let double = crate::tests::test_double_backend(0).await;
     let created_ids = {
         let provider = scripted_cells_provider("workbench-roster-restart-first", Vec::new());
-        let mut state = queued_send_test_state(data_dir.path(), provider).await;
+        let mut state = queued_send_test_state(&double, provider).await;
         state.sessions = WorkbenchSessions::persistent(session_id_path.clone()).expect("roster");
         state.sessions.ensure(&state.current_session_id());
         let mut created = Vec::new();
@@ -211,7 +215,7 @@ async fn the_session_roster_survives_the_web_process() {
         "workbench-roster-restart-second",
         vec!["<typescript>\nfinish(\"restarted\");\n</typescript>".to_string()],
     );
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let mut state = queued_send_test_state(&double, provider).await;
     state.sessions = WorkbenchSessions::persistent(session_id_path).expect("reopen the roster");
 
     let Json(listing) = list_sessions(State(state.clone()))

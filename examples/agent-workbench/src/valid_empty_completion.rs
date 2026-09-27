@@ -62,17 +62,25 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
         &transport,
     )
     .map_err(|error| error.to_string())?;
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .map_err(|error| error.to_string())?,
-    );
-    let mut builder =
-        lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::bounded(1))
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(provider)
-            .model(model);
+    // The fixture's core is a second deployment beside the workbench's own:
+    // the engine binds lash's services under stable names, so it runs on a
+    // private local restate-server over a fresh SQLite memory store set
+    // (ADR 0104), stopped once the core has shut down.
+    let server = crate::local_restate::LocalRestateServer::spawn("agent-workbench-valid-empty")
+        .await
+        .map_err(|error| format!("{error:#}"))?;
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .map_err(|error| error.to_string())?;
+    let engine = server.restate().engine(Arc::new(stores));
+    let mut builder = lash::LashCore::standard_builder(
+        lash::Backend::new(engine.clone()),
+        lash::TurnBudget::bounded(1),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .provider(provider)
+    .model(model);
     if let Some(marker) = crate::shutdown_marker::factory_from_env("agent-workbench-valid-empty")? {
         builder = builder.plugin(marker);
     }
@@ -82,6 +90,16 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
             uuid::Uuid::new_v4().to_string(),
         ))
         .map_err(|error| error.to_string())?;
+    let worker = lash::durability::DurableProcessWorker::new(
+        core.durable_process_worker_config()
+            .map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    let deployment = server
+        .restate()
+        .serve(engine.endpoint_builder(worker).build())
+        .await
+        .map_err(|error| format!("{error:#}"))?;
     let operation = async {
         let session = core
             .session(format!("valid-empty-{}", uuid::Uuid::new_v4()))
@@ -156,6 +174,8 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
     let flush = core
         .flush_trace_sink()
         .map_err(|error| format!("flush valid-empty trace: {error}"));
+    drop(deployment);
+    drop(server);
     match (operation, shutdown, flush) {
         (Err(primary), shutdown, flush) => {
             if let Err(error) = shutdown {

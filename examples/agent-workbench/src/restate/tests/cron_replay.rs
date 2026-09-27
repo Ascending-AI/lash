@@ -456,27 +456,33 @@ async fn materialize_session(state: &crate::AppState, session_id: &SessionId) {
     );
 }
 
+/// The replay state over a fresh double, which the caller keeps alive for the
+/// test (FIG-3723).
 async fn replay_fixture(
-    data_dir: &tempfile::TempDir,
     source_key: &str,
-) -> (crate::AppState, SessionId, String) {
+) -> (
+    crate::AppState,
+    SessionId,
+    String,
+    lash_restate_test::RestateTestBackend,
+) {
     let trigger_store = crate::tests::memory_trigger_store();
+    let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;
     let session_id = state.current_session_id();
     materialize_session(&state, &session_id).await;
     let object_key = crate::restate::cron_job_key(&session_id, source_key);
-    (state, session_id, object_key)
+    (state, session_id, object_key, double)
 }
 
 #[tokio::test]
 async fn legacy_live_basis_replay_continues_through_journaled_downstream_commands() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
     let source_key = "cron-source:fig1071-replay-live";
-    let (state, session_id, object_key) = replay_fixture(&data_dir, source_key).await;
+    let (state, session_id, object_key, _double) = replay_fixture(source_key).await;
     // No registration exists, so a freshly executed basis would cancel. The
     // journaled legacy `live` value must be replayed instead, and the already
     // journaled fired-at run must be replayed too rather than re-emitted.
@@ -518,9 +524,8 @@ async fn legacy_live_basis_replay_continues_through_journaled_downstream_command
 #[tokio::test]
 async fn legacy_retired_and_unknown_basis_replay_enter_the_cancel_path() {
     for legacy in ["retired", "unknown"] {
-        let data_dir = tempfile::tempdir().expect("tempdir");
         let source_key = "cron-source:fig1071-replay-cancel";
-        let (state, session_id, object_key) = replay_fixture(&data_dir, source_key).await;
+        let (state, session_id, object_key, _double) = replay_fixture(source_key).await;
         let cron_state = replay_cron_state(&session_id, source_key);
         let state_json = serde_json::to_vec(&cron_state).expect("encode cron state");
         let endpoint = cron_endpoint(state);
@@ -554,9 +559,8 @@ async fn legacy_retired_and_unknown_basis_replay_enter_the_cancel_path() {
 
 #[tokio::test]
 async fn unfinished_basis_run_replay_reissues_the_same_run_identity() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
     let source_key = "cron-source:fig1071-replay-unfinished";
-    let (state, session_id, object_key) = replay_fixture(&data_dir, source_key).await;
+    let (state, session_id, object_key, _double) = replay_fixture(source_key).await;
     let cron_state = replay_cron_state(&session_id, source_key);
     let state_json = serde_json::to_vec(&cron_state).expect("encode cron state");
     let endpoint = cron_endpoint(state);
@@ -645,10 +649,10 @@ async fn register_then_disable(
 }
 
 async fn handler_cancels_without_rearming_or_emitting(register_and_disable: bool) {
-    let data_dir = tempfile::tempdir().expect("tempdir");
     let trigger_store = crate::tests::memory_trigger_store();
+    let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;
@@ -731,14 +735,14 @@ async fn handler_cancels_a_disabled_registration_without_rearming_or_emitting() 
 
 #[tokio::test]
 async fn non_live_session_cancels_without_reading_a_failing_registration_store() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
     let trigger_store = Arc::new(OccurrenceFailureTriggerStore::for_subscription_list(
         lash::plugins::PluginError::Session(
             "a non-live session must not probe the registration store".to_string(),
         ),
     ));
+    let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
+        &double,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;

@@ -18,14 +18,10 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     let first_session_ids = WorkbenchSessions::persistent(session_id_path.clone())
         .expect("create persistent session id");
     let session_id = first_session_ids.current();
-    let first_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open first process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
+    // One double outlives both web processes: its stores are the durable
+    // state the second process reconstructs from.
+    let double = crate::tests::test_double_backend(0).await;
+    let first_registry = double.engine_stores().process_registry();
     let first_response = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let first_response_for_provider = Arc::clone(&first_response);
     let first_provider = lash::testing::TestProvider::builder()
@@ -51,7 +47,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
-    let first_core = explicit_durable_test_facets(&data_dir)
+    let first_core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(first_provider)
         .model(model.clone())
         .build(crate::test_core_owner())
@@ -211,10 +207,9 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         })
         .build()
         .into_handle();
-    let resumed_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
-    let resumed_core = explicit_durable_test_facets(&data_dir)
+    let resumed_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        double.stores().session_store_factory();
+    let resumed_core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(resumed_provider)
         .model(model)
         .build(crate::test_core_owner())
