@@ -175,11 +175,8 @@ impl ProjectedHostDescriptor for ProjectedList {
         "list"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        {
             let ProjectedReadRequest::Index(index) = request else {
                 return match request {
                     ProjectedReadRequest::Len => {
@@ -240,7 +237,7 @@ impl ProjectedHostDescriptor for ProjectedList {
                 .get(index)
                 .cloned()
                 .map(ProjectedReadResponse::Value)
-        })
+        }
     }
 }
 
@@ -276,11 +273,8 @@ impl ProjectedHostDescriptor for ProjectedText {
         "string"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        {
             match request {
                 ProjectedReadRequest::Len => {
                     Some(ProjectedReadResponse::Len(self.text.chars().count()))
@@ -366,7 +360,7 @@ impl ProjectedHostDescriptor for ProjectedText {
                 )),
                 _ => None,
             }
-        })
+        }
     }
 }
 

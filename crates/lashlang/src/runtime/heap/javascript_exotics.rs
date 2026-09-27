@@ -1,6 +1,6 @@
 use super::guest_coercion::{GuestPrimitive, PrimitiveHint};
 use super::*;
-use crate::runtime::{ProjectedFuture, javascript_to_number, javascript_to_string};
+use crate::runtime::{javascript_to_number, javascript_to_string};
 use std::collections::BTreeSet;
 
 pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
@@ -863,19 +863,6 @@ impl Heap {
         self.javascript_to_primitive_inner(value, &mut BTreeSet::new(), 1, hint)
     }
 
-    /// ToPrimitive with an explicit hint of a value that is (or reaches) a
-    /// projected host binding.
-    pub(crate) fn javascript_to_primitive_with_hint_async<'a>(
-        &'a self,
-        value: &'a Value,
-        hint: PrimitiveHint,
-    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
-        Box::pin(async move {
-            self.javascript_to_primitive_inner_async(value, &mut BTreeSet::new(), 1, hint)
-                .await
-        })
-    }
-
     /// A plain object's primitive: its guest hooks' answer when it has any,
     /// else its type tag.
     fn plain_object_primitive(
@@ -948,87 +935,6 @@ impl Heap {
             active.remove(id);
         }
         Ok(contains)
-    }
-
-    fn javascript_to_primitive_inner_async<'a>(
-        &'a self,
-        value: &'a Value,
-        active: &'a mut BTreeSet<HeapId>,
-        depth: usize,
-        hint: PrimitiveHint,
-    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
-        Box::pin(async move {
-            super::ensure_value_depth(depth)?;
-            match value {
-                Value::Projected(projected) => {
-                    let materialized = projected.materialize_async().await?;
-                    self.javascript_to_primitive_inner_async(&materialized, active, depth, hint)
-                        .await
-                }
-                Value::Tuple(values) | Value::List(values) => Ok(Value::String(
-                    self.javascript_sequence_string_async(values, active, depth)
-                        .await?
-                        .into(),
-                )),
-                Value::Ref(id) => {
-                    let values = match self.get(*id)? {
-                        HeapObject::Tuple(values) | HeapObject::List(values) => values.as_slice(),
-                        HeapObject::RegExpMatch(result) => result.items.as_slice(),
-                        _ => {
-                            return self.javascript_to_primitive_inner(value, active, depth, hint);
-                        }
-                    };
-                    if !active.insert(*id) {
-                        return Err(RuntimeError::ValidationFailed {
-                            reason: "TS_CYCLIC_COERCION_UNSUPPORTED: cyclic object coercion"
-                                .to_string(),
-                        });
-                    }
-                    let result = self
-                        .javascript_sequence_string_async(values, active, depth)
-                        .await
-                        .map(|value| Value::String(value.into()));
-                    active.remove(id);
-                    result
-                }
-                _ => self.javascript_to_primitive_inner(value, active, depth, hint),
-            }
-        })
-    }
-
-    fn javascript_sequence_string_async<'a>(
-        &'a self,
-        values: &'a [Value],
-        active: &'a mut BTreeSet<HeapId>,
-        depth: usize,
-    ) -> ProjectedFuture<'a, Result<String, RuntimeError>> {
-        Box::pin(async move {
-            let mut strings = Vec::with_capacity(values.len());
-            for value in values {
-                let string = match value {
-                    Value::Null | Value::Undefined => String::new(),
-                    Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_)) => {
-                        let HeapObject::Date(date) = self.get(*id)? else {
-                            unreachable!()
-                        };
-                        crate::runtime::vm::javascript_date::date_to_string(date.milliseconds)
-                    }
-                    other => {
-                        let primitive = self
-                            .javascript_to_primitive_inner_async(
-                                other,
-                                active,
-                                depth + 1,
-                                PrimitiveHint::String,
-                            )
-                            .await?;
-                        javascript_to_string(&primitive)
-                    }
-                };
-                strings.push(string);
-            }
-            Ok(strings.join(","))
-        })
     }
 
     pub(crate) fn javascript_to_number(&self, value: &Value) -> Result<f64, RuntimeError> {

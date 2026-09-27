@@ -361,8 +361,8 @@ impl crate::runtime::ProjectedHostDescriptor for WireProbeDescriptor {
     fn read_one(
         &self,
         _request: crate::runtime::ProjectedReadRequest,
-    ) -> crate::runtime::ProjectedFuture<'_, Option<crate::runtime::ProjectedReadResponse>> {
-        Box::pin(async { None })
+    ) -> Option<crate::runtime::ProjectedReadResponse> {
+        None
     }
 }
 

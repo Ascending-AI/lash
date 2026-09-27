@@ -15,8 +15,8 @@ use lash_lashlang_runtime::{
     process_sleep, protocol_tool_output_to_lashlang_value, resolve_lashlang_module_operation,
 };
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ProjectedFuture,
-    Record as FlowRecord, Sleep, Value as FlowValue, ValueProjectionContext, ValueProjector,
+    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, Record as FlowRecord, Sleep,
+    Value as FlowValue, ValueProjectionContext, ValueProjector,
 };
 use serde_json::Value;
 
@@ -870,7 +870,7 @@ impl HostBridge<'_> {
     async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
         let commands = self.commands()?;
         let command = commands.issue()?;
-        let handle = match handle_to_json(&handle).await {
+        let handle = match handle_to_json(&handle) {
             Ok(handle) => handle,
             Err(error) => {
                 commands.skipped(&command)?;
@@ -898,9 +898,8 @@ impl HostBridge<'_> {
             let _phase = self.ctx.named_phase("rlm_lashlang.print_project");
             self.print_projector
                 .project(ValueProjectionContext::new(&value))
-                .await
         };
-        let raw_text = format_output_value(&value).await;
+        let raw_text = format_output_value(&value);
         let projection =
             crate::rlm_support::observation_projection_metadata(&raw_text, &projected_text);
         self.observations.lock_recover().push(Observation {
@@ -1018,10 +1017,10 @@ impl HostBridge<'_> {
 /// its positional arguments under `args`.
 async fn operation_payload(args: &[FlowValue]) -> Result<Value, ExecutionHostError> {
     let mut payload = if let [FlowValue::Record(record)] = args {
-        flow_record_json(record).await
+        flow_record_json(record)
     } else {
         serde_json::json!({
-            "args": flow_values_to_json(args).await,
+            "args": flow_values_to_json(args),
         })
     };
     payload
@@ -1268,31 +1267,27 @@ fn language_event_node_id(payload: &TraceLanguageExecutionPayload) -> Option<&st
     }
 }
 
-async fn handle_to_json(value: &FlowValue) -> Result<Value, ExecutionHostError> {
+fn handle_to_json(value: &FlowValue) -> Result<Value, ExecutionHostError> {
     match value {
-        FlowValue::Projected(_) => Ok(flow_to_json_value(value).await),
+        FlowValue::Projected(_) => Ok(flow_to_json_value(value)),
         _ => lashlang_value_to_json(value),
     }
 }
 
-fn flow_values_to_json<'a>(values: &'a [FlowValue]) -> ProjectedFuture<'a, Vec<Value>> {
-    Box::pin(async move {
-        let mut out = Vec::with_capacity(values.len());
-        for value in values {
-            out.push(flow_to_json_value(value).await);
-        }
-        out
-    })
+fn flow_values_to_json(values: &[FlowValue]) -> Vec<Value> {
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        out.push(flow_to_json_value(value));
+    }
+    out
 }
 
-fn flow_record_json<'a>(record: &'a FlowRecord) -> ProjectedFuture<'a, Value> {
-    Box::pin(async move {
-        let mut object = serde_json::Map::with_capacity(record.len());
-        for (key, value) in record.iter() {
-            object.insert(key.to_string(), flow_to_json_value(value).await);
-        }
-        Value::Object(object)
-    })
+fn flow_record_json(record: &FlowRecord) -> Value {
+    let mut object = serde_json::Map::with_capacity(record.len());
+    for (key, value) in record.iter() {
+        object.insert(key.to_string(), flow_to_json_value(value));
+    }
+    Value::Object(object)
 }
 
 pub(super) struct CollectedExecutionOutput {
@@ -1316,7 +1311,7 @@ fn collect_printed_images_inner<'a>(
     attachment_store: &'a lash_core::facade_support::SessionAttachmentStore,
     seen: &'a mut BTreeSet<String>,
     images: &'a mut Vec<AttachmentRef>,
-) -> ProjectedFuture<'a, Result<(), ExecutionHostError>> {
+) -> lash_sansio::future::SendBoxFuture<'a, Result<(), ExecutionHostError>> {
     Box::pin(async move {
         match value {
             FlowValue::Image(image) => {
@@ -1359,7 +1354,7 @@ fn collect_printed_images_inner<'a>(
             FlowValue::Projected(value) => {
                 // A projection restored without its host descriptor has no value
                 // to scan; it carries no printed image either (FIG-2865).
-                if let Ok(value) = value.materialize_async().await {
+                if let Ok(value) = value.materialize() {
                     collect_printed_images_inner(&value, attachment_store, seen, images).await?;
                 }
             }

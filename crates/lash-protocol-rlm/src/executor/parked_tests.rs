@@ -177,7 +177,7 @@ pub(crate) async fn execute_parked_cell_for_tests(
         {
             VmRunOutcome::EffectCompleted => continue,
             VmRunOutcome::Complete(lashlang::ExecutionOutcome::Finished(value)) => {
-                break crate::projection::flow_to_json_value(&value).await;
+                break crate::projection::flow_to_json_value(&value);
             }
             VmRunOutcome::Complete(other) => {
                 return Err(format!("parked cell resumed to {other:?}"));

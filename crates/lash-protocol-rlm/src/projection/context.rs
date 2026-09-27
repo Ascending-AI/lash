@@ -9,8 +9,8 @@ use lash_rlm_types::{
     RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent, RlmTrajectoryEntry,
 };
 use lashlang::{
-    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, State as FlowState, Value as FlowValue,
+    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, State as FlowState, Value as FlowValue,
 };
 
 use super::bindings::{ProjectionResolver, RlmProjectedBindings};
@@ -263,11 +263,8 @@ impl ProjectedHostDescriptor for HistoryProjectedValue {
         "list"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        {
             match request {
                 ProjectedReadRequest::Len => {
                     Some(ProjectedReadResponse::Len(self.projection.len()))
@@ -334,7 +331,7 @@ impl ProjectedHostDescriptor for HistoryProjectedValue {
                 | ProjectedReadRequest::SliceBound
                 | ProjectedReadRequest::RangeBound => None,
             }
-        })
+        }
     }
 }
 
@@ -505,10 +502,7 @@ mod tests {
     }
 
     async fn read_index(value: &HistoryProjectedValue, index: i64) -> FlowValue {
-        match value
-            .read_one(ProjectedReadRequest::Index(FlowValue::Number(index as f64)))
-            .await
-        {
+        match value.read_one(ProjectedReadRequest::Index(FlowValue::Number(index as f64))) {
             Some(ProjectedReadResponse::Value(value)) => value,
             other => panic!("expected indexed value, got {other:?}"),
         }
@@ -620,15 +614,13 @@ mod tests {
         };
         let first = read_index(&value, 0).await;
         assert!(matches!(
-            value.read_one(ProjectedReadRequest::Contains(first)).await,
+            value.read_one(ProjectedReadRequest::Contains(first)),
             Some(ProjectedReadResponse::Bool(true))
         ));
         assert!(matches!(
-            value
-                .read_one(ProjectedReadRequest::Contains(FlowValue::String(
-                    "absent".into()
-                )))
-                .await,
+            value.read_one(ProjectedReadRequest::Contains(FlowValue::String(
+                "absent".into()
+            ))),
             Some(ProjectedReadResponse::Bool(false))
         ));
     }
@@ -656,7 +648,7 @@ mod tests {
             projection: Arc::new(rlm_history_projection(&step_projection("only"))),
         };
         assert!(matches!(
-            value.read_one(ProjectedReadRequest::Keys).await,
+            value.read_one(ProjectedReadRequest::Keys),
             Some(ProjectedReadResponse::Keys(keys)) if keys.is_empty()
         ));
     }
@@ -670,7 +662,7 @@ mod tests {
             projection: Arc::new(rlm_history_projection(&step_projection("only"))),
         };
         assert!(matches!(
-            populated.read_one(ProjectedReadRequest::Empty).await,
+            populated.read_one(ProjectedReadRequest::Empty),
             Some(ProjectedReadResponse::Bool(false))
         ));
 
@@ -682,7 +674,7 @@ mod tests {
             }),
         };
         assert!(matches!(
-            empty.read_one(ProjectedReadRequest::Empty).await,
+            empty.read_one(ProjectedReadRequest::Empty),
             Some(ProjectedReadResponse::Bool(true))
         ));
     }

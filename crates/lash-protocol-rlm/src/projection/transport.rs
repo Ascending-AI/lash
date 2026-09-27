@@ -3,8 +3,8 @@ use std::sync::Arc;
 use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
 use lash_rlm_types::{PROJECTED_JSON_TAG, RlmProjectedSeedEntry};
 use lashlang::{
-    BudgetedJsonProjector, ImageValue, ProjectedFuture, ProjectedValue, Record as FlowRecord,
-    State as FlowState, Value as FlowValue, ValueProjectionContext, ValueProjector,
+    BudgetedJsonProjector, ImageValue, ProjectedValue, Record as FlowRecord, State as FlowState,
+    Value as FlowValue, ValueProjectionContext, ValueProjector,
 };
 use serde_json::Value;
 
@@ -97,7 +97,7 @@ pub(crate) async fn flow_record_to_tool_args(
     record: &FlowRecord,
     policy: &ToolArgumentProjectionPolicy,
 ) -> Result<Value, ProjectionTransportError> {
-    normalize_tool_args_for_projection(flow_record_to_json_value(record).await, policy)
+    normalize_tool_args_for_projection(flow_record_to_json_value(record), policy)
 }
 
 fn normalize_seed_preserving_tool_args(
@@ -287,57 +287,57 @@ fn unescape_projected_key(key: String) -> String {
     }
 }
 
-pub(crate) fn flow_to_json_value<'a>(value: &'a FlowValue) -> ProjectedFuture<'a, Value> {
-    Box::pin(async move {
-        match value {
-            FlowValue::Null | FlowValue::Undefined => Value::Null,
-            FlowValue::Bool(value) => Value::Bool(*value),
-            FlowValue::Number(value) => json_number(*value),
-            FlowValue::String(value) => Value::String(value.to_string()),
-            FlowValue::Image(image) => serde_json::to_value(image)
-                .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-            FlowValue::Resource(resource) => serde_json::to_value(resource)
-                .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-            FlowValue::Tuple(values) | FlowValue::List(values) => {
-                let mut out = Vec::with_capacity(values.len());
-                for value in values.iter() {
-                    out.push(flow_to_json_value(value).await);
-                }
-                Value::Array(out)
-            }
-            FlowValue::Record(record) => flow_record_to_json_value(record).await,
-            FlowValue::Projected(value) => {
-                let entry = match value
-                    .projection_ref()
-                    .cloned()
-                    .map(serde_json::from_value::<ProjectionRef>)
-                {
-                    Some(Ok(reference)) => RlmProjectedSeedEntry::Ref(reference),
-                    Some(Err(_)) | None => {
-                        RlmProjectedSeedEntry::Materialized(match value.materialize_async().await {
-                            Ok(value) => flow_to_json_value(&value).await,
-                            // No descriptor and no usable `projection_ref`
-                            // leaves nothing to seed with (FIG-2865).
-                            Err(_) => Value::Null,
-                        })
-                    }
-                };
-                projected_wrapper(entry)
-            }
-            FlowValue::Ref(_) => {
-                unreachable!("VM heap references must be materialized before JSON rendering")
-            }
+pub(crate) fn flow_to_json_value(value: &FlowValue) -> Value {
+    match value {
+        FlowValue::Null | FlowValue::Undefined => Value::Null,
+        FlowValue::Bool(value) => Value::Bool(*value),
+        FlowValue::Number(value) => json_number(*value),
+        FlowValue::String(value) => Value::String(value.to_string()),
+        FlowValue::Image(image) => {
+            serde_json::to_value(image).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
         }
-    })
+        FlowValue::Resource(resource) => {
+            serde_json::to_value(resource).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
+        }
+        FlowValue::Tuple(values) | FlowValue::List(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for value in values.iter() {
+                out.push(flow_to_json_value(value));
+            }
+            Value::Array(out)
+        }
+        FlowValue::Record(record) => flow_record_to_json_value(record),
+        FlowValue::Projected(value) => {
+            let entry = match value
+                .projection_ref()
+                .cloned()
+                .map(serde_json::from_value::<ProjectionRef>)
+            {
+                Some(Ok(reference)) => RlmProjectedSeedEntry::Ref(reference),
+                Some(Err(_)) | None => {
+                    RlmProjectedSeedEntry::Materialized(match value.materialize() {
+                        Ok(value) => flow_to_json_value(&value),
+                        // No descriptor and no usable `projection_ref`
+                        // leaves nothing to seed with (FIG-2865).
+                        Err(_) => Value::Null,
+                    })
+                }
+            };
+            projected_wrapper(entry)
+        }
+        FlowValue::Ref(_) => {
+            unreachable!("VM heap references must be materialized before JSON rendering")
+        }
+    }
 }
 
-pub(crate) async fn flow_record_to_json_value(record: &FlowRecord) -> Value {
+pub(crate) fn flow_record_to_json_value(record: &FlowRecord) -> Value {
     let mut object = serde_json::Map::with_capacity(record.len());
     for (key, value) in record.iter() {
         if matches!(value, FlowValue::Undefined) {
             continue;
         }
-        object.insert(escape_projected_key(key), flow_to_json_value(value).await);
+        object.insert(escape_projected_key(key), flow_to_json_value(value));
     }
     Value::Object(object)
 }
@@ -486,10 +486,8 @@ fn optional_json_u32(value: &Value) -> Option<Option<u32>> {
     }
 }
 
-pub(crate) async fn format_output_value(value: &FlowValue) -> String {
-    BudgetedJsonProjector::unbounded()
-        .project(ValueProjectionContext::new(value))
-        .await
+pub(crate) fn format_output_value(value: &FlowValue) -> String {
+    BudgetedJsonProjector::unbounded().project(ValueProjectionContext::new(value))
 }
 
 #[cfg(test)]
@@ -508,7 +506,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            flow_record_to_json_value(&record).await,
+            flow_record_to_json_value(&record),
             serde_json::json!({"present": null, "items": [null, null]})
         );
         assert_eq!(
@@ -532,7 +530,7 @@ mod tests {
             ),
         ])));
 
-        let encoded = flow_to_json_value(&plain).await;
+        let encoded = flow_to_json_value(&plain);
         let host_value = normalize_tool_args_for_projection(
             encoded,
             &ToolArgumentProjectionPolicy::MaterializeProjectedValues,

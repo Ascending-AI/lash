@@ -236,10 +236,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// iterators are; anything else is first converted exactly as
     /// `Array.from` converts it, which also raises the same error for a value
     /// that is not iterable.
-    pub(super) async fn iteration_cursor(
-        &mut self,
-        iterable: Value,
-    ) -> Result<IterCursor, RuntimeError> {
+    pub(super) fn iteration_cursor(&mut self, iterable: Value) -> Result<IterCursor, RuntimeError> {
         if let Value::Ref(id) = iterable {
             let pending = match self.heap.get(id)? {
                 HeapObject::List(_) | HeapObject::UrlSearchParams(_) => {
@@ -276,7 +273,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.stack.push(other);
                 self.execute_javascript_stdlib(2)?;
                 let converted = self.pop_stack()?;
-                self.iterable_values_for_dialect(converted).await?
+                self.iterable_values_for_dialect(converted)?
             }
         };
         Ok(IterCursor::snapshot(values))

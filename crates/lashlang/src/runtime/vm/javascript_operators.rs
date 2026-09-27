@@ -1,4 +1,4 @@
-//! JavaScript unary/binary fast evaluation and async projected-operand preparation.
+//! JavaScript unary/binary fast evaluation and projected-operand preparation.
 
 use super::super::{
     StringValue, ensure_javascript_string_size, javascript_operand_text,
@@ -8,7 +8,7 @@ use super::*;
 use crate::runtime::heap::guest_coercion::PrimitiveHint;
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    pub(super) fn javascript_unary_needs_async(
+    pub(super) fn javascript_unary_needs_slow_path(
         &self,
         op: JavaScriptUnaryOp,
     ) -> Result<bool, RuntimeError> {
@@ -20,7 +20,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 && self.heap.javascript_coercion_contains_projected(value)?)
     }
 
-    pub(super) fn javascript_binary_needs_async(
+    pub(super) fn javascript_binary_needs_slow_path(
         &self,
         op: JavaScriptBinaryOp,
     ) -> Result<bool, RuntimeError> {
@@ -79,21 +79,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    pub(super) async fn redispatch_javascript_unary(
+    pub(super) fn redispatch_javascript_unary(
         &mut self,
         op: JavaScriptUnaryOp,
     ) -> Result<VmStep, RuntimeError> {
-        let mut value = materialize_javascript_operand(self.pop_stack()?).await?;
+        let mut value = materialize_javascript_operand(self.pop_stack()?)?;
         if op.coerces_to_number() {
             value = self
                 .heap
-                .javascript_to_primitive_with_hint_async(&value, PrimitiveHint::Number)
-                .await?;
+                .javascript_to_primitive_with_hint(&value, PrimitiveHint::Number)?;
         } else if op == JavaScriptUnaryOp::ToString {
             value = self
                 .heap
-                .javascript_to_primitive_with_hint_async(&value, PrimitiveHint::String)
-                .await?;
+                .javascript_to_primitive_with_hint(&value, PrimitiveHint::String)?;
         }
         self.stack.push(value);
         self.redispatch_fast(Instruction::JavaScriptUnary(op))
@@ -141,24 +139,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    pub(super) async fn prepare_javascript_binary_operands(
+    pub(super) fn prepare_javascript_binary_operands(
         &self,
         op: JavaScriptBinaryOp,
         left: Value,
         right: Value,
     ) -> Result<(Value, Value), RuntimeError> {
-        let mut left = materialize_javascript_operand(left).await?;
-        let mut right = materialize_javascript_operand(right).await?;
+        let mut left = materialize_javascript_operand(left)?;
+        let mut right = materialize_javascript_operand(right)?;
         let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
         if coerce_left {
-            left = self
-                .javascript_binary_operand_primitive_async(op, &left)
-                .await?;
+            left = self.javascript_binary_operand_primitive(op, &left)?;
         }
         if coerce_right {
-            right = self
-                .javascript_binary_operand_primitive_async(op, &right)
-                .await?;
+            right = self.javascript_binary_operand_primitive(op, &right)?;
         }
         Ok((left, right))
     }
@@ -173,16 +167,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Value, RuntimeError> {
         self.heap
             .javascript_to_primitive_with_hint(value, javascript_binary_hint(op))
-    }
-
-    pub(super) async fn javascript_binary_operand_primitive_async(
-        &self,
-        op: JavaScriptBinaryOp,
-        value: &Value,
-    ) -> Result<Value, RuntimeError> {
-        self.heap
-            .javascript_to_primitive_with_hint_async(value, javascript_binary_hint(op))
-            .await
     }
 }
 
@@ -224,9 +208,9 @@ fn javascript_binary_work_units(op: JavaScriptBinaryOp, left: &Value, right: &Va
     }
 }
 
-async fn materialize_javascript_operand(mut value: Value) -> Result<Value, RuntimeError> {
+fn materialize_javascript_operand(mut value: Value) -> Result<Value, RuntimeError> {
     while let Value::Projected(projected) = value {
-        value = projected.materialize_async().await?;
+        value = projected.materialize()?;
     }
     Ok(value)
 }

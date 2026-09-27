@@ -3,7 +3,7 @@ use lashlang::{
     AbilityOp, AbilityResult, AssignTarget, BinaryOp, Declaration, ExecutionHost,
     ExecutionHostError, Expr, FunctionExpr, HostDescriptor, ImageValue, LASH_PROCESS_NAME_KEY,
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue,
-    Program, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
+    Program, ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest,
     ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr, TypeField, UnaryOp, Value,
     from_json,
 };

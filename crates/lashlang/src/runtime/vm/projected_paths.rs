@@ -24,7 +24,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// advertised method is the built-in function of the value the projection
     /// stands for, so `result.items.map` reads as `[].map` does. Only such a
     /// key materializes the projection, to learn which prototype it has.
-    async fn projected_inherited(
+    fn projected_inherited(
         &mut self,
         projected: &ProjectedValue,
         key: &str,
@@ -32,7 +32,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if !BuiltinFunction::is_method_key(key) {
             return Ok(self.absent_value());
         }
-        let value = projected.materialize_async().await?;
+        let value = projected.materialize()?;
         match inline_inherited_builtin(&value, key) {
             Some(function) => self.heap.builtin_function(function),
             None => Ok(self.absent_value()),
@@ -52,16 +52,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// still carries "this came from a projected source" — except a built-in
     /// method, which is the heap's own function object and no data of the
     /// projection's.
-    pub(super) async fn read_projected_field(
+    pub(super) fn read_projected_field(
         &mut self,
         projected: &ProjectedValue,
         field: &Name,
     ) -> Result<Value, RuntimeError> {
         let inner = match projected.scalar_value() {
             Some(value) => self.read_dialect_field(value.clone(), field)?,
-            None => match projected.get_field(field).await? {
+            None => match projected.get_field(field)? {
                 Some(value) => value,
-                None => self.projected_inherited(projected, &field.text).await?,
+                None => self.projected_inherited(projected, &field.text)?,
             },
         };
         if matches!(inner, Value::Ref(_)) {
@@ -78,18 +78,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// reason as `read_projected_field`: a scalar projection indexes exactly as
     /// the value behind it does, which under ECMA is UTF-16 units and
     /// `undefined` for an absent key.
-    pub(super) async fn read_projected_index(
+    pub(super) fn read_projected_index(
         &mut self,
         projected: &ProjectedValue,
         index: &Value,
     ) -> Result<Value, RuntimeError> {
         let inner = match projected.scalar_value() {
             Some(value) => self.read_dialect_index(value.clone(), index.clone())?,
-            None => match projected.get_index(index).await? {
+            None => match projected.get_index(index)? {
                 Some(value) => value,
                 None => {
                     let key = self.heap.javascript_to_string(index)?;
-                    self.projected_inherited(projected, &key).await?
+                    self.projected_inherited(projected, &key)?
                 }
             },
         };

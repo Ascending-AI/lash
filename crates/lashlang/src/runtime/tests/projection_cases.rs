@@ -128,27 +128,22 @@ impl ProjectedHostDescriptor for SnapshotGuardProjectedValue {
         "string"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            match request {
-                ProjectedReadRequest::Render => {
-                    self.render_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Text(
-                        "rendered full text".to_string(),
-                    ))
-                }
-                ProjectedReadRequest::Materialize => {
-                    self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Value(Value::String(
-                        "materialized full text".into(),
-                    )))
-                }
-                _ => None,
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        match request {
+            ProjectedReadRequest::Render => {
+                self.render_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Text(
+                    "rendered full text".to_string(),
+                ))
             }
-        })
+            ProjectedReadRequest::Materialize => {
+                self.materialize_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Value(Value::String(
+                    "materialized full text".into(),
+                )))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -157,35 +152,30 @@ impl ProjectedHostDescriptor for SearchProjectedText {
         "string"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            match request {
-                ProjectedReadRequest::Len => {
-                    Some(ProjectedReadResponse::Len(self.text.chars().count()))
-                }
-                ProjectedReadRequest::Slice { start, end } => {
-                    self.slice_count.fetch_add(1, Ordering::SeqCst);
-                    self.slices.lock_recover().push((start, end));
-                    Some(ProjectedReadResponse::Value(Value::String(
-                        slice_string(&self.text, start, end).into(),
-                    )))
-                }
-                ProjectedReadRequest::Render => {
-                    self.render_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Text(self.text.to_string()))
-                }
-                ProjectedReadRequest::Materialize => {
-                    self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Value(Value::String(
-                        self.text.as_ref().into(),
-                    )))
-                }
-                _ => None,
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        match request {
+            ProjectedReadRequest::Len => {
+                Some(ProjectedReadResponse::Len(self.text.chars().count()))
             }
-        })
+            ProjectedReadRequest::Slice { start, end } => {
+                self.slice_count.fetch_add(1, Ordering::SeqCst);
+                self.slices.lock_recover().push((start, end));
+                Some(ProjectedReadResponse::Value(Value::String(
+                    slice_string(&self.text, start, end).into(),
+                )))
+            }
+            ProjectedReadRequest::Render => {
+                self.render_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Text(self.text.to_string()))
+            }
+            ProjectedReadRequest::Materialize => {
+                self.materialize_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Value(Value::String(
+                    self.text.as_ref().into(),
+                )))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -194,47 +184,40 @@ impl ProjectedHostDescriptor for TestProjectedValue {
         "list"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            let ProjectedReadRequest::Index(index) = request else {
-                return match request {
-                    ProjectedReadRequest::Len => {
-                        Some(ProjectedReadResponse::Len(self.values.len()))
-                    }
-                    ProjectedReadRequest::Render => {
-                        self.render_count.fetch_add(1, Ordering::SeqCst);
-                        Some(ProjectedReadResponse::Text("<projected list>".to_string()))
-                    }
-                    ProjectedReadRequest::Materialize => {
-                        self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                        Some(ProjectedReadResponse::Value(Value::List(
-                            self.values.clone().into(),
-                        )))
-                    }
-                    _ => None,
-                };
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        let ProjectedReadRequest::Index(index) = request else {
+            return match request {
+                ProjectedReadRequest::Len => Some(ProjectedReadResponse::Len(self.values.len())),
+                ProjectedReadRequest::Render => {
+                    self.render_count.fetch_add(1, Ordering::SeqCst);
+                    Some(ProjectedReadResponse::Text("<projected list>".to_string()))
+                }
+                ProjectedReadRequest::Materialize => {
+                    self.materialize_count.fetch_add(1, Ordering::SeqCst);
+                    Some(ProjectedReadResponse::Value(Value::List(
+                        self.values.clone().into(),
+                    )))
+                }
+                _ => None,
             };
-            let Value::Number(index) = index else {
-                return None;
-            };
-            if !index.is_finite() || index.fract() != 0.0 {
-                return None;
-            }
-            let len = self.values.len() as isize;
-            let index = index as isize;
-            let index = if index < 0 { len + index } else { index };
-            if index < 0 || index >= len {
-                return None;
-            }
-            self.get_count.fetch_add(1, Ordering::SeqCst);
-            self.values
-                .get(index as usize)
-                .cloned()
-                .map(ProjectedReadResponse::Value)
-        })
+        };
+        let Value::Number(index) = index else {
+            return None;
+        };
+        if !index.is_finite() || index.fract() != 0.0 {
+            return None;
+        }
+        let len = self.values.len() as isize;
+        let index = index as isize;
+        let index = if index < 0 { len + index } else { index };
+        if index < 0 || index >= len {
+            return None;
+        }
+        self.get_count.fetch_add(1, Ordering::SeqCst);
+        self.values
+            .get(index as usize)
+            .cloned()
+            .map(ProjectedReadResponse::Value)
     }
 }
 
@@ -367,7 +350,7 @@ fn projected_response_from_value(
             }
             _ => None,
         },
-        ProjectedReadRequest::Push(item) => execute_push_builtin(value, item)
+        ProjectedReadRequest::Push(item) => execute_push_builtin(value.clone(), item)
             .ok()
             .map(ProjectedReadResponse::Value),
         ProjectedReadRequest::ToNumber => as_number(value)
@@ -404,16 +387,11 @@ impl ProjectedHostDescriptor for ProjectedFixture {
         value_type_name(&self.value)
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            if matches!(request, ProjectedReadRequest::Materialize) {
-                self.materialize_count.fetch_add(1, Ordering::SeqCst);
-            }
-            projected_response_from_value(&self.value, request)
-        })
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        if matches!(request, ProjectedReadRequest::Materialize) {
+            self.materialize_count.fetch_add(1, Ordering::SeqCst);
+        }
+        projected_response_from_value(&self.value, request)
     }
 }
 
@@ -513,11 +491,8 @@ impl ProjectedHostDescriptor for SilentDescriptor {
         "widget"
     }
 
-    fn read_one(
-        &self,
-        _request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move { None })
+    fn read_one(&self, _request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        None
     }
 }
 
@@ -530,15 +505,12 @@ async fn an_unanswered_read_refuses_with_the_binding_and_request_named() {
     let projected = ProjectedValue::custom("widget", Arc::new(SilentDescriptor));
 
     for (label, error) in [
-        ("len", projected.len().await.err()),
-        ("empty", projected.empty().await.err()),
-        ("truthy", projected.truthy().await.err()),
-        ("keys", projected.keys().await.err()),
-        ("values", projected.values().await.err()),
-        (
-            "contains",
-            projected.contains(&Value::Number(1.0)).await.err(),
-        ),
+        ("len", projected.len().err()),
+        ("empty", projected.empty().err()),
+        ("truthy", projected.truthy().err()),
+        ("keys", projected.keys().err()),
+        ("values", projected.values().err()),
+        ("contains", projected.contains(&Value::Number(1.0)).err()),
     ] {
         let error = error.unwrap_or_else(|| panic!("`{label}` must refuse"));
         assert!(
@@ -751,12 +723,12 @@ async fn canonical_snapshot_restore_makes_projected_value_unavailable() {
     // so a restored placeholder read back as an English message where the host's
     // view used to be. Both now refuse, typed.
     assert!(matches!(
-        projected.render().await,
+        projected.render(),
         Err(RuntimeError::ProjectedValueUnavailable { ref name, ref type_name })
             if name == "matches[0].text" && type_name == "string"
     ));
     assert!(matches!(
-        projected.materialize_async().await,
+        projected.materialize(),
         Err(RuntimeError::ProjectedValueUnavailable { .. })
     ));
 }
@@ -1116,11 +1088,8 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
         value_type_name(&self.value)
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        {
             match request {
                 ProjectedReadRequest::Len => {
                     self.push_call("len");
@@ -1252,7 +1221,7 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
                 }
                 ProjectedReadRequest::Push(item) => {
                     self.push_call("push");
-                    execute_push_builtin(&self.value, item)
+                    execute_push_builtin(self.value.clone(), item)
                         .ok()
                         .map(ProjectedReadResponse::Value)
                 }
@@ -1294,7 +1263,7 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
                     stringify_value(&self.value).expect("render projected override"),
                 )),
             }
-        })
+        }
     }
 }
 

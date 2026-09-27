@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
-    ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Record, ResourceHandle, Snapshot, State, TypeExpr, TypeField, Value,
+    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
+    ResourceHandle, Snapshot, State, TypeExpr, TypeField, Value,
 };
 use proptest::prelude::*;
 
@@ -271,11 +271,8 @@ impl ProjectedHostDescriptor for SnapshotProjectedDescriptor {
     }
 
     /// Identity only: this descriptor answers no read (FIG-2863).
-    fn read_one(
-        &self,
-        _request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async { None })
+    fn read_one(&self, _request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        None
     }
 }
 

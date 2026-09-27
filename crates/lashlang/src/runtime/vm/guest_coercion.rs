@@ -24,6 +24,7 @@ use super::*;
 use crate::runtime::BuiltinPrototype;
 use crate::runtime::heap::ErrorKind;
 use crate::runtime::heap::guest_coercion::{GuestPrimitive, PrimitiveHint};
+use smallvec::SmallVec;
 
 /// The answers one instruction's guest hooks have given so far. `depth` is the
 /// frame depth the instruction runs at.
@@ -46,7 +47,7 @@ pub(super) struct CoercionDriver {
 /// An instruction's operands, kept while the instruction may still need a hook.
 pub(super) struct CoercionOperands {
     base: usize,
-    values: Vec<Value>,
+    values: SmallVec<[Value; 8]>,
 }
 
 /// How many stack operands an instruction that can coerce an object consumes.
@@ -174,7 +175,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .is_some()
                 .then(|| CoercionOperands {
                     base,
-                    values: window.to_vec(),
+                    values: window.iter().cloned().collect(),
                 });
         }
         window
@@ -182,7 +183,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .any(may_hold_object)
             .then(|| CoercionOperands {
                 base,
-                values: window.to_vec(),
+                values: window.iter().cloned().collect(),
             })
     }
 

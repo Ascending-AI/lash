@@ -312,7 +312,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let operands = self.coercion_operands(instruction);
             let step = match self.step_instruction_fast(instruction) {
                 Ok(Some(step)) => Ok(step),
-                Ok(None) => Box::pin(self.step_instruction(instruction)).await,
+                Ok(None) => self.step_instruction(instruction),
                 Err(error) => Err(error),
             };
             let step = match step {

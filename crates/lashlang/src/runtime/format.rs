@@ -14,22 +14,14 @@ use compact_str::CompactString;
 use super::instruction::{CompiledFormatOneArg, CompiledFormatPart, CompiledFormatTemplate};
 use super::*;
 
-pub(crate) async fn stringify_value_async(value: &Value) -> Result<String, RuntimeError> {
-    let mut output = String::new();
-    append_stringified_value_async(&mut output, value).await?;
-    Ok(output)
-}
-
 pub(crate) fn stringify_value(value: &Value) -> Result<String, RuntimeError> {
     if value_contains_projected(value) {
-        lash_sansio::future::drive_sync(stringify_value_async(value))
+        let mut output = String::new();
+        append_stringified_value(&mut output, value)?;
+        Ok(output)
     } else {
         stringify_value_direct(value)
     }
-}
-
-pub(crate) fn stringify_value_blocking(value: &Value) -> Result<String, RuntimeError> {
-    stringify_value(value)
 }
 
 pub(crate) fn stringify_value_direct(value: &Value) -> Result<String, RuntimeError> {
@@ -54,7 +46,7 @@ pub(crate) fn append_stringified_value_direct(
         Value::Number(value) => {
             write_number(output, *value).expect("string writes should not fail")
         }
-        Value::Projected(_) => unreachable!("projected values require async stringification"),
+        Value::Projected(_) => unreachable!("projected values take the projected-capable path"),
         Value::Tuple(values) => append_tuple_literal_direct(output, values)?,
         Value::Ref(id) => {
             return Err(RuntimeError::UnexportedHeapReference {
@@ -73,41 +65,31 @@ pub(crate) fn append_stringified_value_direct(
     clippy::expect_used,
     reason = "write_number writes into an in-memory String buffer, whose fmt::Write cannot fail, per the message"
 )]
-pub(crate) fn append_stringified_value_async<'a>(
-    output: &'a mut String,
-    value: &'a Value,
-) -> ProjectedFuture<'a, Result<(), RuntimeError>> {
-    Box::pin(async move {
-        match value {
-            Value::String(value) => output.push_str(value),
-            Value::Null => output.push_str("null"),
-            Value::Undefined => output.push_str("undefined"),
-            Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
-            Value::Number(value) => {
-                write_number(output, *value).expect("string writes should not fail")
-            }
-            Value::Projected(value) => output.push_str(&value.render().await?),
-            Value::Tuple(values) => append_tuple_literal_async(output, values).await?,
-            Value::Ref(id) => {
-                return Err(RuntimeError::UnexportedHeapReference {
-                    id: id.get(),
-                    context: "string formatting".into(),
-                });
-            }
-            Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => {
-                append_runtime_json_async(output, value).await?;
-            }
-        }
-        Ok(())
-    })
-}
-
-#[cfg(test)]
 pub(crate) fn append_stringified_value(
     output: &mut String,
     value: &Value,
 ) -> Result<(), RuntimeError> {
-    lash_sansio::future::drive_sync(append_stringified_value_async(output, value))
+    match value {
+        Value::String(value) => output.push_str(value),
+        Value::Null => output.push_str("null"),
+        Value::Undefined => output.push_str("undefined"),
+        Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Value::Number(value) => {
+            write_number(output, *value).expect("string writes should not fail")
+        }
+        Value::Projected(value) => output.push_str(&value.render()?),
+        Value::Tuple(values) => append_tuple_literal(output, values)?,
+        Value::Ref(id) => {
+            return Err(RuntimeError::UnexportedHeapReference {
+                id: id.get(),
+                context: "string formatting".into(),
+            });
+        }
+        Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => {
+            append_runtime_json(output, value)?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn append_tuple_literal_direct(
@@ -146,44 +128,37 @@ fn append_tuple_item_literal_direct(
     Ok(())
 }
 
-pub(crate) fn append_tuple_literal_async<'a>(
-    output: &'a mut String,
-    values: &'a ListValue,
-) -> ProjectedFuture<'a, Result<(), RuntimeError>> {
-    Box::pin(async move {
-        output.push('(');
-        for (index, value) in values.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
-            append_tuple_item_literal_async(output, value).await?;
+pub(crate) fn append_tuple_literal(
+    output: &mut String,
+    values: &ListValue,
+) -> Result<(), RuntimeError> {
+    output.push('(');
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
         }
-        if values.len() == 1 {
-            output.push(',');
-        }
-        output.push(')');
-        Ok(())
-    })
+        append_tuple_item_literal(output, value)?;
+    }
+    if values.len() == 1 {
+        output.push(',');
+    }
+    output.push(')');
+    Ok(())
 }
 
 #[expect(
     clippy::expect_used,
     reason = "serde_json::to_string of a plain string value cannot fail, per the message"
 )]
-fn append_tuple_item_literal_async<'a>(
-    output: &'a mut String,
-    value: &'a Value,
-) -> ProjectedFuture<'a, Result<(), RuntimeError>> {
-    Box::pin(async move {
-        match value {
-            Value::String(value) => output.push_str(
-                &serde_json::to_string(value).expect("string json serialization should succeed"),
-            ),
-            Value::Tuple(values) => append_tuple_literal_async(output, values).await?,
-            other => append_stringified_value_async(output, other).await?,
-        }
-        Ok(())
-    })
+fn append_tuple_item_literal(output: &mut String, value: &Value) -> Result<(), RuntimeError> {
+    match value {
+        Value::String(value) => output.push_str(
+            &serde_json::to_string(value).expect("string json serialization should succeed"),
+        ),
+        Value::Tuple(values) => append_tuple_literal(output, values)?,
+        other => append_stringified_value(output, other)?,
+    }
+    Ok(())
 }
 
 pub(crate) fn write_number(output: &mut impl fmt::Write, value: f64) -> fmt::Result {
@@ -227,10 +202,7 @@ fn write_u64(output: &mut impl fmt::Write, mut value: u64) -> fmt::Result {
     output.write_str(text)
 }
 
-pub(crate) async fn apply_format_async(
-    template: &str,
-    args: &[Value],
-) -> Result<String, RuntimeError> {
+pub(crate) fn apply_format(template: &str, args: &[Value]) -> Result<String, RuntimeError> {
     let mut output = String::with_capacity(template.len());
     let bytes = template.as_bytes();
     let mut index = 0;
@@ -296,7 +268,7 @@ pub(crate) async fn apply_format_async(
                         slot: slot_text.unwrap_or("{}").to_string(),
                     })
                 })?;
-                append_stringified_value_async(&mut output, value).await?;
+                append_stringified_value(&mut output, value)?;
                 index = cursor + 1;
                 last_literal = index;
                 continue;
@@ -335,11 +307,6 @@ pub(crate) async fn apply_format_async(
         }));
     }
     Ok(output)
-}
-
-#[cfg(test)]
-pub(crate) fn apply_format(template: &str, args: &[Value]) -> Result<String, RuntimeError> {
-    lash_sansio::future::drive_sync(apply_format_async(template, args))
 }
 
 pub(crate) fn compile_format_template(template: &str, argc: usize) -> CompiledFormatTemplate {
@@ -520,7 +487,7 @@ pub(crate) fn push_format_literal(parts: &mut Vec<CompiledFormatPart>, literal: 
     }
 }
 
-pub(crate) async fn execute_compiled_format(
+pub(crate) fn execute_compiled_format(
     template: &CompiledFormatTemplate,
     args: &[Value],
 ) -> Result<String, RuntimeError> {
@@ -535,7 +502,7 @@ pub(crate) async fn execute_compiled_format(
         })?;
         let mut output = String::with_capacity(template.min_capacity);
         push_compiled_one_arg_prefix(&mut output, shape);
-        append_stringified_value_async(&mut output, value).await?;
+        append_stringified_value(&mut output, value)?;
         push_compiled_one_arg_suffix(&mut output, shape);
         return Ok(output);
     }
@@ -550,7 +517,7 @@ pub(crate) async fn execute_compiled_format(
                         slot: slot.to_string(),
                     })
                 })?;
-                append_stringified_value_async(&mut output, value).await?;
+                append_stringified_value(&mut output, value)?;
             }
         }
     }

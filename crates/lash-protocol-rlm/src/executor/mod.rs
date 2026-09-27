@@ -647,7 +647,7 @@ async fn execute_code_inner(
     }
     drop(env);
     let terminal_finish = match result {
-        Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value).await),
+        Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value)),
         Ok(ExecutionOutcome::Continued) => None,
         Ok(ExecutionOutcome::Failed(value)) if host.cancellation_observed() => {
             state.cancel_code_execution();

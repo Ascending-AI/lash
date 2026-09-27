@@ -13,9 +13,7 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use super::value_contains_projected;
-use super::{
-    ImageValue, ProjectedFuture, ProjectedValue, ResourceHandle, Value, debug_assert_exported_value,
-};
+use super::{ImageValue, ProjectedValue, ResourceHandle, Value, debug_assert_exported_value};
 use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq};
 use std::fmt::Write as _;
@@ -48,51 +46,49 @@ pub(crate) fn json_number(value: f64) -> Option<serde_json::Number> {
 }
 
 #[cfg(test)]
-pub(crate) fn to_json_async<'a>(value: &'a Value) -> ProjectedFuture<'a, serde_json::Value> {
-    Box::pin(async move {
-        match value {
-            Value::Null | Value::Undefined => serde_json::Value::Null,
-            Value::Bool(value) => serde_json::Value::Bool(*value),
-            Value::Number(value) => json_number(*value)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null),
-            Value::String(value) => serde_json::Value::String(value.to_string()),
-            Value::Image(image) => image_to_json(image),
-            Value::Resource(handle) => resource_to_json(handle),
-            Value::Tuple(values) | Value::List(values) => {
-                let mut out = Vec::with_capacity(values.len());
-                for value in values.iter() {
-                    out.push(to_json_async(value).await);
-                }
-                serde_json::Value::Array(out)
+fn to_json_projected(value: &Value) -> serde_json::Value {
+    match value {
+        Value::Null | Value::Undefined => serde_json::Value::Null,
+        Value::Bool(value) => serde_json::Value::Bool(*value),
+        Value::Number(value) => json_number(*value)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Value::String(value) => serde_json::Value::String(value.to_string()),
+        Value::Image(image) => image_to_json(image),
+        Value::Resource(handle) => resource_to_json(handle),
+        Value::Tuple(values) | Value::List(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for value in values.iter() {
+                out.push(to_json_projected(value));
             }
-            Value::Record(record) => {
-                let mut object = serde_json::Map::with_capacity(record.len());
-                for (key, value) in record.iter() {
-                    if !matches!(value, Value::Undefined) {
-                        object.insert(key.to_string(), to_json_async(value).await);
-                    }
-                }
-                serde_json::Value::Object(object)
-            }
-            // Mirrors the unexported-reference arm below: this async converter
-            // has no error channel, and a restored placeholder has no value.
-            Value::Projected(value) => match value.materialize_async().await {
-                Ok(value) => to_json_async(&value).await,
-                Err(_) => serde_json::Value::Null,
-            },
-            Value::Ref(_) => {
-                debug_assert_exported_value("JSON conversion");
-                serde_json::Value::Null
-            }
+            serde_json::Value::Array(out)
         }
-    })
+        Value::Record(record) => {
+            let mut object = serde_json::Map::with_capacity(record.len());
+            for (key, value) in record.iter() {
+                if !matches!(value, Value::Undefined) {
+                    object.insert(key.to_string(), to_json_projected(value));
+                }
+            }
+            serde_json::Value::Object(object)
+        }
+        // Mirrors the unexported-reference arm below: this converter has no
+        // error channel, and a restored placeholder has no value.
+        Value::Projected(value) => match value.materialize() {
+            Ok(value) => to_json_projected(&value),
+            Err(_) => serde_json::Value::Null,
+        },
+        Value::Ref(_) => {
+            debug_assert_exported_value("JSON conversion");
+            serde_json::Value::Null
+        }
+    }
 }
 
 #[cfg(test)]
 pub(crate) fn to_json(value: &Value) -> serde_json::Value {
     if value_contains_projected(value) {
-        lash_sansio::future::drive_sync(to_json_async(value))
+        to_json_projected(value)
     } else {
         to_json_direct(value)
     }
@@ -120,7 +116,7 @@ pub(crate) fn to_json_direct(value: &Value) -> serde_json::Value {
             }
             serde_json::Value::Object(object)
         }
-        Value::Projected(_) => unreachable!("projected values require async json conversion"),
+        Value::Projected(_) => unreachable!("projected values take the projected-capable path"),
         Value::Ref(_) => {
             debug_assert_exported_value("JSON conversion");
             serde_json::Value::Null
@@ -281,63 +277,61 @@ pub(crate) fn append_direct_json(output: &mut String, value: &Value) {
     clippy::expect_used,
     reason = "the writes target in-memory String buffers and crate-owned plain values, which serialize, per each message"
 )]
-pub(crate) fn append_runtime_json_async<'a>(
-    output: &'a mut String,
-    value: &'a Value,
-) -> ProjectedFuture<'a, Result<(), super::RuntimeError>> {
-    Box::pin(async move {
-        match value {
-            Value::Null | Value::Undefined => output.push_str("null"),
-            Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
-            Value::Number(value) => match json_number(*value) {
-                Some(value) => write!(output, "{value}").expect("string writes should not fail"),
-                None => output.push_str("null"),
-            },
-            Value::String(value) => output.push_str(
-                &serde_json::to_string(value).expect("string json serialization should succeed"),
-            ),
-            Value::Image(_) | Value::Resource(_) => append_direct_json(output, value),
-            Value::Tuple(values) | Value::List(values) => {
-                output.push('[');
-                for (index, value) in values.iter().enumerate() {
-                    if index > 0 {
-                        output.push(',');
-                    }
-                    append_runtime_json_async(output, value).await?;
+pub(crate) fn append_runtime_json(
+    output: &mut String,
+    value: &Value,
+) -> Result<(), super::RuntimeError> {
+    match value {
+        Value::Null | Value::Undefined => output.push_str("null"),
+        Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Value::Number(value) => match json_number(*value) {
+            Some(value) => write!(output, "{value}").expect("string writes should not fail"),
+            None => output.push_str("null"),
+        },
+        Value::String(value) => output.push_str(
+            &serde_json::to_string(value).expect("string json serialization should succeed"),
+        ),
+        Value::Image(_) | Value::Resource(_) => append_direct_json(output, value),
+        Value::Tuple(values) | Value::List(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
                 }
-                output.push(']');
+                append_runtime_json(output, value)?;
             }
-            Value::Record(record) => {
-                let mut entries = record
-                    .iter()
-                    .filter(|(_, value)| !matches!(value, Value::Undefined))
-                    .collect::<Vec<_>>();
-                entries.sort_unstable_by_key(|(key, _)| *key);
-                output.push('{');
-                for (index, (key, value)) in entries.into_iter().enumerate() {
-                    if index > 0 {
-                        output.push(',');
-                    }
-                    output.push_str(
-                        &serde_json::to_string(key)
-                            .expect("record key json serialization should succeed"),
-                    );
-                    output.push(':');
-                    append_runtime_json_async(output, value).await?;
-                }
-                output.push('}');
-            }
-            Value::Projected(projected) => {
-                let value = projected.materialize_async().await?;
-                append_runtime_json_async(output, &value).await?;
-            }
-            Value::Ref(_) => {
-                debug_assert_exported_value("JSON conversion");
-                output.push_str("null");
-            }
+            output.push(']');
         }
-        Ok(())
-    })
+        Value::Record(record) => {
+            let mut entries = record
+                .iter()
+                .filter(|(_, value)| !matches!(value, Value::Undefined))
+                .collect::<Vec<_>>();
+            entries.sort_unstable_by_key(|(key, _)| *key);
+            output.push('{');
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(
+                    &serde_json::to_string(key)
+                        .expect("record key json serialization should succeed"),
+                );
+                output.push(':');
+                append_runtime_json(output, value)?;
+            }
+            output.push('}');
+        }
+        Value::Projected(projected) => {
+            let value = projected.materialize()?;
+            append_runtime_json(output, &value)?;
+        }
+        Value::Ref(_) => {
+            debug_assert_exported_value("JSON conversion");
+            output.push_str("null");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn image_to_json(image: &ImageValue) -> serde_json::Value {

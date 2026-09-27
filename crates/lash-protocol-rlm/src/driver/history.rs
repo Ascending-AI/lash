@@ -61,7 +61,7 @@ use lash_core::{
     facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalPayload,
 };
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
-use lashlang::{Value as FlowValue, ValueProjectionContext};
+use lashlang::{Value as FlowValue, ValueProjectionContext, ValueProjector};
 
 use crate::projection::{decode_rlm_protocol_event, json_to_flow_value, rlm_history_projection};
 
@@ -752,8 +752,8 @@ fn projected_ref(
 
 fn project_history_output(item: &str) -> (String, bool) {
     let value = history_output_value(item);
-    let projected = crate::rlm_support::print_history_projector()
-        .project_blocking(ValueProjectionContext::new(&value));
+    let projected =
+        crate::rlm_support::print_history_projector().project(ValueProjectionContext::new(&value));
     let lossy = crate::rlm_support::projection_is_lossy(item, &projected);
     (projected, lossy)
 }

@@ -4,8 +4,8 @@
 use super::*;
 use crate::dialect::{RlmDialectServices, TypescriptDialect};
 use lashlang::{
-    ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Record as FlowRecord, Value as FlowValue,
+    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue,
+    Record as FlowRecord, Value as FlowValue,
 };
 use serde_json::json;
 
@@ -1349,25 +1349,20 @@ impl ProjectedHostDescriptor for CountingProjectedValue {
         "string"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            match request {
-                ProjectedReadRequest::Render => {
-                    self.render_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Text("rendered".to_string()))
-                }
-                ProjectedReadRequest::Materialize => {
-                    self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Value(FlowValue::String(
-                        "materialized".into(),
-                    )))
-                }
-                _ => None,
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        match request {
+            ProjectedReadRequest::Render => {
+                self.render_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Text("rendered".to_string()))
             }
-        })
+            ProjectedReadRequest::Materialize => {
+                self.materialize_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Value(FlowValue::String(
+                    "materialized".into(),
+                )))
+            }
+            _ => None,
+        }
     }
 }
 

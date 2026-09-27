@@ -1366,27 +1366,22 @@ impl ProjectedHostDescriptor for SnapshotProjectedToolText {
         "string"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            match request {
-                ProjectedReadRequest::Render => {
-                    self.render_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Text(
-                        "rendered tool text".to_string(),
-                    ))
-                }
-                ProjectedReadRequest::Materialize => {
-                    self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                    Some(ProjectedReadResponse::Value(FlowValue::String(
-                        "materialized tool text".into(),
-                    )))
-                }
-                _ => None,
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        match request {
+            ProjectedReadRequest::Render => {
+                self.render_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Text(
+                    "rendered tool text".to_string(),
+                ))
             }
-        })
+            ProjectedReadRequest::Materialize => {
+                self.materialize_count.fetch_add(1, Ordering::SeqCst);
+                Some(ProjectedReadResponse::Value(FlowValue::String(
+                    "materialized tool text".into(),
+                )))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -1395,25 +1390,20 @@ impl ProjectedHostDescriptor for TestProjectedValue {
         "list"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            let ProjectedReadRequest::Index(index) = request else {
-                return match request {
-                    ProjectedReadRequest::Len => Some(ProjectedReadResponse::Len(self.0.len())),
-                    ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
-                        FlowValue::List(self.0.clone().into()),
-                    )),
-                    _ => None,
-                };
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        let ProjectedReadRequest::Index(index) = request else {
+            return match request {
+                ProjectedReadRequest::Len => Some(ProjectedReadResponse::Len(self.0.len())),
+                ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
+                    FlowValue::List(self.0.clone().into()),
+                )),
+                _ => None,
             };
-            let Ok(Some(index)) = projected_index(&index, self.0.len()) else {
-                return None;
-            };
-            self.0.get(index).cloned().map(ProjectedReadResponse::Value)
-        })
+        };
+        let Ok(Some(index)) = projected_index(&index, self.0.len()) else {
+            return None;
+        };
+        self.0.get(index).cloned().map(ProjectedReadResponse::Value)
     }
 }
 

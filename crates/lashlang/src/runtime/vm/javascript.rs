@@ -10,6 +10,7 @@ pub(super) use super::javascript_number::*;
 use super::javascript_static::javascript_static_stdlib;
 pub(super) use super::javascript_stdlib::*;
 use super::*;
+use smallvec::SmallVec;
 use std::collections::BTreeSet;
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -92,7 +93,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.or_builtin(value, inherited)
     }
 
-    pub(super) async fn iterable_values_for_dialect(
+    pub(super) fn iterable_values_for_dialect(
         &mut self,
         iterable: Value,
     ) -> Result<ListValue, RuntimeError> {
@@ -127,10 +128,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     let exported = self.heap.export_for_instruction(&Value::Ref(id))?;
                     // Exporting reads the iterable's whole graph once.
                     self.charge_intrinsic_work(deep_proportional_units(&exported));
-                    iterable_values(exported).await?
+                    iterable_values(exported)?
                 }
             },
-            iterable => iterable_values(iterable).await?,
+            iterable => iterable_values(iterable)?,
         };
         // Materializing the iteration writes every yielded value once.
         self.charge_intrinsic_work(values.len());
@@ -166,7 +167,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_stdlib(&mut self, argc: usize) -> Result<(), RuntimeError> {
-        let mut values = Vec::with_capacity(argc);
+        let mut values: SmallVec<[Value; 8]> = SmallVec::with_capacity(argc);
         for _ in 0..argc {
             values.push(self.pop_stack()?);
         }
@@ -537,8 +538,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// keeps its identity.
     fn applied_stdlib_arguments(
         &mut self,
-        mut values: Vec<Value>,
-    ) -> Result<Vec<Value>, RuntimeError> {
+        mut values: SmallVec<[Value; 8]>,
+    ) -> Result<SmallVec<[Value; 8]>, RuntimeError> {
         let arguments = match values.pop() {
             Some(Value::List(items) | Value::Tuple(items)) => items.to_vec(),
             Some(Value::Ref(id)) => match self.heap.get(id)? {

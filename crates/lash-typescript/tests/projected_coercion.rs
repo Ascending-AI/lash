@@ -3,8 +3,8 @@
 //! A session global supplied by the host is a `Value::Projected`: a lazy handle
 //! the runtime reads through instead of a materialized tree. Every non-path
 //! operation is supposed to strip that wrapper and evaluate the value behind
-//! it — that is what `Binary` (the Lashlang arithmetic opcode) does by routing
-//! a projected operand to the async materializing path.
+//! it — that is what `Binary` (the Lashlang arithmetic opcode) does by
+//! materializing a projected operand synchronously.
 //!
 //! The TypeScript opcodes `JavaScriptUnary`/`JavaScriptBinary` did not. A
 //! projected operand fell straight into the scalar ECMA coercions, whose
@@ -25,17 +25,13 @@
 //! an element of a container the guest built from it.
 
 use std::collections::BTreeSet;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
-use std::time::Duration;
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, RuntimeError, State, Value,
+    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, RuntimeError, State, Value,
 };
 
 #[derive(Default)]
@@ -108,99 +104,41 @@ async fn finished(source: &str) -> Value {
     }
 }
 
-#[derive(Default)]
-struct PendingReadState {
-    scheduled: AtomicBool,
-    ready: AtomicBool,
-    cancelled: AtomicBool,
-    pending_polls: AtomicUsize,
-    waker: Mutex<Option<Waker>>,
-}
-
-impl PendingReadState {
-    fn wake(&self) {
-        if let Some(waker) = self
-            .waker
-            .lock()
-            .expect("pending waker is not poisoned")
-            .take()
-        {
-            waker.wake();
-        }
-    }
-
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        self.wake();
-    }
-}
-
-struct PendingMaterialization {
+/// A descriptor whose `Materialize` read counts its calls. Descriptor reads are
+/// synchronous and pure over already-available state, so "pending" is
+/// unexpressible; what these tests still pin is that the coercion paths read
+/// the projected value on demand, and that identity comparisons never read.
+struct CountingDescriptor {
     value: Value,
-    state: Arc<PendingReadState>,
+    materialize_calls: Arc<AtomicUsize>,
 }
 
-impl Future for PendingMaterialization {
-    type Output = Option<ProjectedReadResponse>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.state.ready.load(Ordering::Acquire) || self.state.cancelled.load(Ordering::Acquire)
-        {
-            return Poll::Ready(Some(ProjectedReadResponse::Value(self.value.clone())));
-        }
-
-        *self
-            .state
-            .waker
-            .lock()
-            .expect("pending waker is not poisoned") = Some(cx.waker().clone());
-        if !self.state.scheduled.swap(true, Ordering::AcqRel) {
-            let state = self.state.clone();
-            tokio::spawn(async move {
-                tokio::task::yield_now().await;
-                state.ready.store(true, Ordering::Release);
-                state.wake();
-            });
-        }
-        self.state.pending_polls.fetch_add(1, Ordering::Relaxed);
-        Poll::Pending
-    }
-}
-
-struct PendingDescriptor {
-    value: Value,
-    state: Arc<PendingReadState>,
-}
-
-impl ProjectedHostDescriptor for PendingDescriptor {
+impl ProjectedHostDescriptor for CountingDescriptor {
     fn type_name(&self) -> &str {
-        "PendingDescriptor"
+        "CountingDescriptor"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
         match request {
-            ProjectedReadRequest::Materialize => Box::pin(PendingMaterialization {
-                value: self.value.clone(),
-                state: self.state.clone(),
-            }),
-            _ => Box::pin(async { None }),
+            ProjectedReadRequest::Materialize => {
+                self.materialize_calls.fetch_add(1, Ordering::Relaxed);
+                Some(ProjectedReadResponse::Value(self.value.clone()))
+            }
+            _ => None,
         }
     }
 }
 
-struct PendingHost {
+struct CountingHost {
     projected: ProjectedValue,
 }
 
-impl ExecutionHost for PendingHost {
+impl ExecutionHost for CountingHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new(
-                "unsupported pending projected-coercion ability",
+                "unsupported counting projected-coercion ability",
             )),
         }
     }
@@ -212,54 +150,41 @@ impl ExecutionHost for PendingHost {
     }
 }
 
-async fn execute_pending(
+async fn execute_counting(
     source: &str,
     value: Value,
-    state: Arc<PendingReadState>,
+    materialize_calls: Arc<AtomicUsize>,
 ) -> Result<ExecutionOutcome, RuntimeError> {
     let globals = BTreeSet::from(["pending".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let program = lashlang::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let projected = ProjectedValue::custom("pending", Arc::new(PendingDescriptor { value, state }));
+    let projected = ProjectedValue::custom(
+        "pending",
+        Arc::new(CountingDescriptor {
+            value,
+            materialize_calls,
+        }),
+    );
     let mut runtime_state = State::new();
-    lashlang::execute(&program, &mut runtime_state, &PendingHost { projected }).await
+    lashlang::execute(&program, &mut runtime_state, &CountingHost { projected }).await
 }
 
-fn run_pending_projection(
+async fn run_counting_projection(
     source: &'static str,
     value: Value,
 ) -> (Result<ExecutionOutcome, RuntimeError>, usize) {
-    let state = Arc::new(PendingReadState::default());
-    let worker_state = state.clone();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let worker = std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("current-thread runtime");
-        let result = runtime.block_on(execute_pending(source, value, worker_state));
-        sender.send(result).expect("test receiver remains live");
-    });
-
-    let result = match receiver.recv_timeout(Duration::from_secs(2)) {
-        Ok(result) => result,
-        Err(error) => {
-            state.cancel();
-            let _ = receiver.recv_timeout(Duration::from_secs(2));
-            worker.join().expect("cancelled worker exits cleanly");
-            panic!("`{source}` did not complete on a current-thread runtime: {error}");
-        }
-    };
-    worker.join().expect("worker exits cleanly");
-    (result, state.pending_polls.load(Ordering::Relaxed))
+    let materialize_calls = Arc::new(AtomicUsize::new(0));
+    let result = execute_counting(source, value, materialize_calls.clone()).await;
+    (result, materialize_calls.load(Ordering::Relaxed))
 }
 
-fn assert_pending_projection_completes(source: &'static str, value: Value, expected: Value) {
-    let (result, pending_polls) = run_pending_projection(source, value);
+async fn assert_counting_projection_completes(source: &'static str, value: Value, expected: Value) {
+    let (result, materialize_calls) = run_counting_projection(source, value).await;
     assert!(
-        pending_polls > 0,
-        "`{source}` must observe a deliberately pending materialization"
+        materialize_calls > 0,
+        "`{source}` must observe a materializing read"
     );
     assert_eq!(
         result.unwrap_or_else(|error| panic!("`{source}` should execute: {error}")),
@@ -268,11 +193,11 @@ fn assert_pending_projection_completes(source: &'static str, value: Value, expec
     );
 }
 
-fn assert_pending_projection_is_not_read(source: &'static str, expected: Value) {
-    let (result, pending_polls) =
-        run_pending_projection(source, Value::String("must stay unread".into()));
+async fn assert_counting_projection_is_not_read(source: &'static str, expected: Value) {
+    let (result, materialize_calls) =
+        run_counting_projection(source, Value::String("must stay unread".into())).await;
     assert_eq!(
-        pending_polls, 0,
+        materialize_calls, 0,
         "`{source}` must not read an object member that equality or truthiness does not coerce"
     );
     assert_eq!(
@@ -283,7 +208,7 @@ fn assert_pending_projection_is_not_read(source: &'static str, expected: Value) 
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn pending_projected_operands_redispatch_without_blocking_the_runtime() {
+async fn projected_operands_redispatch_through_the_synchronous_read() {
     for (source, value, expected) in [
         (
             r#"finish(pending + "!");"#,
@@ -306,12 +231,12 @@ async fn pending_projected_operands_redispatch_without_blocking_the_runtime() {
             Value::Number(41.0),
         ),
     ] {
-        assert_pending_projection_completes(source, value, expected);
+        assert_counting_projection_completes(source, value, expected).await;
     }
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn pending_projected_object_comparisons_preserve_identity_without_reading_members() {
+async fn projected_object_comparisons_preserve_identity_without_reading_members() {
     for (source, expected) in [
         (r#"const a = [pending]; finish(a == a);"#, true),
         (r#"const a = [pending]; finish(a != a);"#, false),
@@ -331,12 +256,12 @@ async fn pending_projected_object_comparisons_preserve_identity_without_reading_
         (r#"const a = [pending]; finish(a !== a);"#, false),
         (r#"const a = [pending]; finish(!a);"#, false),
     ] {
-        assert_pending_projection_is_not_read(source, Value::Bool(expected));
+        assert_counting_projection_is_not_read(source, Value::Bool(expected)).await;
     }
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn pending_projected_date_addition_concatenates_in_both_operand_positions() {
+async fn projected_date_addition_concatenates_in_both_operand_positions() {
     // FIG-3704: a Date's default ToPrimitive hint is string, so `+` with a
     // materialized projection concatenates the deterministic UTC DateString.
     const DATE: &str = "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)";
@@ -344,11 +269,12 @@ async fn pending_projected_date_addition_concatenates_in_both_operand_positions(
         (r#"finish(new Date(0) + pending);"#, format!("{DATE}hello")),
         (r#"finish(pending + new Date(0));"#, format!("hello{DATE}")),
     ] {
-        assert_pending_projection_completes(
+        assert_counting_projection_completes(
             source,
             Value::String("hello".into()),
             Value::String(expected.into()),
-        );
+        )
+        .await;
     }
 }
 

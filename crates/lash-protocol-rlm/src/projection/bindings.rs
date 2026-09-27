@@ -269,7 +269,7 @@ pub fn rlm_session_projection_extension(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lashlang::{ProjectedFuture, ProjectedReadRequest, ProjectedReadResponse};
+    use lashlang::{ProjectedReadRequest, ProjectedReadResponse};
 
     struct TestProjectedValue;
 
@@ -278,21 +278,14 @@ mod tests {
             "string"
         }
 
-        fn read_one(
-            &self,
-            request: ProjectedReadRequest,
-        ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-            Box::pin(async move {
-                match request {
-                    ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
-                        FlowValue::String("lazy".into()),
-                    )),
-                    ProjectedReadRequest::Render => {
-                        Some(ProjectedReadResponse::Text("lazy".into()))
-                    }
-                    _ => None,
-                }
-            })
+        fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+            match request {
+                ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
+                    FlowValue::String("lazy".into()),
+                )),
+                ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text("lazy".into())),
+                _ => None,
+            }
         }
     }
 
@@ -346,7 +339,7 @@ mod tests {
             .expect("resolve projected bindings");
         let value = projected.get("doc").expect("doc binding");
         assert_eq!(value.projection_ref(), Some(&serde_json::json!(reference)));
-        assert_eq!(value.render().await.expect("render"), "lazy");
+        assert_eq!(value.render().expect("render"), "lazy");
     }
 
     #[tokio::test]

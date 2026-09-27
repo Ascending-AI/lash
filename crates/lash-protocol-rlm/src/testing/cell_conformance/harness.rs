@@ -285,13 +285,13 @@ impl Session {
         let bindings = self
             .state
             .bound_variable_values(&std::collections::BTreeSet::new());
-        block_on(async move {
+        {
             let mut out = BTreeMap::new();
             for (name, value) in bindings {
-                out.insert(name, flow_to_json_value(&value).await);
+                out.insert(name, flow_to_json_value(&value));
             }
             out
-        })
+        }
     }
 
     /// The prompt's "Bound Variables" section for the session as it stands,
@@ -416,14 +416,6 @@ impl Session {
     }
 }
 
-pub(crate) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build a current-thread runtime")
-        .block_on(future)
-}
-
 /// A host's read-only JSON value, projected: it answers materialization and
 /// the structural reads a host document answers (a field, an index, its keys
 /// and length); every other read falls back to materializing.
@@ -444,30 +436,28 @@ impl lashlang::ProjectedHostDescriptor for HostJson {
     fn read_one(
         &self,
         request: lashlang::ProjectedReadRequest,
-    ) -> lashlang::ProjectedFuture<'_, Option<lashlang::ProjectedReadResponse>> {
-        Box::pin(async move {
-            use lashlang::{ProjectedReadRequest as Read, ProjectedReadResponse as Answer};
-            let json = |value: Option<&serde_json::Value>| {
-                Answer::Value(
-                    value
-                        .cloned()
-                        .map_or(lashlang::Value::Undefined, lashlang::from_json),
-                )
-            };
-            match (request, &self.0) {
-                (Read::Materialize, value) => Some(json(Some(value))),
-                (Read::Field(name), serde_json::Value::Object(fields)) => {
-                    Some(json(fields.get(name.as_ref())))
-                }
-                (Read::Index(lashlang::Value::Number(index)), serde_json::Value::Array(items)) => {
-                    Some(json(items.get(index as usize)))
-                }
-                (Read::Keys, serde_json::Value::Object(fields)) => {
-                    Some(Answer::Keys(fields.keys().cloned().collect()))
-                }
-                (Read::Len, serde_json::Value::Array(items)) => Some(Answer::Len(items.len())),
-                _ => None,
+    ) -> Option<lashlang::ProjectedReadResponse> {
+        use lashlang::{ProjectedReadRequest as Read, ProjectedReadResponse as Answer};
+        let json = |value: Option<&serde_json::Value>| {
+            Answer::Value(
+                value
+                    .cloned()
+                    .map_or(lashlang::Value::Undefined, lashlang::from_json),
+            )
+        };
+        match (request, &self.0) {
+            (Read::Materialize, value) => Some(json(Some(value))),
+            (Read::Field(name), serde_json::Value::Object(fields)) => {
+                Some(json(fields.get(name.as_ref())))
             }
-        })
+            (Read::Index(lashlang::Value::Number(index)), serde_json::Value::Array(items)) => {
+                Some(json(items.get(index as usize)))
+            }
+            (Read::Keys, serde_json::Value::Object(fields)) => {
+                Some(Answer::Keys(fields.keys().cloned().collect()))
+            }
+            (Read::Len, serde_json::Value::Array(items)) => Some(Answer::Len(items.len())),
+            _ => None,
+        }
     }
 }

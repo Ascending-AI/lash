@@ -551,15 +551,13 @@ ratchet_rule() {
       done | LC_ALL=C sort
     } >"$allowlist.new"
     for key in "${!seen[@]}"; do
-      # The tag's first word is the class; RATCHET_UNCAPPED_TAG is a case
+      # The tag's first word is the class; RATCHET_UNCAPPED_TAG is a regex
       # alternation of the uncapped classes (e.g. 'RECORDED|BENIGN'), so a
       # tag may carry a one-line reason after the class word.
       first_tag=${tags[$key]:-UNMAPPED}
       first_tag=${first_tag%%[[:space:]]*}
-      if [[ -n ${RATCHET_UNCAPPED_TAG:-} ]]; then
-        case $first_tag in
-          $RATCHET_UNCAPPED_TAG) continue ;;
-        esac
+      if [[ -n ${RATCHET_UNCAPPED_TAG:-} && $first_tag =~ ^($RATCHET_UNCAPPED_TAG)$ ]]; then
+        continue
       fi
       total=$(( total + seen[$key] ))
     done

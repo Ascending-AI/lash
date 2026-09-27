@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::{ProjectedFuture, Value, debug_assert_exported_value, write_number};
+use super::{Value, debug_assert_exported_value, write_number};
 
 const DEFAULT_ARRAY_HEAD: usize = 8;
 const DEFAULT_ARRAY_TAIL: usize = 2;
@@ -63,7 +63,10 @@ impl<'a> ValueProjectionContext<'a> {
 }
 
 pub trait ValueProjector: Send + Sync {
-    fn project<'a>(&'a self, context: ValueProjectionContext<'a>) -> ProjectedFuture<'a, String>;
+    /// Renders `context.value` for display. Synchronous and pure: a projected
+    /// member renders through its descriptor's synchronous `read_one`, so the
+    /// trait has no async surface (FIG-3903).
+    fn project(&self, context: ValueProjectionContext<'_>) -> String;
 }
 
 #[derive(Clone, Debug)]
@@ -93,10 +96,6 @@ impl BudgetedJsonProjector {
         Self::new(BudgetedJsonProjectionConfig::unbounded())
     }
 
-    pub fn project_blocking(&self, context: ValueProjectionContext<'_>) -> String {
-        lash_sansio::future::drive_sync(self.project(context))
-    }
-
     fn is_unbounded(&self) -> bool {
         self.config == BudgetedJsonProjectionConfig::unbounded()
     }
@@ -105,132 +104,123 @@ impl BudgetedJsonProjector {
         clippy::expect_used,
         reason = "a number rendered into an in-memory String buffer cannot fail write, per the message"
     )]
-    fn render_value<'a>(
-        &'a self,
-        value: &'a Value,
-        depth: usize,
-        top_level: bool,
-    ) -> ProjectedFuture<'a, String> {
-        Box::pin(async move {
-            match value {
-                Value::Null | Value::Undefined => "null".to_string(),
-                Value::Bool(value) => value.to_string(),
-                Value::Number(value) => {
-                    let mut out = String::new();
-                    write_number(&mut out, *value).expect("string writes should not fail");
-                    out
+    fn render_value(&self, value: &Value, depth: usize, top_level: bool) -> String {
+        match value {
+            Value::Null | Value::Undefined => "null".to_string(),
+            Value::Bool(value) => value.to_string(),
+            Value::Number(value) => {
+                let mut out = String::new();
+                write_number(&mut out, *value).expect("string writes should not fail");
+                out
+            }
+            Value::String(value) if top_level && !self.quote_top_level_strings => value.to_string(),
+            Value::String(value) => json_string(&clip_nested_string(value, self.config)),
+            Value::Image(image) => {
+                serde_json::to_string(image).unwrap_or_else(|_| "null".to_string())
+            }
+            Value::Resource(resource) => {
+                serde_json::to_string(resource).unwrap_or_else(|_| "null".to_string())
+            }
+            // The prompt is a display channel, not a value channel: a
+            // placeholder restored without its host descriptor says so here
+            // instead of pretending to be `null` (FIG-2865).
+            Value::Projected(projected) => match projected.render() {
+                Ok(rendered) => rendered,
+                Err(error) => json_string(&error.to_string()),
+            },
+            Value::Ref(_) => {
+                debug_assert_exported_value("projection rendering");
+                "null".to_string()
+            }
+            Value::Tuple(values) | Value::List(values) => {
+                if self.config.max_depth != usize::MAX && depth >= self.config.max_depth {
+                    return depth_marker(self.config.max_depth);
                 }
-                Value::String(value) if top_level && !self.quote_top_level_strings => {
-                    value.to_string()
+                let len = values.len();
+                if len == 0 {
+                    return "[]".to_string();
                 }
-                Value::String(value) => json_string(&clip_nested_string(value, self.config)),
-                Value::Image(image) => {
-                    serde_json::to_string(image).unwrap_or_else(|_| "null".to_string())
-                }
-                Value::Resource(resource) => {
-                    serde_json::to_string(resource).unwrap_or_else(|_| "null".to_string())
-                }
-                // The prompt is a display channel, not a value channel: a
-                // placeholder restored without its host descriptor says so here
-                // instead of pretending to be `null` (FIG-2865).
-                Value::Projected(projected) => match projected.render().await {
-                    Ok(rendered) => rendered,
-                    Err(error) => json_string(&error.to_string()),
-                },
-                Value::Ref(_) => {
-                    debug_assert_exported_value("projection rendering");
-                    "null".to_string()
-                }
-                Value::Tuple(values) | Value::List(values) => {
-                    if self.config.max_depth != usize::MAX && depth >= self.config.max_depth {
-                        return depth_marker(self.config.max_depth);
+                let mut out = String::from("[");
+                let mut omitted = 0usize;
+                for (index, value) in values.iter().enumerate() {
+                    if !self.is_unbounded()
+                        && len > DEFAULT_ARRAY_HEAD + DEFAULT_ARRAY_TAIL
+                        && index >= DEFAULT_ARRAY_HEAD
+                        && index < len - DEFAULT_ARRAY_TAIL
+                    {
+                        omitted += 1;
+                        continue;
                     }
-                    let len = values.len();
-                    if len == 0 {
-                        return "[]".to_string();
-                    }
-                    let mut out = String::from("[");
-                    let mut omitted = 0usize;
-                    for (index, value) in values.iter().enumerate() {
-                        if !self.is_unbounded()
-                            && len > DEFAULT_ARRAY_HEAD + DEFAULT_ARRAY_TAIL
-                            && index >= DEFAULT_ARRAY_HEAD
-                            && index < len - DEFAULT_ARRAY_TAIL
-                        {
-                            omitted += 1;
-                            continue;
-                        }
-                        if index > 0 && !out.ends_with('[') {
-                            out.push(',');
-                        }
-                        if omitted > 0 {
-                            let _ = write!(
-                                out,
-                                "{}",
-                                json_string(&format!("... {omitted} items omitted ..."))
-                            );
-                            out.push(',');
-                            omitted = 0;
-                        }
-                        out.push_str(&self.render_value(value, depth + 1, false).await);
+                    if index > 0 && !out.ends_with('[') {
+                        out.push(',');
                     }
                     if omitted > 0 {
-                        if !out.ends_with('[') {
-                            out.push(',');
-                        }
                         let _ = write!(
                             out,
                             "{}",
                             json_string(&format!("... {omitted} items omitted ..."))
                         );
+                        out.push(',');
+                        omitted = 0;
                     }
-                    out.push(']');
-                    out
+                    out.push_str(&self.render_value(value, depth + 1, false));
                 }
-                Value::Record(record) => {
-                    if self.config.max_depth != usize::MAX && depth >= self.config.max_depth {
-                        return depth_marker(self.config.max_depth);
+                if omitted > 0 {
+                    if !out.ends_with('[') {
+                        out.push(',');
                     }
-                    if record.is_empty() {
-                        return "{}".to_string();
-                    }
-                    let mut entries: Vec<_> = record
-                        .iter()
-                        .filter(|(_, value)| !matches!(value, Value::Undefined))
-                        .collect();
-                    if !self.is_unbounded() {
-                        entries = prioritized_record_entries(entries);
-                    }
-                    let total = entries.len();
-                    let mut out = String::from("{");
-                    let mut shown = 0usize;
-                    for (key, value) in entries.drain(..) {
-                        if !self.is_unbounded()
-                            && shown >= DEFAULT_OBJECT_FIELDS
-                            && !DIAGNOSTIC_FIELDS.contains(&key)
-                        {
-                            continue;
-                        }
-                        if shown > 0 {
-                            out.push(',');
-                        }
-                        out.push_str(&json_string(key));
-                        out.push(':');
-                        out.push_str(&self.render_value(value, depth + 1, false).await);
-                        shown += 1;
-                    }
-                    if shown < total {
-                        if shown > 0 {
-                            out.push(',');
-                        }
-                        out.push_str("\"__truncated__\":");
-                        out.push_str(&json_string(&format!("{} fields omitted", total - shown)));
-                    }
-                    out.push('}');
-                    out
+                    let _ = write!(
+                        out,
+                        "{}",
+                        json_string(&format!("... {omitted} items omitted ..."))
+                    );
                 }
+                out.push(']');
+                out
             }
-        })
+            Value::Record(record) => {
+                if self.config.max_depth != usize::MAX && depth >= self.config.max_depth {
+                    return depth_marker(self.config.max_depth);
+                }
+                if record.is_empty() {
+                    return "{}".to_string();
+                }
+                let mut entries: Vec<_> = record
+                    .iter()
+                    .filter(|(_, value)| !matches!(value, Value::Undefined))
+                    .collect();
+                if !self.is_unbounded() {
+                    entries = prioritized_record_entries(entries);
+                }
+                let total = entries.len();
+                let mut out = String::from("{");
+                let mut shown = 0usize;
+                for (key, value) in entries.drain(..) {
+                    if !self.is_unbounded()
+                        && shown >= DEFAULT_OBJECT_FIELDS
+                        && !DIAGNOSTIC_FIELDS.contains(&key)
+                    {
+                        continue;
+                    }
+                    if shown > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&json_string(key));
+                    out.push(':');
+                    out.push_str(&self.render_value(value, depth + 1, false));
+                    shown += 1;
+                }
+                if shown < total {
+                    if shown > 0 {
+                        out.push(',');
+                    }
+                    out.push_str("\"__truncated__\":");
+                    out.push_str(&json_string(&format!("{} fields omitted", total - shown)));
+                }
+                out.push('}');
+                out
+            }
+        }
     }
 
     fn enforce_budget(&self, rendered: String) -> String {
@@ -242,11 +232,9 @@ impl BudgetedJsonProjector {
 }
 
 impl ValueProjector for BudgetedJsonProjector {
-    fn project<'a>(&'a self, context: ValueProjectionContext<'a>) -> ProjectedFuture<'a, String> {
-        Box::pin(async move {
-            let rendered = self.render_value(context.value, 0, true).await;
-            self.enforce_budget(rendered)
-        })
+    fn project(&self, context: ValueProjectionContext<'_>) -> String {
+        let rendered = self.render_value(context.value, 0, true);
+        self.enforce_budget(rendered)
     }
 }
 
@@ -334,9 +322,7 @@ mod tests {
     use crate::{ImageValue, ProjectedValue, Record, ResourceHandle};
 
     fn project(value: &Value, config: BudgetedJsonProjectionConfig) -> String {
-        futures_executor::block_on(
-            BudgetedJsonProjector::new(config).project(ValueProjectionContext::new(value)),
-        )
+        BudgetedJsonProjector::new(config).project(ValueProjectionContext::new(value))
     }
 
     fn default_project(value: &Value) -> String {
@@ -360,7 +346,7 @@ mod tests {
         assert_eq!(
             BudgetedJsonProjector::new(config)
                 .with_quoted_top_level_strings()
-                .project_blocking(ValueProjectionContext::new(&value)),
+                .project(ValueProjectionContext::new(&value)),
             r#""{'location': {'name': 'Utrecht'}}""#
         );
     }

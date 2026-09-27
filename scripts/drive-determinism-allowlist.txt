@@ -29,6 +29,7 @@ crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  llm_task: &mut
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn new(handle: crate::task::AbortHandle) -> Self {  |  1  # RECORDED abort guard of the recorded LlmCall step body's provider task
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> lash_sansio::future::SendBoxFuture<'a, Result<(), LashlangRuntimeError>> {  |  1  # BENIGN SB-pure validate_process_claims recursion box; no production caller outside tests
 crates/lash-lashlang-runtime/src/process.rs  |  lash_sansio::future::SendBoxFuture<'a, Result<lashlang::AbilityResult, ExecutionHostError>>;  |  1  # RECORDED SB3 ability-call reply box; the reply arrives through the journaled ability protocol
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  ) -> lash_sansio::future::SendBoxFuture<'a, Result<(), ExecutionHostError>> {  |  1  # RECORDED SB-pure collect_printed_images_inner recursion box; the images it resolves ride the journaled print output
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  lash_sansio::future::SendBoxFuture<'a, Result<AbilityResult, ExecutionHostError>>;  |  1  # RECORDED SB2 host-ability reply box; the reply arrives through the journaled ability protocol
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<'run, JournaledEffectRecord>,  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
@@ -46,15 +47,5 @@ crates/lash-restate/src/process/mod.rs  |  fn restate_now_ms() -> u64 {  |  1  #
 crates/lash-restate/src/process/park_reconcile.rs  |  epoch_ms: super::restate_now_ms(),  |  1  # BENIGN out-of-workflow park reconciler evidence stamp; no workflow decision reads it
 crates/lash-restate/src/process/workflow.rs  |  epoch_ms: restate_now_ms(),  |  1  # RECORDED stamped inside the journaled COMPLETE_STEP
 crates/lash-restate/src/process/workflow.rs  |  restate_now_ms(),  |  1  # RECORDED stamped inside the journaled PARENT_END_STEP
-crates/lashlang/src/runtime/format.rs  |  lash_sansio::future::drive_sync(append_stringified_value_async(output, value))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/format.rs  |  lash_sansio::future::drive_sync(apply_format_async(template, args))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
-crates/lashlang/src/runtime/format.rs  |  lash_sansio::future::drive_sync(stringify_value_async(value))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/json.rs  |  lash_sansio::future::drive_sync(to_json_async(value))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
-crates/lashlang/src/runtime/ops.rs  |  Value::Projected(value) => lash_sansio::future::drive_sync(value.truthy())?,  |  1  # AC38
-crates/lashlang/src/runtime/ops.rs  |  lash_sansio::future::drive_sync(execute_join_builtin_async(items, sep))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
-crates/lashlang/src/runtime/ops.rs  |  lash_sansio::future::drive_sync(execute_push_builtin_async(list.clone(), item))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
-crates/lashlang/src/runtime/projector.rs  |  lash_sansio::future::drive_sync(self.project(context))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/value.rs  |  lash_sansio::future::drive_sync(self.materialize_async())  |  1  # AC38
-crates/lashlang/src/runtime/value.rs  |  pub type ProjectedFuture<'a, T> = lash_sansio::future::SendBoxFuture<'a, T>;  |  1  # BENIGN SB5 alias; the async reads it boxes are pinned at their drive_sync sites
 crates/lashlang/src/runtime/vm/control.rs  |  .map(|_| (instruction.profile_tag(), ProfileMark::now()));  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision
 crates/lashlang/src/runtime/vm/mod.rs  |  let start = self.profile.as_ref().map(|_| ProfileMark::now());  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision

@@ -1253,7 +1253,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
 pub(super) fn flow_to_json_value_emits_projected_marker_for_projected_values() {
     block_on(async {
         let projected = ProjectedValue::scalar("input", FlowValue::String("hello".into()));
-        let value = flow_to_json_value(&FlowValue::Projected(projected)).await;
+        let value = flow_to_json_value(&FlowValue::Projected(projected));
         let obj = value
             .as_object()
             .expect("expected projected wrapper object");
@@ -1278,7 +1278,7 @@ pub(super) fn flow_to_json_value_preserves_projection_ref_without_materializing(
             host.clone(),
             serde_json::json!(reference),
         );
-        let value = flow_to_json_value(&FlowValue::Projected(projected)).await;
+        let value = flow_to_json_value(&FlowValue::Projected(projected));
         assert_eq!(host.render_count.load(Ordering::SeqCst), 0);
         assert_eq!(host.materialize_count.load(Ordering::SeqCst), 0);
         assert_eq!(
@@ -1305,7 +1305,7 @@ pub(super) fn flow_to_json_value_materializes_an_invalid_projection_ref() {
             host.clone(),
             serde_json::Value::Null,
         );
-        let value = flow_to_json_value(&FlowValue::Projected(projected)).await;
+        let value = flow_to_json_value(&FlowValue::Projected(projected));
         assert_eq!(host.materialize_count.load(Ordering::SeqCst), 1);
         assert_eq!(
             value,
@@ -1331,7 +1331,7 @@ pub(super) fn image_json_round_trip_preserves_mime_and_image_type() {
             Some(180),
         );
         let flow = FlowValue::Image(Box::new(image));
-        let json = flow_to_json_value(&flow).await;
+        let json = flow_to_json_value(&flow);
 
         assert_eq!(json.get("mime").and_then(Value::as_str), Some("image/webp"));
         assert!(json.get("media_type").is_none());
@@ -1384,7 +1384,7 @@ pub(super) fn flow_record_to_json_value_marks_only_projected_entries() {
         record.insert("proj".to_string(), FlowValue::Projected(projected));
         record.insert("glob".to_string(), FlowValue::String("g".into()));
 
-        let value = flow_record_to_json_value(&record).await;
+        let value = flow_record_to_json_value(&record);
         let obj = value.as_object().expect("record object");
         // proj entry must be wrapped in {"__projected__": ...}
         let proj = obj

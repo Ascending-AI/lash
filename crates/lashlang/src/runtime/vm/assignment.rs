@@ -1,6 +1,6 @@
 use super::super::{
     StringValue, ensure_javascript_string_size, javascript_operand_text,
-    javascript_string_size_error, stringify_value_blocking,
+    javascript_string_size_error, stringify_value,
 };
 use super::javascript_operators::javascript_binary_operand_coercions;
 use super::*;
@@ -277,7 +277,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     Value::Number(*left)
                 }
                 Value::String(accumulator) => {
-                    let text = stringify_value_blocking(&Value::Number(right))?;
+                    let text = stringify_value(&Value::Number(right))?;
                     self.last_value = None;
                     accumulator.push_str(&text);
                     Value::String(accumulator.clone())

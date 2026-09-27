@@ -9,9 +9,8 @@ use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
-    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record as FlowRecord,
-    Value as FlowValue,
+    ExecutionOutcome, ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest,
+    ProjectedReadResponse, ProjectedValue, Record as FlowRecord, Value as FlowValue,
 };
 use serde_json::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};

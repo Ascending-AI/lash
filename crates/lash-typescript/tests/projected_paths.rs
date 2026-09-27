@@ -23,8 +23,8 @@ use std::sync::{Arc, Mutex};
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, RuntimeError, State, Value,
+    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, RuntimeError, State, Value,
 };
 
 /// Supplies the session's projected bindings the way a real host does — through
@@ -86,10 +86,7 @@ impl ProjectedHostDescriptor for RecordingView {
         "RecordingView"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
         let label = match &request {
             ProjectedReadRequest::Field(field) => format!("field:{field}"),
             ProjectedReadRequest::Materialize => "materialize".to_string(),
@@ -99,14 +96,12 @@ impl ProjectedHostDescriptor for RecordingView {
             .lock()
             .expect("recording view log is not poisoned")
             .push(label);
-        Box::pin(async move {
-            match request {
-                ProjectedReadRequest::Field(field) if field.as_ref() == "kind" => {
-                    Some(ProjectedReadResponse::Value(Value::String("tool".into())))
-                }
-                _ => None,
+        match request {
+            ProjectedReadRequest::Field(field) if field.as_ref() == "kind" => {
+                Some(ProjectedReadResponse::Value(Value::String("tool".into())))
             }
-        })
+            _ => None,
+        }
     }
 }
 
@@ -404,32 +399,27 @@ impl ProjectedHostDescriptor for ProjectedRows {
         "ProjectedRows"
     }
 
-    fn read_one(
-        &self,
-        request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
-        Box::pin(async move {
-            match request {
-                ProjectedReadRequest::Len => Some(ProjectedReadResponse::Len(self.values.len())),
-                ProjectedReadRequest::Empty => {
-                    Some(ProjectedReadResponse::Bool(self.values.is_empty()))
-                }
-                ProjectedReadRequest::Truthy => Some(ProjectedReadResponse::Bool(true)),
-                ProjectedReadRequest::Index(index) => match index {
-                    Value::Number(index) if index >= 0.0 => {
-                        self.values.get(index as usize).cloned().map_or(
-                            Some(ProjectedReadResponse::Value(Value::Undefined)),
-                            |value| Some(ProjectedReadResponse::Value(value)),
-                        )
-                    }
-                    _ => None,
-                },
-                ProjectedReadRequest::Slice { .. } | ProjectedReadRequest::Materialize => Some(
-                    ProjectedReadResponse::Value(Value::List(self.values.clone().into())),
-                ),
-                _ => None,
+    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+        match request {
+            ProjectedReadRequest::Len => Some(ProjectedReadResponse::Len(self.values.len())),
+            ProjectedReadRequest::Empty => {
+                Some(ProjectedReadResponse::Bool(self.values.is_empty()))
             }
-        })
+            ProjectedReadRequest::Truthy => Some(ProjectedReadResponse::Bool(true)),
+            ProjectedReadRequest::Index(index) => match index {
+                Value::Number(index) if index >= 0.0 => {
+                    self.values.get(index as usize).cloned().map_or(
+                        Some(ProjectedReadResponse::Value(Value::Undefined)),
+                        |value| Some(ProjectedReadResponse::Value(value)),
+                    )
+                }
+                _ => None,
+            },
+            ProjectedReadRequest::Slice { .. } | ProjectedReadRequest::Materialize => Some(
+                ProjectedReadResponse::Value(Value::List(self.values.clone().into())),
+            ),
+            _ => None,
+        }
     }
 }
 

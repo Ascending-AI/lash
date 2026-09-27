@@ -6,7 +6,8 @@ use std::sync::Arc;
 use lash_core::{TextProjectionMetadata, TokenUsage};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 use lashlang::{
-    BudgetedJsonProjectionConfig, BudgetedJsonProjector, Value as FlowValue, ValueProjectionContext,
+    BudgetedJsonProjectionConfig, BudgetedJsonProjector, Value as FlowValue,
+    ValueProjectionContext, ValueProjector,
 };
 
 pub(crate) const PRINT_HISTORY_PROJECTION_CONFIG: BudgetedJsonProjectionConfig =
@@ -482,10 +483,10 @@ fn render_row_line(
 }
 
 fn build_bound_variable_row(value: &FlowValue) -> BuiltRow {
-    let projected = bound_variable_projector().project_blocking(ValueProjectionContext::new(value));
+    let projected = bound_variable_projector().project(ValueProjectionContext::new(value));
     let full = BudgetedJsonProjector::unbounded()
         .with_quoted_top_level_strings()
-        .project_blocking(ValueProjectionContext::new(value));
+        .project(ValueProjectionContext::new(value));
     if projected == full {
         return BuiltRow {
             inline: Some(projected),
@@ -1095,7 +1096,7 @@ mod bound_variable_tests {
             ("body".to_string(), FlowValue::String("plain".into())),
         ])));
 
-        let encoded = crate::projection::flow_to_json_value(&value).await;
+        let encoded = crate::projection::flow_to_json_value(&value);
         let decoded = crate::projection::normalize_tool_args_for_projection(
             encoded,
             &lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues,

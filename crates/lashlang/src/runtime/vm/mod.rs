@@ -68,13 +68,12 @@ use super::{
     eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
     eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
     execute_compiled_format, execute_compiled_format_direct,
-    execute_compiled_format_one_number_compact_direct, execute_intrinsic,
-    execute_push_builtin_async, heap_inherited_builtin, inline_inherited_builtin, is_truthy,
-    is_truthy_async, iterable_values, javascript_join, javascript_split,
-    materialize_projected_async, materialize_value, proportional_units, range_bounds,
-    range_bounds_async, read_javascript_field_direct, read_javascript_heap_field,
-    read_javascript_heap_index, read_javascript_index_direct_with_key, regexp_string, sorting_work,
-    unwrap_tool_result, unwrap_type_value,
+    execute_compiled_format_one_number_compact_direct, execute_intrinsic, execute_push_builtin,
+    heap_inherited_builtin, inline_inherited_builtin, is_truthy, iterable_values, javascript_join,
+    javascript_split, materialize_value, proportional_units, range_bounds, range_bounds_projected,
+    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
+    read_javascript_index_direct_with_key, regexp_string, sorting_work, unwrap_tool_result,
+    unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -630,13 +629,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             Instruction::JavaScriptUnary(op) => {
-                if self.javascript_unary_needs_async(op)? {
+                if self.javascript_unary_needs_slow_path(op)? {
                     return Ok(None);
                 }
                 self.execute_javascript_unary(op)?;
             }
             Instruction::JavaScriptBinary(op) => {
-                if self.javascript_binary_needs_async(op)? {
+                if self.javascript_binary_needs_slow_path(op)? {
                     return Ok(None);
                 }
                 self.execute_javascript_binary(op)?;
@@ -873,7 +872,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.add_assign_slot(slot, right)?;
             }
             Instruction::JavaScriptAddAssign(slot) => {
-                if self.javascript_binary_needs_async(JavaScriptBinaryOp::Add)? {
+                if self.javascript_binary_needs_slow_path(JavaScriptBinaryOp::Add)? {
                     return Ok(None);
                 }
                 self.javascript_add_assign(slot)?;
@@ -997,28 +996,25 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// operands the opcode consumes with their materialized values.
     ///
     /// `step_instruction_fast` only routes the pure-arithmetic stack opcodes
-    /// (`Binary`, `JumpIfCompareFalse`) to the async path when an operand is
+    /// (`Binary`, `JumpIfCompareFalse`) to the slow path when an operand is
     /// `Value::Projected`. Materializing the top two operands in place — in the
     /// same right-then-left order the opcode pops them — and re-dispatching is
-    /// exactly equivalent to the inline `materialize_projected_async` the async
+    /// exactly equivalent to the inline `materialize_value` the slow
     /// arm would have done, but without duplicating the eval logic. The retry
     /// always completes because both operands are now concrete.
-    async fn redispatch_with_materialized_stack_pair(
+    fn redispatch_with_materialized_stack_pair(
         &mut self,
         instruction: Instruction,
     ) -> Result<VmStep, RuntimeError> {
-        let right = materialize_projected_async(self.pop_stack()?).await?;
-        let left = materialize_projected_async(self.pop_stack()?).await?;
+        let right = materialize_value(self.pop_stack()?)?;
+        let left = materialize_value(self.pop_stack()?)?;
         let op = match &instruction {
             Instruction::JavaScriptBinary(op) => Some(*op),
             Instruction::JavaScriptAddAssign(_) => Some(JavaScriptBinaryOp::Add),
             _ => None,
         };
         let (left, right) = match op {
-            Some(op) => {
-                self.prepare_javascript_binary_operands(op, left, right)
-                    .await?
-            }
+            Some(op) => self.prepare_javascript_binary_operands(op, left, right)?,
             None => (left, right),
         };
         self.stack.push(left);
@@ -1035,15 +1031,15 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// only read `slot` and never write it, so we materialize the projected
     /// value, swap it into the slot for the (fully synchronous) re-dispatch,
     /// then restore the original projected value. The projected binding is
-    /// re-materialized on every touch, matching the old async arm's
-    /// per-touch `materialize_projected_async(left.clone())`.
-    async fn redispatch_with_materialized_slot(
+    /// re-materialized on every touch, matching the old slow arm's
+    /// per-touch `materialize_value(left.clone())`.
+    fn redispatch_with_materialized_slot(
         &mut self,
         slot: usize,
         instruction: Instruction,
     ) -> Result<VmStep, RuntimeError> {
         let original = self.load_slot(slot)?.clone();
-        let materialized = materialize_projected_async(original.clone()).await?;
+        let materialized = materialize_value(original.clone())?;
         self.slots.values[slot] = Some(materialized);
         let result = self.redispatch_fast(instruction);
         self.slots.values[slot] = Some(original);
@@ -1060,32 +1056,32 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
     }
 
-    /// Async slow path for the run loop. The synchronous `step_instruction_fast`
+    /// Slow path for the run loop. The synchronous `step_instruction_fast`
     /// fully handles every pure-compute and effect-producing opcode on
     /// non-projected operands; it only yields `Ok(None)` (routing here) when an
-    /// operand is `Value::Projected` or the opcode inherently needs a host
-    /// `.await` (field/index projected reads, tool/process effects, intrinsics,
-    /// type literals).
+    /// operand is `Value::Projected` or the opcode inherently can suspend —
+    /// guest-coercion paths (`JavaScriptUnary`/`JavaScriptBinary` operand
+    /// ToPrimitive), tool/process effects, intrinsics, type literals.
+    /// Projected reads themselves are synchronous descriptor calls; nothing
+    /// here awaits on behalf of a `Value::Projected` alone.
     ///
     /// The pure-arithmetic opcodes (`Binary`, `JumpIfCompareFalse`, and the
     /// fused `SlotNumber*` / `JumpIfSlotNumber*` ops) do not duplicate the
     /// fast-path eval here: they resolve the blocking projected operand and
     /// re-dispatch through `step_instruction_fast` (see
     /// `redispatch_with_materialized_stack_pair` /
-    /// `redispatch_with_materialized_slot`). Only the genuinely-async opcodes
-    /// keep bespoke arms — lazy projected field/index propagation, the
-    /// `truthy`-hook bool ops, `Unary`, intrinsics, iteration, type literals,
-    /// and effects. The opcodes the fast path always completes are unreachable
-    /// here.
-    async fn step_instruction(&mut self, instruction: Instruction) -> Result<VmStep, RuntimeError> {
+    /// `redispatch_with_materialized_slot`). Only the genuinely suspending or
+    /// projected-reading opcodes keep bespoke arms — lazy projected field/index
+    /// propagation, the `truthy`-hook bool ops, `Unary`, intrinsics, iteration,
+    /// type literals, and effects. The opcodes the fast path always completes
+    /// are unreachable here.
+    fn step_instruction(&mut self, instruction: Instruction) -> Result<VmStep, RuntimeError> {
         match instruction {
             Instruction::LoadField { slot, field } => {
                 let value = self.load_slot(slot)?.clone();
                 let field = self.chunk.names[field].clone();
                 let value = match value {
-                    Value::Projected(projected) => {
-                        self.read_projected_field(&projected, &field).await?
-                    }
+                    Value::Projected(projected) => self.read_projected_field(&projected, &field)?,
                     value => self.read_dialect_field(value, &field)?,
                 };
                 self.stack.push(value);
@@ -1094,9 +1090,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.load_slot(slot)?.clone();
                 let field = self.chunk.names[field].clone();
                 let value = match value {
-                    Value::Projected(projected) => {
-                        self.read_projected_field(&projected, &field).await?
-                    }
+                    Value::Projected(projected) => self.read_projected_field(&projected, &field)?,
                     value => self.read_dialect_field(value, &field)?,
                 };
                 self.stack.push(unwrap_tool_result(value)?);
@@ -1105,20 +1099,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let target = self.pop_stack()?;
                 let field = self.chunk.names[field].clone();
                 let value = match target {
-                    Value::Projected(projected) => {
-                        self.read_projected_field(&projected, &field).await?
-                    }
+                    Value::Projected(projected) => self.read_projected_field(&projected, &field)?,
                     target => self.read_dialect_field(target, &field)?,
                 };
                 self.stack.push(value);
             }
             Instruction::Index => {
-                let index = materialize_projected_async(self.pop_stack()?).await?;
+                let index = materialize_value(self.pop_stack()?)?;
                 let target = self.pop_stack()?;
                 let value = match target {
-                    Value::Projected(projected) => {
-                        self.read_projected_index(&projected, &index).await?
-                    }
+                    Value::Projected(projected) => self.read_projected_index(&projected, &index)?,
                     target => self.read_dialect_index(target, index)?,
                 };
                 self.stack.push(value);
@@ -1149,7 +1139,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.execute_reference_path_assignment(slot, path)?;
             }
             Instruction::ListAppend => {
-                let item = materialize_projected_async(self.pop_stack()?).await?;
+                let item = materialize_value(self.pop_stack()?)?;
                 let list = self.pop_stack()?;
                 let value = match &list {
                     Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
@@ -1158,7 +1148,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     _ => {
                         // The fallback copies every element the list holds.
                         self.charge_intrinsic_work(proportional_units(&list).saturating_add(1));
-                        execute_push_builtin_async(list, item).await?
+                        execute_push_builtin(list, item)?
                     }
                 };
                 self.stack.push(value);
@@ -1167,45 +1157,37 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let value = match op {
                     UnaryOp::Negate => {
-                        let value = materialize_projected_async(value).await?;
+                        let value = materialize_value(value)?;
                         Value::Number(-as_number(&value)?)
                     }
                     UnaryOp::Not => Value::Bool(match &value {
-                        Value::Projected(_) => !is_truthy_async(&value).await?,
+                        Value::Projected(_) => !is_truthy(&value)?,
                         _ => !self.is_truthy_for_dialect(&value)?,
                     }),
                 };
                 self.stack.push(value);
             }
             Instruction::Binary(_) => {
-                return self
-                    .redispatch_with_materialized_stack_pair(instruction)
-                    .await;
+                return self.redispatch_with_materialized_stack_pair(instruction);
             }
             Instruction::JavaScriptUnary(op) => {
-                return self.redispatch_javascript_unary(op).await;
+                return self.redispatch_javascript_unary(op);
             }
             Instruction::JavaScriptBinary(_) => {
-                return self
-                    .redispatch_with_materialized_stack_pair(instruction)
-                    .await;
+                return self.redispatch_with_materialized_stack_pair(instruction);
             }
             Instruction::JavaScriptAddAssign(_) => {
-                return self
-                    .redispatch_with_materialized_stack_pair(instruction)
-                    .await;
+                return self.redispatch_with_materialized_stack_pair(instruction);
             }
             Instruction::SlotNumberBinary { slot, .. }
             | Instruction::SlotNumberCompare { slot, .. }
             | Instruction::SlotNumberBinaryCompare { slot, .. } => {
-                return self
-                    .redispatch_with_materialized_slot(slot, instruction)
-                    .await;
+                return self.redispatch_with_materialized_slot(slot, instruction);
             }
             Instruction::ToBool => {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
-                    Value::Projected(_) => is_truthy_async(&value).await?,
+                    Value::Projected(_) => is_truthy(&value)?,
                     _ => self.is_truthy_for_dialect(&value)?,
                 };
                 self.stack.push(Value::Bool(truthy));
@@ -1213,7 +1195,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::JumpIfFalse(target) => {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
-                    Value::Projected(_) => is_truthy_async(&value).await?,
+                    Value::Projected(_) => is_truthy(&value)?,
                     _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if !truthy {
@@ -1230,20 +1212,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
             }
             Instruction::JumpIfCompareFalse { .. } => {
-                return self
-                    .redispatch_with_materialized_stack_pair(instruction)
-                    .await;
+                return self.redispatch_with_materialized_stack_pair(instruction);
             }
             Instruction::JumpIfSlotNumberCompareFalse { slot, .. }
             | Instruction::JumpIfSlotNumberBinaryCompareFalse { slot, .. } => {
-                return self
-                    .redispatch_with_materialized_slot(slot, instruction)
-                    .await;
+                return self.redispatch_with_materialized_slot(slot, instruction);
             }
             Instruction::JumpIfTrue(target) => {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
-                    Value::Projected(_) => is_truthy_async(&value).await?,
+                    Value::Projected(_) => is_truthy(&value)?,
                     _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if truthy {
@@ -1291,7 +1269,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 return Ok(VmStep::Effect(VmEffect::AwaitHandleUnwrap));
             }
             Instruction::Intrinsic(op) => {
-                self.execute_intrinsic_instruction(op).await?;
+                self.execute_intrinsic_instruction(op)?;
             }
             Instruction::Print => {
                 if self.mode == VmMode::Process {
@@ -1303,7 +1281,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::BeginIter(binding) => {
                 let iterable = self.pop_stack()?;
-                let cursor = self.iteration_cursor(iterable).await?;
+                let cursor = self.iteration_cursor(iterable)?;
                 if cursor.has_next(&self.heap)? {
                     self.slots.ensure_assignable(
                         binding,
@@ -1320,7 +1298,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::BeginRangeIter { binding, argc } => {
                 let start_index = self.stack_drain_start(argc)?;
-                let (start, end, step) = range_bounds_async(&self.stack[start_index..]).await?;
+                let (start, end, step) = range_bounds_projected(&self.stack[start_index..])?;
                 self.stack.truncate(start_index);
                 if range_has_next(start, end, step) {
                     self.slots.ensure_assignable(
@@ -1430,7 +1408,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         clippy::expect_used,
         reason = "the push item was reserved in this same slot walk above, per the thrice-repeated message"
     )]
-    async fn execute_intrinsic_instruction(&mut self, op: IntrinsicOp) -> Result<(), RuntimeError> {
+    fn execute_intrinsic_instruction(&mut self, op: IntrinsicOp) -> Result<(), RuntimeError> {
         let start = self.profile.as_ref().map(|_| ProfileMark::now());
         match op {
             IntrinsicOp::JavaScriptSplit => self.execute_javascript_split()?,
@@ -1453,8 +1431,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;
-                let schema = materialize_projected_async(schema).await?;
-                let value = materialize_projected_async(value).await?;
+                let schema = materialize_value(schema)?;
+                let value = materialize_value(value)?;
                 // A validation walks the schema and the value's members once.
                 self.charge_intrinsic_work(
                     deep_proportional_units(&value)
@@ -1465,7 +1443,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             IntrinsicOp::ValidateCompiled(schema) => {
                 let value = self.pop_stack()?;
-                let value = materialize_projected_async(value).await?;
+                let value = materialize_value(value)?;
                 // A validation walks the schema and the value's members once;
                 // the compiled schema's size is fixed at compile time.
                 self.charge_intrinsic_work(deep_proportional_units(&value));
@@ -1473,7 +1451,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             IntrinsicOp::PushAssign(slot) => {
-                let mut item = Some(materialize_projected_async(self.pop_stack()?).await?);
+                let mut item = Some(materialize_value(self.pop_stack()?)?);
                 let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
                 self.slots.ensure_assignable(
                     slot,
@@ -1517,7 +1495,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                                 name: slot_name.text.to_string(),
                             }
                         })?;
-                        let value = execute_push_builtin_async(current.clone(), item).await?;
+                        let value = execute_push_builtin(current.clone(), item)?;
                         self.slots.assign(
                             slot,
                             value.clone(),
@@ -1538,7 +1516,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     .iter()
                     .any(|value| matches!(value, Value::Projected(_)))
                 {
-                    execute_compiled_format(template, values).await?
+                    execute_compiled_format(template, values)?
                 } else {
                     execute_compiled_format_direct(template, values)?
                 };
@@ -1555,7 +1533,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     ),
                     value => {
                         let value = if matches!(value, Value::Projected(_)) {
-                            execute_compiled_format(template, std::slice::from_ref(value)).await?
+                            execute_compiled_format(template, std::slice::from_ref(value))?
                         } else {
                             execute_compiled_format_direct(template, std::slice::from_ref(value))?
                         };
@@ -1583,7 +1561,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         .into(),
                     ),
                     left => {
-                        let left = materialize_projected_async(left.clone()).await?;
+                        let left = materialize_value(left.clone())?;
                         self.charge_intrinsic_work(binary_op_work_units(
                             &left,
                             op,
@@ -1591,7 +1569,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         ));
                         let value = eval_binary_values(left, op, Value::Number(right))?;
                         let value = if matches!(value, Value::Projected(_)) {
-                            execute_compiled_format(template, &[value]).await?
+                            execute_compiled_format(template, &[value])?
                         } else {
                             execute_compiled_format_direct(template, &[value])?
                         };
@@ -1620,8 +1598,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     &self.chunk.names,
                     values,
                     &mut self.instructions_executed,
-                )
-                .await?;
+                )?;
                 self.stack.truncate(self.stack.len() - argc);
                 self.stack.push(value);
             }
