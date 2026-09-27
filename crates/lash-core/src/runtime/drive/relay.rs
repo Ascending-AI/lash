@@ -63,8 +63,7 @@ impl RelayPolicy {
     pub fn backoff_ms(&self, attempts: u32) -> u64 {
         let doublings = attempts.saturating_sub(1).min(63);
         self.base_backoff_ms
-            .checked_mul(1_u64 << doublings)
-            .unwrap_or(u64::MAX)
+            .saturating_mul(1_u64 << doublings)
             .min(self.max_backoff_ms)
     }
 }

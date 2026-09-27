@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use lash_core::engine::RecoveryLeaseConfig;
 use lash_core::runtime::recovery_lease::{RecoveryDuties, RecoveryLease};
 use lash_core::store::{LeaseName, RecoveryLeaderStore};
 
@@ -17,7 +18,7 @@ pub(crate) struct RecoverySlot {
     shutdown: tokio_util::sync::CancellationToken,
     store: Arc<dyn RecoveryLeaderStore>,
     name: LeaseName,
-    config: lash_core::engine::RecoveryLeaseConfig,
+    config: RecoveryLeaseConfig,
     clock: Arc<dyn lash_core::Clock>,
 }
 
@@ -25,14 +26,14 @@ impl RecoverySlot {
     /// The slot for a core over `env`: the lease is named after the engine
     /// authority that owns the effect state, in the storage the backend's
     /// store set holds.
-    pub(crate) fn new(env: &RuntimeEnvironment) -> Self {
+    pub(crate) fn new(env: &RuntimeEnvironment, config: RecoveryLeaseConfig) -> Self {
         let authority = env.core.control.effect_host.turn_control_binding_id();
         Self {
             lease: tokio::sync::OnceCell::new(),
             shutdown: tokio_util::sync::CancellationToken::new(),
             store: env.core.backend().recovery_leader(),
             name: LeaseName::new(format!("recovery:{authority}")),
-            config: env.core.control.recovery_lease,
+            config,
             clock: Arc::clone(&env.core.clock),
         }
     }

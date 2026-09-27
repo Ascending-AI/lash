@@ -1256,6 +1256,7 @@ impl LashCoreBuilder {
             process_lifecycle_available,
             worker_slot_supplier.clone(),
             queued_work_execution_concurrency,
+            self.recovery_lease.unwrap_or_default(),
         );
         let native_queued = matches!(&queued_port, QueuedPortSetup::Native { .. });
         let substrate = NativeSubstrateSetup {
@@ -1402,13 +1403,14 @@ impl LashCoreBuilder {
         process_lifecycle_available: bool,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         queued_work_execution_concurrency: usize,
+        recovery_lease: lash_core::engine::RecoveryLeaseConfig,
     ) -> (
         QueuedPortSetup,
         Arc<NativeQueuedWorkRunHandle>,
         Arc<dyn lash_core::SessionDriver>,
     ) {
         let owner = session_execution_owner.clone();
-        let recovery = Arc::new(recovery::RecoverySlot::new(&env));
+        let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
         let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
             NativeQueuedWorkRunConfig {
                 recovery,
