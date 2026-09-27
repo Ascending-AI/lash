@@ -265,6 +265,9 @@ struct Backend {
     /// Lashlang artifacts included.
     backend: lash::Backend,
     factory: Arc<dyn SessionStoreFactory>,
+    /// The SQLite substrate itself, kept so a worker can be given handles
+    /// carrying its own failover window ([`Self::backend_with`]).
+    sqlite: Arc<lash_sqlite_store::SqliteBackend>,
     /// Held so the SQLite root outlives the phase.
     _scratch: tempfile::TempDir,
 }
@@ -284,15 +287,51 @@ impl Backend {
         Ok(Self {
             name: "sqlite",
             factory: backend.session_store_factory(),
-            backend: backend.into(),
+            backend: Arc::clone(&backend).into(),
+            sqlite: backend,
             _scratch: scratch,
         })
     }
 
-    /// A core wired for one deterministic turn. The owner is mandatory and
-    /// belongs to the core's worker/process lifetime.
+    /// Fresh handles on this backend's databases whose durable effect-replay
+    /// leases expire on `timings` instead of the default term. A host shares
+    /// the `LeaseTimings` it configures on its runtime with the effect lane
+    /// (`SqliteEffectReplayOptions::lease_timings`), so a worker that means
+    /// for its claims to lapse on a short failover window must claim them
+    /// through a backend configured to that window.
+    async fn backend_with(&self, timings: lash::durability::LeaseTimings) -> Result<lash::Backend> {
+        let sqlite = self
+            .sqlite
+            .reopen_with_options_and_clock(
+                lash_sqlite_store::SqliteBackendOptions {
+                    effect_replay: lash_sqlite_store::SqliteEffectReplayOptions {
+                        lease_timings: timings,
+                        ..lash_sqlite_store::SqliteEffectReplayOptions::default()
+                    },
+                    ..self.sqlite.options().clone()
+                },
+                self.backend.clock(),
+            )
+            .await
+            .context("reopen the SQLite backend on the worker's failover window")?;
+        Ok(Arc::new(sqlite).into())
+    }
+
+    /// A core wired for one deterministic turn on this backend. The owner is
+    /// mandatory and belongs to the core's worker/process lifetime.
     fn core(
         &self,
+        provider: lash::provider::ProviderHandle,
+        owner: LeaseOwnerIdentity,
+        timings: lash::durability::LeaseTimings,
+    ) -> Result<TurnCore> {
+        self.core_on(&self.backend.clone(), provider, owner, timings)
+    }
+
+    /// A core wired for one deterministic turn over `backend`'s handles.
+    fn core_on(
+        &self,
+        backend: &lash::Backend,
         provider: lash::provider::ProviderHandle,
         owner: LeaseOwnerIdentity,
         timings: lash::durability::LeaseTimings,
@@ -303,10 +342,10 @@ impl Backend {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &self.backend,
+            backend,
         );
         let core =
-            lash::LashCore::rlm_builder(self.backend.clone(), lash::TurnBudget::Unbounded, factory)
+            lash::LashCore::rlm_builder(backend.clone(), lash::TurnBudget::Unbounded, factory)
                 .provider(provider)
                 .model(
                     lash::ModelSpec::builder("session-lease-triage-mock")
@@ -971,8 +1010,15 @@ async fn direct_turn_recovery(
     // The direct turn that never gets to commit. Its worker uses a short lease
     // term so the successor's wait for a dead holder stays inside the phase
     // gate; nothing here depends on the lane lapsing rather than being taken.
+    // The worker claims through a backend carrying the same term: the durable
+    // effect lease on the parked `llm_call` is the claim the successor ends
+    // up waiting on, and a `LeaseTimings` governs a host's effect-replay
+    // leases just as it governs its session lease — on the default term the
+    // parked call's claim would hold for thirty seconds, the length of the
+    // gate itself.
     let provider = StallingProvider::new();
-    let dead = backend.core(
+    let dead = backend.core_on(
+        &backend.backend_with(short_lived_timings()).await?,
         provider.handle.clone(),
         abandoned_by.clone(),
         short_lived_timings(),
