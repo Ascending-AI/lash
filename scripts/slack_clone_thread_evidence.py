@@ -37,9 +37,9 @@ def select_thread_root(messages: list[dict[str, Any]], marker: str) -> dict[str,
 def seed_label_line_starts(value: Any, label: str = THREAD_ROOT_SEED_PREFIX) -> tuple[int, int]:
     """Count occurrences of `label` in a decoded record, and how many start a line.
 
-    Queued text inputs concatenate into one user message with no separator, so a
-    seed enqueued behind copied context runs out of the tail of that line unless
-    the host writes the break itself. A mid-line label is not a label, and the
+    Folded context lines are joined into the send's one text, so a seed folded
+    behind copied context runs out of the tail of that line unless the host
+    writes the break itself. A mid-line label is not a label, and the
     two counts differing is exactly that failure. Walks decoded values rather
     than encoded JSON so real newlines are compared, not `\\n` escapes.
     """

@@ -403,10 +403,15 @@ class Journey:
         }
         self.gate("02-ambient", "dom", "both humans render each ambient row once and no bot row", all(len(self.dom_rows(p)) == 2 and not any(r["bot"] for r in self.dom_rows(p)) for p in self.pages.values()), "02-ambient-*.png")
         self.gate("02-ambient", "platform", "API, outbox, and database correlate the same two delivered human messages", len(api_rows) == len(db_rows) == 2 and len(outbox) == 2 and timestamps_agree and all(r["delivered_at"] is not None and r["attempts"] == 1 for r in outbox), "02-ambient-four-layers.json")
-        self.gate("02-ambient", "bot", "both exact outbox events are folded once, remain pending, and spend no model usage", identities_agree and all(r["deliveries"] == 1 for r in ambient_ledger) and len([r for r in session["pending"] if r["session_id"] == f"channel:{self.channel}"]) == 2 and not session["usage"], "02-ambient-four-layers.json")
+        # D16: ambient traffic is ledger context, not Lash input. A folded row
+        # waits for the route's next mention; it carries no admission identity,
+        # admits nothing to the session graph, and spends no tokens.
+        self.gate("02-ambient", "bot", "both exact outbox events are folded once in the bot ledger and create no Lash input, committed ambient text, or model usage", identities_agree and all(r["deliveries"] == 1 for r in ambient_ledger) and all(r["input_id"] is None for r in ambient_ledger) and not session["pending"] and "FIG1341-AMBIENT" not in json.dumps(session["nodes"], sort_keys=True) and not session["usage"], "02-ambient-four-layers.json")
         log = self.bot_log.read_text(encoding="utf-8", errors="replace")
-        folded_logs = log.count("Disposition::Folded") >= 2 or log.count("Folded {") >= 2
-        self.gate("02-ambient", "trace", "ambient input has Folded dispositions and zero completed turns", folded_logs and len(self.turn_traces()) == 0, "bot log + trace")
+        folded_logs = all(
+            f"handled {r['event_id']}: Folded" in log for r in ambient_ledger
+        )
+        self.gate("02-ambient", "trace", "each ambient event logs a Folded disposition and no turn completes", folded_logs and len(self.turn_traces()) == 0, "bot log + trace")
         self.screenshot("02-ambient")
         self.write_extract("02-ambient")
 
@@ -427,12 +432,39 @@ class Journey:
         self.gate("03-mention", "dom", "one identical bot reply renders in both contexts", all(len([r for r in self.dom_rows(p) if r["bot"]]) == 1 for p in self.pages.values()) and self.dom_rows(self.pages["ada"])[-1]["text"] == self.dom_rows(self.pages["brix"])[-1]["text"], "03-mention-*.png")
         self.gate("03-mention", "platform", "one API/database bot row carries the originating event metadata", len(api_rows) == len(db_rows) == 4 and sum(r["bot_id"] is not None for r in db_rows) == 1 and self.room_event in (next(r["metadata_json"] for r in db_rows if r["bot_id"] is not None) or ""), "03-mention-four-layers.json")
         twin_ok = any(r["kind"] == "message" and r["stage"] == "ignored" and r["detail"] == "superseded_by_app_mention" for r in ledger)
-        drained = session["pending"] and all(
-            pending["state"] == "completed" and pending["claim_id"] is None
-            for pending in session["pending"]
+        # D16: one send per mention, and the send carries the route's folded
+        # ambient block ahead of the mention text. The ledger binds each folded
+        # row to that send's admission identity, so the ambient events are
+        # provably inside the one input the turn committed.
+        mention_turn = f"mention:{row['channel_id']}:{row['message_ts']}"
+        channel_pending = [
+            r for r in session["pending"] if r["session_id"] == f"channel:{self.channel}"
+        ]
+        send_input = channel_pending[0]["input_json"] if len(channel_pending) == 1 else ""
+        drained = (
+            len(channel_pending) == 1
+            and channel_pending[0]["source_key"] == mention_turn
+            and all(
+                pending["state"] == "completed" and pending["claim_id"] is None
+                for pending in channel_pending
+            )
         )
-        self.gate("03-mention", "bot", "mention replied, twin ignored, pending drained, ambient provenance committed", row["reply_ts"] is not None and twin_ok and drained and "FIG1341-AMBIENT-ONE" in node_text and "turn_input" in node_text, "03-mention-four-layers.json")
-        mention_turn = f"mention:{self.room_event}"
+        send_carries_fold = (
+            send_input.find("FIG1341-AMBIENT-ONE") != -1
+            and send_input.find("FIG1341-AMBIENT-ONE") < send_input.find("FIG1341-AMBIENT-TWO")
+            and send_input.find("FIG1341-AMBIENT-TWO") < send_input.find("FIG1341-ROOM-MENTION")
+        )
+        folded_rows = [
+            r
+            for r in ledger
+            if r["stage"] == "folded" and "FIG1341-AMBIENT" in (r["input_text"] or "")
+        ]
+        fold_bound = (
+            len(folded_rows) == 2
+            and row["input_id"] is not None
+            and all(r["input_id"] == row["input_id"] for r in folded_rows)
+        )
+        self.gate("03-mention", "bot", "mention replied, twin ignored, its one send carried the bound ambient fold, and ambient provenance committed", row["reply_ts"] is not None and twin_ok and drained and send_carries_fold and fold_bound and "FIG1341-AMBIENT-ONE" in node_text and "turn_input" in node_text, "03-mention-four-layers.json")
         starts = self.traces_for_turn(mention_turn, "tool_call_started")
         completions = self.traces_for_turn(mention_turn, "tool_call_completed")
         tool_pair_ok = (
@@ -517,8 +549,8 @@ class Journey:
         self.write_extract("03T-thread")
 
         # FIG-1403: inheritance is not recall. The child's prefix extends past the
-        # root — the draining channel turn committed the room mention and the
-        # bot's reply too — so the root is only answerable if the host said which
+        # root — the channel mention's turn committed the folded room context and
+        # the bot's reply too — so the root is only answerable if the host said which
         # message it is.
         seeded_root = f"{THREAD_ROOT_SEED_PREFIX}ada: FIG1341-AMBIENT-ONE says cobalt"
         thread_one_request = next(
@@ -672,8 +704,8 @@ class Journey:
         bot_rows = [r for r in self.platform_rows() if r["bot_id"] is not None]
         self.gate("05-recovered", "platform", "platform stores exactly one recovered reply with event metadata", len(bot_rows) == before_platform_bot_rows + 1 and sum(self.kill_event in (r["metadata_json"] or "") for r in bot_rows) == 1, "05-recovered-four-layers.json")
         recovery_log = self.bot_log.read_text(encoding="utf-8", errors="replace")
-        deferred_lines = re.findall(rf"(?:recovered|settled deferred) event {re.escape(self.kill_event)}[^\n]*Deferred \{{[^\n]*drain_did_not_reach_admission[^\n]*", recovery_log)
-        settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: Turn[^\n]*", recovery_log)
+        deferred_lines = re.findall(rf"(?:recovered|settled deferred) event {re.escape(self.kill_event)}[^\n]*Deferred \{{[^\n]*(?:session_admission_contended|turn_not_settled)[^\n]*", recovery_log)
+        settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: (?:Turn|Transcript)[^\n]*", recovery_log)
         handled = re.search(rf"handled {re.escape(self.kill_event)}: Replied \{{", recovery_log)
         after_session = self.session_snapshot()
         channel_lease = next(r for r in after_session["leases"] if r["session_id"] == f"channel:{self.channel}")
@@ -685,7 +717,7 @@ class Journey:
         if deferred_lines:
             recovery_path = "fast"
             path_ok = settled is not None
-            path_note = f"fast path: deferral then settle-from-Turn for {self.kill_event}"
+            path_note = f"fast path: deferral then settle-from-turn for {self.kill_event}"
         else:
             recovery_path = "slow"
             reply_ms = slack_ts_to_ms(recovered["reply_ts"] or "")
@@ -761,7 +793,7 @@ class Journey:
             .startswith("file://")
         )
         self.gate("06-mcp-depth", "bot", "one durable turn commits four typed host-owned MCP results", expected_results and all(tool in committed for tool in tools), "06-mcp-depth-four-layers.json")
-        mcp_turn = f"mention:{row['event_id']}"
+        mcp_turn = f"mention:{row['channel_id']}:{row['message_ts']}"
         starts = self.traces_for_turn(mcp_turn, "tool_call_started")
         completions = self.traces_for_turn(mcp_turn, "tool_call_completed")
         started_names = [self.trace_tool_name(record) for record in starts]
@@ -898,7 +930,7 @@ class Journey:
         self.gate("08-mcp-attach", "dom", "the attach turn and the post-detach turn each render exactly one reply in both contexts", all(len([r for r in self.dom_rows(p) if r["bot"]]) == before_bots + 2 and "workspace badge came back" in "\n".join(r["text"] for r in self.dom_rows(p)) for p in self.pages.values()), "08-mcp-attach-*.png")
         self.gate("08-mcp-attach", "platform", "the platform stores both mentions and both attributed replies", len(self.history()) == before_main + 4 and len(self.platform_rows()) == before_total + 4 and all(any(row["event_id"] in (r["metadata_json"] or "") for r in self.platform_rows()) for row in (attach_row, detached_row)), "08-mcp-attach-four-layers.json")
         self.gate("08-mcp-attach", "bot", "the operator attaches a connected server, its binary content is committed as one stored attachment reference whose exact bytes reach the host attachment store, and detaching leaves only the server the bot booted with", attached.get("connected") is True and badge_tool in (attached.get("tools") or []) and reference.get("source") == "stored" and reference.get("attachment_ref", {}).get("byte_len") == len(badge_bytes) and reference.get("attachment_ref", {}).get("media_type") == "application/octet-stream" and stored == [badge_bytes] and detached_ok and [view["name"] for view in after_detach["servers"]] == ["slack_clone"], "08-mcp-attach-four-layers.json")
-        attach_turn = f"mention:{attach_row['event_id']}"
+        attach_turn = f"mention:{attach_row['channel_id']}:{attach_row['message_ts']}"
         completions = self.traces_for_turn(attach_turn, "tool_call_completed")
         offered_after_attach = [self.offered_tools(r) for r in self.provider_requests_for("FIG1341-MCP-ATTACH", without=("FIG1341-MCP-DETACHED",))]
         offered_after_detach = [self.offered_tools(r) for r in self.provider_requests_for("FIG1341-MCP-DETACHED")]
