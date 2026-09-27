@@ -189,6 +189,7 @@ mod effect_group_shape;
 mod effect_host_laws_on_the_double;
 mod effect_layer_wait_children;
 mod endpoint_protocol;
+mod generation_drain_on_the_double;
 mod generation_sentinel_on_the_double;
 mod journal_cut_runner;
 mod layered_effect_host_on_the_double;

@@ -117,17 +117,24 @@ impl GenerationDrainStore for SqliteGenerationDrain {
             .await
             .map_err(sqlite_error)?;
         let stamp = generation.as_str().to_owned();
-        let parked_turns: i64 = self
+        let (parked_turns, in_flight_turns): (i64, i64) = self
             .core
             .call(move |conn| {
-                conn.query_row(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .turn_parks
-                        .count_by_build_generation
+                let ingress = crate::turn_ingress::turn_ingress_sql();
+                let parked: i64 = conn.query_row(
+                    ingress.turn_parks.count_by_build_generation.sql(),
+                    rusqlite::params![stamp],
+                    |row| row.get(0),
+                )?;
+                let in_flight: i64 = conn.query_row(
+                    ingress
+                        .queued_runs
+                        .count_pending_by_admitted_generation
                         .sql(),
                     rusqlite::params![stamp],
                     |row| row.get(0),
-                )
+                )?;
+                Ok((parked, in_flight))
             })
             .await
             .map_err(sqlite_error)?;
@@ -135,6 +142,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
             live_processes: count(live_processes),
             parked_processes: count(parked_processes),
             parked_turns: count(parked_turns),
+            in_flight_turns: count(in_flight_turns),
         })
     }
 

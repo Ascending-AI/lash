@@ -64,6 +64,8 @@ mod attachment_owner_kind;
 mod attachment_recovery;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
+#[path = "conformance/generation_drain.rs"]
+mod generation_drain;
 #[path = "conformance/obligation_relay.rs"]
 mod obligation_relay;
 #[path = "conformance/occurrence_listing.rs"]

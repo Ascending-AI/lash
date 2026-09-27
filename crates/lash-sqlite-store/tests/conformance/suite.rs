@@ -56,6 +56,8 @@ mod drain_end;
 mod effect_group;
 #[path = "effect_group_drain.rs"]
 mod effect_group_drain;
+#[path = "generation_drain.rs"]
+mod generation_drain;
 #[path = "lineage.rs"]
 mod lineage;
 #[path = "lock_order.rs"]

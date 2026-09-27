@@ -296,33 +296,25 @@ impl LashCore {
 
     /// What `generation` still holds (FIG-3799): whether it is marked
     /// draining, its live processes, the parked processes and turns its
-    /// checkpoints hold, and the stalled obligations every drain waits on.
+    /// checkpoints hold, the turns its drives admitted that have not settled
+    /// (FIG-3884), and the stalled obligations every drain waits on.
+    ///
+    /// Reading the status is also the metrics refresh: the per-generation
+    /// work gauges and each obligation kind's stalled gauge record inside
+    /// [`GenerationDrainStatus::collect`].
     pub async fn generation_drain_status(
         &self,
         generation: &lash_core::engine::BuildGeneration,
     ) -> Result<GenerationDrainStatus> {
         let drain = self.backend.generation_drain();
-        let draining_since_ms = drain
-            .draining_generations()
-            .await?
-            .into_iter()
-            .find(|marked| &marked.generation == generation)
-            .map(|marked| marked.marked_at_ms);
-        let work = drain.generation_work(generation).await?;
-        let mut stalled_obligations = std::collections::BTreeMap::new();
-        for kind in lash_core::store::ObligationKind::ALL {
-            let count = self.backend.obligation_ledger(kind).count_stalled().await?;
-            stalled_obligations.insert(kind, count);
-        }
-        Ok(GenerationDrainStatus {
-            generation: generation.clone(),
-            draining_since_ms,
-            live_processes: work.live_processes,
-            parked_processes: work.parked_processes,
-            parked_turns: work.parked_turns,
-            stalled_obligations,
-            checked_at: self.env.core.clock.timestamp_ms(),
-        })
+        let backend = self.backend.clone();
+        Ok(GenerationDrainStatus::collect(
+            drain.as_ref(),
+            move |kind| backend.obligation_ledger(kind),
+            generation,
+            self.env.core.clock.timestamp_ms(),
+        )
+        .await?)
     }
 
     /// The stalled obligations of `kind` after `after`, in id order, at most

@@ -17,6 +17,8 @@ const PARKED_WORK_REASON_ATTRIBUTE: &str = "lash.parked_work.reason";
 const OBLIGATION_KIND_ATTRIBUTE: &str = "lash.obligation.kind";
 const OBLIGATION_OUTCOME_ATTRIBUTE: &str = "lash.obligation.outcome";
 const RECOVERY_LEASE_ATTRIBUTE: &str = "lash.recovery_leader.name";
+const GENERATION_DRAIN_GENERATION_ATTRIBUTE: &str = "lash.generation_drain.generation";
+const GENERATION_DRAIN_KIND_ATTRIBUTE: &str = "lash.generation_drain.kind";
 
 /// Runtime-facing OpenTelemetry instruments for host-tunable operational limits.
 #[derive(Clone)]
@@ -504,5 +506,42 @@ impl ObligationMetrics {
         let attributes = [KeyValue::new(RECOVERY_LEASE_ATTRIBUTE, name.to_owned())];
         self.leading.record(u64::from(leading), &attributes);
         self.term.record(term, &attributes);
+    }
+}
+
+/// Runtime-facing OpenTelemetry instruments for a build generation's drain
+/// (FIG-3884): the counts an operator polls while the generation runs down.
+#[derive(Clone)]
+pub struct GenerationDrainMetrics {
+    work: Gauge<u64>,
+}
+
+impl GenerationDrainMetrics {
+    pub fn from_global_provider() -> Self {
+        Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
+    }
+
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            work: meter
+                .u64_gauge("lash.generation_drain.work")
+                .with_description(
+                    "Work a build generation still holds while it drains, by generation and kind",
+                )
+                .build(),
+        }
+    }
+
+    /// Report one (generation, kind) cell's count, including zero so a
+    /// drained cell drops back. `kind` is one of `live_processes`,
+    /// `parked_processes`, `parked_turns`, `in_flight_turns`.
+    pub fn record_work(&self, generation: &str, kind: &'static str, count: u64) {
+        self.work.record(
+            count,
+            &[
+                KeyValue::new(GENERATION_DRAIN_GENERATION_ATTRIBUTE, generation.to_owned()),
+                KeyValue::new(GENERATION_DRAIN_KIND_ATTRIBUTE, kind),
+            ],
+        );
     }
 }

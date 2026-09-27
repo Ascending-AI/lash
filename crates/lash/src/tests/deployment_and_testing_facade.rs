@@ -1,5 +1,18 @@
 use super::*;
 
+/// The persisted configuration a queued-run admission carries.
+fn queued_run_configuration(
+    session_id: &lash_core::SessionId,
+) -> lash_core::PersistedSessionConfig {
+    let state = lash_core::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]).config
+}
+
 #[tokio::test]
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     let backend = memory_store_backend().await;
@@ -479,13 +492,70 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         .await
         .expect("start the process under the retired generation");
 
+    // FIG-3884: a queued run the retired generation's drive admitted counts
+    // as its in-flight turn until the run settles.
+    let turn_session = lash_core::SessionId::from("generation-drain-status-turn");
+    let session_store = core
+        .backend()
+        .session_store_factory()
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: turn_session.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create the in-flight turn's session");
+    let lease = session_store
+        .try_claim_session_execution_lease_with_token(
+            &turn_session,
+            &crate::testing::runtime_lease_owner(),
+            "generation-drain-status-executor",
+            &lash_core::LeaseClaimNonce::for_testing("generation-drain-status-token"),
+            60_000,
+        )
+        .await
+        .expect("claim the session lease")
+        .acquired()
+        .expect("a fresh session's lease is free");
+    let expected_head_revision = session_store
+        .load_session_head_meta()
+        .await
+        .expect("read the head")
+        .map_or(0, |head| head.head_revision);
+    let drain_scope = lash_core::ExecutionScope::queue_drain(
+        turn_session.clone(),
+        "generation-drain-status-drain",
+    );
+    let admission = session_store
+        .begin_or_resume_queued_run(
+            &lease.fence(),
+            lash_core::store::BeginQueuedRun {
+                session_id: turn_session.clone(),
+                identity: Some(drain_scope.clone()),
+                request: lash_core::store::QueuedRunRequest::Automatic,
+                configuration: queued_run_configuration(&turn_session),
+                expected_head_revision,
+                initial_turn_index: 1,
+                generation: None,
+                admitted_generation: retired.clone(),
+            },
+        )
+        .await
+        .expect("begin the queued run");
+
     let unmarked = core
         .generation_drain_status(&retired)
         .await
         .expect("read the unmarked generation");
     assert_eq!(
-        (unmarked.draining_since_ms, unmarked.live_processes),
-        (None, 1)
+        (
+            unmarked.draining_since_ms,
+            unmarked.live_processes,
+            unmarked.in_flight_turns
+        ),
+        (None, 1, 1)
     );
     assert!(!unmarked.drained(), "an unmarked generation is not drained");
 
@@ -503,9 +573,10 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         (
             draining.live_processes,
             draining.parked_processes,
-            draining.parked_turns
+            draining.parked_turns,
+            draining.in_flight_turns,
         ),
-        (1, 0, 0)
+        (1, 0, 0, 1)
     );
     assert_eq!(
         draining.stalled_obligations.len(),
@@ -516,6 +587,41 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     let wire = serde_json::to_value(&draining).expect("serialize the status");
     assert_eq!(wire["drained"], serde_json::json!(false));
     assert_eq!(wire["live_processes"], serde_json::json!(1));
+    assert_eq!(wire["in_flight_turns"], serde_json::json!(1));
+
+    let selected = session_store
+        .select_queued_run(
+            &lease.fence(),
+            &drain_scope,
+            &lease.owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("freeze the empty selection");
+    session_store
+        .settle_queued_run(
+            &lease.fence(),
+            lash_core::store::QueuedRunCommit {
+                scope: drain_scope,
+                expected_revision: selected.admission.revision,
+                progress: lash_core::store::QueuedRunProgress::Settle {
+                    terminal: lash_core::store::QueuedRunTerminal::Empty,
+                },
+            },
+        )
+        .await
+        .expect("settle the queued run");
+    let still_held = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the status with the turn settled");
+    assert_eq!(still_held.in_flight_turns, 0);
+    assert!(
+        !still_held.drained(),
+        "the live process still holds the generation"
+    );
 
     registry
         .complete_process(

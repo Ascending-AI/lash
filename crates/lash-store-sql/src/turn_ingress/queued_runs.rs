@@ -50,5 +50,10 @@ crate::statements! {
         /// stamped, projected for the drain's per-generation counts
         /// (FIG-3795 S9).
         insert = "INSERT INTO queued_runs (session_id, scope_id, status, revision, admission_json, admitted_generation) VALUES (?1, ?2, 'pending', 0, ?3, ?4)";
+        /// The turns generation `?1` admitted that have not settled: one
+        /// pending queued run per session (FIG-3884). Each dialect's
+        /// partial index on `admitted_generation` serves the read.
+        count_pending_by_admitted_generation = "SELECT COUNT(*) FROM queued_runs
+             WHERE status = 'pending' AND admitted_generation = ?1";
     }
 }

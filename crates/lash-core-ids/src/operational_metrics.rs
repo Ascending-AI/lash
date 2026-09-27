@@ -27,6 +27,13 @@ fn obligation_metrics() -> &'static lash_trace::otel::ObligationMetrics {
 }
 
 #[cfg(feature = "otel-trace")]
+fn generation_drain_metrics() -> &'static lash_trace::otel::GenerationDrainMetrics {
+    static METRICS: std::sync::LazyLock<lash_trace::otel::GenerationDrainMetrics> =
+        std::sync::LazyLock::new(lash_trace::otel::GenerationDrainMetrics::from_global_provider);
+    &METRICS
+}
+
+#[cfg(feature = "otel-trace")]
 fn with_parked_work_metrics(record: impl Fn(&lash_trace::otel::ParkedWorkMetrics)) {
     record(parked_work_metrics());
 }
@@ -142,6 +149,18 @@ pub fn record_obligations_stalled(kind: &'static str, count: u64) {
     let _ = (kind, count);
 }
 
+/// Report one (generation, kind) cell of a build generation's drain status,
+/// including zero so a drained cell drops back (FIG-3884). `kind` is one of
+/// `live_processes`, `parked_processes`, `parked_turns`, `in_flight_turns`.
+pub fn record_generation_drain_work(generation: &str, kind: &'static str, count: u64) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+    observe_test_metric("lash.generation_drain.work");
+    #[cfg(feature = "otel-trace")]
+    generation_drain_metrics().record_work(generation, kind, count);
+    #[cfg(not(feature = "otel-trace"))]
+    let _ = (generation, kind, count);
+}
+
 /// Report whether this process leads recovery lease `name`, and its term.
 pub fn record_recovery_leadership(name: &str, leading: bool, term: u64) {
     #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
@@ -237,5 +256,14 @@ mod tests {
         assert_eq!(metrics.counter_value("lash.parked_work.parks"), 1);
         assert_eq!(metrics.counter_value("lash.parked_work.count"), 1);
         assert_eq!(metrics.counter_value("lash.parked_work.oldest_age"), 1);
+    }
+
+    #[test]
+    fn generation_drain_shim_emits_the_fig_3884_metric_name() {
+        let metrics = TestMetrics::install();
+
+        record_generation_drain_work("012345abcdef", "in_flight_turns", 2);
+
+        assert_eq!(metrics.counter_value("lash.generation_drain.work"), 1);
     }
 }

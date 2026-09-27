@@ -1333,6 +1333,33 @@ impl PostgresStorage {
             publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
+
+    /// The build-generation drain marks and per-generation work reads over
+    /// this catalog (FIG-3799, FIG-3884): the port the operator binary and a
+    /// store set compose drain status from.
+    pub fn generation_drain(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::generation_drain::GenerationDrainStore> {
+        Arc::new(crate::generation_drain::PostgresGenerationDrain::new(
+            self.pool.clone(),
+        ))
+    }
+
+    /// The store→engine delivery obligation ledger of `kind` over this
+    /// catalog (ADR 0109 §1.3).
+    pub fn obligation_ledger(
+        &self,
+        kind: lash_core_execution::store::ObligationKind,
+    ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
+        // Ingress spans two tables (ADR 0109 §3).
+        if kind == lash_core_execution::store::ObligationKind::Ingress {
+            return crate::ingress_obligation::ingress_ledger(&self.pool);
+        }
+        Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
+            kind,
+            self.pool.clone(),
+        ))
+    }
 }
 
 impl PostgresSessionStoreFactory {
