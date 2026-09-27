@@ -265,6 +265,7 @@ impl DriveAbort {
 #[doc(hidden)]
 pub mod admission_body {
     use super::super::admission::{AdmissionId, Admitted, AdmittedWork, DriveRequestId};
+    use super::super::contracts::BuildGeneration;
     use crate::{SessionId, TurnId};
 
     #[must_use]
@@ -274,8 +275,17 @@ pub mod admission_body {
         request: DriveRequestId,
         admission: AdmissionId,
         observed_epoch: u64,
+        admitted_generation: BuildGeneration,
         work: AdmittedWork,
     ) -> Admitted {
-        Admitted::minted(session, root, request, admission, observed_epoch, work)
+        Admitted::minted(
+            session,
+            root,
+            request,
+            admission,
+            observed_epoch,
+            admitted_generation,
+            work,
+        )
     }
 }

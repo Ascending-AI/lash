@@ -465,6 +465,12 @@ impl LashRuntime {
             )
             .map_err(super::runtime_error_from_store_commit)?,
             generation: super::generation_fence::current(self),
+            // S9: the admitting drive's generation, when a drive admitted
+            // this drain; the executing build's otherwise.
+            admitted_generation: queued_opts
+                .admitted_generation
+                .clone()
+                .unwrap_or_else(|| self.host.core.backend().build_generation().clone()),
         };
         let admission = match store.begin_or_resume_queued_run(&fence, request).await {
             Ok(run) => run,
@@ -513,8 +519,14 @@ impl LashRuntime {
         // A settled run above only replays its end; a run that still drives
         // work drives it under the generation it was admitted under.
         if let Err(error) = super::generation_fence::admit(self, admission.generation.as_ref()) {
-            self.record_turn_park_after_abort(&error, &TurnId::from(admission.scope.id()))
-                .await;
+            // The park routes by the generation that admitted the run —
+            // the journal the resume must replay, not this refusing build.
+            self.record_turn_park_after_abort(
+                &error,
+                &TurnId::from(admission.scope.id()),
+                Some(&admission.admitted_generation),
+            )
+            .await;
             let _ = lease.release_if_live().await;
             return Err(error.into());
         }

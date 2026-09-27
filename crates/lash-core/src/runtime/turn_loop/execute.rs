@@ -599,7 +599,7 @@ impl LashRuntime {
                         .logical_root(),
                     &trace_turn_id,
                 );
-                Box::pin(self.record_turn_park_after_abort(&err, &root)).await;
+                Box::pin(self.record_turn_park_after_abort(&err, &root, None)).await;
                 return Err(err);
             }
         };

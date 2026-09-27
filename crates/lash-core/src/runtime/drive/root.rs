@@ -185,7 +185,7 @@ impl LashRuntime {
                     )
                     .await
                 {
-                    self.record_turn_park_after_abort(&error, &root).await;
+                    self.record_turn_park_after_abort(&error, &root, None).await;
                     self.release_root_lease(lease.as_ref()).await;
                     return Err(abort(error));
                 }
@@ -468,7 +468,8 @@ fn root_drain_options<'a>(
     )
     .with_local_stop(sinks.local_stop.clone())
     .with_events(sinks.events)
-    .with_turn_events(sinks.turn_events))
+    .with_turn_events(sinks.turn_events)
+    .with_admitted_generation(admitted.admitted_generation().clone()))
 }
 
 /// Trace attribution for the claim decisions the runner makes.

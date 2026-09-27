@@ -41,6 +41,7 @@ pub async fn session_store_factory_discovers_empty_pending_queued_run(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -149,6 +150,7 @@ pub async fn session_store_factory_retains_assigned_input_tombstone(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await

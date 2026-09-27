@@ -599,6 +599,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await

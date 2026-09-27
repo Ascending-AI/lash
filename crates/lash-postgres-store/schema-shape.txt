@@ -352,6 +352,7 @@ table lash_queued_run_members
   foreign-key (session_id, scope_id) references lash_queued_runs (session_id, scope_id) on delete no action
 table lash_queued_runs
   column admission_json text not-null
+  column admitted_generation text not-null
   column revision bigint not-null
   column scope_id text not-null
   column session_id text not-null

@@ -514,6 +514,7 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_runs (
     status text NOT NULL,
     revision bigint NOT NULL,
     admission_json text NOT NULL,
+    admitted_generation text NOT NULL,
     CONSTRAINT ck_queued_runs_revision CHECK ((revision >= 0)),
     CONSTRAINT ck_queued_runs_status CHECK ((status = ANY (ARRAY['pending'::text, 'settled'::text])))
 );
@@ -2306,6 +2307,13 @@ CREATE INDEX idx_lash_processes_updated ON lash_durable_read_fixture.lash_proces
 --
 
 CREATE INDEX idx_lash_processes_wake_session ON lash_durable_read_fixture.lash_processes USING btree (wake_session_id);
+
+
+--
+-- Name: idx_lash_queued_runs_admitted_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_queued_runs_admitted_generation ON lash_durable_read_fixture.lash_queued_runs USING btree (admitted_generation) WHERE (status = 'pending'::text);
 
 
 --

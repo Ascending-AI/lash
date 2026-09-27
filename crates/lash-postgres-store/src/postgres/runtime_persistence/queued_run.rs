@@ -126,6 +126,7 @@ pub(crate) async fn write_run_tx(
             .bind(session_id.as_str())
             .bind(&key)
             .bind(json)
+            .bind(admission.admitted_generation.as_str())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;

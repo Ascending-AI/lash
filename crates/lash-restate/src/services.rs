@@ -424,13 +424,13 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                 ),
                 LashService::SessionDriver => bind_as(
                     builder,
-                    session.clone().serve(),
+                    session.on_route(route.clone()).serve(),
                     &name,
                     ServiceOptions::new().handler("drive", crate::turn_handler_options()),
                 ),
                 LashService::TurnDriver => bind_as(
                     builder,
-                    turn.clone().serve(),
+                    turn.on_route(route.clone()).serve(),
                     &name,
                     ServiceOptions::new().handler("run", crate::turn_handler_options()),
                 ),

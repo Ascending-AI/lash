@@ -203,6 +203,7 @@ impl AdmitDriveRunner {
                 self.request.request.clone(),
                 admission_id(&self.request.request, self.ordinal),
                 epoch.epoch,
+                self.request.build_generation.clone(),
                 work,
             ),
         ))

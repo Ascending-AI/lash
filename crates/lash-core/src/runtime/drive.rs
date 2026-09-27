@@ -102,6 +102,11 @@ pub(crate) struct DriveRootRun {
     /// the recovery's; its evidence names the root that owed the follow-on.
     root: TurnId,
     fence: crate::store::DriveFence,
+    /// The drain generation stamped on the journal the root runs on: the
+    /// admitting drive's request stamp (FIG-3795 S9). A park this run writes
+    /// records it, so the drain routes the root's resume to the build its
+    /// journal belongs to.
+    journal_generation: crate::engine::BuildGeneration,
     /// Whether a commit of this run wrote the root's terminal evidence.
     terminal_written: bool,
 }
@@ -119,6 +124,7 @@ impl DriveRootRun {
         Self {
             root,
             fence,
+            journal_generation: admitted.admitted_generation().clone(),
             terminal_written: false,
         }
     }
@@ -164,6 +170,11 @@ impl DriveRootRun {
     /// The logical root this run's evidence and park name.
     pub(crate) fn root(&self) -> &TurnId {
         &self.root
+    }
+
+    /// The drain generation stamped on the journal this run's root runs on.
+    pub(crate) fn journal_generation(&self) -> &crate::engine::BuildGeneration {
+        &self.journal_generation
     }
 
     pub(crate) fn mark_terminal_written(&mut self) {
@@ -325,6 +336,7 @@ async fn emit_admission_step(
     let admit_request = AdmitRequest {
         session: request.session.clone(),
         request: request.request.clone(),
+        build_generation: request.build_generation.clone(),
     };
     controller
         .execute_effect(

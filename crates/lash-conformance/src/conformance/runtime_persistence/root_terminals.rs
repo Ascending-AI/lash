@@ -278,6 +278,7 @@ pub async fn a_settled_queued_run_writes_its_roots_terminal(store: Arc<dyn Runti
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             };
             let run = store
                 .begin_or_resume_queued_run(&authority, request)

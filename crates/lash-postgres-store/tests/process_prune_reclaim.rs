@@ -214,6 +214,9 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core_execution::engine::BuildGeneration::for_test(
+                    "conformance",
+                ),
             },
         )
         .await

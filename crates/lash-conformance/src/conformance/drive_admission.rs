@@ -747,6 +747,7 @@ pub async fn fence_is_not_in_the_envelope_hash(
                 request: Box::new(lash_core::engine::AdmitRequest {
                     session: request.session.clone(),
                     request: request.request.clone(),
+                    build_generation: request.build_generation.clone(),
                 }),
             },
         ),

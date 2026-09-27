@@ -126,8 +126,16 @@ pub(crate) fn write_run_conn(
     let json = encode_json(&metadata)?;
     let sql = run_sql();
     if insert {
-        tx.execute(sql.insert.sql(), params![session_id.as_str(), key, json])
-            .map_err(sqlite_error)?;
+        tx.execute(
+            sql.insert.sql(),
+            params![
+                session_id.as_str(),
+                key,
+                json,
+                admission.admitted_generation.as_str()
+            ],
+        )
+        .map_err(sqlite_error)?;
     } else {
         tx.execute(
             sql.update.sql(),

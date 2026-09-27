@@ -115,6 +115,10 @@ pub struct QueuedRunAdmission {
     /// The executable generation the run was admitted under (FIG-3571). A
     /// resume under another one is refused before the run drives anything.
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
+    /// The drain generation of the drive whose admission began the run
+    /// (FIG-3795 S9): the generation suffix the run's resume routes by, read
+    /// back rather than recomputed.
+    pub admitted_generation: crate::build_generation::BuildGeneration,
 }
 
 /// Input to admission. Only an explicitly supplied identity is replayed after
@@ -129,6 +133,10 @@ pub struct BeginQueuedRun {
     pub initial_turn_index: u64,
     /// The executable generation the drain runs under; a new run records it.
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
+    /// The drain generation of the drive's admission stamp (FIG-3795 S9):
+    /// the sender's generation the request carried, or the executing
+    /// build's for a drain no drive admitted.
+    pub admitted_generation: crate::build_generation::BuildGeneration,
 }
 
 impl BeginQueuedRun {
@@ -208,6 +216,7 @@ impl BeginQueuedRun {
             terminal: None,
             last_commit: None,
             generation: self.generation,
+            admitted_generation: self.admitted_generation,
         }
     }
 }

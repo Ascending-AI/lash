@@ -170,6 +170,7 @@ mod replay_corpus;
 mod root_control_witnesses;
 mod segment_generation_handoff;
 mod segment_redrive_on_the_double;
+mod session_drive_roll_on_the_double;
 mod tool_context_conformance;
 mod trigger_intent_cutover;
 mod turn_cancel_modes;

@@ -173,10 +173,16 @@ pub enum FenceSource {
 /// the work it admits (the unfinished run it resumes, or the first item of
 /// the queue prefix it takes), so a replay decodes the same root and a fresh
 /// execution never trusts a root the caller guessed.
+///
+/// `build_generation` is the sender's drain generation, the stamp the
+/// drive's request carries ([`DriveRequest::build_generation`]): the
+/// admission records it so the queued run it begins routes its resume by the
+/// generation that admitted it (FIG-3795 S9).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdmitRequest {
     pub session: SessionId,
     pub request: DriveRequestId,
+    pub build_generation: super::contracts::BuildGeneration,
 }
 
 /// Admission's decision.
@@ -235,6 +241,10 @@ pub struct Admitted {
     request: DriveRequestId,
     admission: AdmissionId,
     observed_epoch: u64,
+    /// The sender's drain generation the drive request carried, recorded
+    /// with the admission (FIG-3795 S9): a queued run this root begins stamps
+    /// it, and the run's resume routes by it.
+    admitted_generation: super::contracts::BuildGeneration,
     /// What the root drives.
     work: AdmittedWork,
 }
@@ -265,6 +275,7 @@ impl Admitted {
         request: DriveRequestId,
         admission: AdmissionId,
         observed_epoch: u64,
+        admitted_generation: super::contracts::BuildGeneration,
         work: AdmittedWork,
     ) -> Self {
         Self {
@@ -273,6 +284,7 @@ impl Admitted {
             request,
             admission,
             observed_epoch,
+            admitted_generation,
             work,
         }
     }
@@ -297,6 +309,13 @@ impl Admitted {
     /// The drive epoch admission read; the seal advances it by one.
     pub fn observed_epoch(&self) -> u64 {
         self.observed_epoch
+    }
+
+    /// The drain generation the drive's request was stamped with: the
+    /// generation a queued run this root begins resumes through
+    /// (FIG-3795 S9).
+    pub fn admitted_generation(&self) -> &super::contracts::BuildGeneration {
+        &self.admitted_generation
     }
 
     /// What the root drives.

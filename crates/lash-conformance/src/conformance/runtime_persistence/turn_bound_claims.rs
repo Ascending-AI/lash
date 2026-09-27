@@ -298,6 +298,7 @@ pub async fn bound_claim_skips_a_pending_queued_runs_inputs(store: Arc<dyn Runti
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await

@@ -50,6 +50,7 @@ impl LashRuntime {
         &self,
         err: &RuntimeError,
         root: &TurnId,
+        journal_generation: Option<&crate::engine::BuildGeneration>,
     ) {
         let Some(reason) = crate::store::ParkReason::of_error(err) else {
             return;
@@ -64,11 +65,21 @@ impl LashRuntime {
         else {
             return;
         };
-        let write = crate::store::TurnParkWrite::refusal(
+        // FIG-3795 S9: the park records the drain generation of the build the
+        // parked journal belongs to — the caller's where it holds one (a
+        // resumed run's recorded admission), the running root's admitted
+        // generation, else this build's, which wrote the journal itself.
+        let mut write = crate::store::TurnParkWrite::refusal(
             self.state.session_id.clone(),
             root.clone(),
             reason,
             self.host.core.clock.timestamp_ms(),
+        );
+        write.build_generation = Some(
+            journal_generation
+                .or_else(|| self.drive_root.as_ref().map(|run| run.journal_generation()))
+                .cloned()
+                .unwrap_or_else(|| self.host.core.backend().build_generation().clone()),
         );
         let reason_code = write.reason.code().as_str();
         let effect_kind = write.reason.effect_kind();

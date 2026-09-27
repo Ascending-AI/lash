@@ -48,6 +48,7 @@ pub async fn queued_run_cold_process_driver(
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     if action == "queued_recover" {
         let witness: Witness = serde_json::from_slice(&std::fs::read(marker).unwrap()).unwrap();
@@ -135,6 +136,9 @@ pub async fn queued_run_cold_process_driver(
                         configuration: resumed.configuration.clone(),
                         initial_turn_index: 3,
                         generation: None,
+                        admitted_generation: lash_core::engine::BuildGeneration::for_test(
+                            "conformance",
+                        ),
                     },
                 )
                 .await
@@ -258,6 +262,9 @@ pub async fn queued_run_cold_process_driver(
                             expected_head_revision: 0,
                             initial_turn_index: 1,
                             generation: None,
+                            admitted_generation: lash_core::engine::BuildGeneration::for_test(
+                                "conformance",
+                            ),
                         },
                     )
                     .await

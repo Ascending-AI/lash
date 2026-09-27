@@ -179,6 +179,7 @@ impl ScriptedDriver {
                     request.request.as_str()
                 )),
                 0,
+                request.build_generation.clone(),
                 lash_core::engine::AdmittedWork::Queued,
             )),
             None => AdmitVerdict::Idle,
@@ -215,6 +216,7 @@ impl SessionDriver for ScriptedDriver {
                 request: Box::new(lash_core::engine::AdmitRequest {
                     session: request.session.clone(),
                     request: request.request.clone(),
+                    build_generation: request.build_generation.clone(),
                 }),
             },
         );
@@ -589,6 +591,7 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
                         request("generation"),
                         lash_core::engine::AdmissionId::new("generation"),
                         0,
+                        lash_core::engine::BuildGeneration::for_test("any"),
                         lash_core::engine::AdmittedWork::Queued,
                     ),
                 },

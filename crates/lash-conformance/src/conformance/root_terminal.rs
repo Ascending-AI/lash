@@ -730,6 +730,7 @@ pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await

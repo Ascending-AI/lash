@@ -29,6 +29,7 @@ pub async fn queued_run_active_turn_member_reclaims_after_lane_rotation(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -129,6 +130,7 @@ pub async fn queued_run_repaired_checkpoint_input_remains_deferred_after_settle(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -287,6 +289,7 @@ async fn queued_run_advance_repair_case(store: Arc<dyn RuntimePersistence>, host
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -544,6 +547,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -627,6 +631,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -647,6 +652,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -703,6 +709,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -739,6 +746,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let anonymous_selected = store
         .begin_or_resume_queued_run(&selected_lease.authority(), selected_request.clone())
@@ -863,6 +871,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -958,6 +967,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -1028,6 +1038,7 @@ pub async fn queued_run_identity_survives_lane_rotation(store: Arc<dyn RuntimePe
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let first_fence = claim_session_execution_lease_for_test(&store, &session_id, "first")
         .await
@@ -1102,6 +1113,7 @@ pub async fn queued_run_selection_excludes_later_input_after_takeover(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -1206,6 +1218,7 @@ pub async fn queued_run_commit_receipt_precedes_revisions_but_not_lane_fence(
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let admitted = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1309,6 +1322,7 @@ pub async fn queued_run_terminal_disposition_preserves_unassigned_work(
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1478,6 +1492,7 @@ pub async fn queued_run_cancelled_follow_on_receipt_retains_withheld_members(
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1652,6 +1667,7 @@ pub async fn queued_run_frozen_batches_survive_takeover_and_changed_limits(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -1738,6 +1754,7 @@ pub async fn queued_run_continuation_advances_and_retains_receipts(
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1917,6 +1934,7 @@ pub async fn queued_run_exact_selection_never_commits_a_partial_claim(
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await
@@ -2059,6 +2077,7 @@ pub async fn queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_
                 expected_head_revision: 0,
                 initial_turn_index: 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
             },
         )
         .await

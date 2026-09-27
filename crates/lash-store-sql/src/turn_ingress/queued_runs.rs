@@ -2,7 +2,8 @@
 pub const TABLE: &str = "queued_runs";
 /// Metadata plus redundant scalar guards are decoded together.
 pub const ADMISSION_COLUMNS: &str = "admission_json, status, revision";
-pub const INSERT_COLUMNS: &str = "session_id, scope_id, status, revision, admission_json";
+pub const INSERT_COLUMNS: &str =
+    "session_id, scope_id, status, revision, admission_json, admitted_generation";
 
 crate::statements! {
     pub struct QueuedRunStatements @ "queued_run" {
@@ -44,6 +45,10 @@ crate::statements! {
             (SELECT member_id FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = 'batch')";
         delete_batches = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND
             batch_id IN (SELECT member_id FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = 'batch')";
-        insert = "INSERT INTO queued_runs (session_id, scope_id, status, revision, admission_json) VALUES (?1, ?2, 'pending', 0, ?3)";
+        /// Open a queued run under `?2` in session `?1`: `?3` is the
+        /// admission's JSON body and `?4` the drain generation its drive
+        /// stamped, projected for the drain's per-generation counts
+        /// (FIG-3795 S9).
+        insert = "INSERT INTO queued_runs (session_id, scope_id, status, revision, admission_json, admitted_generation) VALUES (?1, ?2, 'pending', 0, ?3, ?4)";
     }
 }

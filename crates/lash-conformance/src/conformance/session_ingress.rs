@@ -420,6 +420,9 @@ impl Turns {
                     expected_head_revision: self.state.head_revision,
                     initial_turn_index: 1,
                     generation: None,
+                    admitted_generation: lash_core::engine::BuildGeneration::for_test(
+                        "conformance",
+                    ),
                 },
             )
             .await

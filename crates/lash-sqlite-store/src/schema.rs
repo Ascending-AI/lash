@@ -323,9 +323,13 @@ CREATE TABLE IF NOT EXISTS queued_runs (
     status TEXT NOT NULL CONSTRAINT ck_queued_runs_status CHECK (status IN ('pending', 'settled')),
     revision INTEGER NOT NULL CONSTRAINT ck_queued_runs_revision CHECK (revision >= 0),
     admission_json TEXT NOT NULL,
+    admitted_generation TEXT NOT NULL,
     PRIMARY KEY (session_id, scope_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS queued_runs_pending ON queued_runs(session_id) WHERE status = 'pending';
+-- A drain's in-flight queued runs per build generation (FIG-3795 S9).
+CREATE INDEX IF NOT EXISTS idx_queued_runs_admitted_generation
+    ON queued_runs(admitted_generation) WHERE status = 'pending';
 CREATE TABLE IF NOT EXISTS queued_run_members (
     session_id TEXT NOT NULL,
     scope_id TEXT NOT NULL,
@@ -997,8 +1001,11 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// build whose checkpoint it resumes (FIG-3795, changed in place under the
 /// pre-1.0 version freeze, FIG-3846): `turn_parks` and `turn_park_events`
 /// gain the projected `park_build_generation` column, and `turn_parks` the
-/// partial index drain status counts it by. A database written before the
-/// change lacks the columns; recreate it.
+/// partial index drain status counts it by. `queued_runs` gains the
+/// `admitted_generation` column — the drain generation of the drive whose
+/// admission began the run, indexed for the drain's in-flight count per
+/// generation (FIG-3795 S9). A database written before these changes lacks
+/// the columns; recreate it.
 pub(crate) const SCHEMA_VERSION: i32 = 99;
 
 pub(crate) const PROCESS_SCHEMA: &str = "

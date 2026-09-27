@@ -256,9 +256,13 @@ CREATE TABLE IF NOT EXISTS lash_queued_runs (
     status TEXT NOT NULL CONSTRAINT ck_queued_runs_status CHECK (status IN ('pending', 'settled')),
     revision BIGINT NOT NULL CONSTRAINT ck_queued_runs_revision CHECK (revision >= 0),
     admission_json TEXT NOT NULL,
+    admitted_generation TEXT NOT NULL,
     PRIMARY KEY (session_id, scope_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS lash_queued_runs_pending ON lash_queued_runs(session_id) WHERE status = 'pending';
+-- A drain's in-flight queued runs per build generation (FIG-3795 S9).
+CREATE INDEX IF NOT EXISTS idx_lash_queued_runs_admitted_generation
+    ON lash_queued_runs(admitted_generation) WHERE status = 'pending';
 CREATE TABLE IF NOT EXISTS lash_queued_run_members (
     session_id TEXT NOT NULL,
     scope_id TEXT NOT NULL,

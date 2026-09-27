@@ -341,6 +341,41 @@ impl RestateSessionWork {
             .await
     }
 
+    /// Send `request`'s drive to `LashSession_g<G>/{session}`: the resume of
+    /// a drive pinned to drain generation `G` (FIG-3795). The request is
+    /// stamped with `G`, which the resume-only lane holds it to, and the
+    /// request id is the send's idempotency key under that service name, as
+    /// on the stable lane. The drain sends it; a host never does — new work
+    /// goes to the stable lane.
+    pub async fn send_resume(
+        &self,
+        session: &SessionId,
+        request: DriveRequestId,
+        generation: &BuildGeneration,
+    ) -> Result<crate::RestateInvocationId, crate::RestateHttpError> {
+        let route = crate::services::ServiceRoute::generation(
+            LashService::SessionDriver,
+            generation.clone(),
+        );
+        let body = RestateSessionDriveRequest {
+            drive_version: LASH_SESSION_DRIVE_VERSION,
+            request: DriveRequest {
+                session: session.clone(),
+                request: request.clone(),
+                build_generation: generation.clone(),
+            },
+        };
+        self.ingress
+            .send_object_json_idempotent_bounded(
+                &route.name(),
+                session.as_str(),
+                DRIVE_HANDLER,
+                &body,
+                request.as_str(),
+            )
+            .await
+    }
+
     /// Attach to `request`'s drive of `session` and return how it ended,
     /// sending it first if nothing sent it yet: the same idempotency key as
     /// [`send_drive`](Self::send_drive), so the call and an earlier send name
@@ -622,6 +657,9 @@ pub(crate) struct LashSessionImpl {
     slot: RestateSessionDriverSlot,
     authority_id: RestateAuthorityId,
     build_generation: BuildGeneration,
+    /// The lane this instance serves: the binder serves one per lane of the
+    /// pinned `LashSession` (FIG-3795).
+    route: crate::services::ServiceRoute,
 }
 
 /// The `LashTurn` workflow over the deployment's driver slot, journaling
@@ -631,6 +669,9 @@ pub(crate) struct LashTurnImpl {
     slot: RestateSessionDriverSlot,
     authority_id: RestateAuthorityId,
     build_generation: BuildGeneration,
+    /// The lane this instance serves: the binder serves one per lane of the
+    /// pinned `LashTurn` (FIG-3795).
+    route: crate::services::ServiceRoute,
 }
 
 impl LashSessionImpl {
@@ -643,7 +684,16 @@ impl LashSessionImpl {
             slot,
             authority_id,
             build_generation,
+            route: crate::services::ServiceRoute::stable(LashService::SessionDriver),
         }
+    }
+
+    /// This object bound under `route`: the binder serves one instance per
+    /// lane of the pinned `LashSession`.
+    pub(crate) fn on_route(&self, route: crate::services::ServiceRoute) -> Self {
+        let mut session = self.clone();
+        session.route = route;
+        session
     }
 }
 
@@ -657,7 +707,16 @@ impl LashTurnImpl {
             slot,
             authority_id,
             build_generation,
+            route: crate::services::ServiceRoute::stable(LashService::TurnDriver),
         }
+    }
+
+    /// This workflow bound under `route`: the binder serves one instance
+    /// per lane of the pinned `LashTurn`.
+    pub(crate) fn on_route(&self, route: crate::services::ServiceRoute) -> Self {
+        let mut turn = self.clone();
+        turn.route = route;
+        turn
     }
 }
 
@@ -699,6 +758,17 @@ fn misaddressed(message: String) -> HandlerError {
     ))
 }
 
+/// The typed refusal of a request a generation lane does not serve (FIG-3795,
+/// law L11): it names another generation than the lane's, or none. Nothing
+/// past the generation sentinel is journaled, and nothing is stored: a
+/// misroute is the sender's error, never the drive's outcome.
+fn misrouted(route: &crate::services::ServiceRoute, detail: &str) -> HandlerError {
+    drive_refusal(&lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+        format!("misrouted: {route} serves only its own generation's work; {detail}"),
+    ))
+}
+
 impl LashSession for LashSessionImpl {
     async fn drive(
         &self,
@@ -716,6 +786,7 @@ impl LashSession for LashSessionImpl {
             &self.slot,
             &self.authority_id,
             &self.build_generation,
+            &self.route,
             ctx,
             input.request,
         )
@@ -741,7 +812,9 @@ impl LashTurn for LashTurnImpl {
             &self.slot,
             &self.authority_id,
             &self.build_generation,
+            &self.route,
             ctx,
+            input.sender_generation.as_ref(),
             input.admitted,
         )
         .await
@@ -768,6 +841,7 @@ async fn drive_session_journal(
     slot: &RestateSessionDriverSlot,
     authority_id: &RestateAuthorityId,
     generation: &BuildGeneration,
+    route: &crate::services::ServiceRoute,
     ctx: ObjectContext<'_>,
     request: DriveRequest,
 ) -> Result<DriveOutcome, HandlerError> {
@@ -780,6 +854,23 @@ async fn drive_session_journal(
     }
     let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
     crate::sentinel::check_generation(LashService::SessionDriver.name(), &recorded, generation)?;
+    // The generation lane is resume-only (FIG-3795): it serves a drive whose
+    // request was stamped for exactly this generation. A request naming
+    // another generation, sent there by error, is refused before any command
+    // after the sentinel — it is the sender's error, journaled nowhere.
+    if let crate::services::Lane::Generation(lane) = route.lane()
+        && request.build_generation != *lane
+    {
+        return Err(misrouted(
+            route,
+            &format!(
+                "drive `{}` of session `{}` was stamped for generation `{}`",
+                request.request.as_str(),
+                request.session,
+                request.build_generation
+            ),
+        ));
+    }
     let driver = slot.driver_for(LashService::SessionDriver.name())?;
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
         .with_build_generation(generation.clone());
@@ -879,9 +970,13 @@ async fn drive_session_journal(
                         build_generation: request.build_generation.clone(),
                     };
                     let continuation_id = continuation.request.as_str().to_owned();
+                    // The continuation is this same drive yielding: it goes
+                    // to this invocation's lane, so a drive resumed on
+                    // `_g<G>` stays under the generation its journal family
+                    // belongs to. On the stable lane this is the stable name.
                     crate::services::routed_object::<_, _, ()>(
                         controller.context(),
-                        &crate::services::ServiceRoute::stable(LashService::SessionDriver),
+                        route,
                         request.session.as_str().to_owned(),
                         "drive",
                         RestateSessionDriveRequest {
@@ -923,7 +1018,9 @@ async fn run_root_journal(
     slot: &RestateSessionDriverSlot,
     authority_id: &RestateAuthorityId,
     generation: &BuildGeneration,
+    route: &crate::services::ServiceRoute,
     ctx: WorkflowContext<'_>,
+    sender_generation: Option<&BuildGeneration>,
     admitted: Admitted,
 ) -> Result<RootOutcome, HandlerError> {
     let expected = turn_workflow_key(admitted.session(), admitted.root());
@@ -935,6 +1032,26 @@ async fn run_root_journal(
     }
     let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
     crate::sentinel::check_generation(LashService::TurnDriver.name(), &recorded, generation)?;
+    // The generation lane serves a root the latest build refused, re-sent by
+    // the drain under the generation the drive that admitted it ran on
+    // (`sender_generation`). A request naming another generation, or none,
+    // is a misroute refused before any command after the sentinel.
+    if let crate::services::Lane::Generation(lane) = route.lane()
+        && sender_generation != Some(lane)
+    {
+        let sender = sender_generation.map_or_else(
+            || "no generation".to_string(),
+            |sender| format!("generation `{sender}`"),
+        );
+        return Err(misrouted(
+            route,
+            &format!(
+                "root `{}` of session `{}` was sent by {sender}",
+                admitted.root(),
+                admitted.session()
+            ),
+        ));
+    }
     let driver = slot.driver_for(LashService::TurnDriver.name())?;
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
         .with_build_generation(generation.clone());

@@ -73,6 +73,7 @@ impl SessionDriver for Driver {
             request.request.clone(),
             AdmissionId::new(format!("{}#{ordinal}", request.request.as_str())),
             0,
+            request.build_generation.clone(),
             AdmittedWork::Input {
                 head: self.input.clone(),
             },

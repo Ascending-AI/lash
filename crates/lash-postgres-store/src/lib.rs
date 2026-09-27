@@ -624,9 +624,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `written_generation` (nullable: rows a pre-stamp build wrote never
 // recorded the writer's generation, and a missing stamp is never derived)
 // and `route` (non-null: every write names the route its send took — a
-// pre-lane build could only send under the stable workflow name). A catalog
-// provisioned before the change fails the open-time shape check and is
-// recreated.
+// pre-lane build could only send under the stable workflow name); and
+// `lash_queued_runs` gains `admitted_generation` — the drain generation of
+// the drive whose admission began the run — plus the drain's in-flight
+// count index over it (FIG-3795 S9). A catalog provisioned before the change
+// fails the open-time shape check and is recreated.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).

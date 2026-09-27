@@ -27,6 +27,7 @@ pub async fn queued_run_checkpoint_assignment_survives_lane_rotation(
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -333,6 +334,7 @@ pub async fn queued_run_resume_retakes_its_open_checkpoint_assignments(
         expected_head_revision: 0,
         initial_turn_index: 1,
         generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
