@@ -1695,7 +1695,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
 
 #[tokio::test]
 async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Result<()> {
-    let backend = double_backend().await;
+    let backend = double_backend_explicit_reconcile().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let core = process_test_core(backend.clone())?;

@@ -2196,7 +2196,8 @@ mod deployment_and_testing_facade;
 mod durable_session;
 mod harness;
 pub(crate) use harness::{
-    AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend, double_backend_over,
+    AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend,
+    double_backend_explicit_reconcile, double_backend_over, double_backend_over_explicit_reconcile,
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, latest_double,
     memory_store_backend, memory_store_set, mock_model_spec, model_spec, output_into_cancelled_by,
     redeploy, restate_double, retry_when_claim_frees, run_async_test_on_stack_budget,

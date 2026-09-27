@@ -48,6 +48,24 @@ pub(crate) async fn double_backend() -> lash_core::Backend {
     backend
 }
 
+/// The backend over `double` whose installed driver starts no wall-clock
+/// reconcile sweep: every obligation delivery is one the test made — a
+/// verb's immediate attempt or a pass it drives — so a sweep can never
+/// claim an obligation out from under the assertion being made (FIG-3926).
+fn sweep_less(double: &lash_restate_test::RestateTestBackend) -> lash_core::Backend {
+    lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
+        .with_session_work(double.explicit_reconcile_session_work())
+        .into_backend()
+}
+
+/// [`double_backend`] over the sweep-less session work [`sweep_less`] gives.
+pub(crate) async fn double_backend_explicit_reconcile() -> lash_core::Backend {
+    let double = restate_double(DOUBLE_SEED).await;
+    let backend = sweep_less(&double);
+    TEST_DOUBLES.with(|held| held.borrow_mut().push(double));
+    backend
+}
+
 /// [`double_backend`] over a decorated store set: `decorate` wraps the
 /// double's stores before its engine is built, so the engine and every
 /// service it binds run over the decoration (a layer added to the backend
@@ -60,6 +78,20 @@ pub(crate) async fn double_backend_over(
         .await
         .expect("build the Restate double over decorated stores");
     let backend = double.lash_backend();
+    TEST_DOUBLES.with(|held| held.borrow_mut().push(double));
+    backend
+}
+
+/// [`double_backend_over`] over the sweep-less session work
+/// [`sweep_less`] gives.
+pub(crate) async fn double_backend_over_explicit_reconcile(
+    config: lash_restate_test::ServerConfig,
+    decorate: impl FnOnce(Arc<dyn lash_core::StoreSet>) -> Arc<dyn lash_core::StoreSet>,
+) -> lash_core::Backend {
+    let double = lash_restate_test::backend_with(DOUBLE_SEED, config, decorate)
+        .await
+        .expect("build the Restate double over decorated stores");
+    let backend = sweep_less(&double);
     TEST_DOUBLES.with(|held| held.borrow_mut().push(double));
     backend
 }

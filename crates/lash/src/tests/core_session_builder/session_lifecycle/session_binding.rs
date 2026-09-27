@@ -152,9 +152,13 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 /// undeleted — the storage delete is the last step, so the obligation's row
 /// survives the failure — and the relay's next attempt deletes it. Nothing
 /// asks the caller to retry the deletion.
+///
+/// The law runs on the sweep-less double: no reconcile tick can claim the
+/// close intent's obligation out from under the delete call's own delivery
+/// and leave the verb answering `CloseIntent(Pending)` (FIG-3926).
 #[tokio::test]
 async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Result<()> {
-    let backend = DecoratedBackend::over(double_backend().await)
+    let backend = DecoratedBackend::over(double_backend_explicit_reconcile().await)
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),

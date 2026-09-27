@@ -36,7 +36,7 @@ async fn closing_fixture_under(
     time: lash_restate_test::TimeMode,
 ) -> Result<(LashCore, lash_core::store::ObligationId)> {
     let root_scope = lash_core::ScopeId::turn(SESSION, ROOT);
-    let backend = double_backend_over(
+    let backend = double_backend_over_explicit_reconcile(
         lash_restate_test::ServerConfig {
             start_time_ms: now_ms(),
             time,

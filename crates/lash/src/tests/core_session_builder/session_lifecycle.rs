@@ -1457,7 +1457,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
 #[tokio::test]
 async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
+        double_backend_explicit_reconcile().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1792,7 +1792,7 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
 #[tokio::test]
 async fn core_delete_session_removes_factory_backed_session_state() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
+        double_backend_explicit_reconcile().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1910,12 +1910,14 @@ impl lash_core::EffectHost for RetirementRecordingHost {
 async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
     let retirements = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = Arc::clone(&retirements);
-    let backend = DecoratedBackend::over(double_backend().await).effect_host(move |inner| {
-        Arc::new(RetirementRecordingHost {
-            inner,
-            retirements: recorded,
-        })
-    });
+    let backend = DecoratedBackend::over(double_backend_explicit_reconcile().await).effect_host(
+        move |inner| {
+            Arc::new(RetirementRecordingHost {
+                inner,
+                retirements: recorded,
+            })
+        },
+    );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),
         crate::TurnBudget::Unbounded,
