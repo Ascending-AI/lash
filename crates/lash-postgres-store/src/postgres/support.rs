@@ -176,7 +176,12 @@ pub(crate) fn graph_node_insert_error(
 
 /// The `pending_turn_inputs.input_id` column is globally `UNIQUE`: a draft
 /// naming an id any row already carries fails the insert, and that violation
-/// is the typed id-conflict refusal, not an opaque storage failure.
+/// is the typed id-conflict refusal, not an opaque storage failure. The
+/// `(session_id, source_key)` unique constraint surfaces the same way: the
+/// admission verdict reads both names first, so reaching the constraint means
+/// the row materialized after that read — a race or a skipped verdict — and
+/// the refused draft's provisioned id is the identity that cannot be filed.
+/// SQLite's seam maps both violations to the same refusal.
 pub(crate) fn pending_turn_input_insert_error(
     err: sqlx::Error,
     session_id: &SessionId,
@@ -184,7 +189,11 @@ pub(crate) fn pending_turn_input_insert_error(
 ) -> StoreError {
     if let sqlx::Error::Database(database) = &err
         && database.code().as_deref() == Some("23505")
-        && database.constraint() == Some("lash_pending_turn_inputs_input_id_key")
+        && matches!(
+            database.constraint(),
+            Some("lash_pending_turn_inputs_input_id_key")
+                | Some("lash_pending_turn_inputs_session_id_source_key_key")
+        )
     {
         return StoreError::PendingTurnInputIdConflict {
             session_id: session_id.clone(),

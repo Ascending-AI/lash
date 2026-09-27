@@ -321,7 +321,13 @@ fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
 
 /// The `pending_turn_inputs.input_id` column is globally `UNIQUE`: a draft
 /// naming an id any row already carries fails the insert, and that violation
-/// is the typed id-conflict refusal, not an opaque storage failure.
+/// is the typed id-conflict refusal, not an opaque storage failure. The
+/// `(session_id, source_key)` unique constraint surfaces the same way: the
+/// admission verdict reads both names first, so reaching the constraint means
+/// the row materialized after that read — a cross-handle race or a skipped
+/// verdict — and the refused draft's provisioned id is the identity that
+/// cannot be filed. Either violation is the id-conflict refusal PostgreSQL's
+/// `23505` already produces, not a swallowed retry.
 fn sqlite_pending_turn_input_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
@@ -329,15 +335,16 @@ fn sqlite_pending_turn_input_insert_error(
 ) -> StoreError {
     if let rusqlite::Error::SqliteFailure(code, message) = &err
         && code.code == rusqlite::ErrorCode::ConstraintViolation
-        && message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("pending_turn_inputs.input_id")
     {
-        return StoreError::PendingTurnInputIdConflict {
-            session_id: session_id.clone(),
-            input_id: input_id.into(),
-        };
+        let message = message.as_deref().unwrap_or_default();
+        if message.contains("pending_turn_inputs.input_id")
+            || message.contains("pending_turn_inputs.session_id, pending_turn_inputs.source_key")
+        {
+            return StoreError::PendingTurnInputIdConflict {
+                session_id: session_id.clone(),
+                input_id: input_id.into(),
+            };
+        }
     }
     sqlite_error(err)
 }

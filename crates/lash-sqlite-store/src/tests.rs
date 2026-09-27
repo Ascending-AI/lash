@@ -449,6 +449,76 @@ fn pending_turn_input_claim_identity_must_be_all_or_none() {
     }
 }
 
+/// FIG-3886: the `(session_id, source_key)` dedup on both admission tables
+/// aborts instead of ignoring — which stored row an id names is the admission
+/// verdict's call, never the constraint's — and a violation the pre-insert
+/// read missed maps to the same typed identity conflict an `input_id` reuse
+/// gets, the one PostgreSQL's `23505` already produces.
+#[test]
+fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
+    let connection =
+        rusqlite::Connection::open_in_memory().expect("open SQLite constraint witness");
+    connection
+        .execute_batch(crate::schema::SCHEMA)
+        .expect("apply SQLite schema to constraint witness");
+    let insert = "INSERT INTO pending_turn_inputs (enqueue_seq,
+             input_id, session_id, source_key, ingress_json, state, input_json,
+             submitted_ingress_json, submission_digest, enqueued_at_ms
+         ) VALUES (?1, ?2, 'session', ?3, '{\"scope\":\"next_turn\"}',
+                   'deferred_next_turn', '{}', '{}', 'digest', 0)";
+    connection
+        .execute(insert, rusqlite::params![1, "first", "key"])
+        .expect("admit the first row");
+    let error = connection
+        .execute(insert, rusqlite::params![2, "second", "key"])
+        .expect_err("a duplicate (session_id, source_key) insert must abort");
+    let mapped =
+        crate::sqlite_pending_turn_input_insert_error(error, &SessionId::from("session"), "second");
+    assert!(
+        matches!(
+            &mapped,
+            StoreError::PendingTurnInputIdConflict { session_id, input_id }
+                if session_id.as_str() == "session" && input_id.as_str() == "second"
+        ),
+        "the duplicate source-key insert maps to the typed identity conflict: {mapped:?}"
+    );
+    let error = connection
+        .execute(insert, rusqlite::params![3, "first", "other-key"])
+        .expect_err("a duplicate input_id insert must abort");
+    let mapped =
+        crate::sqlite_pending_turn_input_insert_error(error, &SessionId::from("session"), "first");
+    assert!(
+        matches!(&mapped, StoreError::PendingTurnInputIdConflict { .. }),
+        "the duplicate input_id insert maps to the typed identity conflict: {mapped:?}"
+    );
+}
+
+#[test]
+fn queued_work_batches_reject_a_duplicate_source_key_insert() {
+    let connection =
+        rusqlite::Connection::open_in_memory().expect("open SQLite constraint witness");
+    connection
+        .execute_batch(crate::schema::SCHEMA)
+        .expect("apply SQLite schema to constraint witness");
+    let insert = "INSERT INTO queued_work_batches (enqueue_seq,
+             batch_id, session_id, source_key, delivery_policy, work_kind,
+             authority_json, enqueued_at_ms
+         ) VALUES (?1, ?2, 'session', 'key', 'earliest_safe_boundary', 'turn',
+                   '{}', 0)";
+    connection
+        .execute(insert, rusqlite::params![1, "first"])
+        .expect("admit the first row");
+    let error = connection
+        .execute(insert, rusqlite::params![2, "second"])
+        .expect_err("a duplicate (session_id, source_key) insert must abort");
+    assert!(
+        error.to_string().contains(
+            "UNIQUE constraint failed: queued_work_batches.session_id, queued_work_batches.source_key"
+        ),
+        "the duplicate source-key insert names its constraint: {error}"
+    );
+}
+
 #[tokio::test]
 async fn store_options_apply_connection_policy_on_connection_thread() {
     let dir = tempfile::tempdir().expect("tempdir");
