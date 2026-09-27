@@ -161,6 +161,7 @@ mod endpoint_protocol;
 mod generation_sentinel_on_the_double;
 mod journal_cut_runner;
 mod live_turn_probe;
+mod obligation_relay_on_the_double;
 mod parent_end_on_the_double;
 mod process_effect_summary;
 mod process_tool_replay;

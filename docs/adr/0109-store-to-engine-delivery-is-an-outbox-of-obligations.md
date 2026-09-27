@@ -245,8 +245,8 @@ RETURNING term, holder_id;          -- no row: read the current holder
 -- renew
 UPDATE recovery_leader SET expires_at_ms = :now + :ttl
 WHERE name = :name AND holder_id = :me AND term = :term AND expires_at_ms >= :now RETURNING term;
--- resign
-DELETE FROM recovery_leader
+-- resign: expire the row, never delete it, so the term stays monotone
+UPDATE recovery_leader SET expires_at_ms = :now - 1
 WHERE name = :name AND holder_id = :me AND term = :term AND expires_at_ms >= :now;
 ```
 
