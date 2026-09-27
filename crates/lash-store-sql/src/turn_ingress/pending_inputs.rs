@@ -144,6 +144,20 @@ crate::statements! {
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
+        /// The `enqueue_seq` of session `?1`'s earliest next-turn input that
+        /// generation `?2` has not claimed, or `NULL`: where a claim of
+        /// queued work stops, at idle and at a checkpoint alike, because the
+        /// turn lane is one FIFO over both admission tables (ADR 0101 §5).
+        /// Unlike the next-turn claim scan, an open session command does not
+        /// hide the input: the command lane orders nothing in the turn lane.
+        earliest_next_turn_candidate_seq = "SELECT MIN(enqueue_seq) FROM pending_turn_inputs
+             WHERE session_id = ?1
+               AND {{deferred_next_turn_turn_input_state(state)}}
+               AND (
+                    claim_token IS NULL
+                    OR claim_session_lease_generation <> ?2
+               )";
+
         /// Session `?1`'s undelivered inputs at `?2`, each with the expiry of
         /// the session-execution lease its claim is pinned to, or NULL when no
         /// live lease holds that claim.

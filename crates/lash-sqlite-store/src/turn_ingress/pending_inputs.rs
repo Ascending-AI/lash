@@ -69,6 +69,11 @@ lash_store_sql::statements! {
         /// LIMIT` filter, so dropping it selects the wrong rows. PostgreSQL
         /// takes `FOR UPDATE` here; SQLite is already the only
         /// writer.
+        ///
+        /// The prefix also ends at the session's earliest queued turn work
+        /// generation `?2` has not claimed: the turn lane is one FIFO over
+        /// both admission tables (ADR 0101 §5), so no input accepted after it
+        /// is taken past it.
         claim_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
@@ -84,6 +89,15 @@ lash_store_sql::statements! {
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
                )
+               AND NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS turn_work
+                    WHERE turn_work.session_id = ?1 AND turn_work.work_kind = 'turn'
+                      AND (
+                           turn_work.claim_token IS NULL
+                           OR turn_work.claim_session_lease_generation <> ?2
+                      )
+                      AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
+               )
              ORDER BY enqueue_seq ASC
              LIMIT ?3";
 
@@ -93,6 +107,9 @@ lash_store_sql::statements! {
         /// empty, so a command enqueued since holds back only the rows after
         /// it. The prefix ends at the earliest open command; the shared
         /// session sequence orders both lanes.
+        ///
+        /// Like the next-turn scan, the prefix also ends at the earliest
+        /// queued turn work generation `?2` has not claimed (ADR 0101 §5).
         claim_candidates_admitted_root = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
@@ -108,6 +125,15 @@ lash_store_sql::statements! {
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
                       AND commands.enqueue_seq < pending_turn_inputs.enqueue_seq
+               )
+               AND NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS turn_work
+                    WHERE turn_work.session_id = ?1 AND turn_work.work_kind = 'turn'
+                      AND (
+                           turn_work.claim_token IS NULL
+                           OR turn_work.claim_session_lease_generation <> ?2
+                      )
+                      AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
              ORDER BY enqueue_seq ASC
              LIMIT ?3";

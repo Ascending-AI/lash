@@ -129,10 +129,8 @@ pub async fn pending_follow_on_is_written_by_its_switch_and_cleared_by_its_termi
 )]
 pub async fn pending_follow_on_blocks_every_claim_but_its_own(store: Arc<dyn RuntimePersistence>) {
     let (_, owed) = commit_switch(&store).await;
-    store
-        .enqueue_pending_turn_input(pending_next_turn_input_draft(&session(), "host input"))
-        .await
-        .expect("enqueue host input");
+    // The wake is accepted before the host input: a checkpoint never takes
+    // queued work past an earlier next-turn input (ADR 0101 §5).
     let wake = store
         .enqueue_queued_work(queued_draft(
             &session(),
@@ -141,6 +139,10 @@ pub async fn pending_follow_on_blocks_every_claim_but_its_own(store: Arc<dyn Run
         ))
         .await
         .expect("enqueue a wake");
+    store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(&session(), "host input"))
+        .await
+        .expect("enqueue host input");
     store
         .enqueue_queued_work(checkpoint_claims::queued_session_command_draft(
             &session(),

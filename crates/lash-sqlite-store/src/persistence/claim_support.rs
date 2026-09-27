@@ -433,6 +433,62 @@ pub(super) fn scan_queued_work_candidates_sqlite(
     Ok((candidate_rows, candidate_batches, candidates))
 }
 
+/// The `enqueue_seq` of session `session_id`'s earliest next-turn input that
+/// `generation` has not claimed: the turn-lane head of the input table.
+pub(super) fn earliest_next_turn_candidate_seq_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    generation: u64,
+) -> Result<Option<u64>, StoreError> {
+    earliest_candidate_seq_conn(
+        tx,
+        crate::turn_ingress::turn_ingress_sql()
+            .pending_inputs
+            .earliest_next_turn_candidate_seq
+            .sql(),
+        session_id,
+        generation,
+    )
+}
+
+/// The `enqueue_seq` of session `session_id`'s earliest queued turn work that
+/// `generation` has not claimed: the turn-lane head of the queued table.
+pub(super) fn earliest_turn_candidate_seq_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    generation: u64,
+) -> Result<Option<u64>, StoreError> {
+    earliest_candidate_seq_conn(
+        tx,
+        crate::turn_ingress::turn_ingress_sql()
+            .queued_batches
+            .earliest_turn_candidate_seq
+            .sql(),
+        session_id,
+        generation,
+    )
+}
+
+fn earliest_candidate_seq_conn(
+    tx: &Connection,
+    sql: &str,
+    session_id: &SessionId,
+    generation: u64,
+) -> Result<Option<u64>, StoreError> {
+    let seq: Option<i64> = tx
+        .query_row(
+            sql,
+            params![
+                session_id.as_str(),
+                sql_session_lease_generation(generation)?
+            ],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    seq.map(|seq| u64_from_sql("turn_lane", "enqueue_seq", seq).map_err(sqlite_error))
+        .transpose()
+}
+
 pub(super) fn claim_ready_queued_work_sqlite_conn(
     tx: &Connection,
     now: u64,
@@ -448,7 +504,14 @@ pub(super) fn claim_ready_queued_work_sqlite_conn(
     let generation = session_execution_lease.fencing_token;
     let (candidate_rows, candidate_batches, candidates) =
         scan_queued_work_candidates_sqlite(tx, session_id, generation, boundary, policy.max_rows)?;
-    let selected_len = match select_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
+    // ADR 0101 §5: queued work accepted after an unclaimed next-turn input
+    // waits behind it, at idle and at a checkpoint alike.
+    let admitted = TurnLaneStop::before(earliest_next_turn_candidate_seq_conn(
+        tx, session_id, generation,
+    )?)
+    .queued_prefix(&candidates);
+    let candidates = &candidates[..admitted];
+    let selected_len = match select_turn_work_claim_prefix(candidates, boundary, &policy, now)? {
         TurnWorkClaimPrefix::Selected { len } => len,
         TurnWorkClaimPrefix::Refused { .. } => {
             return Ok(TxOutcome::Commit(None));

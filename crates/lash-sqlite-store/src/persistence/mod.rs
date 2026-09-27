@@ -26,6 +26,7 @@
 use super::*;
 use crate::session_sql::session_sql;
 use lash_core_execution::SelectedQueuedWorkClaimOutcome;
+use lash_core_execution::store::claim_plan::{IdleTurnLaneHead, TurnLaneStop};
 use lash_core_execution::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;

@@ -327,6 +327,60 @@ pub(super) async fn scan_queued_work_candidates_postgres(
     Ok((selected, selected_batches, candidates))
 }
 
+/// The `enqueue_seq` of session `session_id`'s earliest next-turn input that
+/// `generation` has not claimed: the turn-lane head of the input table.
+pub(super) async fn earliest_next_turn_candidate_seq_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    generation: u64,
+) -> Result<Option<u64>, StoreError> {
+    earliest_candidate_seq_tx(
+        tx,
+        crate::turn_ingress::turn_ingress_sql()
+            .pending_inputs
+            .earliest_next_turn_candidate_seq
+            .sql(),
+        session_id,
+        generation,
+    )
+    .await
+}
+
+/// The `enqueue_seq` of session `session_id`'s earliest queued turn work that
+/// `generation` has not claimed: the turn-lane head of the queued table.
+pub(super) async fn earliest_turn_candidate_seq_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    generation: u64,
+) -> Result<Option<u64>, StoreError> {
+    earliest_candidate_seq_tx(
+        tx,
+        crate::turn_ingress::turn_ingress_sql()
+            .queued_batches
+            .earliest_turn_candidate_seq
+            .sql(),
+        session_id,
+        generation,
+    )
+    .await
+}
+
+async fn earliest_candidate_seq_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    sql: &'static str,
+    session_id: &SessionId,
+    generation: u64,
+) -> Result<Option<u64>, StoreError> {
+    let seq: Option<i64> = sqlx::query_scalar(sql)
+        .bind(session_id.as_str())
+        .bind(sql_session_lease_generation(generation)?)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    seq.map(|seq| u64_from_sql("turn_lane", "enqueue_seq", seq))
+        .transpose()
+}
+
 pub(super) async fn claim_ready_queued_work_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
@@ -343,7 +397,16 @@ pub(super) async fn claim_ready_queued_work_postgres_tx(
     let (selected_rows, mut selected_batches, candidates) =
         scan_queued_work_candidates_postgres(tx, session_id, generation, boundary, policy.max_rows)
             .await?;
-    let selected_len = match select_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
+    // ADR 0101 §5: queued work accepted after an unclaimed next-turn input
+    // waits behind it, at idle and at a checkpoint alike. Read after the scan:
+    // an input committed before a scanned row took its sequence first, so
+    // this read sees it.
+    let admitted = TurnLaneStop::before(
+        earliest_next_turn_candidate_seq_tx(tx, session_id, generation).await?,
+    )
+    .queued_prefix(&candidates);
+    let candidates = &candidates[..admitted];
+    let selected_len = match select_turn_work_claim_prefix(candidates, boundary, &policy, now)? {
         TurnWorkClaimPrefix::Selected { len } => len,
         TurnWorkClaimPrefix::Refused { .. } => {
             return Ok(ClaimTransactionOutcome::Commit(None));

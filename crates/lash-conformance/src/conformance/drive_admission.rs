@@ -1560,3 +1560,177 @@ pub async fn an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_
         "the command lane goes ahead of an earlier input"
     );
 }
+
+/// One item a turn-lane order law accepts: a next-turn host input, or a
+/// process wake under its delivery policy.
+#[derive(Clone, Copy, Debug)]
+enum LaneItem {
+    Input,
+    Wake(crate::DeliveryPolicy),
+}
+
+/// Accept `items` in order on a fresh law session, drive it to idle, and
+/// answer, per item in acceptance order, the model call that first rendered
+/// it (`None` when no call did). Queued work drains every compatible row it
+/// may (`DrainMode::All`) and one claim takes at most `claim_bound` inputs,
+/// so the only thing that keeps a claim from folding later items in is the
+/// turn lane's order.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn first_rendering_calls(
+    prefix: &str,
+    law: &str,
+    effect_host: &Arc<dyn crate::EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    items: &[LaneItem],
+    claim_bound: usize,
+) -> Vec<Option<usize>> {
+    let mut parts = DriveParts::new(prefix, law, effect_host, stores, claim_bound).await;
+    parts.host.durability.queued_work_batching = crate::QueuedWorkBatchingConfig::new(1)
+        .with_max_turn_input_claim(claim_bound)
+        .with_drain_mode(crate::DrainMode::All);
+    let rendered = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let model = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let rendered = Arc::clone(&rendered);
+            move |request| {
+                let messages = serde_json::to_string(&request.messages)
+                    .expect("a model request's messages serialize");
+                let mut calls = rendered
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                calls.push(messages);
+                let index = calls.len();
+                async move {
+                    Ok(crate::LlmResponse {
+                        parts: vec![crate::LlmOutputPart::Text {
+                            text: format!("answer {index}"),
+                            response_meta: None,
+                        }],
+                        ..crate::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build();
+    parts.host.providers.provider_resolver =
+        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+
+    let marker = |index: usize| format!("{law}-item-{index:02}");
+    let mut wake_sequence = 0;
+    for (index, item) in items.iter().enumerate() {
+        match item {
+            LaneItem::Input => {
+                parts.enqueue(&marker(index), None).await;
+            }
+            LaneItem::Wake(policy) => {
+                wake_sequence += 1;
+                parts
+                    .store
+                    .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
+                        &parts.session_id,
+                        law,
+                        wake_sequence,
+                        &marker(index),
+                        *policy,
+                    ))
+                    .await
+                    .expect("accept the law's wake");
+            }
+        }
+    }
+    let request = parts.request(&format!("{law}-drive"));
+    let outcome: DriveOutcome = on_tier(runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                .await
+                .expect("the drive runs")
+        })
+    })
+    .await;
+    assert_eq!(outcome.stop, DriveStop::Idle, "{law}: {outcome:?}");
+    let calls = rendered
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    (0..items.len())
+        .map(|index| {
+            let marker = marker(index);
+            calls.iter().position(|call| call.contains(&marker))
+        })
+        .collect()
+}
+
+/// ADR 0101 §5: the turn lane is one FIFO over both admission tables, so a
+/// turn never takes an item while an earlier item of the other kind is still
+/// unconsumed. What one claim takes — at idle or at a checkpoint — is a
+/// contiguous run of the ingress sequence that stops at the first item it
+/// cannot deliver, never skipping it. Observed from the model's side: with
+/// host inputs and process wakes interleaved, the first call that renders
+/// each item never goes backwards in acceptance order, whether the queued
+/// run, an input root or a checkpoint claim did the taking.
+pub async fn a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    use crate::DeliveryPolicy::{AfterCurrentTurnCommit, EarliestSafeBoundary};
+    use LaneItem::{Input, Wake};
+    let cases: [(&str, Vec<LaneItem>, usize); 3] = [
+        // A wake heads the lane: its queued run takes the wake, not the
+        // inputs behind it, and never the later wake past an input.
+        (
+            "lane-wake-first",
+            vec![
+                Wake(EarliestSafeBoundary),
+                Input,
+                Wake(EarliestSafeBoundary),
+                Input,
+            ],
+            8,
+        ),
+        // An input heads the lane: its root takes the input, not the input
+        // behind a wake only the next turn can take.
+        (
+            "lane-input-first",
+            vec![Input, Wake(AfterCurrentTurnCommit), Input],
+            8,
+        ),
+        // A checkpoint of the running turn never takes a wake past a
+        // next-turn input accepted before it.
+        (
+            "lane-checkpoint",
+            vec![Input, Input, Wake(EarliestSafeBoundary)],
+            1,
+        ),
+    ];
+    let mut out_of_order = Vec::new();
+    for (law, items, claim_bound) in cases {
+        let seen = first_rendering_calls(
+            prefix,
+            law,
+            &effect_host,
+            &stores,
+            &runner,
+            &items,
+            claim_bound,
+        )
+        .await;
+        let in_order =
+            seen.iter().all(Option::is_some) && seen.windows(2).all(|pair| pair[0] <= pair[1]);
+        if !in_order {
+            out_of_order.push(format!("{law}: {items:?} first rendered at calls {seen:?}"));
+        }
+    }
+    assert!(
+        out_of_order.is_empty(),
+        "the model sees every item, in the turn lane's acceptance order:\n{}",
+        out_of_order.join("\n")
+    );
+}

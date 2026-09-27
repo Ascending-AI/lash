@@ -2034,5 +2034,6 @@ mod root_control {
     (a_refused_follow_on_drive_keeps_the_intents_obligation_due, "s8c-4"),
     (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
     (a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary, "drive-command-after-admission"),
+    (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
     ]);
 }

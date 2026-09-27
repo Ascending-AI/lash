@@ -33,8 +33,8 @@ use super::fencing::{
     turn_input_claimability,
 };
 use super::queued_work::{
-    ClaimCandidate, ClaimIdDialect, QueuedWorkClaimRefusal, TurnWorkEmptyScanDiagnostic,
-    WorkClaimLease, select_turn_work_claim_prefix,
+    ClaimCandidate, ClaimIdDialect, QueuedWorkClaimRefusal, QueuedWorkClass,
+    TurnWorkEmptyScanDiagnostic, WorkClaimLease, select_turn_work_claim_prefix,
 };
 use crate::{LeaseOwnerIdentity, QueuedWorkClaimPolicy, SessionId};
 
@@ -456,6 +456,84 @@ pub fn classify_empty_claim_scan(
     Ok(TurnWorkEmptyScanDiagnostic::Refused {
         reason: QueuedWorkClaimRefusal::Empty,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Turn-lane order across the two admission tables
+// ---------------------------------------------------------------------------
+
+/// Where the turn lane stops a claim of one admission table (ADR 0101 §5, as
+/// the FIG-3540 close-out amends it): the `enqueue_seq` of the other table's
+/// earliest turn-lane row the claiming generation has not claimed.
+///
+/// Host input and queued turn work take one per-session sequence and form one
+/// FIFO, so a claim of either table takes only rows accepted before that
+/// point. It stops there and never skips it: one turn never takes an item
+/// past an earlier unconsumed item of the other kind. A session command is
+/// the command lane (§4) and stops nothing.
+///
+/// A claim of queued work applies it here, over its candidate scan. A
+/// next-turn input claim carries the same stop as a predicate of its
+/// candidate statement, so the input claim keeps its round-trip budget.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TurnLaneStop(Option<u64>);
+
+impl TurnLaneStop {
+    /// The stop before `earliest_other_kind`, the other table's earliest
+    /// unclaimed turn-lane row; `None` stops nothing.
+    pub const fn before(earliest_other_kind: Option<u64>) -> Self {
+        Self(earliest_other_kind)
+    }
+
+    /// Whether a row at `enqueue_seq` lies before the stop.
+    pub fn admits(self, enqueue_seq: u64) -> bool {
+        self.0.is_none_or(|stop| enqueue_seq < stop)
+    }
+
+    /// How many leading `candidates` a claim of queued work may take. A
+    /// session command is never stopped, and neither is the recomposition of
+    /// an interrupted claim (ADR 0101 §7): its composition was taken whole
+    /// under the order that held when it was first claimed.
+    pub fn queued_prefix(self, candidates: &[ClaimCandidate]) -> usize {
+        if candidates
+            .first()
+            .is_some_and(|head| head.prior_claim_id.is_some())
+        {
+            return candidates.len();
+        }
+        candidates
+            .iter()
+            .take_while(|candidate| {
+                candidate.kind.work_class() == QueuedWorkClass::SessionCommand
+                    || self.admits(candidate.enqueue_seq)
+            })
+            .count()
+    }
+}
+
+/// Which admission table an idle claim of the turn lane takes from: the one
+/// whose earliest unclaimed row came first, given the earliest next-turn
+/// input and the earliest queued turn work. `None` when both are empty.
+/// Whichever it names, the claim stops at the other table's head
+/// ([`TurnLaneStop`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdleTurnLaneHead {
+    /// Host input came first.
+    Input,
+    /// Queued turn work came first.
+    Queued,
+}
+
+impl IdleTurnLaneHead {
+    pub fn of(earliest_input: Option<u64>, earliest_queued: Option<u64>) -> Option<Self> {
+        match (earliest_input, earliest_queued) {
+            (Some(input), queued) if queued.is_none_or(|queued| input < queued) => {
+                Some(Self::Input)
+            }
+            (_, Some(_)) => Some(Self::Queued),
+            (_, None) => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -411,7 +411,29 @@ impl PostgresSessionStore {
                         reacquired_queued,
                     });
                 }
-                let inputs = if matches!(admission.request, QueuedRunRequest::Automatic) {
+                // The turn lane is one FIFO over both admission tables (ADR
+                // 0101 §5): the run takes from the table whose earliest row
+                // came first, and each claim stops at the other table's
+                // earliest row.
+                let head = if matches!(admission.request, QueuedRunRequest::Automatic) {
+                    IdleTurnLaneHead::of(
+                        super::claim_support::earliest_next_turn_candidate_seq_tx(
+                            tx,
+                            &fence.session_id,
+                            fence.fencing_token,
+                        )
+                        .await?,
+                        super::claim_support::earliest_turn_candidate_seq_tx(
+                            tx,
+                            &fence.session_id,
+                            fence.fencing_token,
+                        )
+                        .await?,
+                    )
+                } else {
+                    None
+                };
+                let inputs = if head == Some(IdleTurnLaneHead::Input) {
                     require_claim(
                         claim_pending_turn_inputs_postgres_tx(
                             tx,
@@ -429,7 +451,9 @@ impl PostgresSessionStore {
                     None
                 };
                 let (queued, already_satisfied, refusal) = match &admission.request {
-                    QueuedRunRequest::Automatic if inputs.is_some() => (None, Vec::new(), None),
+                    QueuedRunRequest::Automatic if head == Some(IdleTurnLaneHead::Input) => {
+                        (None, Vec::new(), None)
+                    }
                     QueuedRunRequest::Automatic => {
                         let queued = require_claim(
                             claim_ready_queued_work_postgres_tx(

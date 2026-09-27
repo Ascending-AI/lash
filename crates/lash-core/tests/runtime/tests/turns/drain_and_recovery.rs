@@ -817,9 +817,12 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     else {
         panic!("expected queued work started event");
     };
+    // The wake was accepted before the turn's input, so the turn lane admits
+    // it first, at idle, rather than folding it into the later input's turn
+    // (ADR 0101 §5).
     assert_eq!(
         *boundary,
-        lash_core::testing::runtime_internals::QueuedWorkClaimBoundary::ActiveTurnCheckpoint
+        lash_core::testing::runtime_internals::QueuedWorkClaimBoundary::Idle
     );
     assert!(causes.iter().any(|cause| {
         cause.event_type == "process.wake"

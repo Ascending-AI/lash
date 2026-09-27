@@ -191,6 +191,28 @@ struct Harness {
 }
 
 impl Harness {
+    /// How many times the latest model request renders `text`.
+    fn latest_request_renders(&self, text: &str) -> usize {
+        self.requests
+            .lock()
+            .ok()
+            .and_then(|requests| {
+                requests
+                    .last()
+                    .map(|request| format!("{request:?}").matches(text).count())
+            })
+            .unwrap_or_default()
+    }
+
+    /// The index of the first model request that renders `text`.
+    fn first_request_rendering(&self, text: &str) -> Option<usize> {
+        self.requests.lock().ok().and_then(|requests| {
+            requests
+                .iter()
+                .position(|request| format!("{request:?}").contains(text))
+        })
+    }
+
     fn request_mentions(&self, text: &str) -> usize {
         self.requests
             .lock()
@@ -676,10 +698,12 @@ async fn withheld_wake_case(
         "{case}: the withheld wake is deferred at its own position, never settled"
     );
 
-    // The deferred wake is delivered exactly once by the next run: the next
-    // turn's terminal checkpoint claims it and its follow-on turn drives it.
+    // The deferred wake is delivered exactly once by the next run, and at its
+    // own position: it was accepted before the next run's input, so the turn
+    // lane delivers it first (ADR 0101 §5).
+    let next_input = format!("{case} carry on");
     let run = harness
-        .run(&next_turn_id, "carry on", CancellationToken::new())
+        .run(&next_turn_id, &next_input, CancellationToken::new())
         .await;
     assert!(
         run.turns
@@ -688,9 +712,13 @@ async fn withheld_wake_case(
         "{case}: the next run commits"
     );
     assert_eq!(
-        harness.request_mentions(text),
+        harness.latest_request_renders(text),
         1,
         "{case}: the next run's model sees the deferred wake exactly once"
+    );
+    assert!(
+        harness.first_request_rendering(text) <= harness.first_request_rendering(&next_input),
+        "{case}: the deferred wake keeps its place ahead of the later input"
     );
     assert!(
         harness

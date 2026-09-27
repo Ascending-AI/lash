@@ -938,6 +938,17 @@ accepted before an input runs first, and an input accepted before a wake runs
 first. The drive's admission and the park reconcile's reading of the next root
 share one decision (`turn_lane_head`).
 
+**Each claim is a contiguous run of that order (FIG-3909).** A claim of one
+admission table stops at the other table's earliest row its generation has not
+claimed, and never skips it (`TurnLaneStop` over a queued-work scan; the same
+stop as a predicate of the next-turn input scan): an input root, and a queued run
+headed by input, take no input accepted after unclaimed queued turn work; a
+queued run headed by queued work, and a checkpoint's queued-work claim, take no
+work accepted after an unclaimed next-turn input. So one turn never takes an
+item past an earlier unconsumed item of the other kind. A session command stops
+nothing (§4); an addressed checkpoint input and the recomposition of an
+interrupted claim are exempt, as §5.2 and §7 already make them.
+
 ## Alternatives considered
 
 * **Keep two tables (ADR 0010).** Rejected. Every defect in *Context* is a rule
