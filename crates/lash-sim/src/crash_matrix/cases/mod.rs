@@ -236,6 +236,13 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
     } = staged;
     report.notes = notes;
     report.crashed = origin_ms.is_some();
+    // A trip another cut recorded cannot stand in for the point this cell
+    // armed: an armed crash site nothing reached never fired.
+    for site in world.faults().unfired_crashes() {
+        report
+            .violations
+            .push(format!("the armed crash site {site:?} never fired"));
+    }
     let Some(origin_ms) = origin_ms else {
         report
             .violations

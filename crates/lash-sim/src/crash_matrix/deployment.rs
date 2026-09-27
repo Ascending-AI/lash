@@ -213,6 +213,21 @@ impl HostFaults {
         self.arms.lock_recover().clear();
     }
 
+    /// The crash sites armed but never reached: a cell whose armed crash
+    /// nothing took never reached its crash point, whatever the trip says.
+    #[must_use]
+    pub fn unfired_crashes(&self) -> Vec<HostSite> {
+        self.arms
+            .lock_recover()
+            .iter()
+            .filter(|arm| {
+                arm.effect == ArmEffect::Crash
+                    && arm.remaining.is_some_and(|remaining| remaining > 0)
+            })
+            .map(|arm| arm.site)
+            .collect()
+    }
+
     /// The effect armed for a call at `site` with `detail`, consuming a
     /// one-shot arm. A crash fires the trip here.
     fn take(&self, site: HostSite, detail: &str) -> Option<ArmEffect> {

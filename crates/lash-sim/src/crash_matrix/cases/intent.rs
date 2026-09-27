@@ -18,13 +18,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use lash_core::runtime::drive::relay::{RelayVerdict, deliver_now};
+use lash_core::runtime::session_delete::SessionDeleteRelay;
 use lash_core::{ScopeId, SessionId, TurnId};
 
 use super::scope::register_until_child;
 use super::{Staged, TRIP_WAIT, crash_and_restart, held_core, send, session_name};
 
-/// The recovery ticks a deletion's crash point may take to fire.
-const TICKS_TO_TRIP: usize = 6;
+/// The deliverable attempts a deletion's crash point may take to fire.
+const ATTEMPTS_TO_TRIP: usize = 6;
+
+/// The recovery ticks the close's cleanup and the released root's engine
+/// wind-down may take before the delete is declared stuck.
+const TICKS_TO_DELIVERABLE: usize = 36;
 use crate::crash_matrix::deployment::{ArmEffect, HostSite};
 use crate::crash_matrix::invariants::{ChildOf, Expected};
 use crate::crash_matrix::world::CrashWorld;
@@ -115,19 +121,113 @@ async fn await_held(held: &AtomicUsize) -> Result<(), String> {
     Ok(())
 }
 
-/// Tick the recovery interval until the armed crash point fires, racing
-/// each tick against the trip so a pass the host died inside is not waited
-/// out.
-async fn tick_until_tripped(world: &CrashWorld) -> Result<(), String> {
-    for _ in 0..TICKS_TO_TRIP {
-        if world.trip().tripped().is_some() {
-            return Ok(());
-        }
-        tokio::select! {
-            ticked = world.tick() => {
-                ticked?;
+/// Whether `session`'s `SessionDelete` obligation could deliver now, read
+/// the way its relay reads it: the obligation armed, the close's cleanup
+/// settled, and the engine running nothing of the session.
+async fn delete_deliverable(world: &CrashWorld, session: &SessionId) -> Result<bool, String> {
+    let admin = world.core()?.session_administration().await;
+    let close = admin.session_close();
+    let ledger = close.deletes.ledger();
+    let Some(_) = ledger
+        .delete_obligation(session)
+        .await
+        .map_err(|error| format!("`{session}`'s delete obligation: {error}"))?
+    else {
+        // Not armed yet: the close's acknowledgement is still owed.
+        return Ok(false);
+    };
+    let cleanup = ledger
+        .undelivered_cleanup(session)
+        .await
+        .map_err(|error| format!("`{session}`'s cleanup: {error}"))?;
+    if !cleanup.is_settled() {
+        return Ok(false);
+    }
+    Ok(!close.work.session_work_in_flight(session).await)
+}
+
+/// Make `session`'s delete's next attempt on the host, as the verb's own
+/// immediate attempt does: `deliver_now` claims the due row whatever backoff
+/// its deferrals left, so the armed site is reached inside a delivery that
+/// dies holding its claim. `None` when the host died inside it — the crash
+/// point firing.
+async fn deliver_delete_now(
+    world: &CrashWorld,
+    session: &SessionId,
+) -> Result<Option<Result<RelayVerdict, String>>, String> {
+    let core = world.core()?;
+    let session = session.clone();
+    Ok(world
+        .host_op(async move {
+            let administration = core.session_administration().await;
+            let deletes = &administration.session_close().deletes;
+            let Some(obligation) = deletes
+                .ledger()
+                .delete_obligation(&session)
+                .await
+                .map_err(|error| error.to_string())?
+            else {
+                return Ok(RelayVerdict::NotDue);
+            };
+            let clock = administration.session_close().clock.clone();
+            let relay = SessionDeleteRelay::new(administration);
+            deliver_now(&relay, &obligation.id, clock.as_ref())
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .await)
+}
+
+/// Tick the recovery interval until the armed crash point fires.
+///
+/// The delete's delivery may run only once the close's cleanup settled and
+/// the engine wound down the released root's work; a slow wind-down holds
+/// `session_work_in_flight` past every backoff the due pass would wait out,
+/// so no fixed tick count bounds it. The ticks meanwhile run the passes that
+/// deliver the cleanup, and once the delivery's own gates read clear the
+/// attempt is made on the host, which dies inside it holding the claim.
+async fn tick_until_tripped(world: &CrashWorld, session: &SessionId) -> Result<(), String> {
+    let mut ticks = 0_usize;
+    let mut attempts = 0_usize;
+    while world.trip().tripped().is_none() {
+        if !delete_deliverable(world, session).await? {
+            ticks += 1;
+            if ticks > TICKS_TO_DELIVERABLE {
+                return Err(format!(
+                    "session `{session}`'s delete never became deliverable in {TICKS_TO_DELIVERABLE} ticks"
+                ));
             }
-            _ = world.trip().wait(TRIP_WAIT) => {}
+            tokio::select! {
+                ticked = world.tick() => {
+                    ticked?;
+                }
+                _ = world.trip().wait(TRIP_WAIT) => {}
+            }
+            continue;
+        }
+        attempts += 1;
+        if attempts > ATTEMPTS_TO_TRIP {
+            return Err(format!(
+                "session `{session}`'s delete was deliverable but never fired in {ATTEMPTS_TO_TRIP} attempts"
+            ));
+        }
+        match deliver_delete_now(world, session).await? {
+            // The host died inside the delivery: the crash point fired.
+            None => return Ok(()),
+            Some(Err(error)) => return Err(error),
+            Some(Ok(RelayVerdict::Delivered)) => {
+                return Err(format!(
+                    "session `{session}`'s delete delivered without firing the armed site"
+                ));
+            }
+            Some(Ok(RelayVerdict::Stalled(reason))) => {
+                return Err(format!(
+                    "session `{session}`'s delete stalled {reason:?} under the armed site"
+                ));
+            }
+            // A deferral or a claim lost to another relay: re-read the
+            // delivery's gates and go again.
+            Some(Ok(_)) => {}
         }
     }
     Ok(())
@@ -189,9 +289,9 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
             world.faults().crash_once(HostSite::DeleteStorageBefore);
             delete_session(&world, &session).await?;
             // The verb's own attempt defers while the engine still runs the
-            // released root's work; the recovery tick's relay then makes the
-            // attempt the host dies inside.
-            tick_until_tripped(&world).await?;
+            // released root's work; the stage waits out that deferral and
+            // makes the next attempt the host dies inside.
+            tick_until_tripped(&world, &session).await?;
             crash_and_restart(&world).await?
         }
         (Seam::ControlIntent, CrashPoint::DeliveryRetryableForever) => {
