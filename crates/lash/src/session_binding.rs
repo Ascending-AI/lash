@@ -133,6 +133,7 @@ impl BoundSession {
                 work: self.queued(),
                 scopes: Arc::clone(&self.scope_close),
                 clock: Arc::clone(&self.clock),
+                deletes: lash_core::session_delete::SessionDeleteStores::of(&self.backend),
             },
         )
     }

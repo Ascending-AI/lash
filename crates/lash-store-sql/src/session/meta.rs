@@ -309,3 +309,16 @@ impl crate::obligation::ObligationStatementSet for SessionMetaObligationStatemen
         }
     }
 }
+
+/// A session's `SessionDelete` obligation as its delete reads it back
+/// (ADR 0109 §4): the id and the state.
+pub const DELETE_OBLIGATION_COLUMNS: &str = "obligation_id, obligation_state";
+
+crate::statements! {
+    /// `session_meta` reads of a session's two-phase delete (ADR 0109 §4).
+    pub struct SessionMetaDeleteStatements @ "session_meta" {
+        /// Session `?1`'s `SessionDelete` obligation, if its row carries one.
+        delete_obligation = "SELECT obligation_id, obligation_state FROM session_meta
+             WHERE session_id = ?1 AND obligation_id IS NOT NULL";
+    }
+}

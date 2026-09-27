@@ -51,6 +51,7 @@ pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
     root_snapshot_config_from_state,
 };
+pub mod session_delete;
 pub mod session_execution_lease;
 mod session_ingress;
 pub mod session_ingress_plan;

@@ -248,11 +248,14 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     let context = administration
         .delete_context(SOURCE_SESSION)
         .expect("source session delete context");
-    let deleted = LashCore::delete_session(context)
+    let deletion = LashCore::delete_session(context)
         .await
         .expect("delete superseded source session");
+    let deleted = deletion
+        .deleted()
+        .expect("nothing the close left is undelivered, so the delete runs in the call");
     assert_eq!(deleted.session_id, SOURCE_SESSION);
-    let process_delete = deleted.process.expect("process cleanup report");
+    let process_delete = deleted.process.as_ref().expect("process cleanup report");
     assert_eq!(process_delete.removed_observer_count, 1);
     assert!(
         core.session(SOURCE_SESSION)

@@ -345,6 +345,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-sim:process_lifecycle_vocabulary__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:retention_classification__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:schema_congruence__test": {"cpu_count": 4, "memory_kb": 1048576},
+    "//crates/lash-sim:session_delete_bounds__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:signal_replay_key_constructor__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:stack_policy__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:two_opener_differential__test": {"cpu_count": 4, "memory_kb": 1048576},

@@ -147,8 +147,13 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     Ok(())
 }
 
+/// A failed journal retirement is one attempt of the session's
+/// `SessionDelete` obligation (ADR 0109 §4): the session stays closed and
+/// undeleted — the storage delete is the last step, so the obligation's row
+/// survives the failure — and the relay's next attempt deletes it. Nothing
+/// asks the caller to retry the deletion.
 #[tokio::test]
-async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> {
+async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Result<()> {
     let backend = DecoratedBackend::over(memory_backend().await.into())
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -161,20 +166,54 @@ async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> 
     drop(core.session("delete-retry").open().await?);
     let administration = core.session_administration().await;
 
-    let first = LashCore::delete_session(administration.delete_context("delete-retry")?)
-        .await
-        .expect_err("first retirement fails after the tombstone commits");
-    assert!(matches!(first, EmbedError::SessionDeleteProcess { .. }));
+    let first = LashCore::delete_session(administration.delete_context("delete-retry")?).await?;
+    let crate::SessionDeletion::Closing(closing) = first else {
+        panic!("the failed retirement leaves the session closing, got {first:?}");
+    };
     assert!(
-        core.session("delete-retry")
+        matches!(
+            closing.waiting,
+            crate::SessionDeleteWait::Failed(crate::SessionDeleteFailure::Journal { .. })
+        ),
+        "{:?}",
+        closing.waiting
+    );
+    assert!(closing.obligation.is_some());
+    assert!(
+        !core
+            .session("delete-retry")
             .durable()
             .await?
             .was_deleted()
             .await?
     );
+    let reopened = core.session("delete-retry").open().await?;
+    let refused = reopened
+        .send(TurnInput::text("sent to a closing session"))
+        .output()
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            Err(EmbedError::Runtime(error))
+                if error.code == lash_core::RuntimeErrorCode::SessionDeleted
+                    && error.message.contains("is closing")
+        ),
+        "a closing session refuses a send typed: {:?}",
+        refused.as_ref().err()
+    );
+    drop(reopened);
 
-    let report = LashCore::delete_session(administration.delete_context("delete-retry")?).await?;
-    assert_eq!(report.session_id, "delete-retry");
+    let relay = lash_core::session_delete::SessionDeleteRelay::new(administration);
+    let pass = lash_core::runtime::drive::relay::relay_due(
+        &relay,
+        &lash_core::testing::TestClock::new(
+            lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock) + 2_000,
+        ),
+        std::num::NonZeroUsize::new(8).expect("non-zero page"),
+    )
+    .await?;
+    assert_eq!(pass.claimed, 1, "{pass:?}");
     assert!(
         core.session("delete-retry")
             .durable()

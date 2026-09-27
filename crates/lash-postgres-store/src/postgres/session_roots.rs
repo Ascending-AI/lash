@@ -337,6 +337,11 @@ pub(crate) async fn write_intent_state_conn(
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
+    if changed == 1 {
+        // A session close's acknowledgement owes its physical delete
+        // (ADR 0109 §4), armed in this transaction.
+        crate::session_delete_ledger::arm_on_close_acknowledged_conn(conn, prior, next).await?;
+    }
     Ok(changed == 1)
 }
 

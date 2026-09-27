@@ -1476,6 +1476,8 @@ mod schema_shape;
 mod session_blob_reclaim;
 #[path = "postgres/session_catalog.rs"]
 mod session_catalog;
+#[path = "postgres/session_delete_ledger.rs"]
+mod session_delete_ledger;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
 #[path = "postgres/session_ingress.rs"]

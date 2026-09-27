@@ -230,3 +230,33 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
     )
     .await
 }
+
+/// The physical delete's report, once Lash ran it. A session whose delete
+/// Lash still owes is closing (ADR 0109 §4): it refuses new work, and the
+/// relay finishes the delete. Retention waits for it, so that is a retryable
+/// error the delete workflow retries its step on.
+pub(crate) fn physically_deleted(
+    session_id: &SessionId,
+    deletion: lash::SessionDeletion,
+) -> Result<Option<lash::SessionDeleteReport>, AppError> {
+    match deletion {
+        lash::SessionDeletion::Deleted(report) => Ok(Some(report)),
+        lash::SessionDeletion::AlreadyDeleted { .. } => Ok(None),
+        lash::SessionDeletion::Closing(closing) => Err(AppError::retryable_internal(format!(
+            "session `{session_id}` is closing; its delete waits on {:?}",
+            closing.waiting
+        ))),
+    }
+}
+
+#[cfg(test)]
+pub(crate) static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
+    Mutex<BTreeMap<SessionId, String>>,
+> = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+#[cfg(test)]
+pub(crate) fn fail_session_delete_retention_once(session_id: &SessionId, turn_id: &lash::TurnId) {
+    SESSION_DELETE_RETENTION_FAULTS
+        .lock_recover()
+        .insert(session_id.clone(), turn_id.to_string());
+}

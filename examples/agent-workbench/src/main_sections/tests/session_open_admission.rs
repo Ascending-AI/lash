@@ -302,6 +302,10 @@ impl lash::StoreSet for GatedStoreSet {
     ) -> Arc<dyn lash::persistence::ObligationLedger> {
         self.inner.obligation_ledger(kind)
     }
+
+    fn session_delete_ledger(&self) -> Arc<dyn lash::persistence::SessionDeleteLedger> {
+        self.inner.session_delete_ledger()
+    }
 }
 
 pub(crate) struct GatedSessionStoreFactory {

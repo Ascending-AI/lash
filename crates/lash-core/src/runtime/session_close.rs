@@ -37,6 +37,9 @@ pub struct SessionCloseServices {
     /// (FIG-3607 PR-2).
     pub scopes: Arc<dyn ScopeCloseSink>,
     pub clock: Arc<dyn Clock>,
+    /// The session-delete obligation's stores: the close's acknowledgement
+    /// arms it, and the delete's relay delivers it (ADR 0109 §4).
+    pub deletes: crate::session_delete::SessionDeleteStores,
 }
 
 /// A session's close, as its deletion saw it.
@@ -79,7 +82,9 @@ pub enum SessionCloseError {
 /// 3. [`apply_control_intent`] runs its engine half: every closed root's
 ///    execution is released and the session's scope is closed. A failure is
 ///    retained on the intent and never fails the close: reconciliation
-///    finishes it, so the deletion continues.
+///    finishes it. The acknowledgement arms the session's physical delete
+///    ([`session_delete`](crate::session_delete), ADR 0109 §4), so the
+///    delete waits for it.
 ///
 /// `None` when the session had no durable record: nothing was closed.
 pub async fn close_session(

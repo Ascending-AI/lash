@@ -268,6 +268,10 @@ pub fn all_statements() -> Vec<Statement> {
     statements
         .extend_from_slice(process::parent_end_plans::ParentEndPlanObligationStatements::NEUTRAL);
     statements.extend_from_slice(process::processes::ProcessObligationStatements::NEUTRAL);
+    statements.extend_from_slice(session::meta::SessionMetaDeleteStatements::NEUTRAL);
+    statements.extend_from_slice(session_roots::roots::SessionRootCleanupStatements::NEUTRAL);
+    statements
+        .extend_from_slice(process::parent_end_plans::ParentEndPlanCleanupStatements::NEUTRAL);
     statements
 }
 

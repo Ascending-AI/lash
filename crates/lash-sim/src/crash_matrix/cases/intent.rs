@@ -5,12 +5,14 @@
 //! inside a handler of its own, as a deployment's delete endpoint does:
 //! `LashCore::delete_session` writes the `CloseSession` intent (ending the
 //! root), releases the root's engine execution, closes the root's and the
-//! session's scopes, acknowledges the intent, and then deletes the storage.
+//! session's scopes and acknowledges the intent, which arms the session's
+//! `SessionDelete` obligation; its delivery deletes the storage once the
+//! close's cleanup settled (ADR 0109 §4).
 //!
 //! The control-intent cells kill the host inside the close's engine half and
-//! expect the intent settled and everything it owed done. The deletion cells
-//! kill it before the physical delete and expect the session deleted anyway,
-//! which only ADR 0109's two-phase delete (S8-D) owes.
+//! expect the intent settled and everything it owed done, the deletion
+//! included. The deletion cells kill it before the physical delete and expect
+//! the obligation to finish the deletion without a caller retry.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -19,7 +21,10 @@ use std::time::Duration;
 use lash_core::{ScopeId, SessionId, TurnId};
 
 use super::scope::register_until_child;
-use super::{Staged, crash_and_restart, held_core, send, session_name};
+use super::{Staged, TRIP_WAIT, crash_and_restart, held_core, send, session_name};
+
+/// The recovery ticks a deletion's crash point may take to fire.
+const TICKS_TO_TRIP: usize = 6;
 use crate::crash_matrix::deployment::{ArmEffect, HostSite};
 use crate::crash_matrix::invariants::{ChildOf, Expected};
 use crate::crash_matrix::world::CrashWorld;
@@ -110,6 +115,22 @@ async fn await_held(held: &AtomicUsize) -> Result<(), String> {
     Ok(())
 }
 
+/// Tick the recovery interval until the armed crash point fires, racing
+/// each tick against the trip so a pass the host died inside is not waited
+/// out.
+async fn tick_until_tripped(world: &CrashWorld) -> Result<(), String> {
+    for _ in 0..TICKS_TO_TRIP {
+        if world.trip().tripped().is_some() {
+            return Ok(());
+        }
+        tokio::select! {
+            ticked = world.tick() => ticked?,
+            _ = world.trip().wait(TRIP_WAIT) => {}
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn stage_close(point: CrashPoint, seed: u64) -> Result<Staged, String> {
     stage_session_end(Seam::ControlIntent, point, seed).await
 }
@@ -165,6 +186,10 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
         (Seam::SessionDelete, CrashPoint::AfterDeliveryBeforeSettle) => {
             world.faults().crash_once(HostSite::DeleteStorageBefore);
             delete_session(&world, &session).await?;
+            // The verb's own attempt defers while the engine still runs the
+            // released root's work; the recovery tick's relay then makes the
+            // attempt the host dies inside.
+            tick_until_tripped(&world).await?;
             crash_and_restart(&world).await?
         }
         (Seam::ControlIntent, CrashPoint::DeliveryRetryableForever) => {

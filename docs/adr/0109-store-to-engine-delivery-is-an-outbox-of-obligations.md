@@ -5,7 +5,8 @@
 Accepted 2026-09-27 (FIG-3600 S8). It records Sam's S8 rulings of that date.
 **Not yet implemented** beyond the foundation (§1's vocabulary, relay loop and
 leader lease). The per-ledger slices under *Slice plan* build the rest, and
-each slice updates this status when it lands.
+each slice updates this status when it lands. Landed: S8-D, the two-phase
+session delete (§4).
 
 Amends [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 O2 and O3 (the mechanism behind "reconcile every unacknowledged intent" and
@@ -376,9 +377,31 @@ refuses new sends typed (`SessionClosing`), in one transaction. The intent's
 obligation kills the running turn, cancels the session's processes and closes
 its scopes. Its delivered settle arms the session's `SessionDelete`
 obligation, whose deliver refuses retryably while any scope-close or
-parent-end obligation of the session is undelivered, then deletes the storage
-and retires the journal. The ADR 0108 §5a tombstone is kept. A stalled
-cleanup surfaces like any other stall.
+parent-end obligation of the session is undelivered or the engine still runs
+work of the session (`session_work_in_flight`), then retires the journal and
+deletes the storage. The storage delete is last because it removes the
+`session_meta` row the obligation lives on: every step before it is
+idempotent, so a failed attempt leaves the obligation owed and the relay's
+next attempt runs them all again. The ADR 0108 §5a tombstone is kept. A
+stalled cleanup surfaces like any other stall.
+
+The close's delivered settle is the transaction that writes its
+`CloseSession` intent `Acknowledged`: the store arms `SessionDelete` there,
+whichever path acknowledged it.
+
+The engine-work gate keeps replays deterministic. A drive the crash
+interrupted has its admission journaled, and it replays once the dead host's
+session execution lease lapses. Admission opens the session before it replays
+anything, so a session deleted under that replay would answer
+`SessionDeleted` where the journal recorded an admission. A delete asked from
+the verb therefore usually defers to the reconcile tick on an engine whose
+released root is still finishing.
+
+An input claimed before the close does not finish. The close ends its root
+(`Cancelled`, cause `SessionDeleted`), and the delete retires the claim with
+the session's storage. The only close there is, is a delete. The crash
+matrix's control-intent cells therefore do not exclude a closing session's
+in-flight claim: the ingress invariant reads it until the session is deleted.
 
 ## 5. `available_at_ms` is deleted
 

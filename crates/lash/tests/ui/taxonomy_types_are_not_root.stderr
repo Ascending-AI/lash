@@ -2,7 +2,18 @@ error[E0425]: cannot find type `SessionObservation` in crate `lash`
  --> tests/ui/taxonomy_types_are_not_root.rs:5:25
   |
 5 |     let _: Option<lash::SessionObservation> = None;
-  |                         ^^^^^^^^^^^^^^^^^^ not found in `lash`
+  |                         ^^^^^^^^^^^^^^^^^^
+  |
+ ::: $WORKSPACE/crates/lash-core/src/runtime/session_delete.rs
+  |
+  | pub enum SessionDeletion {
+  | ------------------------ similarly named enum `SessionDeletion` defined here
+  |
+help: an enum with a similar name exists
+  |
+5 -     let _: Option<lash::SessionObservation> = None;
+5 +     let _: Option<lash::SessionDeletion> = None;
+  |
 
 error[E0425]: cannot find type `SessionCursor` in crate `lash`
  --> tests/ui/taxonomy_types_are_not_root.rs:6:25

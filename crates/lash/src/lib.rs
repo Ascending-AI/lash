@@ -83,7 +83,10 @@ pub use crate::admin::{
     AdvancedToolAdmin, Completions, CoreTriggerAdmin, PluginOperations, SessionCommandAdmin,
     SessionTriggerAdmin, ToolAdmin,
 };
-pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
+pub use crate::core::{
+    DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionClosing, SessionDeleteFailure,
+    SessionDeleteReport, SessionDeleteWait, SessionDeletion,
+};
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
 pub use crate::parked_work::{
@@ -122,8 +125,8 @@ pub use lash_core::facade_support::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::store::{
-    ObligationId, ObligationKey, ObligationKind, StallReason, StalledObligation,
-    UndecodableObligation,
+    ObligationId, ObligationKey, ObligationKind, ObligationState, StallReason, StalledObligation,
+    UndecodableObligation, session_delete::SessionCleanup,
 };
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
@@ -174,11 +177,12 @@ pub mod prelude {
         ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
         PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
         SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
-        SessionCreateRequest, SessionDeleteReport, SessionListFilter, SessionRelationKind,
-        SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin, ToolAdmin,
-        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnCause,
-        TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt,
-        TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop, message_role, message_text,
+        SessionCreateRequest, SessionDeleteReport, SessionDeletion, SessionListFilter,
+        SessionRelationKind, SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin,
+        ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
+        TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
+        message_role, message_text,
     };
 }
 
@@ -370,8 +374,9 @@ pub mod persistence {
     /// (ADR 0109 §1.3, §1.6).
     pub use lash_core::store::{
         ClaimToken, ClaimedObligation, HolderId, KeyColumn, KeyColumnType, LeaseAnswer, LeaseClaim,
-        LeaseName, LeaseRow, ObligationLedger, ObligationSettlement, ObligationState,
-        RecoveryLeaderStore, SettleOutcome,
+        LeaseName, LeaseRow, ObligationLedger, ObligationSettlement, RecoveryLeaderStore,
+        SettleOutcome,
+        session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
     pub use lash_core::{
         AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,

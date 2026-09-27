@@ -400,6 +400,10 @@ impl StoreSet for LayeredStoreSet {
     ) -> Arc<dyn crate::store::ObligationLedger> {
         self.inner.obligation_ledger(kind)
     }
+
+    fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
+        self.inner.session_delete_ledger()
+    }
 }
 
 #[cfg(test)]

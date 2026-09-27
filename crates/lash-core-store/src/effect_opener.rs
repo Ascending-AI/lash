@@ -200,6 +200,22 @@ impl EffectOpener {
         }
     }
 
+    /// The half-open range `[from, to)` that holds the
+    /// [`identity_encoding`](Self::identity_encoding) of every turn opener of
+    /// `session_id`, compared bytewise: a keyset range over an index of
+    /// encodings, never a parse of one.
+    #[must_use]
+    pub fn session_turn_encoding_range(session_id: &SessionId) -> (String, String) {
+        session_encoding_range("turn:", session_id)
+    }
+
+    /// [`session_turn_encoding_range`](Self::session_turn_encoding_range) for
+    /// the queue-drain openers of `session_id`.
+    #[must_use]
+    pub fn session_queue_drain_encoding_range(session_id: &SessionId) -> (String, String) {
+        session_encoding_range("drain:", session_id)
+    }
+
     /// The one owner derivation: the admitted execution scope, and nothing
     /// else.
     ///
@@ -243,6 +259,15 @@ impl EffectOpener {
     }
 }
 
+/// The half-open range of encodings `{tag}{len}:{session}:…`: every opener
+/// of `tag` the session owns starts with that prefix, which ends in `:`, and
+/// `;` is the byte after `:`.
+fn session_encoding_range(tag: &str, session_id: &SessionId) -> (String, String) {
+    let session = session_id.as_str();
+    let stem = format!("{tag}{}:{session}", session.len());
+    (format!("{stem}:"), format!("{stem};"))
+}
+
 /// A scope that names no opener this contract can express.
 ///
 /// Refusals, not extra arms: widening the opener is a contract decision, and
@@ -269,6 +294,36 @@ mod tests {
 
     fn process_opener(n: u128) -> EffectOpener {
         EffectOpener::process(process(n))
+    }
+
+    /// A session's turn and drain openers, and only its own, fall in its
+    /// encoding ranges: a session id that extends another's, or holds a `:`,
+    /// never lands in the other's range.
+    #[test]
+    fn session_encoding_ranges_hold_exactly_the_sessions_openers() {
+        let inside = |range: &(String, String), encoding: &str| {
+            range.0.as_str() <= encoding && encoding < range.1.as_str()
+        };
+        let session = SessionId::from("s:1");
+        let turns = EffectOpener::session_turn_encoding_range(&session);
+        let drains = EffectOpener::session_queue_drain_encoding_range(&session);
+        for turn in ["t", "", "t:9", "~"] {
+            let encoding =
+                EffectOpener::turn(session.clone(), TurnId::from(turn)).identity_encoding();
+            assert!(inside(&turns, &encoding), "{encoding} outside {turns:?}");
+            assert!(!inside(&drains, &encoding));
+        }
+        let drain = EffectOpener::queue_drain(session.clone(), "d").identity_encoding();
+        assert!(inside(&drains, &drain));
+        assert!(!inside(&turns, &drain));
+        for other in ["s:10", "s:", "s", "s:1:", "s;1"] {
+            let encoding =
+                EffectOpener::turn(SessionId::from(other), TurnId::from("t")).identity_encoding();
+            assert!(
+                !inside(&turns, &encoding),
+                "{other}'s turn {encoding} inside {turns:?}"
+            );
+        }
     }
 
     /// Two processes are two openers, whatever either was labelled.

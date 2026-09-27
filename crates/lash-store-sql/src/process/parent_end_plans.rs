@@ -170,3 +170,18 @@ impl crate::obligation::ObligationStatementSet for ParentEndPlanObligationStatem
         }
     }
 }
+
+crate::statements! {
+    /// `parent_end_plans` reads of a session's two-phase delete (ADR 0109 §4).
+    pub struct ParentEndPlanCleanupStatements @ "parent_end_plan" {
+        /// How many plans of the scopes one session owns owe children's
+        /// cancels not yet delivered: due, claimed, or stalled. `?1` is the
+        /// session scope's projection; `[?2, ?3)` and `[?4, ?5)` are the
+        /// keyset ranges of its turns' and its queue drains' projections.
+        count_undelivered_for_session = "SELECT COUNT(*) FROM parent_end_plans
+             WHERE obligation_state IN ('due', 'claimed', 'stalled')
+               AND ((parent_kind = 'session' AND parent_id = ?1)
+                 OR (parent_kind = 'turn' AND parent_id >= ?2 AND parent_id < ?3)
+                 OR (parent_kind = 'queue_drain' AND parent_id >= ?4 AND parent_id < ?5))";
+    }
+}

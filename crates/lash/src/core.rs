@@ -9,10 +9,6 @@ use crate::support::{
 };
 use lash_core::Backend;
 use lash_core::facade_support;
-use lash_core::runtime::{
-    ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-};
 use lash_core_worker::{DurableProcessWorkerConfig, WorkerProcessWork};
 use lash_sansio::SessionId;
 
@@ -96,23 +92,55 @@ pub struct LashCore {
         Arc<dyn lash_core::facade_support::ToolChildContextSource>,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SessionDeleteReport {
-    /// Identifier of the deleted session.
-    pub session_id: SessionId,
-    /// Storage reclaimed while deleting the session.
-    pub storage: lash_core::SessionBlobReclaimReport,
-    /// Process-state deletion report.
-    pub process: Option<lash_core::ProcessSessionDeleteReport>,
+pub use lash_core::session_delete::{
+    SessionClosing, SessionDeleteFailure, SessionDeleteReport, SessionDeleteWait, SessionDeletion,
+};
+
+/// What a core builds its [`SessionAdministration`](lash_core::SessionAdministration)
+/// from. Its session driver holds one, weakly bound to the core's substrate,
+/// so the reconcile tick can deliver session deletes (ADR 0109 §4).
+#[derive(Clone)]
+pub(crate) struct AdministrationSource {
+    slot: std::sync::Weak<NativeSubstrateSlot>,
+    env: RuntimeEnvironment,
+    store_factory: Arc<dyn SessionStoreFactory>,
+    host_process_engines: lash_core::ProcessEngineRegistry,
 }
 
-impl Default for SessionDeleteReport {
-    fn default() -> Self {
-        Self {
-            session_id: SessionId::from(String::default()),
-            storage: lash_core::SessionBlobReclaimReport::default(),
-            process: None,
-        }
+impl AdministrationSource {
+    /// The administration over the core's resolved ports; `None` once the
+    /// core is gone.
+    pub(crate) async fn administration(&self) -> Option<lash_core::SessionAdministration> {
+        let slot = self.slot.upgrade()?;
+        Some(self.administration_over(&slot).await)
+    }
+
+    async fn administration_over(
+        &self,
+        slot: &NativeSubstrateSlot,
+    ) -> lash_core::SessionAdministration {
+        let ports = slot.ports().await;
+        let queued = ports.queued_port();
+        let resolved_env = self
+            .env
+            .clone()
+            .with_work_ports(Some(ports.process.clone()), Arc::clone(&queued));
+        lash_core::SessionAdministration::new(
+            Arc::clone(&self.store_factory),
+            Arc::clone(&resolved_env.core.control.effect_host),
+            Some(ports.process),
+            Some(resolved_env.core.trigger_store()),
+            Arc::clone(&resolved_env.core.durability.process_env_store),
+            self.host_process_engines.clone(),
+            lash_core::session_close::SessionCloseServices {
+                work: queued,
+                scopes: Arc::clone(&resolved_env.core.control.scope_close),
+                clock: Arc::clone(&resolved_env.core.clock),
+                deletes: lash_core::session_delete::SessionDeleteStores::of(
+                    resolved_env.core.backend(),
+                ),
+            },
+        )
     }
 }
 
@@ -342,25 +370,19 @@ impl LashCore {
     /// and trigger store chosen by this core together. Provider, plugin,
     /// prompt, tracing, and other live turn policy are deliberately excluded.
     pub async fn session_administration(&self) -> lash_core::SessionAdministration {
-        let ports = self.substrate_slot.ports().await;
-        let queued = ports.queued_port();
-        let resolved_env = self
-            .env
-            .clone()
-            .with_work_ports(Some(ports.process.clone()), Arc::clone(&queued));
-        lash_core::SessionAdministration::new(
-            Arc::clone(&self.store_factory),
-            Arc::clone(&resolved_env.core.control.effect_host),
-            Some(ports.process),
-            Some(resolved_env.core.trigger_store()),
-            Arc::clone(&resolved_env.core.durability.process_env_store),
-            self.host_process_engines.clone(),
-            lash_core::session_close::SessionCloseServices {
-                work: queued,
-                scopes: Arc::clone(&resolved_env.core.control.scope_close),
-                clock: Arc::clone(&resolved_env.core.clock),
-            },
-        )
+        self.administration_source()
+            .administration_over(&self.substrate_slot)
+            .await
+    }
+
+    /// What this core builds its session administration from.
+    fn administration_source(&self) -> AdministrationSource {
+        AdministrationSource {
+            slot: Arc::downgrade(&self.substrate_slot),
+            env: self.env.clone(),
+            store_factory: Arc::clone(&self.store_factory),
+            host_process_engines: self.host_process_engines.clone(),
+        }
     }
 
     /// Rebuild a live session from a [`ParkedSession`](crate::ParkedSession)
@@ -555,158 +577,55 @@ impl LashCore {
         Ok(fork)
     }
 
+    /// Delete a session in two phases (ADR 0109 §4).
+    ///
+    /// The close commits first, and every refusal of a deletion is asked
+    /// before it: the session's `CloseSession` intent is recorded, the
+    /// session is marked closing and refuses new sends with
+    /// [`StoreError::SessionClosing`](lash_core::StoreError::SessionClosing),
+    /// and the intent's engine half releases the session's roots and closes
+    /// its scopes. Its acknowledgement arms the session's physical delete as
+    /// an obligation, which this call attempts before it returns.
+    ///
+    /// The physical delete waits for the close's cleanup — each root's scope
+    /// close, each owned scope's parent-end plan — to be delivered, and for
+    /// the engine to finish the session's work (on Restate, a released root
+    /// often still is, so the delete defers to the reconcile tick). What this
+    /// call could not finish is [`SessionDeletion::Closing`]: the session
+    /// stays closed and the recovery relay retries the delete with backoff,
+    /// stalling it (surfaced in [`drain_status`](Self::drain_status) and
+    /// [`stalled_obligations`](Self::stalled_obligations)) at the attempt
+    /// ceiling. The caller does not retry to finish a deletion.
     pub async fn delete_session(
         context: lash_core::SessionDeleteContext<'_>,
-    ) -> Result<SessionDeleteReport> {
-        let session_id = context.session_id().clone();
-        let administration = context.administration();
-        // Every refusal of a deletion is asked inside the close, before its
-        // recorded step, the point of no return (FIG-3600 S7, FIG-3607 item
-        // 7): the close ends the session's roots and stops it accepting and
-        // admitting, and its engine half releases the roots and closes the
-        // session's scopes, or is retained for reconciliation. From here the
-        // deletion only retries: nothing below refuses.
-        lash_core::session_close::close_session(&context)
+    ) -> Result<SessionDeletion> {
+        lash_core::session_delete::delete_session(&context)
             .await
             .map_err(|error| match error {
-                lash_core::session_close::SessionCloseError::Store(error) => {
+                lash_core::session_delete::SessionDeleteError::Close(
+                    lash_core::session_close::SessionCloseError::Store(error),
+                )
+                | lash_core::session_delete::SessionDeleteError::Store(error) => {
                     EmbedError::from(error)
                 }
-                lash_core::session_close::SessionCloseError::Runtime(error) => {
-                    EmbedError::from(error)
-                }
-            })?;
-        let process = if let Some(process) = administration.process() {
-            #[expect(
-                clippy::expect_used,
-                reason = "the scope comes from the session's own live controller, which \
-                          is admitted by construction"
-            )]
-            let invocation = RuntimeEffectInvocation::new(
-                lash_core::EffectAddress::new(
-                    lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
-                        context.controller(),
-                    )
-                    .clone(),
-                    format!("{session_id}:delete-session"),
-                )
-                .expect(
-                    "the scope comes from the session's own live controller, which is \
-                     admitted by construction",
-                ),
-                lash_core::RuntimeAttribution::for_session(session_id.clone()),
-                format!("process:delete-session:{session_id}"),
-            );
-            let outcome = context
-                .controller()
-                .controller()
-                .execute_effect(
-                    RuntimeEffectEnvelope::new(
-                        invocation,
-                        RuntimeEffectCommand::process(ProcessCommand::DeleteSession {
-                            session_id: session_id.clone(),
-                        }),
-                    ),
-                    RuntimeEffectLocalExecutor::processes(
-                        Arc::clone(process.registry()),
-                        Arc::clone(process.port()),
-                    ),
-                )
-                .await
-                .map_err(|err| EmbedError::SessionDeleteProcess {
-                    session_id: session_id.clone(),
-                    message: err.to_string(),
-                })?;
-            match outcome {
-                RuntimeEffectOutcome::Process {
-                    result: ProcessEffectOutcome::DeleteSession { report },
-                } => Some(report),
-                other => {
-                    return Err(EmbedError::SessionDeleteProcess {
-                        session_id,
-                        message: format!(
-                            "process delete returned the wrong outcome: {}",
-                            other.kind().as_str()
-                        ),
-                    });
-                }
-            }
-        } else {
-            None
-        };
-        if let Some(trigger_store) = administration.trigger_store() {
-            trigger_store
-                .delete_session_subscriptions(&session_id)
-                .await
-                .map_err(|err| EmbedError::SessionDeleteProcess {
-                    session_id: session_id.clone(),
-                    message: err.to_string(),
-                })?;
-        }
-        administration
-            .effect_host()
-            .revoke_await_events_for_session(&session_id)
-            .await
-            .map_err(|err| EmbedError::SessionDeleteProcess {
-                session_id: session_id.clone(),
-                message: err.to_string(),
-            })?;
-        let storage = administration
-            .store_factory()
-            .delete_session(&session_id)
-            .await
-            .map_err(|failure| EmbedError::SessionDeleteStorage {
-                session_id: session_id.clone(),
-                failure: Box::new(failure),
-            })?;
-        administration
-            .effect_host()
-            .retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))
-            .await
-            .map_err(|err| EmbedError::SessionDeleteProcess {
-                session_id: session_id.clone(),
-                message: err.to_string(),
-            })?;
-        for scope in administration
-            .effect_host()
-            .pending_artifact_owner_retirements()
-            .await
-            .map_err(|err| EmbedError::SessionDeleteProcess {
-                session_id: session_id.clone(),
-                message: err.to_string(),
-            })?
-        {
-            let owner = lash_core::ArtifactOwner::execution(scope.clone());
-            administration
-                .process_env_store()
-                .retire_process_execution_env_owner(&owner)
-                .await
-                .map_err(|err| EmbedError::SessionDeleteProcess {
-                    session_id: session_id.clone(),
-                    message: err.to_string(),
-                })?;
-            administration
-                .process_engines()
-                .retire_artifact_owner(&owner)
-                .await
-                .map_err(|err| EmbedError::SessionDeleteProcess {
-                    session_id: session_id.clone(),
-                    message: err.to_string(),
-                })?;
-            administration
-                .effect_host()
-                .complete_artifact_owner_retirement(&scope)
-                .await
-                .map_err(|err| EmbedError::SessionDeleteProcess {
-                    session_id: session_id.clone(),
-                    message: err.to_string(),
-                })?;
-        }
-        Ok(SessionDeleteReport {
-            session_id,
-            storage,
-            process,
-        })
+                lash_core::session_delete::SessionDeleteError::Close(
+                    lash_core::session_close::SessionCloseError::Runtime(error),
+                ) => EmbedError::from(error),
+                lash_core::session_delete::SessionDeleteError::Unrecorded {
+                    session_id,
+                    failure: lash_core::session_delete::SessionDeleteFailure::Storage(failure),
+                } => EmbedError::SessionDeleteStorage {
+                    session_id,
+                    failure,
+                },
+                lash_core::session_delete::SessionDeleteError::Unrecorded {
+                    session_id,
+                    failure,
+                } => EmbedError::SessionDeleteProcess {
+                    session_id,
+                    message: failure.to_string(),
+                },
+            })
     }
 
     /// The process registry of this core's backend.
@@ -1277,6 +1196,14 @@ impl LashCoreBuilder {
         // The driver is built before the slot it reconciles through, so the
         // binding lands here: its recovery pass asks the resolved work port.
         session_driver.bind_substrate_slot(Arc::downgrade(&substrate_slot));
+        // The reconcile tick's session-delete relay administers through the
+        // same source the core does (ADR 0109 §4).
+        session_driver.bind_administration(AdministrationSource {
+            slot: Arc::downgrade(&substrate_slot),
+            env: env.clone(),
+            store_factory: Arc::clone(&store_factory),
+            host_process_engines: host_process_engines.clone(),
+        });
         if native_queued {
             // The native engine is built with the resolved ports; resolving
             // them at boot installs the driver so its reconcile tick exists

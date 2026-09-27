@@ -397,28 +397,32 @@ pub const MATRIX: &[CaseSpec] = &[
         "a drive whose invocation the engine lost before it admitted anything leaves the input to the recovery tick",
     ),
     // --- Control intents (S-6, S-7, S-9) ----------------------------------
-    blocked(
-        Finding::F1,
-        Some(S8Slice::D),
+    // A closing session's in-flight input claim is not excluded: an input
+    // claimed before the close does not finish. The close ends its root
+    // (`Cancelled`, `SessionDeleted`) and the only close there is, a delete,
+    // retires the claim with the session's storage through the
+    // `SessionDelete` obligation (ADR 0109 §4). The ingress invariant reads
+    // the claim until then, so a delete that never finishes fails the cell.
+    today(
         Seam::ControlIntent,
         CrashPoint::AfterStateCommit,
         DetectionBound::LostImmediateSqliteFailover,
         "a session close whose intent committed before the host died has its engine half applied by the recovery tick",
     ),
-    blocked(
-        Finding::F1,
-        Some(S8Slice::D),
+    today(
         Seam::ControlIntent,
         CrashPoint::DuringEngineDelivery,
         DetectionBound::LostImmediateSqliteFailover,
         "a session close whose root release the host died inside is re-applied and acknowledged",
     ),
-    blocked(
-        Finding::F1,
-        Some(S8Slice::D),
+    // The acknowledgement the host died before is re-applied in bound, but
+    // the delete it arms waits for the session's engine work: the drive the
+    // crash interrupted replays only once the dead host's session execution
+    // lease lapses, so the end state is a lapsed claim's.
+    today(
         Seam::ControlIntent,
         CrashPoint::AfterDeliveryBeforeSettle,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaim,
         "a session close whose release ran but whose acknowledgement was lost is acknowledged once",
     ),
     blocked(
@@ -487,20 +491,18 @@ pub const MATRIX: &[CaseSpec] = &[
         "a page of plans whose child cancels are refused stalls typed and never starves a later plan (head-of-line)",
     ),
     // --- Session delete (S-21) --------------------------------------------
-    blocked(
-        Finding::F1,
-        Some(S8Slice::D),
+    today(
         Seam::SessionDelete,
         CrashPoint::AfterStateCommit,
         DetectionBound::LostImmediateSqliteFailover,
         "a deletion whose close committed before the host died finishes deleting the session without a caller retry",
     ),
-    blocked(
-        Finding::F1,
-        Some(S8Slice::D),
+    // The host died inside a delivery of the delete obligation, which holds
+    // its claim: the relay retakes it once the claim lapses.
+    today(
         Seam::SessionDelete,
         CrashPoint::AfterDeliveryBeforeSettle,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaim,
         "a deletion whose close was acknowledged before the host died finishes deleting the session without a caller retry",
     ),
     // --- Process terminal (S-14) ------------------------------------------

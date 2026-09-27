@@ -185,6 +185,16 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
             self.inner.storage.pool().clone(),
         ))
     }
+
+    fn session_delete_ledger(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
+        Arc::new(
+            crate::session_delete_ledger::PostgresSessionDeleteLedger::new(
+                self.inner.storage.pool().clone(),
+            ),
+        )
+    }
 }
 
 impl std::fmt::Debug for PostgresStoreSet {

@@ -52,11 +52,8 @@ crash_matrix! {
     ingress_mid_journal_step => (Ingress, MidJournalStep);
     ingress_invocation_lost => (Ingress, InvocationLost);
 
-    #[ignore = "FIG-3849 F1, then FIG-3600 S8-D"]
     control_intent_after_state_commit => (ControlIntent, AfterStateCommit);
-    #[ignore = "FIG-3849 F1, then FIG-3600 S8-D"]
     control_intent_during_engine_delivery => (ControlIntent, DuringEngineDelivery);
-    #[ignore = "FIG-3849 F1, then FIG-3600 S8-D"]
     control_intent_after_delivery_before_settle => (ControlIntent, AfterDeliveryBeforeSettle);
     #[ignore = "FIG-3849 F1, then FIG-3600 S8-C"]
     control_intent_delivery_retryable_forever => (ControlIntent, DeliveryRetryableForever);
@@ -73,9 +70,7 @@ crash_matrix! {
     #[ignore = "FIG-3600 S8-P"]
     parent_end_delivery_refused => (ParentEnd, DeliveryRefused);
 
-    #[ignore = "FIG-3849 F1, then FIG-3600 S8-D"]
     session_delete_after_state_commit => (SessionDelete, AfterStateCommit);
-    #[ignore = "FIG-3849 F1, then FIG-3600 S8-D"]
     session_delete_after_delivery_before_settle => (SessionDelete, AfterDeliveryBeforeSettle);
 
     process_terminal_mid_journal_step => (ProcessTerminal, MidJournalStep);

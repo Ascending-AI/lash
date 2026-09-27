@@ -202,7 +202,10 @@ macro_rules! drive_admission_tests {
 /// step, the close ends every open root `SessionDeleted` and raises the drive
 /// epoch, its engine half is retained on failure, and its `CloseSession`
 /// intent outlives the session as the tombstone its roots are answered from,
-/// and is the one writer of the session scope's close row (D11).
+/// and is the one writer of the session scope's close row (D11); and the
+/// two-phase delete's laws L-D7..L-D9 (ADR 0109 §4): the close's
+/// acknowledgement arms the `SessionDelete` obligation, which waits on
+/// exactly the session's undelivered cleanup and then deletes it.
 /// The fixture is the admitted-head one; a tier with a
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) runs the close
 /// inside the engine's `SessionDelete` handler.
@@ -216,6 +219,9 @@ macro_rules! session_close_tests {
             (a_root_commit_racing_a_close_is_refused_stale_fence, "session-close-fence"),
             (session_delete_writes_exactly_one_close_row_via_its_intent, "session-close-one-row"),
             (a_close_interrupted_before_its_acknowledgement_is_finished_and_its_tombstone_kept, "session-close-crash"),
+            (a_close_acknowledgement_arms_the_session_delete_obligation, "session-delete-arm"),
+            (session_delete_counts_only_the_sessions_undelivered_cleanup, "session-delete-cleanup"),
+            (the_physical_delete_waits_for_cleanup_then_deletes_the_session, "session-delete-finalizer"),
         ]);
     };
     (@laws $fixture:block; [$(($law:ident, $label:literal)),* $(,)?]) => {

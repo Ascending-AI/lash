@@ -189,6 +189,13 @@ impl Backend {
         self.stores().obligation_ledger(kind)
     }
 
+    /// The store set's session-delete reads (ADR 0109 §4).
+    pub fn session_delete_ledger(
+        &self,
+    ) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
+        self.stores().session_delete_ledger()
+    }
+
     /// See [`EffectEngine::process_work`].
     pub fn process_work(&self) -> Option<ProcessWorkWiring> {
         self.engine.process_work()
@@ -267,4 +274,7 @@ pub trait StoreSet: Send + Sync {
         &self,
         kind: crate::store::ObligationKind,
     ) -> Arc<dyn crate::store::ObligationLedger>;
+
+    /// The reads of a session's two-phase delete (ADR 0109 §4).
+    fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger>;
 }

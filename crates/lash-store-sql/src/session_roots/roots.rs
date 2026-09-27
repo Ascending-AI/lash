@@ -235,3 +235,13 @@ impl crate::obligation::ObligationStatementSet for SessionRootObligationStatemen
         }
     }
 }
+
+crate::statements! {
+    /// `session_roots` reads of a session's two-phase delete (ADR 0109 §4).
+    pub struct SessionRootCleanupStatements @ "session_root" {
+        /// How many of session `?1`'s roots owe a scope close not yet
+        /// delivered: due, claimed, or stalled.
+        count_undelivered_scope_close = "SELECT COUNT(*) FROM session_roots
+             WHERE session_id = ?1 AND obligation_state IN ('due', 'claimed', 'stalled')";
+    }
+}

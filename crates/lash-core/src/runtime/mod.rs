@@ -66,6 +66,7 @@ pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
 pub mod session_close;
+pub mod session_delete;
 #[cfg(feature = "testing")]
 pub use lash_core_effect::session_execution_lease;
 #[cfg(not(feature = "testing"))]

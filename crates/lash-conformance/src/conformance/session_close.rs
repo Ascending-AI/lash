@@ -14,7 +14,7 @@ use lash_core::{
     SessionStoreFactory, StoreError, StoreSet, TurnId,
 };
 
-struct CloseSink {
+pub(super) struct CloseSink {
     factory: Arc<dyn SessionStoreFactory>,
     calls: Mutex<Vec<(ControlIntentId, Vec<TurnId>)>>,
     /// How many of the next closes fail.
@@ -22,7 +22,7 @@ struct CloseSink {
 }
 
 impl CloseSink {
-    fn new(factory: Arc<dyn SessionStoreFactory>, failures: usize) -> Arc<Self> {
+    pub(super) fn new(factory: Arc<dyn SessionStoreFactory>, failures: usize) -> Arc<Self> {
         Arc::new(Self {
             factory,
             calls: Mutex::new(Vec::new()),
@@ -74,7 +74,7 @@ impl ScopeCloseSink for CloseSink {
     }
 }
 
-fn administration(
+pub(super) fn administration(
     host: Arc<dyn crate::EffectHost>,
     stores: &Arc<dyn StoreSet>,
     scopes: Arc<dyn ScopeCloseSink>,
@@ -90,11 +90,14 @@ fn administration(
             work: Arc::new(NoSessionWork::new()),
             scopes,
             clock: stores.clock(),
+            deletes: lash_core::session_delete::SessionDeleteStores::of_store_set(Arc::clone(
+                stores,
+            )),
         },
     )
 }
 
-async fn session(
+pub(super) async fn session(
     stores: &Arc<dyn StoreSet>,
     prefix: &str,
     law: &str,
@@ -163,7 +166,7 @@ fn close_attempt(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn close(
+pub(super) async fn close(
     admin: &SessionAdministration,
     id: &SessionId,
     runner: Option<&Arc<dyn crate::ConformanceTurnRunner>>,

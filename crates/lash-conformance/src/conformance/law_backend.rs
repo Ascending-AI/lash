@@ -290,4 +290,8 @@ impl crate::StoreSet for StoreLawStores {
     ) -> Arc<dyn crate::store::ObligationLedger> {
         Self::no_second_substrate("obligation ledger")
     }
+
+    fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
+        Self::no_second_substrate("session delete ledger")
+    }
 }

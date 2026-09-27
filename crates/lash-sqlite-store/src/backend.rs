@@ -729,6 +729,17 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
             kind, conn,
         ))
     }
+
+    fn session_delete_ledger(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
+        Arc::new(
+            crate::session_delete_ledger::SqliteSessionDeleteLedger::new(
+                self.inner.process_env_store.conn.clone(),
+                self.inner.process_registry.conn.clone(),
+            ),
+        )
+    }
 }
 
 impl std::fmt::Debug for SqliteStoreSet {

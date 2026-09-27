@@ -42,6 +42,7 @@ pub(crate) fn native_queued_work_handle_for_tests(
         process_lifecycle_available: core.process_lifecycle_available,
     }));
     handle.bind_substrate_slot(std::sync::Arc::downgrade(&core.substrate_slot));
+    handle.bind_administration(core.administration_source());
     handle
 }
 
@@ -59,6 +60,9 @@ pub(crate) struct NativeQueuedWorkRunHandle {
     /// the reconcile pass asks this port for drives, not the environment's
     /// build-time placeholder.
     substrate_slot: std::sync::OnceLock<std::sync::Weak<super::work_drivers::NativeSubstrateSlot>>,
+    /// What the core administers sessions through, bound with the substrate
+    /// slot: the session-delete relay delivers through it (ADR 0109 §4).
+    administration: std::sync::OnceLock<super::AdministrationSource>,
 }
 
 impl NativeQueuedWorkRunHandle {
@@ -67,7 +71,27 @@ impl NativeQueuedWorkRunHandle {
             config,
             next_request: std::sync::atomic::AtomicU64::new(0),
             substrate_slot: std::sync::OnceLock::new(),
+            administration: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Bind what the core administers sessions through.
+    pub(crate) fn bind_administration(&self, source: super::AdministrationSource) {
+        let _ = self.administration.set(source);
+    }
+
+    /// Every obligation kind's relay this tick claims due rows for.
+    async fn relays(&self) -> Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> {
+        let mut relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
+            Vec::new();
+        if let Some(source) = self.administration.get()
+            && let Some(administration) = source.administration().await
+        {
+            relays.push(Arc::new(
+                lash_core::session_delete::SessionDeleteRelay::new(administration),
+            ));
+        }
+        relays
     }
 
     /// The core's seat in the recovery leader election.
@@ -367,7 +391,7 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         // Which recovery duties this deployment runs this tick (ADR 0109
         // §1.7). The obligation slices register their relays here.
         let duties = self.config.recovery.duties().await;
-        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> = Vec::new();
+        let relays = self.relays().await;
         let report = lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: self.config.store_factory.as_ref(),

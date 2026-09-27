@@ -244,6 +244,26 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "session_delete_bounds__test",
+    crate_features = [],
+    crate_name = "session_delete_bounds",
+    crate_root = "tests/session_delete_bounds.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-sim", "session_delete_bounds", "//crates/lash-sim:session_delete_bounds__test"),
+    extra_compile_data = [
+        "//crates/lash-postgres-store:package_files",
+        "//crates/lash-sqlite-store:package_files",
+    ],
+    library = ":lash-sim",
+    library_crate_name = "lash_sim",
+    manifest_dir = "crates/lash-sim",
+    package_name = "lash-sim",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "signal_replay_key_constructor__test",
     crate_features = [],
     crate_name = "signal_replay_key_constructor",
@@ -319,6 +339,7 @@ lash_batch_test(
         ":process_lifecycle_vocabulary__test",
         ":retention_classification__test",
         ":schema_congruence__test",
+        ":session_delete_bounds__test",
         ":signal_replay_key_constructor__test",
         ":two_opener_differential__test",
     ],

@@ -602,7 +602,11 @@ impl RuntimePersistenceDecorator for RecordingStore {
 pub struct RecordingSessionStoreFactory {
     inner: Arc<dyn SessionStoreFactory>,
     stores: Arc<Mutex<WrappedStores>>,
+    fail_next_delete: Arc<Mutex<Option<DeleteFailure>>>,
 }
+
+/// A storage delete's injected stop, with its partial report.
+type DeleteFailure = crate::store::MaintenanceFailure<crate::store::SessionBlobReclaimReport>;
 
 /// The per-session wrappers a [`RecordingSessionStoreFactory`] handed out.
 type WrappedStores = Vec<(SessionId, Arc<RecordingStore>)>;
@@ -613,7 +617,14 @@ impl RecordingSessionStoreFactory {
         Self {
             inner,
             stores: Arc::new(Mutex::new(Vec::new())),
+            fail_next_delete: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Stop the next session storage delete with `failure`, before the inner
+    /// catalog deletes anything.
+    pub fn fail_next_delete(&self, failure: DeleteFailure) {
+        *self.fail_next_delete.lock_recover() = Some(failure);
     }
 
     /// Every store this catalog wrapped, in first-seen order.
@@ -818,6 +829,9 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         &self,
         session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
+        if let Some(failure) = self.fail_next_delete.lock_recover().take() {
+            return Err(failure);
+        }
         self.inner.delete_session(session_id).await
     }
 

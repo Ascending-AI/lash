@@ -31,10 +31,23 @@ pub(super) fn runtime_operation_scope(
         .expect("effect host supplies an owned runtime operation scope")
 }
 
+/// Delete `session_id` and require the physical delete to have run in the
+/// call: nothing its close left behind is undelivered.
 pub(super) async fn delete_bound_session(
     core: &LashCore,
     session_id: impl AsRef<str>,
 ) -> Result<crate::SessionDeleteReport> {
+    match delete_bound_session_outcome(core, session_id).await? {
+        crate::SessionDeletion::Deleted(report) => Ok(report),
+        other => panic!("the delete must run in the call, got {other:?}"),
+    }
+}
+
+/// Delete `session_id` and answer what the deletion did.
+pub(super) async fn delete_bound_session_outcome(
+    core: &LashCore,
+    session_id: impl AsRef<str>,
+) -> Result<crate::SessionDeletion> {
     let administration = core.session_administration().await;
     let context = administration.delete_context(session_id.as_ref())?;
     LashCore::delete_session(context).await

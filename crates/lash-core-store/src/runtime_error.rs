@@ -447,8 +447,10 @@ pub enum RuntimeErrorCode {
 ///
 /// A source-key conflict is the host's own contract violation (the same key
 /// with a different submission), so it surfaces typed as
-/// [`RuntimeErrorCode::DurableIdentityConflict`]; every other admission failure
-/// is a store commit failure.
+/// [`RuntimeErrorCode::DurableIdentityConflict`]; a closing or deleted
+/// session's refusal surfaces as [`RuntimeErrorCode::SessionDeleted`] with its
+/// cause (ADR 0109 §4); every other admission failure is a store commit
+/// failure.
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
@@ -459,6 +461,8 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
         err @ crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. } => {
             RuntimeError::new(RuntimeErrorCode::RunSpecMismatch, err.to_string())
         }
+        err @ (crate::store::StoreError::SessionClosing { .. }
+        | crate::store::StoreError::SessionDeleted { .. }) => runtime_error_from_store_commit(err),
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }

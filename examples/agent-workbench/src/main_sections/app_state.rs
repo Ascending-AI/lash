@@ -225,18 +225,19 @@ impl AppState {
     /// Both halves live in one place, but only the runtime delete decides the
     /// session fence: it durably retires the id, then the retention lever
     /// reclaims globally-owned process rows the delete deliberately only
-    /// detaches. Cleanup failures are retryable. The workflow deliberately
-    /// replays this idempotent delete before retrying retention so its Restate
-    /// journal command sequence remains stable.
+    /// detaches. Cleanup failures and a delete Lash still owes are retryable.
+    /// The workflow deliberately replays this idempotent delete before
+    /// retrying retention so its Restate journal command sequence remains stable.
     pub(crate) async fn delete_session_and_reclaim_processes(
         &self,
         context: lash::SessionDeleteContext<'_>,
     ) -> Result<lash::process::ProcessPruneReport, AppError> {
         let session_id = context.session_id().clone();
-        let report = lash::LashCore::delete_session(context)
+        let deletion = lash::LashCore::delete_session(context)
             .await
             // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.
             .map_err(AppError::internal)?;
+        let report = physically_deleted(&session_id, deletion)?;
         #[cfg(test)]
         if let Some(turn_id) = SESSION_DELETE_RETENTION_FAULTS
             .lock_recover()
@@ -1268,18 +1269,6 @@ pub(crate) fn work_event_from_observed(event: lash::process::ObservedProcessEven
         occurred_at_ms: event.occurred_at_ms,
         payload: compact_payload(event.payload),
     }
-}
-
-#[cfg(test)]
-pub(crate) static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
-    Mutex<BTreeMap<SessionId, String>>,
-> = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
-
-#[cfg(test)]
-pub(crate) fn fail_session_delete_retention_once(session_id: &SessionId, turn_id: &TurnId) {
-    SESSION_DELETE_RETENTION_FAULTS
-        .lock_recover()
-        .insert(session_id.clone(), turn_id.to_string());
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

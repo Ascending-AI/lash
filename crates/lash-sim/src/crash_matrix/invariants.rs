@@ -209,6 +209,60 @@ impl ObligationProbe for TurnProbe {
     }
 }
 
+/// `SessionDelete` obligations (S8-D) that are due or claimed. The ledger
+/// arms one only when a `CloseSession` intent is acknowledged, so the closed
+/// sessions are the ones the intents name; a deleted session's obligation
+/// left with its row, and a stalled one carries its reason, typed.
+struct SessionDeleteProbe;
+
+#[async_trait::async_trait]
+impl ObligationProbe for SessionDeleteProbe {
+    fn kind(&self) -> &'static str {
+        "session_delete"
+    }
+
+    async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
+        let mut closed: Vec<SessionId> = world
+            .backend()
+            .session_store_factory()
+            .list_control_intents(None, PAGE)
+            .await
+            .map_err(|error| format!("list control intents: {error}"))?
+            .into_iter()
+            .filter(|intent| {
+                matches!(
+                    intent.kind,
+                    lash_core::store::ControlIntentKind::CloseSession { .. }
+                )
+            })
+            .map(|intent| intent.session_id)
+            .collect();
+        closed.sort();
+        closed.dedup();
+        let ledger = world.backend().session_delete_ledger();
+        let mut unsettled = Vec::new();
+        for session in closed {
+            let obligation = ledger
+                .delete_obligation(&session)
+                .await
+                .map_err(|error| format!("read the delete obligation of `{session}`: {error}"))?;
+            if let Some(obligation) = obligation
+                && matches!(
+                    obligation.state,
+                    lash_core::store::ObligationState::Due
+                        | lash_core::store::ObligationState::Claimed
+                )
+            {
+                unsettled.push(format!(
+                    "the delete obligation {} of `{session}` is {:?}",
+                    obligation.id, obligation.state
+                ));
+            }
+        }
+        Ok(unsettled)
+    }
+}
+
 /// The probes the settled-or-stalled invariant reads. An S8 slice lists its
 /// ledger's probe here when it lands.
 #[must_use]
@@ -217,6 +271,7 @@ pub fn obligation_probes() -> Vec<Box<dyn ObligationProbe>> {
         Box::new(TurnProbe),
         Box::new(ControlIntentProbe),
         Box::new(ParentEndPlanProbe),
+        Box::new(SessionDeleteProbe),
     ]
 }
 

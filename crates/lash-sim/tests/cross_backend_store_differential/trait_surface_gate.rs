@@ -24,6 +24,10 @@ const CONTROL_INTENT_SOURCE: &str =
 const OBLIGATION_SOURCE: &str = include_str!("../../../lash-core-store/src/store/obligation.rs");
 const RECOVERY_LEADER_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/recovery_leader.rs");
+/// A session's two-phase delete reads (ADR 0109 §4): every method is driven
+/// by `session_delete_cases`, none is excluded.
+const SESSION_DELETE_SOURCE: &str =
+    include_str!("../../../lash-core-store/src/store/session_delete.rs");
 
 /// Every source file that makes up this test binary. A method counts as
 /// covered when the harness calls it from one of these.
@@ -42,6 +46,7 @@ const HARNESS_SOURCES: &[&str] = &[
     include_str!("process_event_pages.rs"),
     include_str!("raw_durable_reader.rs"),
     include_str!("residue.rs"),
+    include_str!("session_delete_cases.rs"),
     include_str!("session_lifecycle_cases.rs"),
     include_str!("session_meta_layout.rs"),
     include_str!("surface_sweep.rs"),
@@ -338,6 +343,7 @@ fn store_trait_surface_is_fully_gated() {
     for (source, trait_name) in [
         (OBLIGATION_SOURCE, "ObligationLedger"),
         (RECOVERY_LEADER_SOURCE, "RecoveryLeaderStore"),
+        (SESSION_DELETE_SOURCE, "SessionDeleteLedger"),
     ] {
         for method in fallible_trait_methods(source, trait_name) {
             if harness_drives(&method) {

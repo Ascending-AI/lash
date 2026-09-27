@@ -63,6 +63,8 @@ mod process_event_pages;
 mod raw_durable_reader;
 #[path = "cross_backend_store_differential/residue.rs"]
 mod residue;
+#[path = "cross_backend_store_differential/session_delete_cases.rs"]
+mod session_delete_cases;
 #[path = "cross_backend_store_differential/session_lifecycle_cases.rs"]
 mod session_lifecycle_cases;
 #[path = "cross_backend_store_differential/session_meta_layout.rs"]
@@ -1717,9 +1719,15 @@ impl BackendRunner {
                 let context = administration
                     .delete_context(&self.session_id)
                     .expect("issue the differential delete context");
-                lash::LashCore::delete_session(context)
+                let deletion = lash::LashCore::delete_session(context)
                     .await
                     .expect("delete the materialized session through LashCore");
+                assert!(
+                    matches!(deletion, lash::SessionDeletion::Deleted(_)),
+                    "{}: nothing the close left is undelivered, so the delete runs in the call: \
+                     {deletion:?}",
+                    self.name
+                );
                 self.lifecycle_core = Some(core);
                 Ok(None)
             }
@@ -2420,6 +2428,7 @@ async fn cross_backend_store_differential_agrees() {
     verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();
     obligation_cases::compare_obligation_ledgers(sqlite_root.path(), &postgres, &run_nonce).await;
+    session_delete_cases::compare_session_deletes(sqlite_root.path(), &postgres, &run_nonce).await;
     process_event_pages::compare_bounded_process_event_pages(
         sqlite_root.path(),
         &postgres,

@@ -27,7 +27,7 @@ use super::{CaseReport, CaseSpec, Seam};
 const CASE_WALL_LIMIT: Duration = Duration::from_secs(300);
 
 /// How long a stage waits in wall time for its crash point to fire.
-const TRIP_WAIT: Duration = Duration::from_secs(20);
+pub(super) const TRIP_WAIT: Duration = Duration::from_secs(20);
 
 /// A world whose crash happened, and what its end state must be.
 pub(crate) struct Staged {
@@ -96,11 +96,28 @@ pub(crate) fn held_core(held: Arc<AtomicUsize>) -> CoreBuild {
         lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .recovery_lease(recovery_lease())
             .provider(scripted_provider(Arc::clone(&held)))
             .model(model)
             .build(owner)
             .map_err(|error| format!("build the lash core: {error}"))
     })
+}
+
+/// The recovery leader lease of a matrix deployment. The lease renews on a
+/// wall-clock cadence while the world advances the store clock by a whole
+/// tick at a time, so a default 15 s TTL lapses in virtual time after two
+/// ticks and a case that needs more (a lapsed claim, an attempt ceiling) would
+/// lose its leader. A deployment the case kills resigns as it drops, so the
+/// long TTL does not delay its successor.
+fn recovery_lease() -> lash::RecoveryLeaseConfig {
+    lash::RecoveryLeaseConfig {
+        generation_rank: 0,
+        timings: lash::RecoveryLeaseTimings {
+            ttl: std::time::Duration::from_secs(24 * 60 * 60),
+            ..lash::RecoveryLeaseTimings::default()
+        },
+    }
 }
 
 /// The session a case runs, unique per seed.
