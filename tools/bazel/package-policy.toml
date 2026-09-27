@@ -86,6 +86,18 @@ reason = "the generated-profile, minimizer and replay-artifact cases run 109--21
 shards = 8
 timeout = "long"
 
+# The crash-point matrix (FIG-3849): every cell kills and restarts a
+# deployment on the Restate server double for each of its seeds and ticks the
+# recovery interval on virtual time until the end-state invariants hold. The
+# whole binary runs minutes, not seconds, so it stays out of the developer
+# loop; the Bazel tail runs it on every full-profile dispatch of main.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+targets = ["crash_point_matrix"]
+tags = ["dev-deferred"]
+reason = "the crash-point matrix restarts a deployment per cell and seed and ticks recovery on virtual time; minutes per run, too slow for the developer loop; the Bazel tail runs it on main's full-profile dispatch"
+
 # The no-abort guarantee forks a dozen children that each parse deliberately
 # deep sources right up to the stack bound. At the 4 GiB test floor
 # `the_abort_corpus_survives_without_the_preflight` and

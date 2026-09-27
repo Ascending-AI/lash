@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 177,
+  "cargo_target_count": 178,
   "feature_lane_units": [
     {
       "features": [
@@ -16633,7 +16633,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 236,
+  "generated_label_count": 237,
   "packages": [
     {
       "declared_features": [
@@ -18593,6 +18593,7 @@
         "insta",
         "lash-internal-conformance",
         "lash-internal-core",
+        "lash-internal-lashlang",
         "lash-internal-lashlang-runtime",
         "lash-internal-llm-transport",
         "lash-internal-plugin-process-controls",
@@ -18603,6 +18604,7 @@
         "lash-internal-provider-auth",
         "lash-internal-provider-google",
         "lash-internal-provider-openai",
+        "lash-internal-restate",
         "lash-internal-restate-test",
         "lash-internal-rlm-types",
         "lash-internal-s3-store",
@@ -18650,6 +18652,15 @@
           "kind": "bin-unit-test",
           "label": "//crates/lash-sim:lash-sim__bin__unit_test",
           "tags": []
+        },
+        {
+          "cargo": "crash_point_matrix",
+          "cargo_only": "the crash-point matrix restarts a deployment per cell and seed and ticks recovery on virtual time; minutes per run, too slow for the developer loop; the Bazel tail runs it on main's full-profile dispatch",
+          "kind": "test",
+          "label": "//crates/lash-sim:crash_point_matrix__test",
+          "tags": [
+            "dev-deferred"
+          ]
         },
         {
           "cargo": "cross_backend_store_differential",

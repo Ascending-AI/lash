@@ -5,6 +5,7 @@ mod cache_regression;
 mod canonical_scripts;
 mod clock;
 pub mod content_oracle;
+pub mod crash_matrix;
 mod lease;
 #[cfg(test)]
 mod oracle_coverage_tests;

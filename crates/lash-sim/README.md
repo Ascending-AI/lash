@@ -218,6 +218,29 @@ The deferred cross-backend suites run in their named service gates.
   generated lanes still run the same `sim.oracle.serial-engine-determinism.v1`
   oracle on every seed they execute.
 
+## Crash-point matrix
+
+`tests/crash_point_matrix.rs` is the 1.0 durability gate (FIG-3849): one
+test per cell of {seam or ADR 0109 obligation kind} × {crash point}, each over
+`LASH_CRASH_MATRIX_SEEDS` seeds (default 3). A cell runs lash-restate's engine
+on the server double with one deployment — a `LashCore`, its session driver
+and its recovery interval — and kills that deployment at the cell's crash
+point: after the producer's state commit, during the engine delivery, after
+the delivery before its settle, at a seeded journal step, or by losing the
+invocation outright. A fresh deployment comes up after a seeded outage and the
+recovery interval ticks on virtual time until the end-state invariants hold:
+every accepted input driven exactly once, every obligation settled or stalled
+typed, no orphaned child, no wedged session, every terminal root's scope
+closed, within the ADR 0109 §1.8 detection bound. The harness lives in
+`src/crash_matrix/`; its module docs say how an S8 slice activates the cells
+it owns. The binary is `dev-deferred`: the Bazel tail runs it on main's
+full-profile dispatch.
+
+```sh
+kiln run //crates/lash-sim:crash_point_matrix__test -- --nocapture
+kiln run //crates/lash-sim:crash_point_matrix__test -- --include-ignored parent_end
+```
+
 ## Search fleet
 
 The confidence gate's search lane (`run_sim_search_lane`) runs `--mode search`

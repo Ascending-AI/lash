@@ -127,6 +127,7 @@ WORKSPACE_COMPILE_TARGETS = [
     "//crates/lash-s3-store:lash-s3-store__unit_test",
     "//crates/lash-sansio:lash-sansio",
     "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sim:crash_point_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim",
     "//crates/lash-sim:lash-sim__bin",
@@ -365,6 +366,7 @@ WORKSPACE_CLIPPY_TARGETS = [
     "//crates/lash-s3-store:lash-s3-store__unit_test",
     "//crates/lash-sansio:lash-sansio",
     "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sim:crash_point_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim",
     "//crates/lash-sim:lash-sim__bin",
@@ -649,6 +651,7 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sim:crash_point_matrix__test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
     "//crates/lash-sim:lash-sim__unit_test",
     "//crates/lash-sim:logical_turn__test",
@@ -750,6 +753,7 @@ WORKSPACE_TEST_SUITE_LABELS = [
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sim:crash_point_matrix__test",
     "//crates/lash-sim:lash-sim__unit_test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sim:test_batch",
@@ -844,6 +848,7 @@ WORKSPACE_DEV_SUITE_LABELS = [
 ]
 
 WORKSPACE_TAIL_SUITE_LABELS = [
+    "//crates/lash-sim:crash_point_matrix__test",
     "//crates/lash-sim:lash-sim__unit_test",
     "//crates/lash-typescript:carrier_laws__test",
     "//crates/lash-typescript:corpus_laws__test",
@@ -1111,6 +1116,7 @@ WORKSPACE_TEST_TARGETS = [
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-s3-store:lash-s3-store__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sim:crash_point_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
     "//crates/lash-sim:lash-sim__unit_test",
