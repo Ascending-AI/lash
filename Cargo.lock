@@ -2442,7 +2442,6 @@ dependencies = [
  "lash-internal-core-execution",
  "lash-internal-lashlang",
  "lash-internal-postgres-store",
- "lash-internal-restate",
  "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",

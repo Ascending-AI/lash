@@ -59,7 +59,6 @@ lashlang = { workspace = true, features = ["testing"] }
 lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", features = ["testing"] }
 # The promise authority and handler-bound turn runner the ported storage laws
 # drive through: lash-restate's engine on the in-process server double.
-lash-restate = { workspace = true }
 lash-restate-test = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
