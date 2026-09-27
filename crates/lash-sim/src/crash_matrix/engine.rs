@@ -51,7 +51,7 @@ use lash_restate_test::{CrashListener, CrashRule, HandlerAttempt, RestateTestBac
 
 /// The handler host service the double's `run_in_handler` jobs run in: a
 /// host's own call, which dies with the host rather than replaying.
-const HANDLER_HOST: &str = "LashTestHandlerHost";
+pub(crate) const HANDLER_HOST: &str = "LashTestHandlerHost";
 
 /// Where a live world's server and deployment are.
 #[derive(Clone, Debug)]

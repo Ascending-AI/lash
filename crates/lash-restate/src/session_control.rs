@@ -357,6 +357,33 @@ impl SessionControlEngine for RestateSessionControl {
                 report.failed.push((id, error.to_string()));
             }
         }
+        // A process segment's run the engine finished without the process's
+        // terminal (an operator's kill) strands the process: Restate never
+        // runs that key again. End each one `SubstrateLost` (ADR 0110).
+        match crate::process::park_reconcile::end_lost_process_runs(
+            &self.admin,
+            &self.processes,
+            &self.continuations,
+            page.limit,
+        )
+        .await
+        {
+            Ok(pass) => {
+                report.ended_processes.extend(pass.ended);
+                report.unchanged += pass.unchanged;
+                report.failed.extend(
+                    pass.failed
+                        .into_iter()
+                        .map(|(id, error)| (EngineCursor::new(id), error)),
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "lost-run reconcile could not read failed process runs; the next pass retries it"
+                );
+            }
+        }
         Ok(report)
     }
 }

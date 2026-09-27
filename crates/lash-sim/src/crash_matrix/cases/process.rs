@@ -11,6 +11,14 @@
 //! terminal write and the promise's resolution; the terminal transaction's
 //! `ProcessTerminal` obligation (ADR 0109 §3) recovers it, and the relay
 //! publishes the stored terminal to the waiter.
+//!
+//! The caller-killed cell starts the process from a host job that stays
+//! open, and once the process's run has started an operator kills the job:
+//! Restate's kill cascades into the run the job sent, which ends `409
+//! killed` without the process's terminal, and Restate never runs that
+//! workflow key again. The recovery tick's sweep finds the finished run and
+//! ends the process `SubstrateLost` (ADR 0110), and the terminal's
+//! publication answers the waiter.
 
 use std::sync::Arc;
 
@@ -219,9 +227,150 @@ pub(crate) fn waiter_completed(waiter: String, process: ProcessId) -> CustomChec
     })
 }
 
+/// The process ended `Abandoned` because lash refused to resume it:
+/// `ResumeRefused { SubstrateLost }`.
+fn ended_substrate_lost(process: ProcessId) -> CustomCheck {
+    Arc::new(move |world: &CrashWorld| {
+        let process = process.clone();
+        Box::pin(async move {
+            let outcome = match world
+                .backend()
+                .process_registry()
+                .get_process(&process)
+                .await
+            {
+                Ok(record) => record.and_then(|record| record.outcome),
+                Err(error) => return vec![format!("read process `{process}`: {error}")],
+            };
+            match outcome {
+                Some(lash_core::ProcessAwaitOutput::Abandoned { evidence, .. })
+                    if evidence.writer
+                        == (lash_core::AbandonWriter::ResumeRefused {
+                            reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+                        }) =>
+                {
+                    Vec::new()
+                }
+                Some(other) => vec![format!(
+                    "process `{process}` ended {other:?}, not substrate-lost"
+                )],
+                None => vec![format!("process `{process}` has no terminal")],
+            }
+        })
+    })
+}
+
+/// Wait, at most `budget` of wall time, until `process` recorded its start.
+async fn wait_started(
+    world: &CrashWorld,
+    process: &ProcessId,
+    budget: std::time::Duration,
+) -> Result<(), String> {
+    let registry = world.backend().process_registry();
+    tokio::time::timeout(budget, async {
+        loop {
+            if let Ok(Some(record)) = registry.get_process(process).await
+                && record.first_started.is_some()
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .map_err(|_| format!("process `{process}`'s run never started"))
+}
+
+/// [`CrashPoint::CallerKilled`]: see the module documentation.
+async fn stage_caller_killed(world: CrashWorld) -> Result<Staged, String> {
+    // Long enough that the run is still asleep when the kill lands, on the
+    // live server's wall clock too.
+    let request = publish_process(&world, "1h").await?;
+    let core = world.core()?;
+    let engine = world.engine().clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let _job = world.spawn_host(async move {
+        engine
+            .run_in_handler(
+                lash_core::AdmittedScope::runtime_operation("crash-matrix-start".to_owned()),
+                Arc::new(move |scoped| {
+                    let core = core.clone();
+                    let request = request.clone();
+                    let tx = tx.clone();
+                    Box::pin(async move {
+                        let _ = tx.send(
+                            core.processes()
+                                .start(request, scoped)
+                                .await
+                                .map(|receipt| receipt.process_id)
+                                .map_err(|error| error.to_string()),
+                        );
+                        // The job goes on with other work, as a host's does,
+                        // until the operator kills it.
+                        std::future::pending::<()>().await;
+                    })
+                }),
+            )
+            .await
+    });
+    let process = tokio::time::timeout(std::time::Duration::from_secs(20), rx.recv())
+        .await
+        .map_err(|_| "the start did not answer".to_owned())?
+        .ok_or_else(|| "the start's job ended without answering".to_owned())??;
+    let waiter = world
+        .engine()
+        .ingress()
+        .send_workflow_json(
+            PROCESS_WORKFLOW,
+            process.as_str(),
+            "await_terminal",
+            &lash_restate::RestateProcessAwaitRequest {
+                process_id: process.clone(),
+            },
+        )
+        .await
+        .map_err(|error| format!("arm the engine waiter: {error}"))?
+        .into_string();
+    wait_started(&world, &process, std::time::Duration::from_secs(20)).await?;
+    let mut killed = 0;
+    for view in world.invocations().await {
+        if view
+            .target
+            .starts_with(crate::crash_matrix::engine::HANDLER_HOST)
+            && view.status != "completed"
+        {
+            world.kill_invocation(&view.id).await?;
+            killed += 1;
+        }
+    }
+    if killed == 0 {
+        return Err("no open host job to kill".to_owned());
+    }
+    let origin_ms = Some(world.now_ms());
+    let expected = Expected {
+        custom: vec![
+            (
+                "process_terminal",
+                waiter_completed(waiter, process.clone()),
+            ),
+            ("substrate_lost", ended_substrate_lost(process)),
+        ],
+        ..Expected::default()
+    };
+    Ok(Staged {
+        world,
+        notes: Vec::new(),
+        expected,
+        origin_ms,
+    })
+}
+
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
     let world = CrashWorld::new(seed, rlm_core(), true).await?;
     world.restart().await?;
+    if point == CrashPoint::CallerKilled {
+        return Box::pin(stage_caller_killed(world)).await;
+    }
     let request = publish_process(&world, "500ms").await?;
     let mut notes = Vec::new();
     match point {

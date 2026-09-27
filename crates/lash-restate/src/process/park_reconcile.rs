@@ -28,6 +28,17 @@
 //! ([`resume_parked_process`]) retries the paused invocation over its kept
 //! journal. The first fact past the refusal (progress, or the terminal)
 //! ends the park, and another exhaustion re-parks the same park.
+//!
+//! A segment's `run` that *finished* with a failure is the other engine stop
+//! lash cannot see from inside: an operator's kill, which Restate cascades
+//! from the invocation that started the run, ends it `409 killed` with no
+//! lash code running. Restate runs a workflow key's `run` once, so no redrive
+//! or sweep ever reaches the process again. The same pass reads those runs
+//! back ([`end_lost_process_runs`]) and ends each live process whose current
+//! segment's run it was `Abandoned` with `ResumeRefused { SubstrateLost }`
+//! (ADR 0110): its execution is lost as surely as a lost journal. The
+//! terminal transaction arms the `ProcessTerminal` publication, so the
+//! process's waiters are served.
 
 use std::sync::Arc;
 
@@ -38,7 +49,9 @@ use lash_core::{
 };
 use lash_sansio::ProcessId;
 
-use crate::ingress::{RestateAdminClient, RestateInvocationId, RestatePausedInvocation};
+use crate::ingress::{
+    RestateAdminClient, RestateInvocationId, RestateInvocationStatus, RestatePausedInvocation,
+};
 use crate::services::LashService;
 
 /// What one reconcile pass did.
@@ -136,6 +149,107 @@ pub(crate) async fn reconcile_process_invocations(
         report.parked.push(record.id);
     }
     Ok(report)
+}
+
+/// What one [`end_lost_process_runs`] pass did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LostRunPass {
+    /// Processes this pass ended `SubstrateLost`.
+    pub ended: Vec<ProcessId>,
+    /// Failed runs left as they were: the process is gone or already
+    /// terminal, or a later segment carries it.
+    pub unchanged: usize,
+    /// Failed runs this pass could not settle, by invocation id, with why.
+    pub failed: Vec<(String, String)>,
+}
+
+/// End `SubstrateLost` every live process whose current segment's `run` the
+/// engine finished with a failure, reading the latest `limit` failed runs.
+///
+/// Idempotent: a process this pass ended is terminal, so the next pass that
+/// reads the same run leaves it. One run that fails to settle never fails the
+/// pass.
+///
+/// # Errors
+/// When Restate's admin query fails.
+pub(crate) async fn end_lost_process_runs(
+    admin: &RestateAdminClient,
+    registry: &Arc<dyn ProcessRegistry>,
+    continuations: &Arc<dyn ProcessContinuationStore>,
+    limit: std::num::NonZeroUsize,
+) -> Result<LostRunPass, PluginError> {
+    let runs = admin.failed_process_runs(limit).await.map_err(|error| {
+        PluginError::Session(format!("read failed process runs from Restate: {error}"))
+    })?;
+    let mut pass = LostRunPass::default();
+    for run in runs {
+        match end_lost_run(registry, continuations, &run).await {
+            Ok(Some(process_id)) => pass.ended.push(process_id),
+            Ok(None) => pass.unchanged += 1,
+            Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
+        }
+    }
+    Ok(pass)
+}
+
+/// End the process of failed segment `run`, when the run was its current
+/// segment and it is still live. The process it ended, if any.
+async fn end_lost_run(
+    registry: &Arc<dyn ProcessRegistry>,
+    continuations: &Arc<dyn ProcessContinuationStore>,
+    run: &RestateInvocationStatus,
+) -> Result<Option<ProcessId>, PluginError> {
+    let Some((record, segment_ordinal)) =
+        segment_process_of_key(registry, run.target_service_key.as_deref()).await?
+    else {
+        return Ok(None);
+    };
+    if record.is_terminal() {
+        return Ok(None);
+    }
+    // A segment that handed over is carried by its successor's run.
+    let latest = continuations
+        .latest_segment_handover(&record.id)
+        .await?
+        .map_or(0, |handover| handover.segment_ordinal);
+    if latest > segment_ordinal {
+        return Ok(None);
+    }
+    let proposed = lash_core::ProcessAwaitOutput::Abandoned {
+        evidence: Box::new(lash_core::AbandonEvidence {
+            writer: lash_core::AbandonWriter::ResumeRefused {
+                reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+            },
+            owner: record
+                .first_started
+                .as_deref()
+                .map(|started| started.owner.clone()),
+            epoch_ms: super::restate_now_ms(),
+        }),
+        control: None,
+    };
+    let authority = lash_core::ProcessCompletionAuthority::WorkflowKeyRecovery {
+        workflow_key: record.id.to_string(),
+        segment_ordinal,
+    };
+    match registry
+        .complete_process(&record.id, proposed, authority)
+        .await
+    {
+        Ok(_) => {
+            tracing::warn!(
+                event = "process.run_lost",
+                process_id = record.id.as_str(),
+                invocation_id = run.id.as_str(),
+                segment_ordinal,
+                completion_failure = run.completion_failure.as_deref().unwrap_or_default(),
+                "a process segment's run ended without its terminal; the process ends substrate-lost"
+            );
+            Ok(Some(record.id))
+        }
+        Err(PluginError::ProcessHandedOver { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Kill the paused segment `invocation` of terminal `record` once its
@@ -257,7 +371,15 @@ async fn segment_process(
     registry: &Arc<dyn ProcessRegistry>,
     invocation: &RestatePausedInvocation,
 ) -> Result<Option<(ProcessRecord, u64)>, PluginError> {
-    let Some(key) = invocation.target_service_key.as_deref() else {
+    segment_process_of_key(registry, invocation.target_service_key.as_deref()).await
+}
+
+/// The process a segment workflow `key` runs and the segment it names.
+async fn segment_process_of_key(
+    registry: &Arc<dyn ProcessRegistry>,
+    key: Option<&str>,
+) -> Result<Option<(ProcessRecord, u64)>, PluginError> {
+    let Some(key) = key else {
         return Ok(None);
     };
     // A later segment's key is `<id>#<ordinal>`; segment 0's is the id. A

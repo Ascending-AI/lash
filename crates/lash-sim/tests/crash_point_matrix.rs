@@ -77,6 +77,7 @@ crash_matrix! {
 
     process_terminal_mid_journal_step => (ProcessTerminal, MidJournalStep);
     process_terminal_invocation_lost => (ProcessTerminal, InvocationLost);
+    process_terminal_caller_killed => (ProcessTerminal, CallerKilled);
 }
 
 /// The generated tests and the registry agree: every registered cell has

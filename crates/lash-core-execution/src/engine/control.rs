@@ -321,6 +321,10 @@ pub struct ParkReconcileReport {
     /// is gone. A stopped drive is never resumed here (ADR 0109 §3): it is
     /// parked, and only the park's operator verb resumes it.
     pub released_drives: Vec<SessionId>,
+    /// Processes this pass ended `SubstrateLost` because the engine had
+    /// finished their current segment's execution without their terminal (an
+    /// operator's kill): nothing would ever run them again.
+    pub ended_processes: Vec<crate::ProcessId>,
     /// Stalled executions this pass left as they were.
     pub unchanged: usize,
     /// Stalled executions this pass could not settle, each with why: one

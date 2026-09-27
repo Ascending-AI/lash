@@ -29,6 +29,9 @@
 //!   step of the invocation that carries the seam.
 //! - [`CrashPoint::InvocationLost`]: the engine lost the invocation that
 //!   carries the seam (an operator kill), so no replay recovers it.
+//! - [`CrashPoint::CallerKilled`]: an operator killed the host job that
+//!   started the seam's work, and the kill cascaded into the work's own
+//!   invocation, which ended without its terminal.
 //! - [`CrashPoint::DeliveryRefused`]: the delivery is refused for good.
 //! - [`CrashPoint::DeliveryRetryableForever`]: every delivery fails retryably.
 //!
@@ -131,6 +134,7 @@ pub enum CrashPoint {
     AfterDeliveryBeforeSettle,
     MidJournalStep,
     InvocationLost,
+    CallerKilled,
     DeliveryRefused,
     DeliveryRetryableForever,
 }
@@ -144,6 +148,7 @@ impl CrashPoint {
             Self::AfterDeliveryBeforeSettle => "after_delivery_before_settle",
             Self::MidJournalStep => "mid_journal_step",
             Self::InvocationLost => "invocation_lost",
+            Self::CallerKilled => "caller_killed",
             Self::DeliveryRefused => "delivery_refused",
             Self::DeliveryRetryableForever => "delivery_retryable_forever",
         }
@@ -526,6 +531,12 @@ pub const MATRIX: &[CaseSpec] = &[
         CrashPoint::InvocationLost,
         DetectionBound::LostImmediateSqliteFailover,
         "a process whose workflow invocation was lost after its terminal commit still publishes the terminal to an engine waiter",
+    ),
+    today(
+        Seam::ProcessTerminal,
+        CrashPoint::CallerKilled,
+        DetectionBound::LostImmediateSqliteFailover,
+        "a started process whose host job an operator killed, the kill cascading into its run, ends substrate-lost and answers its engine waiter",
     ),
 ];
 

@@ -85,6 +85,16 @@ identical start is idempotent, a successor execution the engine resumes takes
 exactly the next attempt, any other attempt is refused, and an externally-owned
 process never starts.
 
+A run the engine finished without the process's terminal is the same loss.
+An operator's kill ends a segment's run `409 killed`, and Restate cascades a
+kill from the invocation that started the run. Restate runs a workflow key's
+`run` once, so no redrive or sweep reaches the process again. The recovery
+tick's park reconcile reads such failed runs back through the admin API and
+ends each live process whose current segment's run it was `Abandoned` with
+`ResumeRefused { SubstrateLost }`. The terminal transaction arms the
+`ProcessTerminal` publication, so the process's waiters are served
+(FIG-3890).
+
 A boundary's write of its successor's external reference is part of the
 boundary's journaled handover step. A store fault there fails the step and the
 engine retries it. It is never logged and dropped.

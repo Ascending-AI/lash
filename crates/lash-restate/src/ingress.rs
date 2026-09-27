@@ -1080,6 +1080,23 @@ impl RestateAdminClient {
         )).await
     }
 
+    /// The latest `limit` process segment runs that finished with a failure,
+    /// newest first, on every lane of the process workflow. A segment's run
+    /// answers its process's outcome as its output, so one that failed ended
+    /// without it: an operator's kill, which Restate cascades from the
+    /// invocation that started it, or a run the engine gave up on.
+    pub(crate) async fn failed_process_runs(
+        &self,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<RestateInvocationStatus>, RestateHttpError> {
+        let segments = service_lanes_sql(crate::LashService::ProcessWorkflow.name());
+        self.query_json(&format!(
+            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {segments} AND target_handler_name = 'run' AND status = 'completed' AND completion_result = 'failure' ORDER BY modified_at DESC LIMIT {}",
+            limit.get()
+        ))
+        .await
+    }
+
     /// Resume a paused invocation: a fresh retry loop over its kept journal.
     pub async fn resume_invocation(
         &self,
