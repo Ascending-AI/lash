@@ -15,7 +15,8 @@
 //! is retaken and asked again under its next attempt,
 //! [`ingress_drive_request`], since the engine dedupes a reused request
 //! against the invocation it lost. A waiter on an input attaches to the
-//! first attempt's drive.
+//! drive of the current attempt ([`IngressRelay::current_ask`]), and follows
+//! the ask to its next attempt when the engine lost the one it waited on.
 
 use std::sync::Arc;
 
@@ -82,6 +83,36 @@ impl IngressRelay {
             &ingress_obligation_id(item_id),
         )
         .await
+    }
+
+    /// The drive the relay last asked for item `item_id`:
+    /// `ingress:{item_id}:{attempt}`, the attempt being its latest claim's,
+    /// while that claim stands or once an admission delivered the row.
+    /// `None` while no ask is outstanding — the row is due for a later
+    /// attempt, or stalled — or before any claim. A waiter follows it: after
+    /// the engine loses an ask (an operator kill), the relay asks again under
+    /// the next attempt.
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub async fn current_ask(
+        &self,
+        item_id: &str,
+    ) -> Result<Option<crate::engine::DriveRequestId>, StoreError> {
+        use crate::store::ObligationState;
+        Ok(self
+            .ledger
+            .standing(&ingress_obligation_id(item_id))
+            .await?
+            .filter(|standing| {
+                standing.attempts > 0
+                    && matches!(
+                        standing.state,
+                        ObligationState::Claimed | ObligationState::Delivered
+                    )
+            })
+            .map(|standing| ingress_drive_request(item_id, standing.attempts)))
     }
 
     /// Ask for the drive the admission of item `item_id` owes, right after

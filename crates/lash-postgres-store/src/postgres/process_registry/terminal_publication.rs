@@ -22,7 +22,10 @@ static STATEMENTS: LazyLock<ProcessObligationStatements> =
     LazyLock::new(|| ProcessObligationStatements::render(Dialect::postgres()));
 
 /// Arm `record`'s terminal publication in the transaction that saves it, if
-/// the record is terminal and its row owes nothing yet.
+/// the record is terminal and its row owes nothing yet. The registry stamps
+/// its rows with the database clock, so the obligation is due at once rather
+/// than at that instant: a relay whose host clock is behind the database
+/// takes it in its first pass.
 pub(crate) async fn arm_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &ProcessRecord,
@@ -35,7 +38,7 @@ pub(crate) async fn arm_tx(
         &ObligationKey::ProcessTerminal {
             process_id: record.id.clone(),
         },
-        record.updated_at_ms,
+        crate::obligation_ledger::DUE_AT_ONCE_MS,
     )
     .await
     .map(|_| ())

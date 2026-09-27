@@ -79,6 +79,19 @@ impl DurableSessionOps {
         self.ingress.stalled(item_id).await
     }
 
+    /// The drive the relay's current claim of item `item_id` asked for, while
+    /// one is outstanding ([`IngressRelay::current_ask`](crate::runtime::drive::IngressRelay::current_ask)).
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub async fn current_ingress_ask(
+        &self,
+        item_id: &str,
+    ) -> Result<Option<crate::engine::DriveRequestId>, crate::StoreError> {
+        self.ingress.current_ask(item_id).await
+    }
+
     /// A head that cannot be read is not an error for a best-effort
     /// publication; it degrades to [`EMPTY_HEAD_REVISION`], which mints a
     /// cursor a reconnect resolves through gap recovery rather than losing the

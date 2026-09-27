@@ -370,6 +370,22 @@ impl ParkReasonCode {
 }
 
 impl ParkReason {
+    /// Whether the engine stopped retrying work whose last attempt admission
+    /// refused only because the session's park named a redrive that had not
+    /// settled (D15): the work waited behind that redrive, and once it
+    /// settles nothing of the work's own stops it. The engine records the
+    /// refusal as it rendered it, which names the typed code either way it
+    /// renders: its wire form or its variant.
+    #[must_use]
+    pub fn stopped_behind_unsettled_redrive(&self) -> bool {
+        let code = crate::runtime_error::RuntimeErrorCode::SessionRedriveUnsettled;
+        matches!(
+            self,
+            Self::EngineRetryExhausted { message, .. }
+                if message.contains(code.as_str()) || message.contains(&format!("{code:?}"))
+        )
+    }
+
     /// The park of an in-flight turn whose session the generation gate
     /// refused ([`ParkReason::SessionStateGenerationRefused`]).
     #[must_use]
@@ -1006,6 +1022,12 @@ pub struct UnsettledTurnCounts {
     /// in-flight turns too — they hold their claims — so this is never less
     /// than [`parked_turns`](Self::parked_turns).
     pub in_flight_turns: usize,
+    /// Sessions whose unparked turn in flight their stalled close holds: the
+    /// session's `CloseSession` intent stalled its obligation (ADR 0109 §4),
+    /// so the claim stays until an operator re-arms the close, whose delete
+    /// then retires it. A typed stall, like a park: never more than
+    /// `in_flight_turns - parked_turns`.
+    pub held_by_stalled_close: usize,
     /// The oldest live park's `since_ms`: the first park of the oldest
     /// still-parked turn, `None` when nothing is parked.
     pub oldest_parked_since_ms: Option<u64>,

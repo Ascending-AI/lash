@@ -203,8 +203,8 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
         out.push(format!("rearm {alias} -> {rearmed}"));
     }
     for alias in aliases {
-        let state = ledger.state(&ids[alias]).await.expect("state");
-        out.push(format!("state {alias} -> {state:?}"));
+        let standing = ledger.standing(&ids[alias]).await.expect("standing");
+        out.push(format!("standing {alias} -> {standing:?}"));
     }
     let unknown = ledger
         .state(&ObligationId::new(format!(

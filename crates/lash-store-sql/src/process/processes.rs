@@ -12,6 +12,10 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "processes";
 
+/// An obligation's standing: its state and the claims taken since it was
+/// armed, which name the attempt a delivery is under (ADR 0109).
+pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
+
 /// Every column, in insert order. The only statements that name all of them
 /// are the two backends' registration inserts.
 pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
@@ -259,8 +263,8 @@ crate::statements! {
         /// How many obligations are stalled.
         obligation_count_stalled = "SELECT COUNT(*) FROM processes WHERE obligation_state = 'stalled'";
 
-        /// Obligation `?1`'s state.
-        obligation_select_state = "SELECT obligation_state FROM processes WHERE obligation_id = ?1";
+        /// Obligation `?1`'s state and the claims taken since it was armed.
+        obligation_select_standing = "SELECT obligation_state, obligation_attempts FROM processes WHERE obligation_id = ?1";
 
         /// Settle process `?1`'s terminal publication delivered at `?2`,
         /// whatever claim holds it: the engine published the terminal itself
@@ -293,7 +297,7 @@ impl crate::obligation::ObligationStatementSet for ProcessObligationStatements {
             rearm: &self.obligation_rearm,
             select_stalled: &self.obligation_select_stalled,
             count_stalled: &self.obligation_count_stalled,
-            select_state: &self.obligation_select_state,
+            select_standing: &self.obligation_select_standing,
         }
     }
 }

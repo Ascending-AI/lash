@@ -57,7 +57,7 @@ use crate::engine::{
 use crate::store::{
     ClaimToken, ClaimedObligation, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, IntentApplication, IntentSettle, ObligationId, ObligationKey,
-    ObligationKind, ObligationLedger, ObligationSettlement, ObligationState, SettleOutcome,
+    ObligationKind, ObligationLedger, ObligationSettlement, ObligationStanding, SettleOutcome,
     StalledObligation, StoreError, scope_close_obligation_id,
 };
 use crate::{Clock, SessionStoreFactory, SessionWorkEngine};
@@ -569,7 +569,7 @@ impl ObligationLedger for ClaimRecordingLedger {
         self.inner.count_stalled().await
     }
 
-    async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
-        self.inner.state(id).await
+    async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
+        self.inner.standing(id).await
     }
 }

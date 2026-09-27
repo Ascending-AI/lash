@@ -20,7 +20,8 @@ use lash_core::Backend;
 use lash_core::sync::MutexExt as _;
 
 use super::deployment::{
-    CrashProcessPort, CrashSessionFactory, CrashSessionWork, DriverProxy, HostFaults, Trip,
+    CrashProcessPort, CrashSessionFactory, CrashSessionWork, DriveLog, DriverProxy, HostFaults,
+    Trip,
 };
 use super::engine::{Engine, EngineHold, EngineInvocation, EngineKind};
 
@@ -131,6 +132,8 @@ pub struct CrashWorld {
     /// How long [`quiesce`](Self::quiesce) waits in wall time for the server
     /// to settle, in milliseconds.
     quiesce_ms: std::sync::atomic::AtomicU64,
+    /// The drive requests the session work saw.
+    drives: Arc<DriveLog>,
 }
 
 impl std::fmt::Debug for CrashWorld {
@@ -183,10 +186,12 @@ impl CrashWorld {
         let trip = Arc::new(Trip::new(clock));
         let faults = Arc::new(HostFaults::new(Arc::clone(&trip)));
         let proxy = Arc::new(DriverProxy::default());
+        let drives = Arc::new(DriveLog::default());
         let work = Arc::new(CrashSessionWork::new(
             engine.explicit_reconcile_session_work(),
             Arc::clone(&proxy),
             Arc::clone(&faults),
+            Arc::clone(&drives),
         ));
         let backend = layered(engine.lash_backend(), &work, &faults);
         let killing = Arc::new(AtomicBool::new(false));
@@ -230,7 +235,15 @@ impl CrashWorld {
             interval: tokio::sync::Mutex::new(Interval::fresh(engine_now_ms)),
             ticks_run: std::sync::atomic::AtomicUsize::new(0),
             quiesce_ms: std::sync::atomic::AtomicU64::new(2_000),
+            drives,
         })
+    }
+
+    /// The drive requests the deployments' session work saw: what waiters
+    /// awaited and what the engine accepted as asks.
+    #[must_use]
+    pub fn drives(&self) -> &DriveLog {
+        &self.drives
     }
 
     #[must_use]

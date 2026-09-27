@@ -9,6 +9,10 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "control_intents";
 
+/// An obligation's standing: its state and the claims taken since it was
+/// armed, which name the attempt a delivery is under (ADR 0109).
+pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
+
 /// Every column a row decoder reads, in the order both backends index.
 pub const ROW_COLUMNS: &str = "intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id";
 
@@ -176,8 +180,8 @@ crate::statements! {
         /// How many obligations are stalled.
         obligation_count_stalled = "SELECT COUNT(*) FROM control_intents WHERE obligation_state = 'stalled'";
 
-        /// Obligation `?1`'s state.
-        obligation_select_state = "SELECT obligation_state FROM control_intents WHERE obligation_id = ?1";
+        /// Obligation `?1`'s state and the claims taken since it was armed.
+        obligation_select_standing = "SELECT obligation_state, obligation_attempts FROM control_intents WHERE obligation_id = ?1";
     }
 }
 
@@ -195,7 +199,7 @@ impl crate::obligation::ObligationStatementSet for ControlIntentObligationStatem
             rearm: &self.obligation_rearm,
             select_stalled: &self.obligation_select_stalled,
             count_stalled: &self.obligation_count_stalled,
-            select_state: &self.obligation_select_state,
+            select_standing: &self.obligation_select_standing,
         }
     }
 }

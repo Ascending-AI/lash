@@ -209,9 +209,9 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
             // release inside the engine half: what the ceiling owes is the
             // typed stall, surfaced for an operator, never another attempt.
             // A stalled close arms no physical delete (ADR 0109 §4), so the
-            // input its root claimed stays claimed: the ingress probe counts
-            // it in flight until S8-I's ingress ledger types it as held by
-            // the stalled close. The cell is ignored for S8-I until then.
+            // input its root claimed stays claimed: the store types that
+            // turn as held by the stalled close, and the ingress probe reads
+            // it as a typed stall, not a lost turn.
             expected.closed_scopes.clear();
             expected.closed_sessions.clear();
             expected.custom.push((

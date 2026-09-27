@@ -25,7 +25,7 @@ pub struct ObligationSql<'a> {
     pub rearm: &'a Rendered,
     pub select_stalled: &'a Rendered,
     pub count_stalled: &'a Rendered,
-    pub select_state: &'a Rendered,
+    pub select_standing: &'a Rendered,
 }
 
 /// A table module's obligation statement set.

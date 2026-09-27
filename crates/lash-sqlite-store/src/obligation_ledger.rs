@@ -14,8 +14,8 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     ClaimToken, ClaimedObligation, KeyColumn, KeyColumnType, ObligationId, ObligationKey,
-    ObligationKind, ObligationLedger, ObligationSettlement, ObligationState, SettleOutcome,
-    StallReason, StalledObligation,
+    ObligationKind, ObligationLedger, ObligationSettlement, ObligationStanding, ObligationState,
+    SettleOutcome, StallReason, StalledObligation,
 };
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
@@ -427,23 +427,29 @@ impl ObligationLedger for SqliteObligationLedger {
         u64::try_from(count).map_err(|_| stored_data_corrupt("obligation", "a negative count"))
     }
 
-    async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
+    async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
         let sql = self.sql();
         let id = id.as_str().to_owned();
-        let label: Option<Option<String>> = self
+        let row: Option<(Option<String>, i64)> = self
             .conn
             .call(move |conn| {
                 use rusqlite::OptionalExtension;
-                conn.query_row(sql.select_state.sql(), rusqlite::params![id], |row| {
-                    row.get(0)
+                conn.query_row(sql.select_standing.sql(), rusqlite::params![id], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
                 })
                 .optional()
             })
             .await
             .map_err(sqlite_error)?;
-        label
-            .flatten()
-            .map(|label| ObligationState::from_label(&label))
-            .transpose()
+        let Some((Some(label), attempts)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(ObligationStanding {
+            state: ObligationState::from_label(&label)?,
+            attempts: u32::try_from(attempts).map_err(|_| StoreError::StoredDataCorrupt {
+                record_kind: "Obligation",
+                message: format!("obligation attempt count {attempts} is out of range"),
+            })?,
+        }))
     }
 }

@@ -298,7 +298,7 @@ mod tests {
     use lash_sansio::SessionId;
 
     use super::*;
-    use crate::store::{ClaimToken, ObligationState, StalledObligation, UndecodableObligation};
+    use crate::store::{ClaimToken, StalledObligation, UndecodableObligation};
     use crate::testing::TestClock;
 
     /// A ledger that hands out one scripted page and records every
@@ -375,7 +375,10 @@ mod tests {
             Ok(0)
         }
 
-        async fn state(&self, _id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
+        async fn standing(
+            &self,
+            _id: &ObligationId,
+        ) -> Result<Option<crate::store::ObligationStanding>, StoreError> {
             Ok(None)
         }
     }

@@ -152,8 +152,8 @@ mod tests {
     use crate::engine::RelayPass;
     use crate::runtime::drive::relay::{RelayVerdict, deliver_now, relay_due};
     use crate::store::{
-        ClaimToken, ClaimedObligation, ObligationKind, ObligationSettlement, ObligationState,
-        SettleOutcome, StallReason, StalledObligation, StoreError, UndecodableObligation,
+        ClaimToken, ClaimedObligation, ObligationKind, ObligationSettlement, SettleOutcome,
+        StallReason, StalledObligation, StoreError, UndecodableObligation,
     };
     use crate::testing::TestClock;
 
@@ -269,7 +269,10 @@ mod tests {
             Ok(0)
         }
 
-        async fn state(&self, _id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
+        async fn standing(
+            &self,
+            _id: &ObligationId,
+        ) -> Result<Option<crate::store::ObligationStanding>, StoreError> {
             Ok(None)
         }
     }

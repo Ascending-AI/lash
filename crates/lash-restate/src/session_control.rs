@@ -1,8 +1,11 @@
 //! Restate's implementation of root release, resume and bounded park recovery.
 //!
-//! A paused session drive is never resumed by recovery (ADR 0109 §3): it is
-//! parked on its session's next root, and the park's redrive, cancel or fork
-//! resumes it.
+//! A paused session drive is never resumed blindly by recovery (ADR 0109
+//! §3): it is parked on its session's next root, and the park's redrive,
+//! cancel or fork resumes it. Recovery resumes only a drive that stopped
+//! behind a redrive that has since settled (D15), and releases one whose
+//! session's next work names no root, leaving that work to its ingress
+//! obligations.
 //!
 //! Every verb reaches the engine through the Restate admin API: pausing,
 //! resuming and killing an invocation have no ingress form. A deployment
@@ -151,7 +154,9 @@ impl RestateSessionControl {
             {
                 EngineParkRecorded::Parked(_) => report.parked.push(target),
                 EngineParkRecorded::AttachedToExisting(_) => report.attached += 1,
-                EngineParkRecorded::Redriven | EngineParkRecorded::NothingToPark => {
+                EngineParkRecorded::Redriven
+                | EngineParkRecorded::NothingToPark
+                | EngineParkRecorded::ResumeDrive => {
                     report.unchanged += 1;
                 }
                 EngineParkRecorded::TargetTerminal | EngineParkRecorded::TargetGone => {
@@ -168,10 +173,12 @@ impl RestateSessionControl {
         Ok(())
     }
 
-    /// Settle one paused session drive (ADR 0109 §3): never resumed here.
+    /// Settle one paused session drive (ADR 0109 §3): never resumed blindly.
     /// Its session is parked on its next root, and only that park's operator
-    /// verb resumes it ([`Self::resume_session_drives`]); a drive whose
-    /// session is gone is killed.
+    /// verb resumes it ([`Self::resume_session_drives`]). A drive that
+    /// stopped behind a redrive that has since settled is resumed; one whose
+    /// session is gone, or whose next work names no root to park on, is
+    /// killed, and the session's ingress obligations ask for a fresh drive.
     async fn reconcile_drive(
         &self,
         parks: &dyn ParkRecoveryWriter,
@@ -199,15 +206,32 @@ impl RestateSessionControl {
         {
             EngineParkRecorded::Parked(_) => report.parked.push(target),
             EngineParkRecorded::AttachedToExisting(_) => report.attached += 1,
+            EngineParkRecorded::ResumeDrive => {
+                self.admin
+                    .resume_invocation(&invocation.invocation_id())
+                    .await
+                    .map_err(refusal)?;
+                tracing::info!(
+                    session_id = %session,
+                    invocation = invocation.id.as_str(),
+                    event = "session.drive.resumed",
+                    "a session drive paused behind a redrive that has since settled is resumed"
+                );
+                report.resumed_drives.push(session);
+            }
             EngineParkRecorded::NothingToPark => {
+                self.admin
+                    .kill_invocation(&invocation.invocation_id())
+                    .await
+                    .map_err(refusal)?;
                 tracing::warn!(
                     session_id = %session,
                     invocation = invocation.id.as_str(),
-                    event = "session.drive.paused",
-                    "a paused session drive has no root to park on; it stays paused until \
-                     Restate's operator resumes it"
+                    event = "session.drive.released",
+                    "a paused session drive has no root to park on; it is released, and the \
+                     session's ingress obligations ask for a fresh drive"
                 );
-                report.unchanged += 1;
+                report.released_drives.push(session);
             }
             EngineParkRecorded::Redriven | EngineParkRecorded::TargetTerminal => {
                 report.unchanged += 1;

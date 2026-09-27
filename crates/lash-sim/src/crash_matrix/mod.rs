@@ -346,22 +346,6 @@ const fn today(
     }
 }
 
-const fn s8(
-    slice: S8Slice,
-    seam: Seam,
-    point: CrashPoint,
-    bound: DetectionBound,
-    summary: &'static str,
-) -> CaseSpec {
-    CaseSpec {
-        seam,
-        point,
-        activation: Activation::S8(slice),
-        bound,
-        summary,
-    }
-}
-
 /// The registry: every cell the matrix runs, today's and S8's. The generated
 /// tests in `tests/crash_point_matrix.rs` are checked against it.
 pub const MATRIX: &[CaseSpec] = &[
@@ -437,8 +421,7 @@ pub const MATRIX: &[CaseSpec] = &[
         DetectionBound::LapsedClaim,
         "a session close whose release ran but whose acknowledgement was lost is acknowledged once",
     ),
-    s8(
-        S8Slice::I,
+    today(
         Seam::ControlIntent,
         CrashPoint::DeliveryRetryableForever,
         DetectionBound::AttemptCeiling,

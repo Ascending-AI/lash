@@ -15,7 +15,7 @@ use std::sync::Arc;
 use super::StoreError;
 use super::obligation::{
     ClaimToken, ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, ObligationState, SettleOutcome, StalledObligation,
+    ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StalledObligation,
 };
 
 /// The obligation id an ingress row with item id `item_id` is armed under:
@@ -179,10 +179,10 @@ impl ObligationLedger for IngressLedger {
         Ok(count)
     }
 
-    async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
+    async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
         for table in &self.tables {
-            if let Some(state) = table.ledger.state(id).await? {
-                return Ok(Some(state));
+            if let Some(standing) = table.ledger.standing(id).await? {
+                return Ok(Some(standing));
             }
         }
         Ok(None)

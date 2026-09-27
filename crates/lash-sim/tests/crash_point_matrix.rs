@@ -58,7 +58,6 @@ crash_matrix! {
     control_intent_after_state_commit => (ControlIntent, AfterStateCommit);
     control_intent_during_engine_delivery => (ControlIntent, DuringEngineDelivery);
     control_intent_after_delivery_before_settle => (ControlIntent, AfterDeliveryBeforeSettle);
-    #[ignore = "FIG-3600 S8-I"]
     control_intent_delivery_retryable_forever => (ControlIntent, DeliveryRetryableForever);
 
     scope_close_after_state_commit => (ScopeClose, AfterStateCommit);
@@ -145,4 +144,16 @@ async fn the_checker_reports_a_lost_input_and_a_double_drive() {
             .any(|violation| violation.contains("committed 2 time(s)")),
         "an input driven twice is reported: {twice:#?}"
     );
+}
+
+/// FIG-3879: a waiter on an input whose drive the engine lost before it
+/// admitted anything follows the relay's ask under the next attempt to the
+/// input's answer, instead of waiting on the lost drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_waiter_follows_its_input_past_a_lost_ask() {
+    let violations =
+        Box::pin(crash_matrix::cases::a_waiter_follows_its_input_past_a_lost_ask(0x3879_0005))
+            .await
+            .expect("stage the lost ask");
+    assert!(violations.is_empty(), "{violations:#?}");
 }

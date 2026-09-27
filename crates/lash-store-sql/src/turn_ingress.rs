@@ -63,8 +63,11 @@ crate::statements! {
              RETURNING turn_id, park_id";
 
         /// The deployment's parked turns, the oldest live park's instant,
-        /// and its turns in flight: a session with a pending queued run, a
-        /// claimed turn input that is not settled, or a parked turn.
+        /// its turns in flight — a session with a pending queued run, a
+        /// claimed turn input that is not settled, or a parked turn — and
+        /// the unparked ones among them its stalled close holds: the
+        /// session's `close_session` intent stalled its obligation (ADR 0109
+        /// §4), so no delete retires the claim until an operator re-arms it.
         count_unsettled_turns = "SELECT
                 (SELECT COUNT(*) FROM turn_parks) AS parked_turns,
                 (SELECT MIN(since_ms) FROM turn_parks) AS oldest_parked_since_ms,
@@ -76,7 +79,19 @@ crate::statements! {
                     SELECT session_id FROM pending_turn_inputs
                     WHERE claim_id IS NOT NULL
                       AND {{nonterminal_turn_input_state(state)}}
-                ) AS unsettled) AS in_flight_turns";
+                ) AS unsettled) AS in_flight_turns,
+                (SELECT COUNT(*) FROM (
+                    SELECT session_id FROM queued_runs WHERE status = 'pending'
+                    UNION
+                    SELECT session_id FROM pending_turn_inputs
+                    WHERE claim_id IS NOT NULL
+                      AND {{nonterminal_turn_input_state(state)}}
+                ) AS held
+                WHERE held.session_id NOT IN (SELECT session_id FROM turn_parks)
+                  AND held.session_id IN (
+                      SELECT session_id FROM control_intents
+                      WHERE kind = 'close_session' AND obligation_state = 'stalled'
+                  )) AS held_by_stalled_close";
 
         /// Live parked turns grouped by their reason's stable code. All four
         /// `ParkReasonCode` cells stay observable: the reader zero-fills.

@@ -581,13 +581,29 @@ fn root_of_physical_turn(turn_id: &TurnId) -> TurnId {
 }
 
 /// A followed root that did not settle: it parked, holding its work until an
-/// operator resolves the park, or its input was withdrawn before any turn ran
-/// it.
+/// operator resolves the park; its input's delivery stalled, holding the
+/// input until an operator re-arms it; or its input was withdrawn before any
+/// turn ran it.
 fn unsettled_turn(status: &lash::TurnStatus) -> AppError {
     match status {
         lash::TurnStatus::Parked(_) => AppError {
             status: axum::http::StatusCode::CONFLICT,
             message: format!("turn_parked: {}", crate::PARKED_TURN_MESSAGE),
+            verdict: AppErrorVerdict::Parked,
+            retirement: None,
+        },
+        // Not terminal (ADR 0109 §3): the input stays durable, and a re-armed
+        // delivery drives it. Like a park, the turn is neither settled nor
+        // failed, and its invocation keeps its journal.
+        lash::TurnStatus::Stalled(stalled) => AppError {
+            status: axum::http::StatusCode::CONFLICT,
+            message: format!(
+                "turn_stalled: input `{}` was never delivered to the engine ({:?} after {} \
+                 attempt(s)); an operator re-arm of its delivery drives it",
+                stalled.input_id.as_str(),
+                stalled.reason,
+                stalled.attempts
+            ),
             verdict: AppErrorVerdict::Parked,
             retirement: None,
         },

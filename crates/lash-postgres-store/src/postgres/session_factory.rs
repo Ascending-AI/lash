@@ -530,6 +530,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let parked: i64 = row.get(0);
         let oldest_since_ms: Option<i64> = row.get(1);
         let in_flight: i64 = row.get(2);
+        let held_by_stalled_close: i64 = row.get(3);
         let reason_rows = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .family
@@ -575,6 +576,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         Ok(lash_core_execution::store::UnsettledTurnCounts {
             parked_turns: usize::try_from(parked).unwrap_or_default(),
             in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+            held_by_stalled_close: usize::try_from(held_by_stalled_close).unwrap_or_default(),
             oldest_parked_since_ms: oldest_since_ms.map(|ms| u64::try_from(ms).unwrap_or_default()),
             parked_by_reason,
             retired_by_executable_generation,

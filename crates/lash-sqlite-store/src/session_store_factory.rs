@@ -414,14 +414,19 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .await
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.read(|conn| {
-            let (parked, oldest_since_ms, in_flight): (i64, Option<i64>, i64) = conn
+            let (parked, oldest_since_ms, in_flight, held_by_stalled_close): (
+                i64,
+                Option<i64>,
+                i64,
+                i64,
+            ) = conn
                 .query_row(
                     crate::turn_ingress::turn_ingress_sql()
                         .family
                         .count_unsettled_turns
                         .sql(),
                     [],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .map_err(|err| {
                     rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
@@ -464,6 +469,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             Ok(lash_core_execution::store::UnsettledTurnCounts {
                 parked_turns: usize::try_from(parked).unwrap_or_default(),
                 in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+                held_by_stalled_close: usize::try_from(held_by_stalled_close).unwrap_or_default(),
                 oldest_parked_since_ms: oldest_since_ms
                     .map(|ms| u64::try_from(ms).unwrap_or_default()),
                 parked_by_reason,

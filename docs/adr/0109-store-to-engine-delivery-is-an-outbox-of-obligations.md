@@ -155,7 +155,11 @@ ObligationLedger>` over per-table statements in
 `lash_store_sql::obligation`. A slice decodes what the key names inside its
 `deliver`. A producer arms inside its own transaction with the same `arm`
 statement (`obligation_state = 'due'`, `obligation_due_at_ms = now`, a minted
-id), through the store's `arm_obligation` helper on that transaction.
+id), through the store's `arm_obligation` helper on that transaction. A
+producer whose transaction stamps its rows with the database clock (the
+PostgreSQL process registry) arms its row due at once (instant 0) rather than
+at that instant: the relays claim on their host clock, and a host clock behind
+the database must not defer the row's first attempt.
 
 ### 1.4 Engine half: the relay
 
@@ -405,8 +409,10 @@ being the claim's: the engine dedupes a request id against an invocation it
 lost (an operator kill) as well as a live one, so a claim that lapsed with
 nothing admitted is asked again under the next attempt, and past the attempt
 ceiling stalls typed instead. A waiter on an input attaches to the first
-attempt's drive. There is no repair scan for ingress. A native wake asks for
-its batch's first attempt once and leaves the rest to the relay.
+attempt's drive and follows the ask: when the drive it waits on ends with the
+input unadmitted and the row claimed under a later attempt, it attaches to
+that attempt's drive. There is no repair scan for ingress. A native wake asks
+for its batch's first attempt once and leaves the rest to the relay.
 
 **Parks.** The parks arm no longer resumes a paused drive blindly: a pause
 after the engine's own retries is recorded as a turn park, and only a redrive
@@ -414,8 +420,15 @@ verb resumes it. A drive paused in its admission is parked on the root the
 session's next admission names (an unfinished queued run, an owed follow-on,
 else the head input unless a command precedes it); a session already parked
 keeps its park, and its verb resumes the drive with the root. A drive whose
-next work names no root stays paused for the engine's operator; one whose
-session is gone is killed.
+every attempt was refused only because the park named a redrive that had not
+settled (D15) waited on that redrive, not on an operator: once the redrive
+settles — its park still held, or already cleared by its root's commit — the
+pass resumes the drive rather than parking it again. A drive whose next work
+names no root (only queued commands, a closing session's in-flight claim, or
+nothing) has no park a verb could resume, so the pass kills it: what the
+session still holds keeps its own ingress obligation, whose relay asks for a
+fresh drive, and the command lane drives the session. One whose session is
+gone is killed.
 
 **Repair.** The leader keeps one rate-bounded repair pass per kind that
 reports, and arms, a row that should owe an obligation and does not. It never
@@ -460,7 +473,10 @@ differently from the run that recorded it.
 
 An input claimed before the close does not finish. The close ends its root
 (`Cancelled`, cause `SessionDeleted`), and the delete retires the claim with
-the session's storage. The only close there is, is a delete. The crash
+the session's storage. A close whose obligation stalls arms no delete, so the
+claim stays until an operator re-arms the close: the store counts that turn as
+held by the stalled close (`UnsettledTurnCounts::held_by_stalled_close`), a
+typed stall like a park. The only close there is, is a delete. The crash
 matrix's control-intent cells therefore do not exclude a closing session's
 in-flight claim: the ingress invariant reads it until the session is deleted.
 

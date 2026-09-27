@@ -11,6 +11,10 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "parent_end_plans";
 
+/// An obligation's standing: its state and the claims taken since it was
+/// armed, which name the attempt a delivery is under (ADR 0109).
+pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
+
 /// Every column, in insert order. `settled_at_ms` and the obligation
 /// columns are absent: a plan is recorded unsettled and armed by the record.
 pub const INSERT_COLUMNS: &str = "parent_kind, parent_id, parent_payload, ended_at_ms";
@@ -144,8 +148,8 @@ crate::statements! {
         /// How many obligations are stalled.
         obligation_count_stalled = "SELECT COUNT(*) FROM parent_end_plans WHERE obligation_state = 'stalled'";
 
-        /// Obligation `?1`'s state.
-        obligation_select_state = "SELECT obligation_state FROM parent_end_plans WHERE obligation_id = ?1";
+        /// Obligation `?1`'s state and the claims taken since it was armed.
+        obligation_select_standing = "SELECT obligation_state, obligation_attempts FROM parent_end_plans WHERE obligation_id = ?1";
     }
 }
 
@@ -163,7 +167,7 @@ impl crate::obligation::ObligationStatementSet for ParentEndPlanObligationStatem
             rearm: &self.obligation_rearm,
             select_stalled: &self.obligation_select_stalled,
             count_stalled: &self.obligation_count_stalled,
-            select_state: &self.obligation_select_state,
+            select_standing: &self.obligation_select_standing,
         }
     }
 }

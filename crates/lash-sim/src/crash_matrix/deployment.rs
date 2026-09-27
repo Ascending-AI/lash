@@ -343,6 +343,31 @@ pub struct CrashSessionWork {
     proxy: Arc<DriverProxy>,
     faults: Arc<HostFaults>,
     installed: std::sync::Once,
+    /// Every drive request a waiter awaited, and every ask the engine
+    /// accepted, in order.
+    drives: Arc<DriveLog>,
+}
+
+/// The drive requests a deployment's session work saw: those a waiter
+/// awaited, and those the engine accepted as asks.
+#[derive(Debug, Default)]
+pub struct DriveLog {
+    awaited: std::sync::Mutex<Vec<String>>,
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+impl DriveLog {
+    /// Every drive request a waiter awaited, in order.
+    #[must_use]
+    pub fn awaited(&self) -> Vec<String> {
+        self.awaited.lock_recover().clone()
+    }
+
+    /// Every drive ask the engine accepted, in order.
+    #[must_use]
+    pub fn asked(&self) -> Vec<String> {
+        self.asked.lock_recover().clone()
+    }
 }
 
 impl std::fmt::Debug for CrashSessionWork {
@@ -359,12 +384,14 @@ impl CrashSessionWork {
         inner: Arc<dyn SessionWorkEngine>,
         proxy: Arc<DriverProxy>,
         faults: Arc<HostFaults>,
+        drives: Arc<DriveLog>,
     ) -> Self {
         Self {
             inner,
             proxy,
             faults,
             installed: std::sync::Once::new(),
+            drives,
         }
     }
 }
@@ -403,6 +430,10 @@ impl SessionWorkEngine for CrashSessionWork {
         session: &SessionId,
         request: &lash_core::engine::DriveRequestId,
     ) -> Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+        self.drives
+            .awaited
+            .lock_recover()
+            .push(request.as_str().to_owned());
         self.inner.await_drive(session, request).await
     }
 
@@ -420,7 +451,10 @@ impl SessionWorkEngine for CrashSessionWork {
             Some(effect) => return Err(refusal(effect, HostSite::DriveAsk)),
             None => {}
         }
-        self.inner.request_drive(session, request).await
+        let asked = request.as_str().to_owned();
+        self.inner.request_drive(session, request).await?;
+        self.drives.asked.lock_recover().push(asked);
+        Ok(())
     }
 
     async fn session_work_in_flight(&self, session: &SessionId) -> bool {

@@ -121,6 +121,19 @@ family owns the whole predicate and reads the root family's binding inside it.
 """
 
 [[cross_family]]
+statement = "turn_ingress.count_unsettled_turns"
+owner = "crates/lash-store-sql/src/turn_ingress.rs"
+touches = ["control_intents"]
+reason = """
+A turn a session's close holds in flight is typed, not lost, only while that
+close's intent is stalled: its release never ran, so no physical delete is
+armed and the claimed input stays claimed (ADR 0109 §4). The count reads the
+intent's obligation state inside the one snapshot it counts in-flight turns
+from, so a close that stalls or is rearmed between two statements cannot make
+the same turn count as both held and untyped.
+"""
+
+[[cross_family]]
 statement = "pending_turn_input.delete_withdrawn"
 owner = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
 touches = ["session_root_inputs"]

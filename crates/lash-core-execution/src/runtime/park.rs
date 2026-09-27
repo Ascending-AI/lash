@@ -147,10 +147,15 @@ impl StoreParkRecovery<'_> {
     ///
     /// A session already parked keeps its park: the drive stopped behind it,
     /// and the verb that resolves it resumes the drive too. A redrive still
-    /// open owns the session. A settled redrive after which the drive is
-    /// still stopped re-parks its root, so the operator can act again.
-    /// Otherwise the root the session's next admission names is parked, with
-    /// no engine handle: the engine finds the stopped drive by its session.
+    /// open owns the session. A drive whose every attempt was refused only
+    /// because that redrive had not settled (D15) waited on the redrive, not
+    /// on an operator: once the redrive settles — its park still held, or
+    /// already cleared by its root's commit — the engine resumes the drive.
+    /// Any other drive still stopped after a settled redrive re-parks its
+    /// root, so the operator can act again. Otherwise the root the session's
+    /// next admission names is parked, with no engine handle: the engine
+    /// finds the stopped drive by its session. A drive whose next work names
+    /// no root is released: its session's ingress obligations ask again.
     async fn record_drive_park(
         &self,
         session: &crate::SessionId,
@@ -167,6 +172,7 @@ impl StoreParkRecovery<'_> {
                 .await
                 .map_err(|refusal| StoreError::Backend(refusal.to_string()))
         };
+        let behind_redrive = reason.stopped_behind_unsettled_redrive();
         let (root, after_redrive) = match store.load_turn_park(session).await? {
             Some(park) => match park.resume_intent {
                 None => return Ok(EngineParkRecorded::AttachedToExisting(park.park_id)),
@@ -179,9 +185,21 @@ impl StoreParkRecovery<'_> {
                     if open || !still_stopped().await? {
                         return Ok(EngineParkRecorded::Redriven);
                     }
+                    if behind_redrive {
+                        return Ok(EngineParkRecorded::ResumeDrive);
+                    }
                     (park.turn_id, Some(intent))
                 }
             },
+            // The redrive the drive stopped behind settled, and its root's
+            // commit already cleared the park.
+            None if behind_redrive => {
+                return Ok(if still_stopped().await? {
+                    EngineParkRecorded::ResumeDrive
+                } else {
+                    EngineParkRecorded::Redriven
+                });
+            }
             None => {
                 let Some(root) = next_admission_root(store.as_ref(), session).await? else {
                     return Ok(EngineParkRecorded::NothingToPark);

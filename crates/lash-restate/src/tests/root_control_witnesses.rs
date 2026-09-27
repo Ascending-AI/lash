@@ -20,12 +20,24 @@ struct Driver {
     /// Admission names the root again after it ended: a store that has not
     /// caught up with the root's release.
     repeat_released: AtomicBool,
+    /// A failing admission answers D15's refusal: the session's park names a
+    /// redrive that has not settled.
+    redrive_unsettled: AtomicBool,
+    /// The session holds only a queued command: admission names no root.
+    command_only: bool,
+    admits: AtomicUsize,
     commits: AtomicUsize,
 }
 fn fault() -> lash_core::RuntimeError {
     lash_core::RuntimeError::new(
         lash_core::RuntimeErrorCode::PluginSessionManager,
         "injected execution fault",
+    )
+}
+fn redrive_unsettled() -> lash_core::RuntimeError {
+    lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::SessionRedriveUnsettled,
+        "the session admits no turn input while its park names an unsettled redrive",
     )
 }
 #[async_trait::async_trait]
@@ -39,8 +51,18 @@ impl SessionDriver for Driver {
         request: &DriveRequest,
         ordinal: u32,
     ) -> Result<AdmitVerdict, DriveAbort> {
+        self.admits.fetch_add(1, Ordering::SeqCst);
         if self.admission_fails.load(Ordering::SeqCst) {
-            return Err(DriveAbort::Retry(fault()));
+            return Err(DriveAbort::Retry(
+                if self.redrive_unsettled.load(Ordering::SeqCst) {
+                    redrive_unsettled()
+                } else {
+                    fault()
+                },
+            ));
+        }
+        if self.command_only {
+            return Ok(AdmitVerdict::Idle);
         }
         let root = if !self.repeat_released.load(Ordering::SeqCst)
             && self
@@ -133,6 +155,8 @@ struct Fixture {
     factory: Arc<dyn lash_core::SessionStoreFactory>,
     /// The law stores' `ControlIntent` obligation ledger.
     intents: Arc<dyn ObligationLedger>,
+    /// The queued command of a [`Fixture::with_command`] session.
+    batch: Option<lash_core::BatchId>,
 }
 /// The session work of `work` with its control engine replaced: an engine
 /// half that fails where the fixture injects it.
@@ -161,6 +185,14 @@ impl SessionWorkEngine for WithControl {
 }
 impl Fixture {
     async fn new(server: HarnessServer, admission: bool) -> Self {
+        Self::build(server, admission, false).await
+    }
+    /// A session whose only work is a queued command: its next admission
+    /// names no root.
+    async fn with_command(server: HarnessServer) -> Self {
+        Self::build(server, true, true).await
+    }
+    async fn build(server: HarnessServer, admission: bool, command_only: bool) -> Self {
         let harness = LiveConformanceHarness::start_on(server).await;
         let session = SessionId::from(format!("control-witness-{}", harness.run_nonce()));
         let root = TurnId::from("root");
@@ -175,19 +207,35 @@ impl Fixture {
             })
             .await
             .expect("store");
-        let input = store
-            .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
-                session.clone(),
-                lash_core::TurnInputIngress::next_turn(),
-                lash_core::TurnInput::text("input"),
-            ))
-            .await
-            .expect("enqueue")
-            .input_id;
-        store
-            .bind_root_inputs(&session, &root, std::slice::from_ref(&input))
-            .await
-            .expect("bind");
+        let (input, batch) = if command_only {
+            let batch = store
+                .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+                    session.clone(),
+                    lash_core::DeliveryPolicy::AfterCurrentTurnCommit,
+                    lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+                        reason: "the session's only work".into(),
+                    },
+                ))
+                .await
+                .expect("enqueue the command")
+                .batch_id;
+            (lash_core::InputId::from("no-input"), Some(batch))
+        } else {
+            let input = store
+                .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+                    session.clone(),
+                    lash_core::TurnInputIngress::next_turn(),
+                    lash_core::TurnInput::text("input"),
+                ))
+                .await
+                .expect("enqueue")
+                .input_id;
+            store
+                .bind_root_inputs(&session, &root, std::slice::from_ref(&input))
+                .await
+                .expect("bind");
+            (input, None)
+        };
         let driver = Arc::new(Driver {
             session,
             root,
@@ -197,6 +245,9 @@ impl Fixture {
             restored: AtomicBool::new(false),
             admission_fails: AtomicBool::new(admission),
             repeat_released: AtomicBool::new(false),
+            redrive_unsettled: AtomicBool::new(false),
+            command_only,
+            admits: AtomicUsize::new(0),
             commits: AtomicUsize::new(0),
         });
         let work = harness.session_work();
@@ -213,6 +264,7 @@ impl Fixture {
             work,
             factory,
             intents,
+            batch,
         }
     }
     /// The `ControlIntent` relay over the fixture's ledger and engine —
@@ -278,8 +330,131 @@ impl Fixture {
         }
         panic!("engine did not pause within the bounded witness");
     }
+    /// Run the engine until the session's drive is paused.
+    async fn await_paused_drive(&self) {
+        let admin = self.harness.admin_client();
+        for _ in 0..2000 {
+            if let Some(server) = self.harness.server_double() {
+                server.settle().await;
+                server.fire_next_timer();
+            }
+            if !admin
+                .paused_session_drives(self.driver.session.as_str())
+                .await
+                .expect("paused drives")
+                .is_empty()
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the session's drive did not pause within the bounded witness");
+    }
+    /// The session's paused drives now.
+    async fn paused_drives(&self) -> usize {
+        self.harness
+            .admin_client()
+            .paused_session_drives(self.driver.session.as_str())
+            .await
+            .expect("paused drives")
+            .len()
+    }
+    /// One park-reconcile pass over the whole listing.
+    async fn park_pass(&self) -> ParkReconcileReport {
+        let clock = lash_core::facade_support::SystemClock;
+        let writer = lash_core::drive::StoreParkRecovery::new(self.factory.as_ref(), &clock);
+        self.work
+            .control()
+            .reconcile_parks(
+                &writer,
+                EnginePage {
+                    after: None,
+                    limit: NonZeroUsize::new(16).expect("page"),
+                },
+            )
+            .await
+            .expect("park pass")
+    }
+    /// Attach to `request`'s drive, firing the double's timers while it
+    /// runs; `None` when it did not end within the bounded witness.
+    async fn attach_within(&self, request: DriveRequestId) -> Option<DriveOutcome> {
+        let attach = self.work.attach_drive(&self.driver.session, request);
+        tokio::pin!(attach);
+        for _ in 0..1000 {
+            if let Some(server) = self.harness.server_double() {
+                server.settle().await;
+                server.fire_next_timer();
+            }
+            tokio::select! {
+                outcome = &mut attach => return Some(outcome.expect("the drive answers")),
+                () = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+            }
+        }
+        None
+    }
     async fn finish(&self) {
         self.harness.finish().await;
+    }
+}
+
+/// An engine half whose resume ran but whose reply was lost: the redrive
+/// intent stays open, retryable.
+struct LostResumeReply {
+    inner: Arc<dyn SessionControlEngine>,
+}
+#[async_trait::async_trait]
+impl SessionControlEngine for LostResumeReply {
+    async fn reconcile_parks(
+        &self,
+        writer: &dyn ParkRecoveryWriter,
+        page: EnginePage,
+    ) -> Result<ParkReconcileReport, EngineRefusal> {
+        self.inner.reconcile_parks(writer, page).await
+    }
+    async fn resume_root(
+        &self,
+        target: &RootRef,
+        engine: Option<&EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        self.inner.resume_root(target, engine).await?;
+        Err(EngineRefusal::Retryable(
+            "lost reply after the engine resumed".into(),
+        ))
+    }
+    async fn release_root(
+        &self,
+        target: &RootRef,
+        engine: Option<&EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        self.inner.release_root(target, engine).await
+    }
+}
+
+/// The engine half's reply, redelivered: the engine already resumed what the
+/// redrive holds, and answers without touching it again.
+struct ReplyOnly;
+#[async_trait::async_trait]
+impl SessionControlEngine for ReplyOnly {
+    async fn reconcile_parks(
+        &self,
+        _: &dyn ParkRecoveryWriter,
+        _: EnginePage,
+    ) -> Result<ParkReconcileReport, EngineRefusal> {
+        Ok(ParkReconcileReport::default())
+    }
+    async fn resume_root(
+        &self,
+        _: &RootRef,
+        _: Option<&EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        Ok(EngineAck::Resumed)
+    }
+    async fn release_root(
+        &self,
+        _: &RootRef,
+        _: Option<&EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        Ok(EngineAck::NothingHeld)
     }
 }
 
@@ -468,6 +643,145 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
             .is_none(),
         "the root's commit cleared the park"
     );
+    f.finish().await;
+}
+
+/// FIG-3879 (D15): a drive the engine paused only because its session's park
+/// named a redrive that had not settled — every attempt refused its admission
+/// retryably, and the redrive's own engine half ran before the pause — is
+/// resumed by the recovery pass once that redrive settles. It is never parked
+/// again for a second operator redrive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drive_paused_only_by_an_unsettled_redrive_is_resumed_once_it_settles() {
+    let f = Fixture::new(HarnessServer::in_process(), true).await;
+    f.reconcile_until(true).await;
+    let park = f
+        .driver
+        .store
+        .load_turn_park(&f.driver.session)
+        .await
+        .expect("park")
+        .expect("the paused drive parked its session's next root");
+    // The operator redrives. The engine half resumes the drive, but its reply
+    // is lost: the intent stays open, and the resumed drive's admission meets
+    // the unsettled redrive on every attempt until the engine pauses it again.
+    f.driver.redrive_unsettled.store(true, Ordering::SeqCst);
+    let intent = f
+        .factory
+        .open_root_intent(
+            &RootIntentRequest {
+                session_id: f.driver.session.clone(),
+                root: f.driver.root.clone(),
+                park: park.park_id,
+                verb: RootVerb::Redrive,
+            },
+            5,
+        )
+        .await
+        .expect("redrive");
+    let lost = f
+        .relay(
+            Some(Arc::new(LostResumeReply {
+                inner: f.work.control(),
+            })),
+            Arc::new(NoScopeClose),
+        )
+        .deliver_intent(&intent)
+        .await
+        .expect("apply");
+    assert!(
+        lost.is_open(),
+        "the lost reply keeps the redrive open: {lost:?}"
+    );
+    f.await_paused_drive().await;
+    let open = f.park_pass().await;
+    assert!(open.parked.is_empty(), "{open:?}");
+    assert_eq!(f.paused_drives().await, 1, "an open redrive owns the drive");
+    // The redrive's reply lands: it settles without another engine call.
+    let settled = f
+        .relay(Some(Arc::new(ReplyOnly)), Arc::new(NoScopeClose))
+        .deliver_intent(&intent)
+        .await
+        .expect("settle");
+    assert!(
+        matches!(settled, ControlIntentState::Acknowledged { .. }),
+        "{settled:?}"
+    );
+    f.driver.redrive_unsettled.store(false, Ordering::SeqCst);
+    f.driver.admission_fails.store(false, Ordering::SeqCst);
+    f.driver.restored.store(true, Ordering::SeqCst);
+    let pass = f.park_pass().await;
+    assert!(
+        pass.parked.is_empty(),
+        "the settled redrive's drive is not parked again: {pass:?}"
+    );
+    assert_eq!(pass.resumed_drives, vec![f.driver.session.clone()]);
+    let outcome = f
+        .attach_within(DriveRequestId::new("initial"))
+        .await
+        .expect("the pass resumed the drive the settled redrive left paused");
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(f.driver.commits.load(Ordering::SeqCst), 1);
+    assert!(
+        f.driver
+            .store
+            .load_turn_park(&f.driver.session)
+            .await
+            .expect("park")
+            .is_none(),
+        "the root's commit cleared the park; no second redrive was needed"
+    );
+    f.finish().await;
+}
+
+/// FIG-3879: a paused drive whose session's next work names no root — here
+/// only a queued command — has no park an operator verb could resume it
+/// through. The recovery pass releases it, and the command lane drives the
+/// session again: the command's ingress obligation asks for a fresh drive,
+/// which the released session admits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_paused_drive_with_no_root_to_park_is_released_to_its_command_lane() {
+    let f = Fixture::with_command(HarnessServer::in_process()).await;
+    f.await_paused_drive().await;
+    let pass = f.park_pass().await;
+    assert!(pass.parked.is_empty(), "nothing names a root: {pass:?}");
+    assert_eq!(pass.released_drives, vec![f.driver.session.clone()]);
+    f.driver.admission_fails.store(false, Ordering::SeqCst);
+    let admitted = f.driver.admits.load(Ordering::SeqCst);
+    // The command's ingress obligation is still owed: its relay asks for the
+    // session's drive under its first attempt.
+    let batch = f.batch.clone().expect("the queued command");
+    let relay = lash_core::drive::IngressRelay::new(
+        f.harness
+            .law_stores()
+            .obligation_ledger(ObligationKind::Ingress),
+        Arc::new(f.work.clone()),
+        Arc::new(lash_core::facade_support::SystemClock),
+    );
+    let asked = lash_core::drive::relay::relay_due(
+        &relay,
+        &lash_core::facade_support::SystemClock,
+        NonZeroUsize::new(16).expect("page"),
+    )
+    .await
+    .expect("relay pass");
+    assert_eq!(
+        asked.requested, 1,
+        "the command's obligation asks: {asked:?}"
+    );
+    let outcome = f
+        .attach_within(lash_core::drive::ingress_drive_request(
+            batch.as_str(),
+            lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        ))
+        .await
+        .expect("the command's drive runs: no paused drive holds the session");
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert!(
+        f.driver.admits.load(Ordering::SeqCst) > admitted,
+        "the command's drive admitted the session"
+    );
+    assert_eq!(f.paused_drives().await, 0, "no drive is left paused");
     f.finish().await;
 }
 

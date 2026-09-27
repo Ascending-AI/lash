@@ -126,8 +126,10 @@ pub trait SessionControlEngine: Send + Sync {
     /// O3: the engine's stalled work becomes lash parks. Every execution the
     /// engine stopped retrying is recorded through `parks` with
     /// [`ParkReason::EngineRetryExhausted`] and the engine's handle; one
-    /// whose target already ended is released instead. A stalled
-    /// admission-only drive (no root, no effects) is resumed, never parked.
+    /// whose target already ended is released instead. A stalled session
+    /// drive is parked on its session's next root; one that stopped only
+    /// behind a redrive that has since settled is resumed, and one whose
+    /// session's next work names no root is released (ADR 0109 §3).
     ///
     /// Bounded: at most `page.limit` executions after `page.after`, in the
     /// engine's own order; the report's `next` resumes the listing, and
@@ -266,9 +268,17 @@ pub enum EngineParkRecorded {
     /// re-lists the execution if it stops again.
     Redriven,
     /// A stopped drive whose session's next work names no root — only
-    /// queued commands, or nothing: nothing was written, and the engine's
-    /// pause stands until the engine's own operator resumes it.
+    /// queued commands, a closing session's in-flight claim, or nothing: no
+    /// operator verb could resume it, so nothing was written and the engine
+    /// releases the drive. What the session still holds keeps its own
+    /// ingress obligation, whose relay asks for a fresh drive: the command
+    /// lane drives the session again (ADR 0109 §3).
     NothingToPark,
+    /// A stopped drive whose every attempt was refused only because its
+    /// session's park named a redrive that had not settled (D15), and that
+    /// redrive has since settled: the engine resumes the drive. Nothing was
+    /// written; the redrive already was the operator's action.
+    ResumeDrive,
 }
 
 /// The engine's live view of the one stalled execution a
@@ -317,14 +327,19 @@ pub struct ParkReconcileReport {
     /// Roots whose execution this pass released because the store had
     /// already ended them.
     pub released: Vec<RootRef>,
-    /// Sessions whose stopped drive this pass released because the session
-    /// is gone. A stopped drive is never resumed here (ADR 0109 §3): it is
-    /// parked, and only the park's operator verb resumes it.
+    /// Sessions whose stopped drive this pass released: the session is
+    /// gone, or its next work names no root to park on, and its ingress
+    /// obligations ask for a fresh drive.
     pub released_drives: Vec<SessionId>,
     /// Processes this pass ended `SubstrateLost` because the engine had
     /// finished their current segment's execution without their terminal (an
     /// operator's kill): nothing would ever run them again.
     pub ended_processes: Vec<crate::ProcessId>,
+    /// Sessions whose stopped drive this pass resumed: it stopped only behind
+    /// a redrive that has since settled (D15). Any other stopped drive is
+    /// never resumed here (ADR 0109 §3): it is parked, and only the park's
+    /// operator verb resumes it.
+    pub resumed_drives: Vec<SessionId>,
     /// Stalled executions this pass left as they were.
     pub unchanged: usize,
     /// Stalled executions this pass could not settle, each with why: one

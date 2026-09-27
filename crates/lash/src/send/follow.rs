@@ -55,10 +55,11 @@ pub(super) enum Subject {
 }
 
 impl Subject {
-    /// The drive request a follower waits on: an accepted row's request is
-    /// the one its ingress obligation delivers (ADR 0109 §3), so waiting
-    /// attaches to that drive, or starts it when no delivery reached the
-    /// engine yet.
+    /// The drive request a follower first waits on: an accepted row's
+    /// request is the one its ingress obligation delivers (ADR 0109 §3), so
+    /// waiting attaches to that drive, or starts it when no delivery reached
+    /// the engine yet. A follower moves on to the relay's later ask when the
+    /// engine lost this one ([`moved_ask`]).
     fn drive_request(&self) -> DriveRequestId {
         match self {
             Self::Input(receipt) => lash_core::drive::ingress_drive_request(
@@ -234,6 +235,40 @@ fn await_drive(
     })
 }
 
+/// The relay's last ask for an input subject's drive, when it moved past
+/// `request`: the engine lost the ask the follower waited on (an operator
+/// kill) before it admitted the input, so the relay asked again under the
+/// next attempt, `ingress:{input}:{attempt}` — whether or not that drive has
+/// admitted the input yet. The follower attaches to that drive rather than
+/// wait on the lost one. A root subject has no ask.
+async fn moved_ask(
+    ctx: &SendContext,
+    subject: &Subject,
+    request: &DriveRequestId,
+) -> Option<DriveRequestId> {
+    let Subject::Input(receipt) = subject else {
+        return None;
+    };
+    match ctx
+        .parts
+        .ops
+        .current_ingress_ask(receipt.input_id.as_str())
+        .await
+    {
+        Ok(Some(ask)) if ask != *request => Some(ask),
+        Ok(_) => None,
+        Err(error) => {
+            tracing::debug!(
+                session_id = %ctx.parts.session_id,
+                input_id = %receipt.input_id.as_str(),
+                error = %error,
+                "send handle could not read its input's current drive ask; waiting on the one it holds"
+            );
+            None
+        }
+    }
+}
+
 /// Where a follower stands in its subject's live activity: the replay
 /// cursor to go on from, whether it has observed any of the root's activity,
 /// and the gaps it has met so far. A windowed follower hands its position to
@@ -348,7 +383,7 @@ pub(super) async fn follow(
     let mut adoption = Adoption::new(subject);
     let observed_before = from.observed;
     let mut observation = Observation::subscribe(ctx, from, tap).await;
-    let request = subject.drive_request();
+    let mut request = subject.drive_request();
     let mut drive = Some(await_drive(ctx, &request, None));
     let mut drive_stopped: Option<tokio::time::Instant> = None;
     let mut refused: Option<lash_core::RuntimeError> = None;
@@ -454,6 +489,20 @@ pub(super) async fn follow(
                     })));
                 }
                 Resolution::Undecided { root } => {
+                    // The input's drive may have moved on from the one this
+                    // follower waits on: follow it, whatever the lost drive's
+                    // own attach is still doing.
+                    if let Some(ask) = moved_ask(ctx, subject, &request).await {
+                        tracing::debug!(
+                            session_id = %ctx.parts.session_id,
+                            from = request.as_str(),
+                            to = ask.as_str(),
+                            "send handle follows its input's drive to the relay's next ask"
+                        );
+                        request = ask;
+                        drive = Some(await_drive(ctx, &request, None));
+                        drive_stopped = None;
+                    }
                     if let Some(root) = root {
                         adoption.adopt(root, tap).await;
                         if let Some(stopped) = drive_stopped
@@ -524,6 +573,18 @@ pub(super) async fn follow(
                 }
             } => {
                 drive = None;
+                if let Some(ask) = moved_ask(ctx, subject, &request).await {
+                    tracing::debug!(
+                        session_id = %ctx.parts.session_id,
+                        from = request.as_str(),
+                        to = ask.as_str(),
+                        "send handle follows its input's drive to the relay's next ask"
+                    );
+                    request = ask;
+                    drive = Some(await_drive(ctx, &request, None));
+                    drive_stopped = None;
+                    continue;
+                }
                 match answer {
                     Ok(_) | Err(DriveAbort::Parked { .. }) => {
                         drive_stopped.get_or_insert_with(tokio::time::Instant::now);

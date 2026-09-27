@@ -233,8 +233,10 @@ impl ObligationProbe for ParentEndPlanProbe {
     }
 }
 
-/// Turns in flight that no park holds: claimed inputs or a pending queued
-/// run. A parked turn is stalled with its park reason, typed.
+/// Turns in flight that no park and no stalled close holds: claimed inputs
+/// or a pending queued run. A parked turn is stalled with its park reason,
+/// and one its session's stalled close holds with the close's obligation
+/// (ADR 0109 §4): both typed.
 struct TurnProbe;
 
 #[async_trait::async_trait]
@@ -254,12 +256,16 @@ impl ObligationProbe for TurnProbe {
             .count_unsettled_turns()
             .await
             .map_err(|error| format!("count unsettled turns: {error}"))?;
-        let unparked = counts.in_flight_turns.saturating_sub(counts.parked_turns);
-        Ok(if unparked == 0 {
+        let untyped = counts
+            .in_flight_turns
+            .saturating_sub(counts.parked_turns)
+            .saturating_sub(counts.held_by_stalled_close);
+        Ok(if untyped == 0 {
             Vec::new()
         } else {
             vec![format!(
-                "{unparked} session(s) hold a turn in flight that no park accounts for: {counts:?}"
+                "{untyped} session(s) hold a turn in flight that no park or stalled close \
+                 accounts for: {counts:?}"
             )]
         })
     }

@@ -8,6 +8,8 @@
 //! checks the detection bound and that every live session still drives.
 
 mod ingress;
+
+pub use ingress::a_waiter_follows_its_input_past_a_lost_ask;
 mod intent;
 pub(crate) mod process;
 mod scope;
@@ -250,7 +252,10 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
     };
     let bound = spec.bound.limit();
     if spec.bound == super::DetectionBound::AttemptCeiling {
-        world.set_quiesce_budget(Duration::from_millis(100));
+        // Hundreds of ticks, each awaiting its own relay pass: the wait for
+        // the engine to settle only lets host work the pass handed off land,
+        // and the held root this world keeps open never settles.
+        world.set_quiesce_budget(Duration::from_millis(20));
     }
     let min_tick = super::TICK - super::TICK / 10;
     let max_ticks = (bound.as_millis() / min_tick.as_millis()) as usize + 2;

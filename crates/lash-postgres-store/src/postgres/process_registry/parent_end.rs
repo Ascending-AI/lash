@@ -101,7 +101,10 @@ pub(crate) async fn lock_parent_scope_tx(
 /// The row `parent`'s record writes is also its `ParentEnd` obligation, due
 /// immediately (ADR 0109 §3): the record arms it in the same transaction, so
 /// no crash window can leave a plan nothing will ever deliver. A replayed
-/// record keeps the first row — and the obligation it already owes.
+/// record keeps the first row — and the obligation it already owes. The
+/// plan's `ended_at_ms` is the registry's database-clock instant, so the
+/// obligation is due at once rather than at it: a relay whose host clock is
+/// behind the database takes it in its first pass.
 pub(crate) async fn record_tx(
     tx: &mut Transaction<'_, Postgres>,
     parent: &ScopeId,
@@ -125,7 +128,7 @@ pub(crate) async fn record_tx(
             parent_kind: kind.to_string(),
             parent_id: id,
         },
-        ended_at_ms,
+        crate::obligation_ledger::DUE_AT_ONCE_MS,
     )
     .await
     .map_err(|error| PluginError::Session(error.to_string()))?;

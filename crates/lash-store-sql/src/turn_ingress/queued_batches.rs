@@ -3,6 +3,10 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "queued_work_batches";
 
+/// An obligation's standing: its state and the claims taken since it was
+/// armed, which name the attempt a delivery is under (ADR 0109).
+pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
+
 /// Every column a reader decodes.
 ///
 /// Both backends carried this as a 14-element `QUEUED_WORK_COLUMNS` array that
@@ -320,8 +324,8 @@ crate::statements! {
         /// How many obligations are stalled.
         obligation_count_stalled = "SELECT COUNT(*) FROM queued_work_batches WHERE obligation_state = 'stalled'";
 
-        /// Obligation `?1`'s state.
-        obligation_select_state = "SELECT obligation_state FROM queued_work_batches WHERE obligation_id = ?1";
+        /// Obligation `?1`'s state and the claims taken since it was armed.
+        obligation_select_standing = "SELECT obligation_state, obligation_attempts FROM queued_work_batches WHERE obligation_id = ?1";
     }
 }
 
@@ -339,7 +343,7 @@ impl crate::obligation::ObligationStatementSet for QueuedBatchObligationStatemen
             rearm: &self.obligation_rearm,
             select_stalled: &self.obligation_select_stalled,
             count_stalled: &self.obligation_count_stalled,
-            select_state: &self.obligation_select_state,
+            select_standing: &self.obligation_select_standing,
         }
     }
 }

@@ -11,8 +11,8 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     ClaimToken, ClaimedObligation, KeyColumn, KeyColumnType, ObligationId, ObligationKey,
-    ObligationKind, ObligationLedger, ObligationSettlement, ObligationState, SettleOutcome,
-    StallReason, StalledObligation, UndecodableObligation,
+    ObligationKind, ObligationLedger, ObligationSettlement, ObligationStanding, ObligationState,
+    SettleOutcome, StallReason, StalledObligation, UndecodableObligation,
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
@@ -169,6 +169,14 @@ fn key_query<'q>(
     }
     query
 }
+
+/// The due instant of an obligation armed by a transaction that reads the
+/// database clock — the process registry's (ADR 0044): due at once. The
+/// relays claim on their host clock, so an arm stamped by a database clock
+/// ahead of a relay would defer the row's first attempt until that relay's
+/// clock caught up; a row due at once is taken by the first pass of any
+/// relay, the way the ingress ledger re-opens an abandoned claim.
+pub(crate) const DUE_AT_ONCE_MS: u64 = 0;
 
 /// Arm `key`'s row as a fresh obligation due at `now_ms` inside a producer's
 /// own transaction: the helper a slice's producer calls on its transaction.
@@ -427,16 +435,20 @@ impl ObligationLedger for PostgresObligationLedger {
         u64::try_from(count).map_err(|_| corrupt("a negative count"))
     }
 
-    async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
+    async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
         let sql = self.sql;
-        let label: Option<Option<String>> = sqlx::query_scalar(sql.select_state.sql())
+        let row: Option<(Option<String>, i32)> = sqlx::query_as(sql.select_standing.sql())
             .bind(id.as_str())
             .fetch_optional(&self.pool)
             .await
             .map_err(store_sqlx_error)?;
-        label
-            .flatten()
-            .map(|label| ObligationState::from_label(&label))
-            .transpose()
+        let Some((Some(label), attempts)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(ObligationStanding {
+            state: ObligationState::from_label(&label)?,
+            attempts: u32::try_from(attempts)
+                .map_err(|_| corrupt("a negative obligation attempt count"))?,
+        }))
     }
 }

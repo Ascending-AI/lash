@@ -332,6 +332,16 @@ pub enum ObligationState {
     Stalled,
 }
 
+/// Where an armed obligation stands, and how many claims it has taken since
+/// it was armed or re-armed (`obligation_attempts`): a kind whose consumer
+/// settles it (ingress) asks the engine under the attempt of its current
+/// claim, so a reader follows that ask by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ObligationStanding {
+    pub state: ObligationState,
+    pub attempts: u32,
+}
+
 impl ObligationState {
     /// Every state, in declaration order.
     pub const ALL: [Self; 4] = [Self::Due, Self::Claimed, Self::Delivered, Self::Stalled];
@@ -513,8 +523,13 @@ pub trait ObligationLedger: Send + Sync {
     /// How many obligations are stalled.
     async fn count_stalled(&self) -> Result<u64, StoreError>;
 
+    /// Where `id` stands, or `None` if no row carries it.
+    async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError>;
+
     /// The state of `id`, or `None` if no row carries it.
-    async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError>;
+    async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
+        Ok(self.standing(id).await?.map(|standing| standing.state))
+    }
 }
 
 #[cfg(test)]
