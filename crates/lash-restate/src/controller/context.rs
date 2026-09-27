@@ -52,9 +52,13 @@ use crate::process::{
 use crate::process_attach::RestateProcessAttachRequest;
 
 #[macro_use]
+mod child_cancel;
+#[macro_use]
 mod segment_wait;
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
+pub(crate) use child_cancel::GroupChildCancelRace;
+use child_cancel::race_group_child_cancel;
 use segment_wait::race_signal_wait;
 pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome};
 #[cfg(test)]
@@ -313,7 +317,7 @@ where
     Box::pin(async move { Err(TerminalError::new(format!("{handler} is not registered"))) })
 }
 
-pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
+pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sync + 'ctx {
     fn sleep_send<'run>(&'run self, duration: Duration) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run;
@@ -1688,6 +1692,10 @@ macro_rules! impl_restate_controller_context {
                 {
                     impl_process_cancel_peek!($promises, self)
                 }
+            }
+
+            impl<'ctx> GroupChildCancelRace<'ctx> for $context<'ctx> {
+                group_child_cancel_methods!('ctx);
             }
         )+
     };

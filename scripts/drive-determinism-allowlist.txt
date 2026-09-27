@@ -36,9 +36,9 @@ crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::Journa
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<'run, RecordedRuntimeEffect>,  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
 crates/lash-restate/src/controller/mod.rs  |  crate::system_clock(),  |  1  # RECORDED CR-adjacent: the stamp feeds a journaled durable-wait request
 crates/lash-restate/src/durable_wait.rs  |  let remaining = deadline.remaining(crate::system_clock().timestamp_ms())?;  |  1  # RECORDED CR13: sizes only a ctx.sleep whose wake time Restate journals
-crates/lash-restate/src/effect_group/dispatch.rs  |  let Json(outcome) = tokio::select! {  |  1  # UNMAPPED
-crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select! {  |  2  # AC18 UNMAPPED
-crates/lash-restate/src/effect_group/dispatch.rs  |  tokio::select! {  |  1  # AC18
+crates/lash-restate/src/effect_group/dispatch.rs  |  lash_core::retry_cancel_watch("an effect-group child's cancel", || watch.cancelled());  |  1  # RECORDED D20 live cancel watch of the atomic child's recorded ctx.run body; it only fires the body's stop
+crates/lash-restate/src/effect_group/dispatch.rs  |  let Json(outcome) = tokio::select! {  |  1  # RECORDED D20 atomic child: picks only when its recorded ctx.run body is cancelled; the run's recorded outcome is what replay serves
+crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select! {  |  1  # RECORDED D20 atomic child's cancel race inside its ctx.run body; the run records the winner
 crates/lash-restate/src/process/admission.rs  |  nonce: crate::journaled_nonce(),  |  1  # RECORDED minted inside the journaled ADMIT_STEP; deliberately unreproducible (ADR 0110)
 crates/lash-restate/src/process/admission.rs  |  started.started_at_ms = super::restate_now_ms();  |  1  # RECORDED stamped inside the journaled START_STEP
 crates/lash-restate/src/process/admission.rs  |  started_at_ms: super::restate_now_ms(),  |  1  # RECORDED stamped inside the journaled START_STEP

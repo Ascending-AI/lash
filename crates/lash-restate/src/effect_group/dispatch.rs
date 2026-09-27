@@ -588,9 +588,16 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             &request.group_key,
             EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
         )?;
-        let cancel_watch =
-            watch_child_cancellation(&self.ingress, self.route.namespace(), cancel_key);
-        tokio::pin!(cancel_watch);
+        // The child's durable cancel fact (ADR 0105 §4, FIG-3904). No child
+        // races it at handler level: a wait child races it as a journaled
+        // arm, a tool child peeks it at its step boundaries and watches it
+        // inside each attempt, and an atomic child watches it inside its
+        // recorded body.
+        let child_cancel = GroupChildCancel::new(
+            self.ingress.clone(),
+            self.route.namespace().clone(),
+            cancel_key,
+        );
 
         if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
             // ADR 0099 §2: a tool child is a handler-level invocation driver,
@@ -617,7 +624,8 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             };
             let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
                 .in_namespace(self.route.namespace().clone())
-                .with_build_generation(self.build_generation.clone());
+                .with_build_generation(self.build_generation.clone())
+                .with_group_child_cancel(child_cancel);
             // The child's own admitted controller, bound to its recorded
             // identity: the recorded pair — claim scope and the incarnation
             // it was admitted under — never the dispatching scope and never
@@ -649,40 +657,15 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             // drive is, so the opener's rank wait always learns of it.
             let routed = self.executors.route_handler_child_controller(scoped);
             let address = request.envelope.invocation.address.clone();
-            let mut drive: std::pin::Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<
-                                lash_core::RuntimeEffectOutcome,
-                                lash_core::RuntimeEffectControllerError,
-                            >,
-                        > + Send
-                        + '_,
-                >,
-            > = match routed {
-                Ok(scoped) => driver.drive(child, address, scoped),
-                Err(error) => Box::pin(std::future::ready(Err(
-                    lash_core::RuntimeEffectControllerError::from(error),
-                ))),
+            // The drive runs to its own end: the child's cancel ends it at a
+            // journaled peek, a journaled wait arm or an attempt's recorded
+            // outcome, each of which a replay takes as the first execution
+            // did, and never by dropping it mid-journal.
+            let driven = match routed {
+                Ok(scoped) => driver.drive(child, address, scoped).await,
+                Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
             };
-            let outcome = tokio::select! {
-                biased;
-                cancel = &mut cancel_watch => {
-                    cancel?;
-                    // Dropping the drive is the leaf path's cancellation
-                    // lifted to handler level: whatever step the child was
-                    // parked on is abandoned, and the settlement recorded is
-                    // Cancelled — a CancelDecided loser writes no payload, the
-                    // index-serialized seam #1857's finalization handler owns
-                    // on the journaled tiers.
-                    drop(drive);
-                    EffectGroupChildRunOutcome::Cancelled
-                }
-                outcome = &mut drive => {
-                    drop(drive);
-                    EffectGroupChildRunOutcome::Completed { outcome }
-                }
-            };
+            let outcome = child_run_outcome(driven);
             // A child that parks settles nothing, so its opener's rank wait
             // cannot learn of it (FIG-3725).
             if let EffectGroupChildRunOutcome::Completed {
@@ -729,7 +712,8 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             };
             let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
                 .in_namespace(self.route.namespace().clone())
-                .with_build_generation(self.build_generation.clone());
+                .with_build_generation(self.build_generation.clone())
+                .with_group_child_cancel(child_cancel);
             let envelope = RuntimeEffectEnvelope {
                 group: None,
                 ..request.envelope.clone()
@@ -739,23 +723,12 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 request.shape.opener.clone(),
             )
             .and_then(|scoped| self.executors.route_handler_child_controller(scoped));
-            let outcome = {
-                let wait = async {
-                    match routed {
-                        Ok(scoped) => scoped.execute_effect(envelope, executor).await,
-                        Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
-                    }
-                };
-                tokio::pin!(wait);
-                tokio::select! {
-                    biased;
-                    cancel = &mut cancel_watch => {
-                        cancel?;
-                        EffectGroupChildRunOutcome::Cancelled
-                    }
-                    outcome = &mut wait => EffectGroupChildRunOutcome::Completed { outcome },
-                }
-            };
+            // The wait races the child's cancel fact as a journaled arm, so
+            // a replay takes the arm its live run took.
+            let outcome = child_run_outcome(match routed {
+                Ok(scoped) => scoped.execute_effect(envelope, executor).await,
+                Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
+            });
             refuse_unrecorded_abort(&request, &outcome)?;
             // A cancelled wait child does not release its own promise: the
             // index handler that decided the cancel, the close or the
@@ -812,14 +785,29 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             ))
             .retry_policy(self.infinite_retry_policy.clone()),
         );
+        // The body's cancel is watched live on the shared ladder: a transient
+        // fault of the watch retries, and a watch that gives up leaves the
+        // body to run to its own end, so no fault of the watch ever drops it.
+        // Whatever the body returns is its recorded outcome.
+        let watch = child_cancel.watch();
+        let watched =
+            lash_core::retry_cancel_watch("an effect-group child's cancel", || watch.cancelled());
+        tokio::pin!(watched);
         let Json(outcome) = tokio::select! {
             biased;
-            cancel = &mut cancel_watch => {
-                cancel?;
-                cancellation.cancel();
+            outcome = &mut run => outcome?,
+            watched = &mut watched => {
+                match watched {
+                    Ok(()) => cancellation.cancel(),
+                    Err(lost) => tracing::warn!(
+                        error = %lost,
+                        group_key = %request.group_key,
+                        position = request.position,
+                        "an atomic effect-group child lost its cancel watch; its body runs to its own end"
+                    ),
+                }
                 run.await?
             }
-            outcome = &mut run => outcome?,
         };
 
         record_child_settlement(&ctx, self.route.namespace(), &request, outcome).await
@@ -1069,44 +1057,17 @@ fn refuse_unrecorded_abort(
     }
 }
 
-/// A dispatched child's cancellation watch: an ingress call on the child's
-/// cancel wait, kept out of the child's journal, that completes only when a
-/// cancel reaches the child.
-///
-/// The index ends the wait as `Settled` once the child's settlement is seated
-/// (FIG-3709), so the watch does not stay open on the deployment after the
-/// child finishes. `Settled` is no cancel: a dispatch invocation that replays
-/// after its settlement and finds the wait already ended keeps to the work its
-/// journal recorded.
-async fn watch_child_cancellation(
-    ingress: &RestateIngressClient,
-    namespace: &crate::RestateNamespace,
-    key: AwaitEventKey,
-) -> std::io::Result<()> {
-    let address = RestateDurableWaitAddress::for_key(&key);
-    let resolution = ingress
-        .call_workflow_json::<_, Resolution>(
-            &namespace
-                .stable(crate::LashService::DurableWaitWorkflow)
-                .name(),
-            &address.workflow_key,
-            "await_resolution",
-            &RestateDurableWaitAwaitRequest {
-                key,
-                deadline: None,
-            },
-        )
-        .await
-        .map_err(|error| {
-            std::io::Error::other(format!("observe effect-group child cancellation: {error}"))
-        })?;
-    if matches!(
-        decode_wait_resolution(resolution),
-        Ok(EffectGroupWaitResolution::Settled)
-    ) {
-        std::future::pending::<()>().await;
+/// A driven child's run outcome: the typed end of a child its cancel fact
+/// ended is `Cancelled`, and anything else is what the drive produced.
+fn child_run_outcome(
+    driven: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+) -> EffectGroupChildRunOutcome {
+    match driven {
+        Err(error) if error.code == RuntimeErrorCode::RuntimeEffectGroupChildCancelled => {
+            EffectGroupChildRunOutcome::Cancelled
+        }
+        outcome => EffectGroupChildRunOutcome::Completed { outcome },
     }
-    Ok(())
 }
 
 /// Records one child's terminal in the index, writing its payload first when

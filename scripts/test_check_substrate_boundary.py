@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -333,6 +334,8 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             "        task: &mut crate::task::JoinHandle<T>,",
             "        handle: crate::task::AbortHandle,",
             "        err: crate::task::JoinError,",
+            "        let watched = lash_core::retry_cancel_watch(\"a cancel\", || watch());",
+            "        crate::runtime::run_step_body_until_cancelled(stop, watch, body, on_cancel)",
         ]
         for line in offenders:
             with self.subTest(line=line):
@@ -395,6 +398,41 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             )
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_regenerate_counts_only_capped_pins(self) -> None:
+        # Regeneration keeps each pin's tag and writes the count file from the
+        # capped pins alone: a RECORDED or BENIGN pin raises no cap.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(
+                root,
+                [
+                    "fn drive() {",
+                    FIXTURE_HIT_LINE,
+                    "        let now = crate::system_clock().timestamp_ms();",
+                    "        let mark = ProfileMark::now();",
+                    "}",
+                ],
+                [
+                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"let now = crate::system_clock().timestamp_ms();{ENTRY_SEPARATOR}"
+                    "1  # RECORDED inside a journaled step",
+                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"let mark = ProfileMark::now();{ENTRY_SEPARATOR}"
+                    "1  # BENIGN observational only",
+                ],
+            )
+            result = subprocess.run(
+                ["bash", str(root / "scripts" / SCRIPT.name)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+                env={**os.environ, "DRIVE_DETERMINISM_REGENERATE": "1"},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            count = (root / "scripts" / COUNT.name).read_text().strip()
+        self.assertEqual(count, "1")
 
     def test_removed_hit_with_stale_entry_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

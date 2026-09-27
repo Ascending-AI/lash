@@ -32,6 +32,17 @@ pub use scope::facade_ops;
 pub use scope::*;
 pub use task::*;
 
+/// A live watch of one effect-group child's durable cancel fact (FIG-3904).
+///
+/// `cancelled` completes `Ok` once the child's cancel is decided and stays
+/// pending while it is not; a child that settled first leaves it pending. An
+/// `Err` is a fault of this watch, never a cancel: callers retry it on the
+/// shared cancel-watch ladder.
+#[async_trait::async_trait]
+pub trait GroupChildCancelWatch: Send + Sync {
+    async fn cancelled(&self) -> Result<(), RuntimeError>;
+}
+
 /// Backend-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
@@ -441,6 +452,30 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         lent_stop: &CancellationToken,
     ) -> Result<bool, RuntimeEffectControllerError> {
         Ok(lent_stop.is_cancelled())
+    }
+
+    /// Whether the effect-group child this controller drives has a durable
+    /// cancel fact, read as a recorded peek at one of its step boundaries
+    /// (ADR 0105 §4, FIG-3904).
+    ///
+    /// A tool child's drive never races its cancel at handler level: it reads
+    /// the fact here before each attempt, and each attempt body watches it
+    /// through [`group_child_cancel_watch`](Self::group_child_cancel_watch).
+    /// An engine that records the fact answers the answer it recorded, so a
+    /// replay takes the branch the first execution took. A controller that
+    /// drives no group child answers `false`. Forwarding wrappers forward.
+    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
+        Ok(false)
+    }
+
+    /// The execution-side watch of the effect-group child's cancel fact that a
+    /// recorded step body of this child races (ADR 0105 §3, §4, FIG-3904).
+    ///
+    /// Execution-side only: the step records whatever its body returned, so a
+    /// replay serves that and never consults the watch. `None` for every
+    /// controller that drives no group child. Forwarding wrappers forward.
+    fn group_child_cancel_watch(&self) -> Option<Arc<dyn GroupChildCancelWatch>> {
+        None
     }
 
     /// Run one registry step of a process drive whose answer the engine

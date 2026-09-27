@@ -247,6 +247,16 @@ where
         self.inner.observe_process_cancel(lent_stop).await
     }
 
+    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
+        self.inner.observe_group_child_cancel().await
+    }
+
+    fn group_child_cancel_watch(
+        &self,
+    ) -> Option<std::sync::Arc<dyn lash_core::GroupChildCancelWatch>> {
+        self.inner.group_child_cancel_watch()
+    }
+
     async fn record_process_drive_step(
         &self,
         name: String,

@@ -34,6 +34,13 @@ struct Script {
     /// Each turn gate's signal; `None` never fires.
     turn_gates: VecDeque<Option<TurnCancelSignal>>,
     escalations: VecDeque<Option<TurnCancelSignal>>,
+    /// Each timer's firing, ready after this many pending polls.
+    timers: VecDeque<usize>,
+    /// Each group child's cancel fact: ready after this many pending polls,
+    /// or `None` never.
+    child_cancels: VecDeque<Option<(usize, ChildCancelSignal)>>,
+    /// Each recorded peek of a group child's cancel fact.
+    child_peeks: VecDeque<Option<ChildCancelSignal>>,
     log: Vec<String>,
 }
 
@@ -214,8 +221,15 @@ macro_rules! test_engine {
                 $op::of(ready_after(polls, Ok(result)))
             }
 
-            fn timer(&self, _f: &DriveFence, _at: EpochMs, _key: &ReplayKey) -> Self::Op<'_, ()> {
-                $op::now(unscripted("timer"))
+            fn timer(&self, _f: &DriveFence, _at: EpochMs, key: &ReplayKey) -> Self::Op<'_, ()> {
+                let polls = self.with(|script| {
+                    script.log.push(format!("timer:{key}"));
+                    script.timers.pop_front()
+                });
+                match polls {
+                    Some(polls) => $op::of(ready_after(polls, Ok(()))),
+                    None => $op::now(unscripted("timer")),
+                }
             }
 
             fn await_key(&self, _f: &DriveFence, _key: &AwaitEventKey) -> Self::Op<'_, Resolution> {
@@ -302,6 +316,28 @@ macro_rules! test_engine {
 
             fn close_group(&self, _h: EffectGroupHandle, _d: LoserPolicy) -> Self::Op<'_, GroupClosed> {
                 $op::now(unscripted("close_group"))
+            }
+
+            fn child_cancel(&self, _a: &InheritedAuthority) -> Self::Op<'_, ChildCancelSignal> {
+                let signal = self.with(|script| {
+                    script.log.push("child_cancel".to_owned());
+                    script.child_cancels.pop_front()
+                });
+                match signal.expect("a scripted child cancel fact") {
+                    Some((polls, signal)) => $op::of(ready_after(polls, Ok(signal))),
+                    None => $op::never(),
+                }
+            }
+
+            fn peek_child_cancel(
+                &self,
+                _a: &InheritedAuthority,
+            ) -> Self::Op<'_, Option<ChildCancelSignal>> {
+                let signal = self.with(|script| {
+                    script.log.push("peek_child_cancel".to_owned());
+                    script.child_peeks.pop_front()
+                });
+                $op::now(Ok(signal.expect("a scripted child cancel peek")))
             }
         }
     };
@@ -458,7 +494,7 @@ fn script(
         steps: VecDeque::from([(step_polls, step_answer())]),
         turn_gates: VecDeque::from([turn_gate]),
         escalations: escalation.into_iter().collect(),
-        log: Vec::new(),
+        ..Script::default()
     }
 }
 
@@ -609,4 +645,154 @@ fn recorded_verdicts_round_trip() {
     let decoded: TurnCancelSignal =
         serde_json::from_value(serde_json::to_value(&signal).expect("encode")).expect("decode");
     assert_eq!(decoded, signal);
+}
+
+/// How a group child's wait or attempts settled under its cancel fact.
+#[derive(Debug, PartialEq, Eq)]
+enum ChildSettled {
+    /// The wait fired, or every attempt ran.
+    Finished,
+    /// The child's cancel fact won, before attempt `before` when a step
+    /// boundary's peek read it.
+    Cancelled {
+        signal: ChildCancelSignal,
+        before: Option<usize>,
+    },
+}
+
+/// A wait child, written once and generic over the engine: its wait raced
+/// against its own cancel fact (ADR 0105 §3, §4). The first arm the engine
+/// records wins; the loser is disposed of.
+async fn wait_under_child_cancel<C: DriveGroups>(
+    f: &Fenced<'_, C>,
+    authority: &InheritedAuthority,
+    key: &ReplayKey,
+) -> Result<ChildSettled, EngineFault> {
+    let cx = f.context();
+    let mut wait = f.timer(EpochMs(60_000), key);
+    let mut cancel = cx.child_cancel(authority);
+    Ok(
+        match cx.race(Pin::new(&mut wait), Pin::new(&mut cancel)).await? {
+            Winner::First(()) => {
+                cx.dispose(cancel, Disposition::Abandon).await?;
+                ChildSettled::Finished
+            }
+            Winner::Second(signal) => {
+                cx.dispose(wait, Disposition::RequestCancel).await?;
+                ChildSettled::Cancelled {
+                    signal,
+                    before: None,
+                }
+            }
+        },
+    )
+}
+
+/// A tool child's attempts, each behind a recorded peek of its cancel fact:
+/// no handler-level race, a step boundary at a time.
+async fn attempts_under_child_cancel<C: DriveGroups>(
+    f: &Fenced<'_, C>,
+    authority: &InheritedAuthority,
+    attempts: &[&str],
+) -> Result<ChildSettled, EngineFault> {
+    let cx = f.context();
+    for (index, attempt) in attempts.iter().enumerate() {
+        if let Some(signal) = cx.peek_child_cancel(authority).await? {
+            return Ok(ChildSettled::Cancelled {
+                signal,
+                before: Some(index + 1),
+            });
+        }
+        // The attempt's own outcome is the child's business, not the law's.
+        let _attempted = f.step(command(attempt)).await?;
+    }
+    Ok(ChildSettled::Finished)
+}
+
+fn child_authority(f: &Fenced<'_, impl DriveContext>) -> InheritedAuthority {
+    f.inherited(ReplayKey::new("opener"), Some((GroupKey::new("group"), 0)))
+}
+
+#[test]
+fn a_wait_child_that_loses_to_its_cancel_requests_its_wait_cancelled() {
+    let cx = LocalTestCx::new(Script {
+        timers: VecDeque::from([3]),
+        child_cancels: VecDeque::from([Some((0, ChildCancelSignal::Cancelled))]),
+        ..Script::default()
+    });
+    let f = cx.fenced(sealed()).expect("a sealed verdict fences");
+    let authority = child_authority(&f);
+
+    let settled = run(wait_under_child_cancel(
+        &f,
+        &authority,
+        &ReplayKey::new("wait"),
+    ))
+    .expect("no engine fault");
+
+    assert_eq!(
+        settled,
+        ChildSettled::Cancelled {
+            signal: ChildCancelSignal::Cancelled,
+            before: None,
+        }
+    );
+    assert_eq!(
+        cx.log(),
+        ["timer:wait", "child_cancel", "dispose:CancelRequested"]
+    );
+}
+
+#[test]
+fn a_wait_that_fires_first_abandons_its_childs_cancel_fact() {
+    let cx = LocalTestCx::new(Script {
+        timers: VecDeque::from([0]),
+        child_cancels: VecDeque::from([None]),
+        ..Script::default()
+    });
+    let f = cx.fenced(sealed()).expect("a sealed verdict fences");
+    let authority = child_authority(&f);
+
+    let settled = run(wait_under_child_cancel(
+        &f,
+        &authority,
+        &ReplayKey::new("wait"),
+    ))
+    .expect("no engine fault");
+
+    assert_eq!(settled, ChildSettled::Finished);
+    assert_eq!(
+        cx.log(),
+        ["timer:wait", "child_cancel", "dispose:Abandoned"]
+    );
+}
+
+#[test]
+fn a_tool_child_reads_its_cancel_at_the_next_step_boundary() {
+    let cx = SendTestCx::new(Script {
+        steps: VecDeque::from([(2, step_answer())]),
+        child_peeks: VecDeque::from([None, Some(ChildCancelSignal::Retired)]),
+        ..Script::default()
+    });
+    let f = cx
+        .fenced(FenceSource::Inherited(InheritVerdict::Valid(fence())))
+        .expect("a valid inherited verdict fences");
+    let authority = child_authority(&f);
+    let drive = attempts_under_child_cancel(&f, &authority, &["attempt-1", "attempt-2"]);
+    fn assert_send<T: Send>(_: &T) {}
+    assert_send(&drive);
+
+    let settled = run(drive).expect("no engine fault");
+
+    assert_eq!(
+        settled,
+        ChildSettled::Cancelled {
+            signal: ChildCancelSignal::Retired,
+            before: Some(2),
+        }
+    );
+    assert_eq!(
+        cx.log(),
+        ["peek_child_cancel", "step:attempt-1", "peek_child_cancel"]
+    );
 }

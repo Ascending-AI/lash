@@ -240,31 +240,93 @@ impl TurnCancelGatePair {
         F: Fn(AwaitEventKey) -> Fut,
         Fut: std::future::Future<Output = Result<Resolution, RuntimeError>>,
     {
-        let mut backoff = GATE_RETRY_INITIAL;
-        let mut attempt = 1;
-        loop {
-            match self.await_stop(&await_key).await {
-                Ok(stop) => return Ok(stop),
-                Err(error) if attempt < GATE_RETRY_ATTEMPTS && !error.code.is_terminal() => {
-                    tracing::warn!(
-                        %error,
-                        attempt,
-                        gate = %self.cancel.key_id,
-                        "watching a turn's cancellation gate failed; retrying"
-                    );
-                    tokio::time::sleep(backoff).await;
-                    backoff = backoff.saturating_mul(2).min(GATE_RETRY_MAX);
-                    attempt += 1;
-                }
-                Err(error) => {
-                    return Err(RuntimeEffectControllerError::turn_cancel_watch_lost(
-                        format!(
-                            "watching turn cancellation gate `{}` failed after {attempt} attempt(s): {error}",
-                            self.cancel.key_id
-                        ),
-                    ));
-                }
+        retry_cancel_watch(
+            &format!("turn cancellation gate `{}`", self.cancel.key_id),
+            || self.await_stop(&await_key),
+        )
+        .await
+    }
+}
+
+/// The shared ladder of every execution-side watch of a durable cancel fact
+/// (FIG-3672 P9): a turn's gate pair, a group child's cancel (ADR 0105 §4).
+///
+/// A transient fault of `watch` is retried, from 25ms doubling to 1s. A watch
+/// that fails [`GATE_RETRY_ATTEMPTS`] times in a row, or with a terminal
+/// fault, ends as the typed live fault
+/// [`RuntimeEffectControllerError::turn_cancel_watch_lost`] — never as a
+/// cancellation. `what` names the watched fact in the diagnostics.
+pub async fn retry_cancel_watch<T, F, Fut>(
+    what: &str,
+    watch: F,
+) -> Result<T, RuntimeEffectControllerError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, RuntimeError>>,
+{
+    let mut backoff = GATE_RETRY_INITIAL;
+    let mut attempt = 1;
+    loop {
+        match watch().await {
+            Ok(value) => return Ok(value),
+            Err(error) if attempt < GATE_RETRY_ATTEMPTS && !error.code.is_terminal() => {
+                tracing::warn!(%error, attempt, watched = what, "a cancel watch failed; retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = backoff.saturating_mul(2).min(GATE_RETRY_MAX);
+                attempt += 1;
             }
+            Err(error) => {
+                return Err(RuntimeEffectControllerError::turn_cancel_watch_lost(
+                    format!("watching {what} failed after {attempt} attempt(s): {error}"),
+                ));
+            }
+        }
+    }
+}
+
+/// Execution-side only: run one recorded step body until its cancel is
+/// decided (ADR 0105 §3, §4).
+///
+/// This is how a group child's recorded step keeps its loser inside its own
+/// body: `cancelled` is a live watch of the child's cancel fact, and when it
+/// reports the cancel, `stop` fires and the body is dropped, whether or not
+/// it watches its token; `on_cancel` is then the step's outcome. Whatever the
+/// body returns, finished or dropped, is the step's recorded outcome, so a
+/// replay serves it and never runs this. A body that finishes at the same
+/// poll the cancel lands keeps its own outcome. A watch that gives up (`Err`)
+/// leaves the body running to its own end under a stop that never fires: a
+/// step whose engine records every outcome must not record the fault, and
+/// the child honours its cancel at its next journaled peek.
+pub async fn run_step_body_until_cancelled<T, W, F, Fut>(
+    stop: CancellationToken,
+    cancelled: W,
+    body: F,
+    on_cancel: impl FnOnce() -> T,
+) -> T
+where
+    W: std::future::Future<Output = Result<(), RuntimeEffectControllerError>>,
+    F: FnOnce(CancellationToken) -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let body = body(stop.clone());
+    tokio::pin!(body);
+    tokio::pin!(cancelled);
+    let watched = tokio::select! {
+        biased;
+        output = &mut body => return output,
+        watched = &mut cancelled => watched,
+    };
+    match watched {
+        Ok(()) => {
+            stop.cancel();
+            on_cancel()
+        }
+        Err(lost) => {
+            tracing::warn!(
+                error = %lost,
+                "a step body lost its cancel watch; it runs to its own end"
+            );
+            body.await
         }
     }
 }

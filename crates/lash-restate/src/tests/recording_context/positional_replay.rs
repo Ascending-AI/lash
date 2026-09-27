@@ -31,6 +31,8 @@ impl PositionalReplayContext {
     }
 }
 
+impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<PositionalReplayContext> {}
+
 impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     fn attach_process_terminal<'run>(
         &'run self,

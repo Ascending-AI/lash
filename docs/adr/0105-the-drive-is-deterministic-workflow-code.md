@@ -505,6 +505,40 @@ fence-aware: `open_group` (records membership, reopen fenced on shape),
   drain and then seat their own rank. Close is idempotent.
 - **Opener bookkeeping leaves the context.** Reserve and bound, the held list
   and the incorporation ledger become a pure fold over recorded outcomes.
+- **A child's cancel is an engine event.** `DriveGroups` exposes a child's
+  durable cancel fact the way `Fenced::turn_cancel` exposes a turn's:
+  `child_cancel(&authority)` is an op a race arm awaits, and
+  `peek_child_cancel(&authority)` is a recorded read. The fact answers
+  `ChildCancelSignal::Cancelled` when a close or a retirement's cancel decided
+  the child's cancel, and `Retired` when the group retired under the child.
+  The child's own settlement ends it without a signal. There is no child-side
+  cancel intent: the intent that closed the group is already an obligation,
+  and `commit_child_final` arbitrates the child's final record.
+
+**Implemented (D20, FIG-3904): effect-group dispatch records its cancel
+races.**
+
+- **The fact.** It is the child's `Cancel` group wait. The index resolves it
+  `Cancel` or `Retired` when it decides, and `Settled` once the child's
+  settlement is seated. Every terminal except `Settled` is a cancel.
+- **A wait child** races its timer or durable wait against a call on that
+  wait. The race is journaled: the wait's command first, then the cancel
+  call. A replay takes the arm its live run took. A lost wait is the typed
+  `RuntimeEffectGroupChildCancelled`, which the dispatch settles `Cancelled`.
+- **A tool child** has no handler-level race. Its drive reads the fact with
+  a journaled peek before each attempt and before an orchestrating body.
+  Each `ToolAttempt` body races a live watch of the fact on the execution
+  side. The watch fires the attempt's stop and drops the body, and the typed
+  cancel is then the attempt's recorded outcome. A watch fault retries on the
+  shared cancel-watch ladder, and a watch that gives up leaves the body to
+  run to its own end. The engine's cancellation of the child's invocation
+  (`409`) is the same decided cancel wherever it surfaces.
+- **An atomic child** keeps its two races around its recorded `ctx.run` body,
+  pinned `RECORDED` in the drive-determinism allowlist. Its watch retries on
+  the same ladder, so a transient fault never drops the body.
+- **Journal shape.** A group child's journal records the peeks, the
+  cancel-wait call and the attempt's cancelled outcome. Nothing races outside
+  a recorded arm or a recorded body.
 
 ### 5. Keyed promises
 

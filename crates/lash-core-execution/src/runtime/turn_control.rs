@@ -120,7 +120,9 @@ fn turn_cancel_peek_replay_key(
 pub use lash_sansio::{TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence};
 
 mod local_stop;
-pub use local_stop::{LocalTurnStop, StopDeliveryGuard};
+pub use local_stop::{
+    LocalTurnStop, StopDeliveryGuard, retry_cancel_watch, run_step_body_until_cancelled,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", content = "cancellation", rename_all = "snake_case")]

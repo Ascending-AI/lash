@@ -103,6 +103,20 @@ struct GatedTool {
     /// Set when an attempt saw its cancellation token fire while it waited
     /// for the gate; the attempt then answers cancelled.
     stopped: Arc<std::sync::atomic::AtomicBool>,
+    /// The tool never watches its cancellation token: only dropping its
+    /// attempt stops it.
+    ignores_cancel: bool,
+    /// Set when an attempt that was still waiting for the gate is dropped.
+    dropped: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Marks its flag when dropped: an attempt dropped mid-wait.
+struct DropWitness(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for DropWitness {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
 }
 
 #[async_trait::async_trait]
@@ -133,6 +147,12 @@ impl lash_core::ToolProvider for GatedTool {
             .cancellation_token()
             .cloned()
             .unwrap_or_default();
+        if self.ignores_cancel {
+            let witness = DropWitness(Arc::clone(&self.dropped));
+            let _permit = self.gate.acquire().await.expect("the gate never closes");
+            std::mem::forget(witness);
+            return lash_core::ToolOutcome::ok(json!({"result": "gated result"})).into();
+        }
         tokio::select! {
             permit = self.gate.acquire() => {
                 let _permit = permit.expect("the gate never closes");
@@ -158,6 +178,7 @@ struct Turn {
     gate: Arc<tokio::sync::Semaphore>,
     executions: Arc<AtomicUsize>,
     stopped: Arc<std::sync::atomic::AtomicBool>,
+    dropped: Arc<std::sync::atomic::AtomicBool>,
     /// The sent input's settled turn.
     run: tokio::task::JoinHandle<lash::Result<lash::TurnOutput>>,
 }
@@ -168,6 +189,7 @@ async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> T
         gate_open,
         via_batch,
         fail_first: false,
+        ignores_cancel: false,
     })
     .await
 }
@@ -182,6 +204,8 @@ struct TurnOptions {
     /// The tool's first attempt fails retryably and asks for its retry an
     /// hour later.
     fail_first: bool,
+    /// The tool never watches its cancellation token.
+    ignores_cancel: bool,
 }
 
 async fn start_turn_with(options: TurnOptions) -> Turn {
@@ -190,6 +214,7 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
         gate_open,
         via_batch,
         fail_first,
+        ignores_cancel,
     } = options;
     let backend = lash_restate_test::backend(0x3712, config)
         .await
@@ -200,6 +225,7 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
     }
     let executions = Arc::new(AtomicUsize::new(0));
     let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("suspended-turn")
         .complete(move |request: LlmRequest| async move {
@@ -223,6 +249,8 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
                 stopped: Arc::clone(&stopped),
                 gate: Arc::clone(&gate),
                 fail_first,
+                ignores_cancel,
+                dropped: Arc::clone(&dropped),
             }) as Arc<dyn lash_core::ToolProvider>)
             .build(lash_core::LeaseOwnerIdentity::opaque(
                 "lash-restate-test",
@@ -247,6 +275,7 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
         gate,
         executions,
         stopped,
+        dropped,
         run,
     }
 }
@@ -568,6 +597,7 @@ async fn a_durable_turn_cancel_reaches_a_rebuilt_child_at_its_next_wait() {
         gate_open: true,
         via_batch: false,
         fail_first: true,
+        ignores_cancel: false,
     })
     .await;
     let child = turn.tool_child().await;
@@ -653,6 +683,7 @@ async fn a_rebuilt_childs_tool_sees_its_turns_durable_cancel_as_its_token() {
         gate_open: false,
         via_batch: false,
         fail_first: false,
+        ignores_cancel: false,
     })
     .await;
     let child = turn.tool_child().await;
@@ -737,4 +768,136 @@ async fn a_leaf_child_records_the_same_commands_on_a_rebuilt_context_as_on_its_l
             "command {index} differs between the live and the rebuilt child"
         );
     }
+}
+
+/// D20 (FIG-3904): a tool child whose group is cancelled while its attempt
+/// runs replays exactly the journal its live run left.
+///
+/// The tool ignores its token, so only the child's own cancel can stop the
+/// attempt. The turn is cancelled while the attempt runs; the turn's close
+/// decides the child's cancel, and the child's attempt ends. The child's
+/// invocation then dies before it stores its next command, and its redrive
+/// replays the journal the cancelled run left: it issues the commands that
+/// journal holds, never re-runs the attempt the cancel ended, and settles.
+///
+/// Red before D20: the child raced its drive against a live ingress watch and
+/// dropped the drive mid-journal, leaving the attempt's run unrecorded; the
+/// redrive, which finds no recorded result for that run, ran the tool again
+/// before its own watch came back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replayed_tool_child_issues_the_same_commands_as_its_journal() {
+    use lash_restate_test::{CrashPoint, CrashRule};
+    let turn = start_turn_with(TurnOptions {
+        config: ServerConfig::default().time(TimeMode::Manual),
+        gate_open: false,
+        via_batch: false,
+        fail_first: false,
+        ignores_cancel: true,
+    })
+    .await;
+    let child = turn.tool_child().await;
+    while turn.executions.load(Ordering::SeqCst) == 0 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // The attempt is inside the tool once the server stored its run command:
+    // the child's next journal command is the first one it stores once the
+    // cancel ends the attempt. Its attempt dies right there, once, and the
+    // redrive replays what it left.
+    let next = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let commands: Vec<_> = turn
+                .backend
+                .server()
+                .journal(&child)
+                .expect("the child's invocation exists")
+                .into_iter()
+                .filter(|entry| entry.ty.is_command())
+                .collect();
+            if commands
+                .last()
+                .and_then(|entry| entry.name.as_deref())
+                .is_some_and(|name| name.contains(":attempt:"))
+            {
+                return commands.len();
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the server stores the running attempt's command");
+    // The child runs on its group's dispatch lane, a service of its own.
+    let lane = turn
+        .backend
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|view| view.id == child)
+        .and_then(|view| view.target.split('/').next().map(str::to_owned))
+        .expect("the child's dispatch lane");
+    turn.backend.server().crash_on(
+        CrashRule::new(CrashPoint::BeforeCommand { index: next })
+            .service(lane)
+            .handler("child")
+            .times(1),
+    );
+
+    turn.cancel_root().await;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while !turn.dropped.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the cancel ends the attempt of a tool that ignores its token");
+    let server = turn.backend.server().clone();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while !turn.has_status(&child, "completed") {
+            server.advance(Duration::from_secs(1));
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "the cancelled child's redrive settles: {:#?}",
+            server
+                .invocations()
+                .into_iter()
+                .filter(|view| view.status != "completed")
+                .map(|view| format!(
+                    "{} {} attempts={} last_failure={:?}",
+                    view.target, view.status, view.attempts, view.last_failure
+                ))
+                .collect::<Vec<_>>()
+        )
+    });
+    let view = server
+        .invocations()
+        .into_iter()
+        .find(|view| view.id == child)
+        .expect("the child's invocation");
+    assert!(
+        view.attempts >= 2,
+        "the child's attempt died and was redriven: {view:?}"
+    );
+    assert!(
+        !view
+            .last_failure
+            .as_ref()
+            .is_some_and(|(code, _)| *code == 570),
+        "the redrive issued a command its journal does not hold: {view:?}"
+    );
+    assert_eq!(
+        turn.executions.load(Ordering::SeqCst),
+        1,
+        "the redrive never re-ran the attempt the cancel ended"
+    );
+
+    let executions = Arc::clone(&turn.executions);
+    let answer = turn.finish(Duration::from_secs(20)).await;
+    assert!(
+        answer.contains("Cancel"),
+        "the turn ends cancelled: {answer}"
+    );
+    assert_eq!(executions.load(Ordering::SeqCst), 1, "the tool ran once");
 }

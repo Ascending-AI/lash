@@ -63,6 +63,35 @@ pub trait DriveGroups: DriveContext {
     /// that are committed but unseated: those drain, then seat their own rank.
     /// Idempotent.
     fn close_group(&self, h: EffectGroupHandle, d: LoserPolicy) -> Self::Op<'_, GroupClosed>;
+
+    /// The cancel fact of the group child `a` names, as an engine event: the
+    /// `turn_cancel` of a group child (ADR 0105 §4).
+    ///
+    /// It resolves once the group's serialization point decided the child's
+    /// cancel, by a `close(Cancel)` or a retirement, and never once the
+    /// child's settlement is seated. The fact is the engine's own: a child
+    /// admits no cancel intent of its own, and
+    /// [`commit_child_final`](Self::commit_child_final) still arbitrates the
+    /// child's final. A child races its waits against it with
+    /// [`race`](super::EngineContext::race) and gives up the loser with
+    /// [`dispose`](super::EngineContext::dispose), so a replay takes the arm
+    /// the engine recorded first.
+    fn child_cancel(&self, a: &InheritedAuthority) -> Self::Op<'_, ChildCancelSignal>;
+
+    /// A recorded, non-blocking read of the same fact, for a child's step
+    /// boundaries: before each attempt and before an orchestrating body.
+    fn peek_child_cancel(&self, a: &InheritedAuthority) -> Self::Op<'_, Option<ChildCancelSignal>>;
+}
+
+/// What a group child's cancel fact delivered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildCancelSignal {
+    /// A `close(Cancel)`, or a retirement's cancel, decided the child's
+    /// cancel.
+    Cancelled,
+    /// The group retired under the child.
+    Retired,
 }
 
 /// A durable effect group's key.

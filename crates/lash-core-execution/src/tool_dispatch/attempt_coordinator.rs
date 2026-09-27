@@ -264,6 +264,20 @@ pub async fn coordinate_tool_invocation<'run>(
     };
 
     for attempt in 1..=max_attempts {
+        // A group child reads its cancel fact at each attempt boundary, as a
+        // recorded peek (ADR 0105 §4, FIG-3904): the child's drive never races
+        // it, so a replay reads the answer its first execution read.
+        if group_child.is_some() {
+            match group_child_cancel_boundary(context, &call).await {
+                Ok(()) => {}
+                Err(error) => {
+                    abandon_to_open_buffers(context, triggers, captures);
+                    return CoordinatedToolInvocation {
+                        launch: ToolCallLaunch::ControllerAborted(error),
+                    };
+                }
+            }
+        }
         let prepared_key = context
             .effect_controller
             .controller()
@@ -329,6 +343,18 @@ pub async fn coordinate_tool_invocation<'run>(
             .and_then(crate::RuntimeEffectOutcome::into_tool_attempt_effect);
         let outcome = match outcome {
             Ok(outcome) => outcome,
+            // A group child's attempt its cancel ended, live or recorded, ends
+            // the child's drive as that cancel: the attempt's body was dropped,
+            // and nothing it did is a result.
+            Err(err)
+                if group_child.is_some()
+                    && err.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled =>
+            {
+                abandon_to_open_buffers(context, triggers, captures);
+                return CoordinatedToolInvocation {
+                    launch: ToolCallLaunch::ControllerAborted(err),
+                };
+            }
             // A journaled error is the attempt's recorded `Failed` terminal
             // replaying: that durable record is the attempt's outcome, so it
             // stays model-visible exactly as it does today (FIG-3528).
@@ -508,6 +534,34 @@ pub async fn coordinate_tool_invocation<'run>(
             triggers,
         ))),
     }
+}
+
+/// A group child's recorded peek of its cancel fact at an attempt boundary: a
+/// decided cancel is the typed [`RuntimeEffectGroupChildCancelled`] refusal
+/// that ends the child's drive.
+///
+/// [`RuntimeEffectGroupChildCancelled`]: crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+async fn group_child_cancel_boundary(
+    context: &ToolDispatchContext<'_>,
+    call: &PreparedToolCall,
+) -> Result<(), crate::RuntimeEffectControllerError> {
+    if context
+        .effect_controller
+        .controller()
+        .observe_group_child_cancel()
+        .await?
+    {
+        return Err(group_child_cancelled(&call.call_id));
+    }
+    Ok(())
+}
+
+/// The typed end of a group child whose cancel was decided while it ran.
+pub(crate) fn group_child_cancelled(call_id: &str) -> crate::RuntimeEffectControllerError {
+    crate::RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+        format!("tool child `{call_id}` was cancelled by its effect group"),
+    )
 }
 
 /// When no outcome exists to carry them — a controller abort refuses the

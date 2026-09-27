@@ -399,6 +399,8 @@ impl RecordingContext {
     }
 }
 
+impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<RecordingContext> {}
+
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn attach_process_terminal<'run>(
         &'run self,
@@ -1916,6 +1918,11 @@ fn decode_recorded_runtime_effect(bytes: &[u8]) -> RecordedRuntimeEffect {
         value => value,
     };
     serde_json::from_value(unwrapped).expect("recorded runtime effect")
+}
+
+impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx>
+    for Arc<ReplayableRecordingContext>
+{
 }
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {

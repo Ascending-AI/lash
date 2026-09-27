@@ -75,7 +75,7 @@ pub use drive::{
     drive_close_root_replay_key, drive_continuation_request, drive_root_scope,
     drive_root_start_replay_key, drive_seal_replay_key,
 };
-pub use groups::{DriveGroups, GroupClosed, GroupKey};
+pub use groups::{ChildCancelSignal, DriveGroups, GroupClosed, GroupKey};
 pub use ingress::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
 pub use reconcile::{
     ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, RecoveryLeaseConfig,

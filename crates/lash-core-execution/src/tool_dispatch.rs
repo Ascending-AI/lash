@@ -13,10 +13,10 @@ pub use context::{
 };
 pub use pending_resolver::arm_pending_resolver;
 
-pub(crate) use attempt_coordinator::commit_group_child_boundary;
 pub use attempt_coordinator::{
     GroupChildCoordination, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
+pub(crate) use attempt_coordinator::{commit_group_child_boundary, group_child_cancelled};
 pub use context::OrchestratingChildSinks;
 #[cfg(feature = "testing")]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};

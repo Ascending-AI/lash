@@ -9,7 +9,9 @@
 use lash_sansio::SessionId;
 pub(crate) mod context;
 pub(crate) mod effect_journal;
+mod group_child_cancel;
 mod group_commit;
+use group_child_cancel::group_child_cancelled;
 mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
@@ -94,6 +96,12 @@ pub struct RestateEffectControllerOptions {
     /// to a drain wake naming this generation (FIG-3799). Shared, so every
     /// controller future that holds the options stays a pointer wider.
     segment_generation: Option<Arc<lash_core::engine::BuildGeneration>>,
+    /// The cancel fact of the effect-group child this controller drives
+    /// (FIG-3904): a wait that observes no turn races it as a journaled arm,
+    /// [`observe_group_child_cancel`](RuntimeEffectController::observe_group_child_cancel)
+    /// is a journaled peek of it, and a recorded step body watches it live.
+    /// Shared for the same pointer-width reason `segment_generation` is.
+    group_child_cancel: Option<Arc<crate::effect_group::GroupChildCancel>>,
 }
 
 impl Default for RestateEffectControllerOptions {
@@ -105,6 +113,7 @@ impl Default for RestateEffectControllerOptions {
             drain_budget: lash_core::EffectGroupDrainBudget::DEFAULT.duration(),
             process_cancel: context::ProcessCancelRace::NotRaced,
             segment_generation: None,
+            group_child_cancel: None,
         }
     }
 }
@@ -210,6 +219,7 @@ impl fmt::Debug for RestateEffectControllerOptions {
             .field("drain_budget", &self.drain_budget)
             .field("process_cancel", &self.process_cancel)
             .field("segment_generation", &self.segment_generation)
+            .field("group_child_cancel", &self.group_child_cancel)
             .finish()
     }
 }
@@ -1182,6 +1192,15 @@ where
         }
     }
 
+    /// A journaled peek of the bound group child's cancel fact (FIG-3904).
+    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
+        self.peek_group_child_cancel().await
+    }
+
+    fn group_child_cancel_watch(&self) -> Option<Arc<dyn lash_core::GroupChildCancelWatch>> {
+        RestateRuntimeEffectController::group_child_cancel_watch(self)
+    }
+
     /// One `ctx.run` step named `name`: its answer is journaled and replayed
     /// (FIG-3673). A retryable fault ends the attempt unrecorded; any other
     /// refusal is recorded as the step's answer.
@@ -1326,7 +1345,6 @@ where
                 self.emit_trace(Some(&invocation), || {
                     lash_trace::TraceEvent::DurableTimerStarted { duration_ms }
                 });
-                let duration = Duration::from_millis(duration_ms);
                 let turn_cancel = restate_timer_turn_cancel_wait_request(
                     &self.authority_id,
                     &invocation,
@@ -1334,14 +1352,8 @@ where
                     turn_cancel_scope.as_ref(),
                 )?;
                 match self
-                    .context
-                    .sleep_or_turn_cancel(
-                        &self.namespace,
-                        duration,
-                        turn_cancel,
-                        self.options.process_cancel,
-                    )
-                    .await
+                    .sleep_raced(&invocation, duration_ms, turn_cancel)
+                    .await?
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(())) => {}
                     Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id }) => {
@@ -1465,6 +1477,16 @@ where
                     ))
                     .await;
                 }
+                if let Some(cancel) = self.group_child_wait_race(turn_cancel.as_ref()) {
+                    return self
+                        .await_event_under_group_child_cancel(
+                            &invocation,
+                            request,
+                            replay_key,
+                            cancel,
+                        )
+                        .await;
+                }
                 match self
                     .context
                     .await_event_or_turn_cancel(
@@ -1517,6 +1539,11 @@ where
                         Ok(RuntimeEffectOutcome::AwaitEvent {
                             resolution: Resolution::Cancelled,
                         })
+                    }
+                    // The engine's cancellation of a group child's invocation is
+                    // the child's decided cancel, surfacing at this wait (FIG-3904).
+                    Err(err) if self.is_group_child_engine_cancel(&err) => {
+                        Err(group_child_cancelled())
                     }
                     Err(err) => {
                         self.emit_trace(Some(&invocation), || {
@@ -1571,6 +1598,11 @@ where
                                 status: lash_trace::TraceJournaledEffectStatus::Failed,
                             }
                         });
+                        if let RestateEffectError::Terminal { terminal, .. } = &error
+                            && self.is_group_child_engine_cancel(terminal)
+                        {
+                            return Err(group_child_cancelled());
+                        }
                         return Err(error.into());
                     }
                 };
@@ -1690,48 +1722,4 @@ pub(crate) use execution::{
 };
 
 #[cfg(test)]
-mod identity_trace_tests {
-    use super::*;
-
-    #[test]
-    fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
-        let parent_address = lash_core::EffectAddress::new(
-            ExecutionScope::process(lash_core::ProcessId::fixture("restate-parent-process")),
-            "shared-replay-key",
-        )
-        .expect("valid Restate causal address");
-        let invocation = RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                ExecutionScope::turn("restate-session", "restate-turn"),
-                "restate-child-key",
-            )
-            .expect("valid Restate child address"),
-            lash_core::RuntimeAttribution::for_turn("restate-session", "restate-turn", 4, 2),
-            "restate-child",
-        )
-        .with_caused_by(Some(lash_core::CausalRef::Effect {
-            address: parent_address.clone(),
-        }));
-
-        let caused = trace_context_for_runtime_effect_invocation(
-            lash_trace::TraceContext::default(),
-            &invocation,
-        );
-        assert_eq!(
-            caused.parent_graph_node_id.as_deref(),
-            Some(parent_address.graph_key().as_str())
-        );
-
-        let explicit = lash_trace::TraceContext {
-            parent_graph_node_id: Some("host:explicit-parent".to_string()),
-            run_id: Some("restate-host-run".to_string()),
-            ..Default::default()
-        };
-        let explicit = trace_context_for_runtime_effect_invocation(explicit.clone(), &invocation);
-        assert_eq!(
-            explicit.parent_graph_node_id.as_deref(),
-            Some("host:explicit-parent")
-        );
-        assert_eq!(explicit.run_id.as_deref(), Some("restate-host-run"));
-    }
-}
+mod tests;

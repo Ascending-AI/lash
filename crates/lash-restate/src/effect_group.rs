@@ -1628,8 +1628,10 @@ impl EffectGroupState for EffectGroupStateImpl {
     }
 }
 
+mod child_cancel;
 mod dispatch;
 mod payload;
+pub(crate) use child_cancel::{GroupChildCancel, group_child_cancel_verdict};
 #[cfg(test)]
 pub(crate) use dispatch::EffectGroupChildRequest;
 pub use dispatch::EffectGroupDispatchRequest;

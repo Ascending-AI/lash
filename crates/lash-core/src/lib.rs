@@ -702,9 +702,9 @@ pub use runtime::{
     DrainedChild, EffectAddress, EffectCommitState, EffectGroupDrainBudget, EffectGroupHandle,
     EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,
     EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupDrainReport,
-    GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement,
-    GroupWakePolicy, HandleId, IndependentEffectWork, InputItem, InvalidStartKey,
+    ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupChildCancelWatch,
+    GroupDrainReport, GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen,
+    GroupSettlement, GroupWakePolicy, HandleId, IndependentEffectWork, InputItem, InvalidStartKey,
     LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
     LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord,
@@ -786,7 +786,8 @@ pub use runtime::{
     WorkCadencePolicy, admit_session_state_generation, artifact_destination_owner_retired_error,
     artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
     effect_groups_unsupported, ensure_process_lease_schema_version, lifetime, mint_process_id,
-    park_turn_of_refused_group_child, park_turn_refused_by_generation, tool_failure_code,
+    park_turn_of_refused_group_child, park_turn_refused_by_generation, retry_cancel_watch,
+    tool_failure_code,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]

@@ -30,12 +30,12 @@ pub use control::RuntimeEffectControllerHandle;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, IndependentEffectWork,
-    ProcessDriveStep, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
-    QueuedLaneProbe, RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution,
-    ResolveOutcome, RuntimeEffectController, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildCancelWatch,
+    IndependentEffectWork, ProcessDriveStep, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal, RecordedKeyFence,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
+    ScopedEffectController, SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};
 pub use control::{EffectTaskController, drive_effect_controller_task};
@@ -1380,15 +1380,47 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             envelope.invocation.into_runtime_invocation(),
         );
         tool_context.install_prederived_completion_key(self.completion_key);
-        let outcome = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
+        // A group child's attempt watches its child's cancel inside the
+        // recorded body (ADR 0105 §4, FIG-3904): the watch fires the attempt's
+        // stop and drops the body, and the typed cancel is the attempt's
+        // recorded outcome, so a replay serves it and never re-runs the tool.
+        let call_id = call.call_id.clone();
+        let cancel_watch = dispatch
+            .effect_controller
+            .controller()
+            .group_child_cancel_watch();
+        let (stop, tool_context) = match &cancel_watch {
+            None => (None, tool_context),
+            Some(_) => {
+                let stop = tool_context
+                    .cancellation_token()
+                    .map(tokio_util::sync::CancellationToken::child_token)
+                    .unwrap_or_default();
+                (Some(stop.clone()), tool_context.with_step_stop(stop))
+            }
+        };
+        let body = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             dispatch.as_ref(),
             call,
             execution_grant,
             attempt,
             max_attempts,
             tool_context,
-        ))
-        .await?;
+        ));
+        let outcome = match (cancel_watch, stop) {
+            (Some(watch), Some(stop)) => {
+                crate::runtime::run_step_body_until_cancelled(
+                    stop,
+                    crate::runtime::retry_cancel_watch("an effect-group child's cancel", || {
+                        watch.cancelled()
+                    }),
+                    |_| body,
+                    || Err(crate::tool_dispatch::group_child_cancelled(&call_id)),
+                )
+                .await?
+            }
+            _ => body.await?,
+        };
         Ok(RuntimeEffectOutcome::ToolAttempt {
             launch: Box::new(outcome.launch),
             triggers: outcome.triggers,

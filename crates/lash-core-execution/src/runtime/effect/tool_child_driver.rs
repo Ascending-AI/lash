@@ -1229,6 +1229,18 @@ async fn drive(
         super::tool_child::ToolChildAdmission::Catalog { .. }
     ) && dispatch.is_orchestrating_tool(&request.call.tool_id)
     {
+        // The body's one step boundary before it runs: a child whose group
+        // cancel is already decided never starts it (ADR 0105 §4, FIG-3904).
+        if dispatch
+            .effect_controller
+            .controller()
+            .observe_group_child_cancel()
+            .await?
+        {
+            return Err(crate::tool_dispatch::group_child_cancelled(
+                &request.call.call_id,
+            ));
+        }
         let outcome = Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
             dispatch.as_ref(),
             request.call.clone(),

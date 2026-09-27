@@ -1035,6 +1035,15 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Lends the call the stop of the recorded step body it runs in (ADR 0105
+    /// §4): the body's watch fires it when the call's effect-group child is
+    /// cancelled. `stop` is a child of the context's own token, so either
+    /// stop reaches the call.
+    pub(crate) fn with_step_stop(mut self, stop: tokio_util::sync::CancellationToken) -> Self {
+        self.cancellation_token = Some(stop);
+        self
+    }
+
     pub(crate) fn take_completion_key(&self) -> Option<crate::AwaitEventKey> {
         self.completion.take()
     }
