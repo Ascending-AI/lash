@@ -87,6 +87,31 @@ lash_store_sql::statements! {
              ORDER BY enqueue_seq ASC
              LIMIT ?3";
 
+        /// [`claim_candidates_next_turn`](Self::claim_candidates_next_turn)
+        /// for an admitted input root's claim (ADR 0101 §4): the root's
+        /// admission chose the turn lane at a boundary whose command lane was
+        /// empty, so a command enqueued since holds back only the rows after
+        /// it. The prefix ends at the earliest open command; the shared
+        /// session sequence orders both lanes.
+        claim_candidates_admitted_root = "SELECT enqueue_seq, input_id, session_id, source_key,
+                    ingress_json, state, input_json, enqueued_at_ms, claim_id,
+                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
+                    claim_token, claim_session_lease_generation, run_spec_hash
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_session
+             WHERE session_id = ?1
+               AND {{deferred_next_turn_turn_input_state(state)}}
+               AND (
+                    claim_token IS NULL
+                    OR claim_session_lease_generation <> ?2
+               )
+               AND NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS commands
+                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+                      AND commands.enqueue_seq < pending_turn_inputs.enqueue_seq
+               )
+             ORDER BY enqueue_seq ASC
+             LIMIT ?3";
+
         /// Session `?1`'s claim candidates for active turn `?4` at generation
         /// `?2`, up to `?3` of them, at the `after_work` checkpoint.
         ///

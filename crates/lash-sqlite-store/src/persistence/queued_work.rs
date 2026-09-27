@@ -333,6 +333,7 @@ impl QueuedWorkStore for Store {
                             turn_id: turn_id.clone(),
                             checkpoint,
                         },
+                        CommandLaneGate::Boundary,
                     )?;
                     let input = match input {
                         TxOutcome::Commit(input) => input,

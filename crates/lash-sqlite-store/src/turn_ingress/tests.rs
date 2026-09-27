@@ -97,6 +97,9 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs_sqlite.select_pending_active.sql(),
         sql.pending_inputs_sqlite.claim_candidates_next_turn.sql(),
         sql.pending_inputs_sqlite
+            .claim_candidates_admitted_root
+            .sql(),
+        sql.pending_inputs_sqlite
             .claim_candidates_active_turn_after_work
             .sql(),
         sql.pending_inputs_sqlite
@@ -205,6 +208,7 @@ fn a_claim_candidate_scan_seeks_its_session_index() {
     let statements = &turn_ingress_sql().pending_inputs_sqlite;
     for statement in [
         &statements.claim_candidates_next_turn,
+        &statements.claim_candidates_admitted_root,
         &statements.claim_candidates_active_turn_after_work,
         &statements.claim_candidates_active_turn_before_completion,
     ] {

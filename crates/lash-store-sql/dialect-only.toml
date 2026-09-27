@@ -3419,6 +3419,12 @@ replace (FIG-3381).
 """
 
 [[dialect_only]]
+statement = "pending_turn_input.claim_candidates_admitted_root"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED"
+reason = "Same lock fork as pending_turn_input.claim_candidates_next_turn, for an admitted input root's claim, whose command-lane gate holds back only the rows after the earliest open command (ADR 0101 §4)."
+
+[[dialect_only]]
 statement = "pending_turn_input.claim_candidates_active_turn_after_work"
 backends = ["sqlite", "postgres"]
 kind = "SKIP LOCKED; JSON extraction"

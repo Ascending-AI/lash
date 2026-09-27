@@ -91,7 +91,6 @@ macro_rules! regressions {
 }
 
 regressions! {
-    #[ignore = "FIG-3873 S1: a queued command wedges its session's admitted head root on a claim race"]
     s1_queued_command_wedges_the_head_root => "FIG-3873 S1";
     #[ignore = "FIG-3873 S2: a crashed queued-work root replays into a journal mismatch"]
     s2_crashed_queued_work_root_diverges_on_replay => "FIG-3873 S2";

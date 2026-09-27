@@ -378,6 +378,12 @@ pub trait RootStore: Send + Sync {
     /// drive with the root. A claim that misses the head takes nothing and
     /// returns `None`, as does an empty queue.
     ///
+    /// The root's admission chose the turn lane at a boundary whose command
+    /// lane was empty (ADR 0101 §4), so a session command enqueued since
+    /// never holds the head back: the claim takes the prefix enqueued before
+    /// the earliest open command, and the rows after it wait for the next
+    /// boundary, where that command applies first.
+    ///
     /// While the head is undelivered, every later call for the same root,
     /// under any lease generation, returns the recorded drive unchanged and
     /// claims nothing: a worker that dies between this commit and the

@@ -46,6 +46,7 @@ pub(crate) async fn claim_root_inputs_sqlite(
                     &request.owner,
                     request.max_inputs,
                     lash_core_execution::TurnInputClaimMode::NextTurn,
+                    CommandLaneGate::AdmittedRoot,
                 )? {
                     TxOutcome::Commit(Some(claim)) => claim,
                     TxOutcome::Commit(None) => return Ok(TxOutcome::Commit(None)),
@@ -468,6 +469,21 @@ pub(super) fn claim_ready_queued_work_sqlite_conn(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Which command-lane gate a next-turn claim reads (ADR 0101 §4). A
+/// checkpoint claim never consults the command lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CommandLaneGate {
+    /// A claim at a turn boundary: any open session command holds every
+    /// turn-lane row back, because the command lane drains first.
+    Boundary,
+    /// The claim of an input root whose admission already chose the turn
+    /// lane at a boundary with no open command: a command enqueued since
+    /// holds back only the rows after it, so the root still reaches the head
+    /// it was admitted for.
+    AdmittedRoot,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn claim_pending_turn_inputs_sqlite_conn(
     tx: &Connection,
     now: u64,
@@ -476,6 +492,7 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core_execution::TurnInputClaimMode,
+    gate: CommandLaneGate,
 ) -> Result<TxOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     if max_inputs == 0 {
         return Ok(TxOutcome::Commit(None));
@@ -494,10 +511,11 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
     let generation = session_execution_lease.fencing_token;
     let candidate_rows = {
         // One named statement per filter shape production takes, picked by an
-        // exhaustive match: a next-turn scan, and an active-turn scan per
-        // checkpoint. The mode used to be spliced into one statement with a
-        // bound `? AND state = …` disjunct and an interpolated boundary
-        // predicate, neither of which a planner can seek.
+        // exhaustive match: a next-turn scan per command-lane gate, and an
+        // active-turn scan per checkpoint. The mode used to be spliced into
+        // one statement with a bound `? AND state = …` disjunct and an
+        // interpolated boundary predicate, neither of which a planner can
+        // seek.
         let sql = crate::turn_ingress::turn_ingress_sql();
         let statements = &sql.pending_inputs_sqlite;
         let mut values: Vec<rusqlite::types::Value> = vec![
@@ -505,14 +523,20 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
             sql_session_lease_generation(generation)?.into(),
             i64::try_from(max_inputs).unwrap_or(i64::MAX).into(),
         ];
-        let statement = match &mode {
-            lash_core_execution::TurnInputClaimMode::NextTurn => {
+        let statement = match (&mode, gate) {
+            (lash_core_execution::TurnInputClaimMode::NextTurn, CommandLaneGate::Boundary) => {
                 statements.claim_candidates_next_turn.sql()
             }
-            lash_core_execution::TurnInputClaimMode::ActiveTurn {
-                turn_id,
-                checkpoint,
-            } => {
+            (lash_core_execution::TurnInputClaimMode::NextTurn, CommandLaneGate::AdmittedRoot) => {
+                statements.claim_candidates_admitted_root.sql()
+            }
+            (
+                lash_core_execution::TurnInputClaimMode::ActiveTurn {
+                    turn_id,
+                    checkpoint,
+                },
+                _,
+            ) => {
                 values.push(turn_id.to_string().into());
                 match checkpoint {
                     lash_core_execution::CheckpointKind::AfterWork => {
@@ -664,6 +688,7 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
                     &owner,
                     max_inputs,
                     mode.clone(),
+                    CommandLaneGate::Boundary,
                 )?;
                 if let TxOutcome::Commit(input) = &outcome
                     && let lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } =

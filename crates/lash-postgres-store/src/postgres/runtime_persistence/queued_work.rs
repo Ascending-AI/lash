@@ -299,6 +299,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 turn_id: turn_id.clone(),
                 checkpoint,
             },
+            CommandLaneGate::Boundary,
         )
         .await?;
         let input = match input {

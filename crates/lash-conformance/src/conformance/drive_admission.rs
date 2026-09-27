@@ -1200,6 +1200,147 @@ pub async fn a_store_fault_at_the_root_claim_is_retried_not_recorded(
     }
 }
 
+/// ADR 0101 §4 (FIG-3892): the command lane drains first at every turn
+/// boundary, and an input root's admission is that boundary. A session
+/// command enqueued after the root was admitted, before its claim, never
+/// holds the root's head back: the root claims the prefix ahead of the
+/// command and commits, while an input enqueued after the command waits.
+/// The next drive applies the command before that input runs.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "command-after-admission", &effect_host, &stores, 8).await;
+    let head = parts
+        .enqueue("ahead of the command", Some("command-after-admission-root"))
+        .await;
+    let request = parts.request("command-after-admission-drive");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Result<RootOutcome, String>>();
+    let attempt: crate::ConformanceTurnAttempt = {
+        let parts = parts.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let request = request.clone();
+            let tx = tx.clone();
+            Box::pin(async move {
+                let mut runtime = parts.runtime().await;
+                let verdict = lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                    .await
+                    .expect("admit the input root");
+                let admitted = admitted(verdict);
+                // The command and a later input arrive between the root's
+                // admission and its claim. Both are keyed, so a tier that
+                // retries this attempt admits each once.
+                parts
+                    .store
+                    .enqueue_queued_work(
+                        crate::QueuedWorkBatchDraft::new(
+                            &parts.session_id,
+                            crate::DeliveryPolicy::EarliestSafeBoundary,
+                            crate::SessionCommand::RefreshToolCatalog {
+                                reason: "after the admission".to_string(),
+                            },
+                        )
+                        .with_source_key("command-after-admission-command"),
+                    )
+                    .await
+                    .expect("enqueue the command");
+                parts
+                    .enqueue("behind the command", Some("command-after-admission-later"))
+                    .await;
+                match lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted).await {
+                    Ok(outcome) => {
+                        let _ = tx.send(Ok(outcome));
+                        crate::ConformanceTurnEnd::Settled
+                    }
+                    Err(abort) => {
+                        let error = abort.into_error();
+                        let _ = tx.send(Err(error.to_string()));
+                        crate::ConformanceTurnEnd::Aborted(error.turn_failure_cause())
+                    }
+                }
+            })
+        })
+    };
+    // The root's first execution must commit: a claim the command held back
+    // would fail it retryably, and the tier would retry it forever.
+    let driving = tokio::spawn({
+        let runner = Arc::clone(&runner);
+        let scope = driver_scope(&parts);
+        async move { runner.run_turn(scope, attempt).await }
+    });
+    // A wedged root never ends its first execution: bound the wait so the
+    // wedge fails here rather than at the harness's test timeout.
+    let first = tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv())
+        .await
+        .expect("the root's first execution ends instead of retrying its claim forever")
+        .expect("the root's first execution ended");
+    assert!(
+        matches!(
+            &first,
+            Ok(RootOutcome::Committed { root, .. })
+                if root.as_str() == "command-after-admission-root"
+        ),
+        "the admitted root claims its head past the later command and commits: {first:?}"
+    );
+    driving.await.expect("the tier settles the drive");
+    let root = TurnId::from("command-after-admission-root");
+    assert_eq!(
+        parts.applications().await,
+        vec![(head.clone(), root.clone())],
+        "the input behind the command waits for the next boundary"
+    );
+    let pending = parts
+        .store
+        .list_pending_queued_work(&parts.session_id)
+        .await
+        .expect("read the command lane");
+    assert_eq!(pending.len(), 1, "the command is still open: {pending:?}");
+
+    let next = parts.request("command-after-admission-next");
+    let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let next = next.clone();
+        Box::pin(async move {
+            lash_core::drive::drive_session(&mut runtime, &scope, &next)
+                .await
+                .expect("the next drive runs")
+        })
+    })
+    .await;
+    assert_eq!(outcome.stop, DriveStop::Idle, "{outcome:?}");
+    assert!(
+        matches!(
+            outcome.ran.first(),
+            Some(RootOutcome::Committed { root, .. } | RootOutcome::Ceded { root })
+                if root.as_str().starts_with("drive-run:")
+        ),
+        "the next boundary runs the command lane first: {outcome:?}"
+    );
+    assert!(
+        parts
+            .store
+            .list_pending_queued_work(&parts.session_id)
+            .await
+            .expect("read the command lane")
+            .is_empty(),
+        "the command applied"
+    );
+    let applied: Vec<_> = parts
+        .applications()
+        .await
+        .into_iter()
+        .map(|(input, _)| input)
+        .collect();
+    assert_eq!(applied.len(), 2, "both inputs are answered: {applied:?}");
+    assert_eq!(applied[0], head, "the head is answered once, first");
+}
+
 /// A drive whose accepted root meets a live foreign lane keeps the input and
 /// its invocation open. Its redrive can start while the holder is releasing;
 /// once released, the same root answers without a Failed terminal row.

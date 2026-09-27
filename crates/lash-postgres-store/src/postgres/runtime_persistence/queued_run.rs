@@ -420,6 +420,7 @@ impl PostgresSessionStore {
                             owner,
                             max_inputs,
                             lash_core_execution::TurnInputClaimMode::NextTurn,
+                            CommandLaneGate::Boundary,
                         )
                         .await?,
                         &fence.session_id,

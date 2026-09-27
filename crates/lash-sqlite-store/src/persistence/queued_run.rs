@@ -446,6 +446,7 @@ impl Store {
                                 &owner,
                                 max_inputs,
                                 lash_core_execution::TurnInputClaimMode::NextTurn,
+                                CommandLaneGate::Boundary,
                             )?,
                             &fence.session_id,
                         )?

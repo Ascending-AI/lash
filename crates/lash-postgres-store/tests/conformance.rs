@@ -2033,5 +2033,6 @@ mod root_control {
     (an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session, "s8c-3"),
     (a_refused_follow_on_drive_keeps_the_intents_obligation_due, "s8c-4"),
     (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
+    (a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary, "drive-command-after-admission"),
     ]);
 }

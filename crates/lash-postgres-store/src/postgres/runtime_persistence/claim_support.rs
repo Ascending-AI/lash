@@ -36,6 +36,7 @@ pub(crate) async fn claim_root_inputs_postgres(
         &request.owner,
         request.max_inputs,
         lash_core_execution::TurnInputClaimMode::NextTurn,
+        CommandLaneGate::AdmittedRoot,
     )
     .await?
     {
@@ -865,6 +866,20 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     ))
 }
 
+/// Which command-lane gate a next-turn claim reads (ADR 0101 §4). A
+/// checkpoint claim never consults the command lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CommandLaneGate {
+    /// A claim at a turn boundary: any open session command holds every
+    /// turn-lane row back, because the command lane drains first.
+    Boundary,
+    /// The claim of an input root whose admission already chose the turn
+    /// lane at a boundary with no open command: a command enqueued since
+    /// holds back only the rows after it, so the root still reaches the head
+    /// it was admitted for.
+    AdmittedRoot,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -873,6 +888,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core_execution::TurnInputClaimMode,
+    gate: CommandLaneGate,
 ) -> Result<ClaimTransactionOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     if max_inputs == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
@@ -891,16 +907,19 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
     // One named statement per filter shape production takes, picked by an
-    // exhaustive match: a next-turn scan, and an active-turn scan per
-    // checkpoint. The mode used to be spliced into one query-builder statement
-    // with a bound `$N AND state = …` disjunct and an interpolated boundary
-    // predicate, neither of which a planner can seek.
+    // exhaustive match: a next-turn scan per command-lane gate, and an
+    // active-turn scan per checkpoint. The mode used to be spliced into one
+    // query-builder statement with a bound `$N AND state = …` disjunct and an
+    // interpolated boundary predicate, neither of which a planner can seek.
     let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs_postgres;
-    let mut query = match &mode {
-        lash_core_execution::TurnInputClaimMode::NextTurn => {
+    let mut query = match (&mode, gate) {
+        (lash_core_execution::TurnInputClaimMode::NextTurn, CommandLaneGate::Boundary) => {
             sqlx::query(statements.claim_candidates_next_turn.sql())
         }
-        lash_core_execution::TurnInputClaimMode::ActiveTurn { checkpoint, .. } => {
+        (lash_core_execution::TurnInputClaimMode::NextTurn, CommandLaneGate::AdmittedRoot) => {
+            sqlx::query(statements.claim_candidates_admitted_root.sql())
+        }
+        (lash_core_execution::TurnInputClaimMode::ActiveTurn { checkpoint, .. }, _) => {
             match checkpoint {
                 lash_core_execution::CheckpointKind::AfterWork => {
                     sqlx::query(statements.claim_candidates_active_turn_after_work.sql())
@@ -1052,6 +1071,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
         owner,
         max_inputs,
         mode.clone(),
+        CommandLaneGate::Boundary,
     )
     .await?
     {

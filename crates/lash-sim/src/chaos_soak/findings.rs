@@ -37,7 +37,23 @@ impl Finding {
 }
 
 /// Every defect the soak found that `main` still has.
-pub const OPEN: &[Finding] = &[
+pub const OPEN: &[Finding] = &[Finding {
+    id: "FIG-3873 S2",
+    summary: "a queued-work (command) root whose first attempt dies replays \
+                  divergently: Restate journal mismatch 570 (recorded `set state` at \
+                  index 4, the replay attempts `run`), so the root retries until it \
+                  pauses and pins its build past the rolling deploy's drain",
+    exposed_by: &["command"],
+    seed: 0x70b3_4810_d30c_b07a,
+    steps: 200,
+    without: &[],
+}];
+
+/// The defects the soak found that `main` has fixed: each replay must pass.
+pub const FIXED: &[Finding] = &[
+    // FIG-3892: a session command enqueued between an input root's
+    // admission and its claim held the claim back, so the root retried a
+    // claim race forever and the command never drained behind it.
     Finding {
         id: "FIG-3873 S1",
         summary: "a session with a queued command wedges: its admitted head root \
@@ -59,21 +75,6 @@ pub const OPEN: &[Finding] = &[
             "roll",
         ],
     },
-    Finding {
-        id: "FIG-3873 S2",
-        summary: "a queued-work (command) root whose first attempt dies replays \
-                  divergently: Restate journal mismatch 570 (recorded `set state` at \
-                  index 4, the replay attempts `run`), so the root retries until it \
-                  pauses and pins its build past the rolling deploy's drain",
-        exposed_by: &["command"],
-        seed: 0x70b3_4810_d30c_b07a,
-        steps: 200,
-        without: &[],
-    },
-];
-
-/// The defects the soak found that `main` has fixed: each replay must pass.
-pub const FIXED: &[Finding] = &[
     // FIG-3894: a turn whose final commit the close cut short left its
     // closure pinned, which no activation of a closing session drains, so
     // the physical delete refused it for good, and a deletion retried after
