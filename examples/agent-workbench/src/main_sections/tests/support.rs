@@ -266,10 +266,11 @@ pub(crate) fn detached_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> 
     })
 }
 
-pub(crate) fn run_async_test_on_stack_budget<F, Fut>(name: &str, test: F)
+pub(crate) fn run_async_test_on_stack_budget<F, Fut, T>(name: &str, test: F) -> T
 where
     F: FnOnce() -> Fut + Send + 'static,
-    Fut: Future<Output = ()> + 'static,
+    Fut: Future<Output = T> + 'static,
+    T: Send + 'static,
 {
     std::thread::Builder::new()
         .name(name.to_string())
@@ -284,16 +285,22 @@ where
         })
         .expect("spawn stack-budget test thread")
         .join()
-        .expect("stack-budget test thread");
+        .expect("stack-budget test thread")
 }
 
-pub(crate) fn run_async_test_on_stack_budget_multi_thread<F, Fut>(
+/// The value `test` returns crosses the join after the law's runtime has
+/// dropped: ambient tasks it spawned are gone with the runtime, so fixture
+/// data directories a live law hands back can be removed without racing the
+/// detached writers that would otherwise recreate them.
+pub(crate) fn run_async_test_on_stack_budget_multi_thread<F, Fut, T>(
     name: &str,
     worker_threads: usize,
     test: F,
-) where
+) -> T
+where
     F: FnOnce() -> Fut + Send + 'static,
-    Fut: Future<Output = ()> + 'static,
+    Fut: Future<Output = T> + 'static,
+    T: Send + 'static,
 {
     std::thread::Builder::new()
         .name(name.to_string())
@@ -310,5 +317,5 @@ pub(crate) fn run_async_test_on_stack_budget_multi_thread<F, Fut>(
         })
         .expect("spawn stack-budget multi-thread test thread")
         .join()
-        .expect("stack-budget multi-thread test thread");
+        .expect("stack-budget multi-thread test thread")
 }

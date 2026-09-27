@@ -446,198 +446,206 @@ async fn prove_live_restate_participant_crash_windows(
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_closure_participants_serialize_direct_index_retirement() {
-    run_async_test_on_stack_budget_multi_thread("workbench-closure-lifecycle-e2e", 4, || async {
-        use lash::{durability::EffectHost as _, persistence::SessionStoreFactory as _};
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-closure-lifecycle-e2e",
+        4,
+        || async {
+            use lash::{durability::EffectHost as _, persistence::SessionStoreFactory as _};
 
-        let ingress_url = std::env::var("RESTATE_INGRESS_URL")
-            .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
-        let admin_url = std::env::var("RESTATE_ADMIN_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-        let data_dir = std::env::temp_dir().join(format!(
-            "agent-workbench-closure-lifecycle-e2e-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&data_dir).expect("create closure lifecycle E2E data dir");
-        let provider = lash::testing::TestProvider::builder()
-            .kind("workbench-closure-lifecycle-e2e")
-            .complete(|_| async { Ok(text_response("unused")) })
-            .build()
-            .into_handle();
-        let harness = live_workbench_restate_state_with_provider(
-            &data_dir,
-            ingress_url.clone(),
-            provider,
-            WorkbenchSessions::fresh(),
-            ActiveTurns::default(),
-        )
-        .await;
-        let mut endpoint = LiveRestateEndpoint::start(
-            &admin_url,
-            harness.state.clone(),
-            harness.backend,
-            harness.process_worker,
-        )
-        .await;
-        let host = Arc::new(lash_restate::RestateEffectHost::new(
-            lash_restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
-            lash_restate::RestateAuthorityId::new("agent-workbench-tests")
-                .expect("valid live Restate authority"),
-        ));
-        let effect_host: Arc<dyn lash::durability::EffectHost> = host.clone();
-        let factory_a =
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("closure-catalog-a"));
-        let factory_b =
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("closure-catalog-b"));
-        factory_a.bind_effect_host(&effect_host);
-        factory_b.bind_effect_host(&effect_host);
-
-        let scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
-            "live-restate-shared-owner",
-        ));
-        let (store_a, lease_a, authorization_a) = authorize_restate_completion_closure(
-            &effect_host,
-            &factory_a,
-            "live-restate-catalog-a",
-            &scope,
-        )
-        .await;
-        let (store_b, lease_b, authorization_b) = authorize_restate_completion_closure(
-            &effect_host,
-            &factory_b,
-            "live-restate-catalog-b",
-            &scope,
-        )
-        .await;
-        let retirement = || lash::durability::EffectJournalRetirement::for_scope(&scope).unwrap();
-        let blocked = host
-            .retire_effect_journal(retirement())
-            .await
-            .expect_err("actual Restate index retirement observes both catalogs");
-        assert_eq!(
-            blocked.code,
-            lash::runtime::RuntimeErrorCode::EffectScopeNotQuiescent
-        );
-
-        settle_and_release_restate_completion_closure(
-            effect_host.clone(),
-            &factory_a,
-            &scope,
-            store_a,
-            lease_a,
-            authorization_a,
-        )
-        .await;
-        assert!(
-            host.retire_effect_journal(retirement()).await.is_err(),
-            "the second live catalog still fences direct index retirement"
-        );
-        settle_and_release_restate_completion_closure(
-            effect_host.clone(),
-            &factory_b,
-            &scope,
-            store_b,
-            lease_b,
-            authorization_b,
-        )
-        .await;
-        host.retire_effect_journal(retirement())
-            .await
-            .expect("live Restate index retires after every participant releases");
-
-        let late_scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
-            "live-restate-retire-first",
-        ));
-        let late_address = lash::TurnAddress::new("live-restate-late-catalog", "turn");
-        let late_store = factory_a
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: late_address.session_id.clone(),
-                relation: lash::persistence::SessionRelation::Root,
-                policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
-            })
-            .await
-            .expect("create late live Restate catalog session");
-        let late_lease = late_store
-            .try_claim_session_execution_lease(
-                &late_address.session_id,
-                &lash::persistence::LeaseOwnerIdentity::opaque("late", "late:incarnation"),
-                "late:executor",
-                60_000,
+            let ingress_url = std::env::var("RESTATE_INGRESS_URL")
+                .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
+            let admin_url = std::env::var("RESTATE_ADMIN_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
+            let data_dir = std::env::temp_dir().join(format!(
+                "agent-workbench-closure-lifecycle-e2e-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&data_dir).expect("create closure lifecycle E2E data dir");
+            let provider = lash::testing::TestProvider::builder()
+                .kind("workbench-closure-lifecycle-e2e")
+                .complete(|_| async { Ok(text_response("unused")) })
+                .build()
+                .into_handle();
+            let harness = live_workbench_restate_state_with_provider(
+                &data_dir,
+                ingress_url.clone(),
+                provider,
+                WorkbenchSessions::fresh(),
+                ActiveTurns::default(),
             )
-            .await
-            .expect("claim late live Restate lane")
-            .acquired()
-            .expect("late live Restate lane is free");
-        let late_scoped = host
-            .scoped(live_restate_admission(&late_scope))
-            .expect("scope late owner");
-        let late_binding = host
-            .turn_control_binding(&late_scoped)
-            .await
-            .expect("capture binding before owner retirement");
-        late_store
-            .validate_turn_cancellation_binding(
-                &late_address.session_id,
-                &late_lease.fence(),
-                late_binding.binding_id(),
-                &late_scope,
-            )
-            .await
-            .expect("persist late original scope before owner retirement");
-        let late_resolver = late_binding.resolver();
-        let late_authorization = lash::TurnCancelClosureAuthorization::new(
-            late_address.clone(),
-            late_binding.binding_id(),
-            late_scope.clone(),
-            late_resolver
-                .await_event_key(
-                    &late_address.execution_scope(),
-                    lash::AwaitEventWaitIdentity::TurnCancelGate,
-                )
-                .await
-                .expect("late base key"),
-            late_resolver
-                .await_event_key(
-                    &late_address.execution_scope(),
-                    lash::AwaitEventWaitIdentity::TurnCancelEscalation,
-                )
-                .await
-                .expect("late escalation key"),
-            late_resolver
-                .await_event_key(
-                    &late_address.execution_scope(),
-                    lash::AwaitEventWaitIdentity::TurnTerminal,
-                )
-                .await
-                .expect("late terminal key"),
-            lash::TurnCancelClosureProposal::CompletionSealed,
-            lash::TurnCancelIntentSnapshot::Absent,
-            &late_lease.fence(),
-        )
-        .expect("materialize late live Restate authorization");
-        host.retire_effect_journal(
-            lash::durability::EffectJournalRetirement::for_scope(&late_scope).unwrap(),
-        )
-        .await
-        .expect("retire live Restate index before catalog authorization");
-        late_store
-            .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
-            .await
-            .expect_err("retired live Restate owner refuses late catalog authorization");
-        assert!(
-            late_store
-                .pending_turn_cancel_closure_pins()
-                .await
-                .expect("read late live Restate catalog pins")
-                .is_empty()
-        );
-
-        prove_live_restate_participant_crash_windows(&host, &effect_host, &data_dir).await;
-
-        endpoint
-            .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
             .await;
-        let _ = std::fs::remove_dir_all(data_dir);
-    });
+            let mut endpoint = LiveRestateEndpoint::start(
+                &admin_url,
+                harness.state.clone(),
+                harness.backend,
+                harness.process_worker,
+            )
+            .await;
+            let host = Arc::new(lash_restate::RestateEffectHost::new(
+                lash_restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
+                lash_restate::RestateAuthorityId::new("agent-workbench-tests")
+                    .expect("valid live Restate authority"),
+            ));
+            let effect_host: Arc<dyn lash::durability::EffectHost> = host.clone();
+            let factory_a = lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.join("closure-catalog-a"),
+            );
+            let factory_b = lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.join("closure-catalog-b"),
+            );
+            factory_a.bind_effect_host(&effect_host);
+            factory_b.bind_effect_host(&effect_host);
+
+            let scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
+                "live-restate-shared-owner",
+            ));
+            let (store_a, lease_a, authorization_a) = authorize_restate_completion_closure(
+                &effect_host,
+                &factory_a,
+                "live-restate-catalog-a",
+                &scope,
+            )
+            .await;
+            let (store_b, lease_b, authorization_b) = authorize_restate_completion_closure(
+                &effect_host,
+                &factory_b,
+                "live-restate-catalog-b",
+                &scope,
+            )
+            .await;
+            let retirement =
+                || lash::durability::EffectJournalRetirement::for_scope(&scope).unwrap();
+            let blocked = host
+                .retire_effect_journal(retirement())
+                .await
+                .expect_err("actual Restate index retirement observes both catalogs");
+            assert_eq!(
+                blocked.code,
+                lash::runtime::RuntimeErrorCode::EffectScopeNotQuiescent
+            );
+
+            settle_and_release_restate_completion_closure(
+                effect_host.clone(),
+                &factory_a,
+                &scope,
+                store_a,
+                lease_a,
+                authorization_a,
+            )
+            .await;
+            assert!(
+                host.retire_effect_journal(retirement()).await.is_err(),
+                "the second live catalog still fences direct index retirement"
+            );
+            settle_and_release_restate_completion_closure(
+                effect_host.clone(),
+                &factory_b,
+                &scope,
+                store_b,
+                lease_b,
+                authorization_b,
+            )
+            .await;
+            host.retire_effect_journal(retirement())
+                .await
+                .expect("live Restate index retires after every participant releases");
+
+            let late_scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
+                "live-restate-retire-first",
+            ));
+            let late_address = lash::TurnAddress::new("live-restate-late-catalog", "turn");
+            let late_store = factory_a
+                .create_store(&lash::persistence::SessionStoreCreateRequest {
+                    owning_process_id: None,
+                    pending_observer_intents: Vec::new(),
+                    session_id: late_address.session_id.clone(),
+                    relation: lash::persistence::SessionRelation::Root,
+                    policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+                })
+                .await
+                .expect("create late live Restate catalog session");
+            let late_lease = late_store
+                .try_claim_session_execution_lease(
+                    &late_address.session_id,
+                    &lash::persistence::LeaseOwnerIdentity::opaque("late", "late:incarnation"),
+                    "late:executor",
+                    60_000,
+                )
+                .await
+                .expect("claim late live Restate lane")
+                .acquired()
+                .expect("late live Restate lane is free");
+            let late_scoped = host
+                .scoped(live_restate_admission(&late_scope))
+                .expect("scope late owner");
+            let late_binding = host
+                .turn_control_binding(&late_scoped)
+                .await
+                .expect("capture binding before owner retirement");
+            late_store
+                .validate_turn_cancellation_binding(
+                    &late_address.session_id,
+                    &late_lease.fence(),
+                    late_binding.binding_id(),
+                    &late_scope,
+                )
+                .await
+                .expect("persist late original scope before owner retirement");
+            let late_resolver = late_binding.resolver();
+            let late_authorization = lash::TurnCancelClosureAuthorization::new(
+                late_address.clone(),
+                late_binding.binding_id(),
+                late_scope.clone(),
+                late_resolver
+                    .await_event_key(
+                        &late_address.execution_scope(),
+                        lash::AwaitEventWaitIdentity::TurnCancelGate,
+                    )
+                    .await
+                    .expect("late base key"),
+                late_resolver
+                    .await_event_key(
+                        &late_address.execution_scope(),
+                        lash::AwaitEventWaitIdentity::TurnCancelEscalation,
+                    )
+                    .await
+                    .expect("late escalation key"),
+                late_resolver
+                    .await_event_key(
+                        &late_address.execution_scope(),
+                        lash::AwaitEventWaitIdentity::TurnTerminal,
+                    )
+                    .await
+                    .expect("late terminal key"),
+                lash::TurnCancelClosureProposal::CompletionSealed,
+                lash::TurnCancelIntentSnapshot::Absent,
+                &late_lease.fence(),
+            )
+            .expect("materialize late live Restate authorization");
+            host.retire_effect_journal(
+                lash::durability::EffectJournalRetirement::for_scope(&late_scope).unwrap(),
+            )
+            .await
+            .expect("retire live Restate index before catalog authorization");
+            late_store
+                .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
+                .await
+                .expect_err("retired live Restate owner refuses late catalog authorization");
+            assert!(
+                late_store
+                    .pending_turn_cancel_closure_pins()
+                    .await
+                    .expect("read late live Restate catalog pins")
+                    .is_empty()
+            );
+
+            prove_live_restate_participant_crash_windows(&host, &effect_host, &data_dir).await;
+
+            endpoint
+                .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+                .await;
+            data_dir
+        },
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }

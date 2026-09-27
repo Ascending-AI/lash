@@ -1312,12 +1312,15 @@ pub(crate) use restate_cron_tests::{
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_cron_zombie_cancel_path_end_to_end() {
-    run_async_test_on_stack_budget_multi_thread("workbench-restate-cron-zombie-e2e", 4, || {
-        live_restate_cron_zombie_cancel_path_end_to_end_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-restate-cron-zombie-e2e",
+        4,
+        live_restate_cron_zombie_cancel_path_end_to_end_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
-async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() {
+async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() -> PathBuf {
     let scenario = start_live_restate_cron_scenario(
         "agent-workbench-restate-cron-zombie-e2e",
         live_restate_cron_provider(LIVE_RESTATE_CRON_ZOMBIE_EXPR.to_string()),
@@ -1336,20 +1339,23 @@ async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() {
     )
     .await;
     assert_no_active_lash_restate_invocations(&scenario.state, Duration::from_secs(10)).await;
+    let data_dir = scenario.data_dir.clone();
     scenario.shutdown().await;
+    data_dir
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end() {
-    run_async_test_on_stack_budget_multi_thread(
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
         "workbench-restate-cron-sync-cancel-e2e",
         4,
         live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner,
     );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
-async fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner() {
+async fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner() -> PathBuf {
     let (provider, mut queued_turn_entered, release_queued_turn) =
         gated_live_restate_cron_provider();
     let scenario =
@@ -1405,7 +1411,9 @@ async fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner() {
         "sync-cancel scenario must not need the zombie backstop"
     );
     assert_no_active_lash_restate_invocations(&scenario.state, Duration::from_secs(10)).await;
+    let data_dir = scenario.data_dir.clone();
     scenario.shutdown().await;
+    data_dir
 }
 
 /// A turn a live scenario started the way the chat route does: through the

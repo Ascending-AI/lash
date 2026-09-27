@@ -3,12 +3,24 @@ use super::*;
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_retry_keeps_the_admitted_deployment_configuration() {
-    run_async_test_on_stack_budget_multi_thread("workbench-immutable-deployment-retry", 4, || {
-        live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
-    });
+    let (a_dir, b_dir) = run_async_test_on_stack_budget_multi_thread(
+        "workbench-immutable-deployment-retry",
+        4,
+        live_restate_retry_keeps_the_admitted_deployment_configuration_inner,
+    );
+    let a_path = a_dir.path().to_path_buf();
+    let b_path = b_dir.path().to_path_buf();
+    a_dir.close().expect("remove fixture A data directory");
+    b_dir.close().expect("remove fixture B data directory");
+    assert!(!a_path.exists());
+    assert!(!b_path.exists());
+    println!(
+        "workbench immutable-deployment gate passed: A-retried-on-A; B-new-on-B; env-ref-and-bytes-stable; owned-cleanup"
+    );
 }
 
-async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() {
+async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
+-> (tempfile::TempDir, tempfile::TempDir) {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -320,15 +332,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
     endpoint_b
         .stop_after_producers_closed_and_drained(&harness_b.state, Duration::from_secs(30))
         .await;
-    let a_path_for_check = a_path.clone();
-    let b_path_for_check = b_path.clone();
-    a_dir.close().expect("remove fixture A data directory");
-    b_dir.close().expect("remove fixture B data directory");
-    assert!(!a_path_for_check.exists());
-    assert!(!b_path_for_check.exists());
-    println!(
-        "workbench immutable-deployment gate passed: A-retried-on-A; B-new-on-B; env-ref-and-bytes-stable; owned-cleanup"
-    );
+    (a_dir, b_dir)
 }
 
 /// Fixture A's provider script.

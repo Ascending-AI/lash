@@ -12,12 +12,14 @@ mod immutable_deployment;
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_process_llm_query_with_typed_output_succeeds() {
-    run_async_test_on_stack_budget_multi_thread("workbench-process-llm-query-e2e", 4, || {
-        live_restate_process_llm_query_with_typed_output_succeeds_inner()
-    });
+    let data_dir =
+        run_async_test_on_stack_budget_multi_thread("workbench-process-llm-query-e2e", 4, || {
+            live_restate_process_llm_query_with_typed_output_succeeds_inner()
+        });
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
-async fn live_restate_process_llm_query_with_typed_output_succeeds_inner() {
+async fn live_restate_process_llm_query_with_typed_output_succeeds_inner() -> PathBuf {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -95,7 +97,7 @@ finish(await handle);
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
-    let _ = std::fs::remove_dir_all(data_dir);
+    data_dir
 }
 
 /// A turn whose cell awaits two tool calls together opens a durable effect
@@ -106,12 +108,14 @@ finish(await handle);
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_turn_tool_batch_runs_through_effect_group_services() {
-    run_async_test_on_stack_budget_multi_thread("workbench-tool-batch-e2e", 4, || {
-        live_restate_turn_tool_batch_runs_through_effect_group_services_inner()
-    });
+    let data_dir =
+        run_async_test_on_stack_budget_multi_thread("workbench-tool-batch-e2e", 4, || {
+            live_restate_turn_tool_batch_runs_through_effect_group_services_inner()
+        });
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
-async fn live_restate_turn_tool_batch_runs_through_effect_group_services_inner() {
+async fn live_restate_turn_tool_batch_runs_through_effect_group_services_inner() -> PathBuf {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -179,7 +183,7 @@ finish(`tool batch settled: ${found.length}`);
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
-    let _ = std::fs::remove_dir_all(data_dir);
+    data_dir
 }
 
 #[test]
@@ -191,9 +195,13 @@ fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable() {
         });
         return;
     }
-    run_async_test_on_stack_budget_multi_thread("workbench-recovery-parent", 4, || {
-        live_restate_ingress_owner_restart_resumes_and_remains_cancellable_inner()
-    });
+    let data_dirs =
+        run_async_test_on_stack_budget_multi_thread("workbench-recovery-parent", 4, || {
+            live_restate_ingress_owner_restart_resumes_and_remains_cancellable_inner()
+        });
+    for data_dir in &data_dirs {
+        remove_fixture_owned_data_dir(data_dir);
+    }
 }
 
 #[cfg(unix)]
@@ -262,12 +270,15 @@ fn restate_recovery_failure_reaps_child_before_aborting_process() {
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence() {
-    run_async_test_on_stack_budget_multi_thread("workbench-suspended-sleep-cancel", 4, || {
-        live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-suspended-sleep-cancel",
+        4,
+        live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
-async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() {
+async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() -> PathBuf {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -387,18 +398,22 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
-    let _ = std::fs::remove_dir_all(data_dir);
+    data_dir
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence() {
-    run_async_test_on_stack_budget_multi_thread("workbench-stop-over-process-await", 4, || {
-        live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-stop-over-process-await",
+        4,
+        live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
-async fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence_inner() {
+async fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence_inner()
+-> PathBuf {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -552,58 +567,76 @@ finish(await handle);
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
-    let _ = std::fs::remove_dir_all(data_dir);
+    data_dir
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle() {
-    run_async_test_on_stack_budget_multi_thread("workbench-turn-ingress-e2e", 4, || {
-        live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-turn-ingress-e2e",
+        4,
+        live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_session_delete_ends_until_children_through_parent_end() {
-    run_async_test_on_stack_budget_multi_thread("workbench-process-lifecycle-e2e", 4, || {
-        live_restate_session_delete_ends_until_children_through_parent_end_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-process-lifecycle-e2e",
+        4,
+        live_restate_session_delete_ends_until_children_through_parent_end_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_session_delete_revokes_process_await_and_cancels_process() {
-    run_async_test_on_stack_budget_multi_thread("workbench-revoked-process-await", 4, || {
-        live_restate_session_delete_revokes_process_await_and_cancels_process_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-revoked-process-await",
+        4,
+        live_restate_session_delete_revokes_process_await_and_cancels_process_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_terminal_session_delete_failure_keeps_the_session_live() {
-    run_async_test_on_stack_budget_multi_thread("workbench-delete-failure-e2e", 4, || {
-        live_restate_terminal_session_delete_failure_keeps_the_session_live_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-delete-failure-e2e",
+        4,
+        live_restate_terminal_session_delete_failure_keeps_the_session_live_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_provider_auth_failure_terminalizes_and_session_recovers() {
-    run_async_test_on_stack_budget_multi_thread("workbench-auth-failure-e2e", 4, || {
-        live_restate_provider_auth_failure_terminalizes_and_session_recovers_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-auth-failure-e2e",
+        4,
+        live_restate_provider_auth_failure_terminalizes_and_session_recovers_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_rate_limit_retry_converges_observers_to_one_copy() {
-    run_async_test_on_stack_budget_multi_thread("workbench-rate-limit-retry-e2e", 4, || {
-        live_restate_rate_limit_retry_converges_observers_to_one_copy_inner()
-    });
+    let data_dir = run_async_test_on_stack_budget_multi_thread(
+        "workbench-rate-limit-retry-e2e",
+        4,
+        live_restate_rate_limit_retry_converges_observers_to_one_copy_inner,
+    );
+    remove_fixture_owned_data_dir(&data_dir);
 }
 
-async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_inner() {
+async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_inner() -> PathBuf {
     let (harness, data_dir) = live_failure_path_harness(
         "auth-failure",
         failure_provider::DevProviderScenario::AuthFailureOnce,
@@ -697,7 +730,8 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     println!(
         "workbench auth-failure gate passed: failed terminal, visible error, next turn recovered"
     );
-    harness.shutdown(data_dir).await;
+    harness.shutdown().await;
+    data_dir
 }
 
 async fn submit_workbench_turn_via_restate(
@@ -744,7 +778,7 @@ async fn wait_for_restate_invocation_completion(
     }
 }
 
-async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
+async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -> PathBuf {
     let (harness, data_dir) = live_failure_path_harness(
         "rate-limit-retry",
         failure_provider::DevProviderScenario::RateLimitOnce,
@@ -882,7 +916,8 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
     println!(
         "workbench rate-limit gate passed: retry succeeded and live/replay observers converged"
     );
-    harness.shutdown(data_dir).await;
+    harness.shutdown().await;
+    data_dir
 }
 
 fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messages::Message]) {
@@ -973,21 +1008,14 @@ struct LiveFailurePathHarness {
 }
 
 impl LiveFailurePathHarness {
-    async fn shutdown(mut self, data_dir: PathBuf) {
+    async fn shutdown(mut self) {
         self.endpoint
             .stop_after_producers_closed_and_drained(&self.state, Duration::from_secs(30))
             .await;
-        std::fs::remove_dir_all(&data_dir)
-            .unwrap_or_else(|error| panic!("remove owned fixture {}: {error}", data_dir.display()));
-        assert!(
-            !data_dir.exists(),
-            "owned fixture data directory remained at {}",
-            data_dir.display()
-        );
     }
 }
 
-async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inner() {
+async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inner() -> PathBuf {
     // An orphan active-turn claim: a registry row with no workflow behind it,
     // the shape a turn leaves between ingress claiming the slot and its
     // workflow journaling any awaits. Await-gate revocation cannot settle it,
@@ -1110,7 +1138,8 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
             .await
             .expect("read successful retry tombstone fence")
     );
-    harness.shutdown(data_dir).await;
+    harness.shutdown().await;
+    data_dir
 }
 
 /// How long the session-bound process sleeps: long enough that the session
@@ -1121,7 +1150,7 @@ const REVOKED_PROCESS_AWAIT_SLEEP: Duration = Duration::from_secs(90);
 /// cancels the process: it terminalizes far inside this deadline.
 const REVOKED_PROCESS_AWAIT_SETTLE_MARGIN: Duration = Duration::from_secs(45);
 
-async fn live_restate_session_delete_revokes_process_await_and_cancels_process_inner() {
+async fn live_restate_session_delete_revokes_process_await_and_cancels_process_inner() -> PathBuf {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -1277,10 +1306,10 @@ finish(await handle);
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
-    let _ = std::fs::remove_dir_all(data_dir);
+    data_dir
 }
 
-async fn live_restate_session_delete_ends_until_children_through_parent_end_inner() {
+async fn live_restate_session_delete_ends_until_children_through_parent_end_inner() -> PathBuf {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -1397,7 +1426,7 @@ finish("started lifecycle gates");
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
-    let _ = std::fs::remove_dir_all(data_dir);
+    data_dir
 }
 
 async fn wait_for_running_process(state: &AppState, label: &str, timeout: Duration) -> ProcessId {
@@ -1551,7 +1580,7 @@ fn assert_parent_end_request(
     );
 }
 
-async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_inner() {
+async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_inner() -> PathBuf {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -1896,13 +1925,16 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
-    let _ = std::fs::remove_dir_all(data_dir);
+    data_dir
 }
 
-async fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable_inner() {
+async fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable_inner() -> Vec<PathBuf>
+{
+    let mut data_dirs = Vec::new();
     for backend in ["sqlite", "postgres"] {
-        live_restate_ingress_owner_restart_for_store(backend).await;
+        data_dirs.push(live_restate_ingress_owner_restart_for_store(backend).await);
     }
+    data_dirs
 }
 
 /// Session-lease timings this deployment chooses through
@@ -1920,7 +1952,7 @@ fn recovery_e2e_lease_timings() -> lash::durability::LeaseTimings {
         .expect("valid recovery E2E lease timings")
 }
 
-async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
+async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> PathBuf {
     // Declared before every child/store owner so unwinding kills and reaps those
     // resources before this guard stops libtest from entering another fixture.
     let mut failure_scope = AbortRestateFixtureOnPanic::armed("ingress-owner-restart");
@@ -2132,9 +2164,8 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     drop(driver);
     drop(stores);
     println!("workbench ingress-owner restart gate passed: backend={backend}");
-    std::fs::remove_dir_all(&data_dir).expect("remove drained recovery E2E data directory");
-    assert!(!data_dir.exists());
     failure_scope.disarm();
+    data_dir
 }
 
 async fn wait_for_restate_deployment_and_unpinned_invocations_drained(

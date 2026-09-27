@@ -389,6 +389,22 @@ pub(crate) fn record_fixture_owned_data_dir(path: &std::path::Path) {
     .expect("append fixture data manifest");
 }
 
+/// Remove a recorded fixture data directory. Call it from the `#[test]`
+/// wrapper — after the law's runtime has been dropped — rather than inside
+/// the law: detached followers and session watches keep writing into the
+/// directory until their runtime dies, and a write landing mid-removal
+/// recreates the directory without its ownership marker, which the E2E
+/// driver's cleanup then refuses to remove.
+pub(crate) fn remove_fixture_owned_data_dir(path: &std::path::Path) {
+    std::fs::remove_dir_all(path)
+        .unwrap_or_else(|error| panic!("remove owned fixture {}: {error}", path.display()));
+    assert!(
+        !path.exists(),
+        "owned fixture data directory remained at {}",
+        path.display()
+    );
+}
+
 pub(crate) fn record_fixture_owned_child(pid: u32) {
     let Some(manifest) = std::env::var_os("AGENT_WORKBENCH_FIXTURE_CHILD_MANIFEST") else {
         return;

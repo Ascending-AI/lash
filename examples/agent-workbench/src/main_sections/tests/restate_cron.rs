@@ -131,17 +131,6 @@ impl LiveRestateCronScenario {
         self.endpoint
             .stop_after_producers_closed_and_drained(&self.state, Duration::from_secs(30))
             .await;
-        std::fs::remove_dir_all(&self.data_dir).unwrap_or_else(|error| {
-            panic!(
-                "remove owned cron fixture {}: {error}",
-                self.data_dir.display()
-            )
-        });
-        assert!(
-            !self.data_dir.exists(),
-            "owned cron fixture data directory remained at {}",
-            self.data_dir.display()
-        );
     }
 }
 
