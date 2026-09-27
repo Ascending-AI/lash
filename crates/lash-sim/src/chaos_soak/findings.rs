@@ -37,17 +37,7 @@ impl Finding {
 }
 
 /// Every defect the soak found that `main` still has.
-pub const OPEN: &[Finding] = &[Finding {
-    id: "FIG-3873 S2",
-    summary: "a queued-work (command) root whose first attempt dies replays \
-                  divergently: Restate journal mismatch 570 (recorded `set state` at \
-                  index 4, the replay attempts `run`), so the root retries until it \
-                  pauses and pins its build past the rolling deploy's drain",
-    exposed_by: &["command"],
-    seed: 0x70b3_4810_d30c_b07a,
-    steps: 200,
-    without: &[],
-}];
+pub const OPEN: &[Finding] = &[];
 
 /// The defects the soak found that `main` has fixed: each replay must pass.
 pub const FIXED: &[Finding] = &[
@@ -74,6 +64,24 @@ pub const FIXED: &[Finding] = &[
             "lease_loss",
             "roll",
         ],
+    },
+    // FIG-3893: a queued-work root whose settling execution recorded its
+    // scope close replayed without it, because the close was gated on
+    // whether this execution wrote the root's evidence rather than on the
+    // durable evidence its replayed run carries. Later fixes moved this
+    // seed's schedule off the cut that exposed it; the drive-admission law
+    // `a_settled_queued_roots_redrive_replays_its_scope_close` pins the
+    // redelivery itself.
+    Finding {
+        id: "FIG-3873 S2",
+        summary: "a queued-work (command) root whose first attempt dies replays \
+                  divergently: Restate journal mismatch 570 (recorded `set state` at \
+                  index 4, the replay attempts `run`), so the root retries until it \
+                  pauses and pins its build past the rolling deploy's drain",
+        exposed_by: &["command"],
+        seed: 0x70b3_4810_d30c_b07a,
+        steps: 200,
+        without: &[],
     },
     // FIG-3894: a turn whose final commit the close cut short left its
     // closure pinned, which no activation of a closing session drains, so

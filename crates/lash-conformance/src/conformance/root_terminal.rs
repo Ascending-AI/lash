@@ -856,6 +856,120 @@ pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
     assert_eq!(parts.calls(), 0, "nothing ran");
 }
 
+/// L-C1 across a redelivery (FIG-3893, ADR 0105 §2): whether a root's
+/// recorded scope-close step runs is decided by durable facts, never by
+/// whether this execution wrote the root's evidence. A queued root that
+/// applied a session command and settled empty closes its scope; its
+/// execution then dies before the engine records its end. The redelivered
+/// execution reads the settled run back, replays the same journal — the
+/// close step included — and answers the same outcome; the scope owner is
+/// asked to close once.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_settled_queued_roots_redrive_replays_its_scope_close(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "queued-close-redrive", &effect_host, &stores, 8).await;
+    let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
+    parts.host.control.scope_close = closes.clone();
+    // A session command alone: the drive admits a queued root, which applies
+    // it and settles its run empty.
+    parts
+        .store
+        .enqueue_queued_work(
+            crate::QueuedWorkBatchDraft::new(
+                &parts.session_id,
+                crate::DeliveryPolicy::EarliestSafeBoundary,
+                crate::SessionCommand::RefreshToolCatalog {
+                    reason: "queued close redrive".to_string(),
+                },
+            )
+            .with_source_key("queued-close-redrive-command"),
+        )
+        .await
+        .expect("enqueue the command");
+    let request = parts.request("queued-close-redrive-drive");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Result<DriveOutcome, String>>();
+    let attempt = |crash: bool| -> crate::ConformanceTurnAttempt {
+        let parts = parts.clone();
+        let request = request.clone();
+        let tx = tx.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let request = request.clone();
+            let tx = tx.clone();
+            Box::pin(async move {
+                let mut runtime = parts.runtime().await;
+                let outcome = lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                    .await
+                    .map_err(|abort| format!("{abort:?}"));
+                let _ = tx.send(outcome);
+                if crash {
+                    panic!("the drive's execution dies after its queued root ended");
+                }
+                crate::ConformanceTurnEnd::Settled
+            })
+        })
+    };
+    let driving = tokio::spawn({
+        let runner = Arc::clone(&runner);
+        let scope = driver_scope(&parts);
+        let (crashing, redrive) = (attempt(true), attempt(false));
+        async move {
+            runner
+                .run_crashed_then_redriven_turn(scope, crashing, redrive)
+                .await;
+        }
+    });
+    let first = rx
+        .recv()
+        .await
+        .expect("the first execution ran")
+        .expect("the first execution drives the queued root");
+    let again = rx
+        .recv()
+        .await
+        .expect("the redelivered execution ran")
+        .expect("the redelivered execution drives the same root");
+    // A redelivery whose journal diverged from the recorded one never
+    // settles: its engine refuses the attempt and retries it forever. Bound
+    // the wait so the divergence fails here rather than at the harness's
+    // test timeout.
+    tokio::time::timeout(std::time::Duration::from_secs(60), driving)
+        .await
+        .expect("the redelivered execution replays its recorded journal to its end")
+        .expect("the tier settles the drive");
+    let [RootOutcome::Ceded { root }] = first.ran.as_slice() else {
+        panic!("one queued root ran and settled empty: {first:?}");
+    };
+    assert!(root.as_str().starts_with("drive-run:"), "{first:?}");
+    assert_eq!(again, first, "the redrive answers the recorded outcome");
+    let evidence = terminal(&parts, root)
+        .await
+        .expect("the settlement wrote the root's evidence");
+    assert_eq!(evidence.cause, RootTerminalCause::SettledEmpty);
+    assert_eq!(
+        closes.closes(),
+        vec![(root.clone(), true)],
+        "the scope owner is asked to close once, after the evidence"
+    );
+    assert!(
+        parts
+            .store
+            .list_pending_queued_work(&parts.session_id)
+            .await
+            .expect("read the command lane")
+            .is_empty(),
+        "the command applied"
+    );
+    assert_eq!(parts.calls(), 0, "nothing ran a model");
+}
+
 /// L-C1 with the process registry as the scope owner (FIG-3607 R9, R11): a
 /// root's end closes `Turn(root)` in the registry's scope-close ledger. A
 /// process living `Until` the root is owed its cancel from that row, and a

@@ -117,7 +117,11 @@ pub(crate) struct DriveRootRun {
     /// records it, so the drain routes the root's resume to the build its
     /// journal belongs to.
     journal_generation: crate::engine::BuildGeneration,
-    /// Whether a commit of this run wrote the root's terminal evidence.
+    /// Whether the root's terminal evidence is durable: a commit or
+    /// settlement of this run wrote it, or the run the root replayed had
+    /// already written it. It gates the recorded scope-close step, so it is
+    /// a durable fact every execution of the root reads alike, never whether
+    /// this execution was the writer (FIG-3893).
     terminal_written: bool,
 }
 
@@ -200,6 +204,24 @@ impl DriveRootRun {
                 &settlement.progress,
                 crate::store::QueuedRunProgress::Settle { terminal }
                     if crate::store::settled_queued_root_cause(terminal).is_some()
+            )
+        {
+            self.terminal_written = true;
+        }
+    }
+
+    /// Mark the evidence of the settled queued run `run` this root replayed
+    /// instead of running: a redelivered execution of a root whose run
+    /// settled reads it back, and the settlement (a head commit's included)
+    /// wrote the root's evidence. Its journal holds the scope-close step the
+    /// settling execution recorded, so the replay must reach that step too.
+    /// A run forgotten unworked wrote no evidence.
+    pub(crate) fn mark_replayed(&mut self, run: &crate::store::QueuedRunAdmission) {
+        if self.root.as_str() == run.scope.id()
+            && run.terminal.is_some()
+            && matches!(
+                run.last_commit.as_ref().map(|commit| &commit.progress),
+                Some(crate::store::QueuedRunProgress::Settle { .. })
             )
         {
             self.terminal_written = true;
@@ -819,8 +841,10 @@ impl LashRuntime {
         let ran = std::mem::replace(&mut self.drive_root, outer);
         // The root ended here: its evidence is durable, so its scope closes
         // (FIG-3607 item 7), whether its final commit or a queued run's failed
-        // settlement wrote that evidence. A root that did not end holds its
-        // scope open, and a host that owns no scopes has nothing to close.
+        // settlement wrote that evidence, in this execution or in the one
+        // whose settled run this execution replayed. A root that did not end
+        // holds its scope open, and a host that owns no scopes has nothing to
+        // close.
         if ran.is_some_and(|ran| ran.terminal_written)
             && self.host.core.control.scope_close.owns_scopes()
         {

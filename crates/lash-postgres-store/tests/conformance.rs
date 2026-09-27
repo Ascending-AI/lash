@@ -2035,5 +2035,6 @@ mod root_control {
     (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
     (a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary, "drive-command-after-admission"),
     (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
+    (a_settled_queued_roots_redrive_replays_its_scope_close, "drive-root-settled-close-redrive"),
     ]);
 }

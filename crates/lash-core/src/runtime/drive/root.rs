@@ -312,10 +312,15 @@ impl LashRuntime {
 
     /// A queued-work root's outcome from how its drain ended.
     fn root_run_of_drain(
-        &self,
+        &mut self,
         root: TurnId,
         drain: crate::runtime::turn_loop::QueuedTurnDrain<crate::AssembledTurn>,
     ) -> Result<RootRun, DriveAbort> {
+        if let crate::runtime::turn_loop::QueuedTurnDrain::Replayed(receipt) = &drain
+            && let Some(run) = self.drive_root.as_mut()
+        {
+            run.mark_replayed(receipt);
+        }
         Ok(match drain {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => RootRun {
                 outcome: RootOutcome::Committed {
