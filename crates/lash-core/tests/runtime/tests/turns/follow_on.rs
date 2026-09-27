@@ -748,6 +748,11 @@ pub(super) async fn fig3848_a_parked_root_owing_a_follow_on_is_cleared_when_the_
         Arc::clone(&factory),
         Arc::new(lash_core::NoSessionWork::new()),
         Arc::new(lash_core::engine::NoScopeClose),
+        Arc::new(lash_core::drive::ScopeCloseRelay::over_backend(
+            &owed_run.backend,
+            Arc::clone(&factory),
+            Arc::new(lash_core::engine::NoScopeClose),
+        )),
         owed_run.clock.clone() as Arc<dyn lash_core::Clock>,
     )
     .deliver_intent(&redrive)

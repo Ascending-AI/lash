@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
 use crate::store::{
-    ObligationId, ObligationKey, ObligationLedger, RootTerminal, StoreError,
+    ObligationId, ObligationKey, ObligationKind, ObligationLedger, RootTerminal, StoreError,
     scope_close_obligation_id,
 };
 use crate::{Clock, SessionStoreFactory};
@@ -53,6 +53,21 @@ impl ScopeCloseRelay {
             sink,
             policy: RelayPolicy::default(),
         }
+    }
+
+    /// The relay over `backend`'s `ScopeClose` ledger: the one every host
+    /// delivers a root's scope close through (ADR 0109 §3).
+    #[must_use]
+    pub fn over_backend(
+        backend: &crate::Backend,
+        sessions: Arc<dyn SessionStoreFactory>,
+        sink: Arc<dyn ScopeCloseSink>,
+    ) -> Self {
+        Self::new(
+            backend.obligation_ledger(ObligationKind::ScopeClose),
+            sessions,
+            sink,
+        )
     }
 
     /// The relay on `policy` rather than the deployment default — a lever
@@ -104,24 +119,11 @@ impl ObligationRelay for ScopeCloseRelay {
     }
 }
 
-/// The ledger's relay, when the host wires the `ScopeClose` kind's ledger:
-/// `None` on a host that runs no obligation substrate, which takes the sink
-/// directly.
-#[must_use]
-pub fn scope_close_relay(
-    ledger: Option<Arc<dyn ObligationLedger>>,
-    sessions: Arc<dyn SessionStoreFactory>,
-    sink: Arc<dyn ScopeCloseSink>,
-) -> Option<ScopeCloseRelay> {
-    ledger.map(|ledger| ScopeCloseRelay::new(ledger, sessions, sink))
-}
-
 /// How the producer's immediate scope-close attempt ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScopeCloseAttempt {
-    /// The scope close is delivered: by this attempt, a racing claim, an
-    /// already-settled row, or the sink itself on a host that runs no
-    /// obligation ledger.
+    /// The scope close is delivered: by this attempt, a racing claim, or an
+    /// already-settled row.
     Delivered,
     /// The attempt missed and the armed obligation owns what follows:
     /// `retryable` is `false` when the row stalled, `true` while the ledger
@@ -131,26 +133,21 @@ pub enum ScopeCloseAttempt {
     Owed { retryable: bool },
 }
 
-/// Deliver `terminal`'s scope close: through the obligation relay when the
-/// host wires one — the armed row's immediate delivery, whose misses the
-/// due pass owns — else the sink itself. A host that wires a relay over a
-/// store that armed no obligation (a terminal row older than obligations)
-/// takes the close itself once the ledger proves no row carries the id.
+/// Deliver `terminal`'s scope close through `relay`: the armed row's
+/// immediate delivery, whose misses the due pass owns. A store that armed no
+/// obligation for the root (a terminal row older than obligations) takes the
+/// close through `sink` once the ledger proves no row carries the id.
 ///
 /// # Errors
 ///
 /// Only a store failure; a delivery the relay retried or stalled is a
 /// [`ScopeCloseAttempt::Owed`] the obligation ledger owns, not an error.
 pub async fn deliver_scope_close(
-    relay: Option<&dyn ObligationRelay>,
+    relay: &dyn ObligationRelay,
     sink: &dyn ScopeCloseSink,
     terminal: &RootTerminal,
     clock: &dyn Clock,
 ) -> Result<ScopeCloseAttempt, StoreError> {
-    let Some(relay) = relay else {
-        sink.close_root_scope(terminal).await?;
-        return Ok(ScopeCloseAttempt::Delivered);
-    };
     let id = scope_close_obligation_id(&terminal.session_id, &terminal.root);
     match deliver_now(relay, &id, clock).await? {
         RelayVerdict::Delivered | RelayVerdict::ClaimLost => Ok(ScopeCloseAttempt::Delivered),

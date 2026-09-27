@@ -92,12 +92,10 @@ pub(super) fn administration(
             // The `ScopeClose` kind's relay over the law's stores (ADR 0109
             // §3): the close's engine half gives each closed root's armed
             // obligation its immediate delivery here.
-            scope_close_obligations: Some(Arc::new(
-                lash_core::runtime::drive::ScopeCloseRelay::new(
-                    stores.obligation_ledger(crate::store::ObligationKind::ScopeClose),
-                    stores.session_store_factory(),
-                    scopes,
-                ),
+            scope_close_obligations: Arc::new(lash_core::runtime::drive::ScopeCloseRelay::new(
+                stores.obligation_ledger(crate::store::ObligationKind::ScopeClose),
+                stores.session_store_factory(),
+                scopes,
             )),
             intents: stores.obligation_ledger(ObligationKind::ControlIntent),
             clock: stores.clock(),
@@ -119,7 +117,12 @@ pub(super) fn intent_relay(
         stores.obligation_ledger(ObligationKind::ControlIntent),
         stores.session_store_factory(),
         Arc::new(NoSessionWork::new()),
-        scopes,
+        Arc::clone(&scopes),
+        Arc::new(lash_core::runtime::drive::ScopeCloseRelay::new(
+            stores.obligation_ledger(ObligationKind::ScopeClose),
+            stores.session_store_factory(),
+            scopes,
+        )),
         clock,
     )
 }

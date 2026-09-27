@@ -294,11 +294,19 @@ impl Fixture {
             }),
             None => Arc::new(self.work.clone()),
         };
+        let scope_close = Arc::new(lash_core::drive::ScopeCloseRelay::new(
+            self.harness
+                .law_stores()
+                .obligation_ledger(ObligationKind::ScopeClose),
+            Arc::clone(&self.factory),
+            Arc::clone(&scopes),
+        ));
         lash_core::drive::ControlIntentRelay::new(
             Arc::clone(&self.intents),
             Arc::clone(&self.factory),
             work,
             scopes,
+            scope_close,
             clock,
         )
     }
@@ -912,24 +920,35 @@ async fn crash_gaps(server: HarnessServer) {
                     .deliver_intent(&intent)
                     .await
                     .expect("interrupted apply");
-                // No `ScopeClose` relay is wired here, so a missed scope
-                // close has no obligation to own its retry and stays on the
-                // intent, like a lost release.
-                assert!(matches!(
-                    state,
-                    ControlIntentState::Failed {
-                        retryable: true,
-                        ..
-                    }
-                ));
+                if gap == 1 {
+                    // A lost release stays on the intent.
+                    assert!(matches!(
+                        state,
+                        ControlIntentState::Failed {
+                            retryable: true,
+                            ..
+                        }
+                    ));
+                } else {
+                    // A missed scope close is its armed `ScopeClose`
+                    // obligation's to retry: it never holds the intent open.
+                    assert!(matches!(state, ControlIntentState::Acknowledged { .. }));
+                }
             }
             // Reconstruct recovery from the durable ledger after dropping the
             // interrupted caller, an hour on, past the failed attempt's
             // backoff. The engine's retained invocation is shared.
             let later = LaterClock(3_600_000);
-            let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![Arc::new(
-                f.relay_on(None, scopes.clone(), Arc::new(LaterClock(3_600_000))),
-            )];
+            let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![
+                Arc::new(f.relay_on(None, scopes.clone(), Arc::new(LaterClock(3_600_000)))),
+                Arc::new(lash_core::drive::ScopeCloseRelay::new(
+                    f.harness
+                        .law_stores()
+                        .obligation_ledger(ObligationKind::ScopeClose),
+                    Arc::clone(&f.factory),
+                    scopes.clone(),
+                )),
+            ];
             let report = lash_core::drive::reconcile_once(
                 &lash_core::drive::ReconcileParts {
                     sessions: f.factory.as_ref(),

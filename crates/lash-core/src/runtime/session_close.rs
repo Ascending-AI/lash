@@ -37,10 +37,9 @@ pub struct SessionCloseServices {
     /// until the process registry's scope-close adapter is installed
     /// (FIG-3607 PR-2).
     pub scopes: Arc<dyn ScopeCloseSink>,
-    /// The `ScopeClose` kind's relay when the host wires its ledger (ADR
-    /// 0109 §3): each closed root's obligation gets its immediate delivery
-    /// here. `None` on a host without an obligation substrate.
-    pub scope_close_obligations: Option<Arc<dyn ObligationRelay>>,
+    /// The `ScopeClose` kind's relay (ADR 0109 §3): each closed root's
+    /// obligation gets its immediate delivery here.
+    pub scope_close_obligations: Arc<dyn ObligationRelay>,
     /// The store set's `ControlIntent` obligation ledger (ADR 0109).
     pub intents: Arc<dyn crate::store::ObligationLedger>,
     pub clock: Arc<dyn Clock>,
@@ -207,9 +206,9 @@ pub async fn close_session(
         Arc::clone(stores),
         Arc::clone(&services.work),
         Arc::clone(&services.scopes),
+        Arc::clone(&services.scope_close_obligations),
         Arc::clone(&services.clock),
-    )
-    .with_scope_close(services.scope_close_obligations.clone());
+    );
     let applied = match relay.deliver_intent(&intent).await {
         Ok(state) => state,
         Err(error) => {

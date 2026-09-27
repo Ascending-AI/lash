@@ -1,8 +1,7 @@
 //! The recorded body of a logical root's scope close (FIG-3600 S7, FIG-3607
 //! item 7, ADR 0109 §3): it reads the root's terminal evidence and delivers
-//! the close the terminal transaction armed — the `ScopeClose` obligation's
-//! immediate attempt when the host wires the kind's ledger, else the scope
-//! owner itself. It runs only inside the engine's recorded `CloseRootScope`
+//! the close the terminal transaction armed as the `ScopeClose` obligation's
+//! immediate attempt. It runs only inside the engine's recorded `CloseRootScope`
 //! step, and only after the root's final commit wrote that evidence; a
 //! replay decodes the evidence it closed and never runs it.
 //!
@@ -16,11 +15,11 @@ use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
 use crate::runtime::drive::deliver_scope_close;
+use crate::runtime::drive::relay::ObligationRelay;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
-use crate::store::ObligationLedger;
 use crate::{
     Clock, RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectOutcome, RuntimeErrorCode, SessionId, SessionStoreFactory, StoreError, TurnId,
+    RuntimeEffectOutcome, RuntimeErrorCode, SessionId, StoreError, TurnId,
 };
 
 /// The first execution of one `CloseRootScope` step.
@@ -29,12 +28,9 @@ pub(super) struct CloseRootScopeRunner {
     pub(super) session: SessionId,
     pub(super) root: TurnId,
     pub(super) sink: Arc<dyn ScopeCloseSink>,
-    /// The `ScopeClose` kind's ledger when the host wires one (ADR 0109
-    /// §3); the close is its obligation's immediate delivery, else the sink
-    /// answers directly.
-    pub(super) obligations: Option<Arc<dyn ObligationLedger>>,
-    /// The catalog the obligation's delivery reads terminal evidence from.
-    pub(super) sessions: Arc<dyn SessionStoreFactory>,
+    /// The `ScopeClose` kind's relay (ADR 0109 §3): the close is its
+    /// obligation's immediate delivery.
+    pub(super) relay: Arc<dyn ObligationRelay>,
     pub(super) clock: Arc<dyn Clock>,
 }
 
@@ -84,15 +80,8 @@ impl RuntimeEffectLocalRunner for CloseRootScopeRunner {
                     ),
                 )
             })?;
-        let relay = super::scope_close::scope_close_relay(
-            self.obligations,
-            self.sessions,
-            Arc::clone(&self.sink),
-        );
         deliver_scope_close(
-            relay
-                .as_ref()
-                .map(|relay| relay as &dyn super::relay::ObligationRelay),
+            self.relay.as_ref(),
             self.sink.as_ref(),
             &terminal,
             self.clock.as_ref(),

@@ -26,7 +26,6 @@ pub(crate) struct BoundSession {
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn SessionStoreFactory>,
     scope_close: Arc<dyn lash_core::engine::ScopeCloseSink>,
-    scope_close_obligations: Option<Arc<dyn lash_core::store::ObligationLedger>>,
     clock: Arc<dyn lash_core::Clock>,
     provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
     /// The core's tool-child context source (FIG-3712), held for as long as
@@ -58,7 +57,6 @@ impl BoundSession {
             process_engines: env.core.process_engines.clone(),
             catalog,
             scope_close: Arc::clone(&env.core.control.scope_close),
-            scope_close_obligations: env.core.control.scope_close_obligations.clone(),
             clock: Arc::clone(&env.core.clock),
             provider_resolver: Arc::clone(&env.core.providers.provider_resolver),
             tool_child_context_source: None,
@@ -153,14 +151,13 @@ impl BoundSession {
             lash_core::session_close::SessionCloseServices {
                 work: self.queued(),
                 scopes: Arc::clone(&self.scope_close),
-                scope_close_obligations: lash_core::runtime::drive::scope_close_relay(
-                    self.scope_close_obligations.clone(),
-                    self.catalog(),
-                    Arc::clone(&self.scope_close),
-                )
-                .map(|relay| {
-                    Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
-                }),
+                scope_close_obligations: Arc::new(
+                    lash_core::runtime::drive::ScopeCloseRelay::over_backend(
+                        &self.backend,
+                        self.catalog(),
+                        Arc::clone(&self.scope_close),
+                    ),
+                ),
                 intents: self
                     .backend
                     .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),

@@ -182,11 +182,17 @@ impl World {
             failures: AtomicU32::new(failures),
             attempts: Mutex::new(Vec::new()),
         });
+        let scope_close = Arc::new(lash_core::drive::ScopeCloseRelay::new(
+            stores.obligation_ledger(ObligationKind::ScopeClose),
+            Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>,
+            Arc::clone(&close) as Arc<dyn ScopeCloseSink>,
+        ));
         let relay = ControlIntentRelay::new(
             stores.obligation_ledger(ObligationKind::ControlIntent),
             factory,
             Arc::new(Work(engine)),
             Arc::clone(&close) as Arc<dyn ScopeCloseSink>,
+            scope_close,
             Arc::clone(&clock) as Arc<dyn Clock>,
         );
         Self {

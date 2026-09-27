@@ -135,14 +135,13 @@ impl AdministrationSource {
             lash_core::session_close::SessionCloseServices {
                 work: queued,
                 scopes: Arc::clone(&resolved_env.core.control.scope_close),
-                scope_close_obligations: lash_core::runtime::drive::scope_close_relay(
-                    resolved_env.core.control.scope_close_obligations.clone(),
-                    Arc::clone(&self.store_factory),
-                    Arc::clone(&resolved_env.core.control.scope_close),
-                )
-                .map(|relay| {
-                    Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
-                }),
+                scope_close_obligations: Arc::new(
+                    lash_core::runtime::drive::ScopeCloseRelay::over_backend(
+                        resolved_env.core.backend(),
+                        Arc::clone(&self.store_factory),
+                        Arc::clone(&resolved_env.core.control.scope_close),
+                    ),
+                ),
                 intents: resolved_env
                     .core
                     .backend()
@@ -359,14 +358,13 @@ impl LashCore {
         crate::parked_work::ParkedWork {
             work: self.env.queued_work(),
             scopes: Arc::clone(&self.env.core.control.scope_close),
-            scope_close_obligations: lash_core::runtime::drive::scope_close_relay(
-                self.env.core.control.scope_close_obligations.clone(),
-                Arc::clone(&self.store_factory),
-                Arc::clone(&self.env.core.control.scope_close),
-            )
-            .map(|relay| {
-                Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
-            }),
+            scope_close_obligations: Arc::new(
+                lash_core::runtime::drive::ScopeCloseRelay::over_backend(
+                    &self.backend,
+                    Arc::clone(&self.store_factory),
+                    Arc::clone(&self.env.core.control.scope_close),
+                ),
+            ),
             intents: self
                 .backend
                 .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
@@ -1282,6 +1280,16 @@ impl LashCoreBuilder {
             self.recovery_lease.unwrap_or_default(),
         );
         let native_queued = matches!(&queued_port, QueuedPortSetup::Native { .. });
+        // The driver's reconcile tick runs every obligation kind's relay
+        // (ADR 0109 §1.4): the substrate resolves a process port from either
+        // setup, and the driver administers through the slot bound below.
+        lash_core::drive::RelaySupply {
+            process_work: match &process_port {
+                ProcessPortSetup::NativeDefault { .. } | ProcessPortSetup::External { .. } => true,
+            },
+            session_administration: true,
+        }
+        .check()?;
         let substrate = NativeSubstrateSetup {
             config: native_substrate,
             process: process_port,

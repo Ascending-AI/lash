@@ -77,7 +77,7 @@ pub struct ControlIntentRelay {
     stores: Arc<dyn SessionStoreFactory>,
     work: Arc<dyn SessionWorkEngine>,
     scopes: Arc<dyn ScopeCloseSink>,
-    scope_close: Option<Arc<dyn ObligationRelay>>,
+    scope_close: Arc<dyn ObligationRelay>,
     clock: Arc<dyn Clock>,
     policy: RelayPolicy,
 }
@@ -85,13 +85,17 @@ pub struct ControlIntentRelay {
 impl ControlIntentRelay {
     /// The relay over `ledger` (the store set's `ControlIntent` ledger),
     /// applying engine halves against `work`'s control engine and `scopes`,
-    /// under the default [`RelayPolicy`].
+    /// under the default [`RelayPolicy`]. Each released root's scope close
+    /// is delivered through `scope_close`, the `ScopeClose` kind's relay
+    /// (ADR 0109 §3): the close is that obligation's immediate delivery,
+    /// which its ledger owns from there.
     #[must_use]
     pub fn new(
         ledger: Arc<dyn ObligationLedger>,
         stores: Arc<dyn SessionStoreFactory>,
         work: Arc<dyn SessionWorkEngine>,
         scopes: Arc<dyn ScopeCloseSink>,
+        scope_close: Arc<dyn ObligationRelay>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
@@ -99,21 +103,10 @@ impl ControlIntentRelay {
             stores,
             work,
             scopes,
-            scope_close: None,
+            scope_close,
             clock,
             policy: RelayPolicy::default(),
         }
-    }
-
-    /// The same relay delivering each released root's scope close through
-    /// `scope_close`, the `ScopeClose` kind's relay when the host wires its
-    /// ledger (ADR 0109 §3): the close is then that obligation's immediate
-    /// delivery, which its ledger owns from there. `None` closes through
-    /// the sink directly.
-    #[must_use]
-    pub fn with_scope_close(mut self, scope_close: Option<Arc<dyn ObligationRelay>>) -> Self {
-        self.scope_close = scope_close;
-        self
     }
 
     /// The same relay under `policy`.
@@ -166,7 +159,7 @@ impl ControlIntentRelay {
                 close_session_engine_half(
                     engine.as_ref(),
                     self.scopes.as_ref(),
-                    self.scope_close.as_deref(),
+                    self.scope_close.as_ref(),
                     intent,
                     roots,
                     self.clock.as_ref(),
@@ -197,7 +190,7 @@ impl ControlIntentRelay {
                     self.stores.as_ref(),
                     engine.as_ref(),
                     self.scopes.as_ref(),
-                    self.scope_close.as_deref(),
+                    self.scope_close.as_ref(),
                     intent,
                     root,
                     self.clock.as_ref(),
@@ -363,7 +356,7 @@ impl From<EngineRefusal> for EngineHalfFailure {
 async fn close_session_engine_half(
     engine: &dyn SessionControlEngine,
     scopes: &dyn ScopeCloseSink,
-    scope_close: Option<&dyn ObligationRelay>,
+    scope_close: &dyn ObligationRelay,
     intent: &ControlIntent,
     roots: &[crate::TurnId],
     clock: &dyn Clock,
@@ -383,18 +376,16 @@ async fn close_session_engine_half(
     // the verdict stays the ledger's, whose retries the due pass owns, so a
     // failure is reported, never fatal (ADR 0109 §3). The session's own
     // scope close below carries no obligation of this kind.
-    if let Some(relay) = scope_close {
-        for root in roots {
-            let id = scope_close_obligation_id(&intent.session_id, root);
-            if let Err(error) = deliver_now(relay, &id, clock).await {
-                tracing::warn!(
-                    session_id = intent.session_id.as_str(),
-                    root = root.as_str(),
-                    error = %error,
-                    "the closed root's scope-close obligation missed its immediate \
-                     delivery; the due pass owns it"
-                );
-            }
+    for root in roots {
+        let id = scope_close_obligation_id(&intent.session_id, root);
+        if let Err(error) = deliver_now(scope_close, &id, clock).await {
+            tracing::warn!(
+                session_id = intent.session_id.as_str(),
+                root = root.as_str(),
+                error = %error,
+                "the closed root's scope-close obligation missed its immediate \
+                 delivery; the due pass owns it"
+            );
         }
     }
     scopes
@@ -407,16 +398,15 @@ async fn close_session_engine_half(
 }
 
 /// A cancel's or fork's engine half: release the root's execution, then
-/// attempt its scope close once. With the `ScopeClose` relay wired, a
-/// missed close is its armed obligation's to retry and never holds the
-/// intent open: a failing child cancel inside the close must not wedge the
-/// session behind its cancel or fork. Without one, nothing else retries
-/// the close, so its failure is retained on the intent.
+/// attempt its scope close once. A missed close is its armed `ScopeClose`
+/// obligation's to retry and never holds the intent open: a failing child
+/// cancel inside the close must not wedge the session behind its cancel or
+/// fork.
 async fn release_root_engine_half(
     stores: &dyn SessionStoreFactory,
     engine: &dyn SessionControlEngine,
     scopes: &dyn ScopeCloseSink,
-    scope_close: Option<&dyn ObligationRelay>,
+    scope_close: &dyn ObligationRelay,
     intent: &ControlIntent,
     root: &crate::TurnId,
     clock: &dyn Clock,

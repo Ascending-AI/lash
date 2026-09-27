@@ -976,15 +976,13 @@ impl LashRuntime {
         {
             return;
         }
-        let Some(relay) = crate::runtime::drive::scope_close_relay(
-            self.host.core.control.scope_close_obligations.clone(),
+        let relay = crate::runtime::drive::ScopeCloseRelay::over_backend(
+            self.host.core.backend(),
             self.host.core.session_store_factory(),
             Arc::clone(&self.host.core.control.scope_close),
-        ) else {
-            return;
-        };
+        );
         if let Err(error) = crate::runtime::drive::deliver_scope_close(
-            Some(&relay),
+            &relay,
             self.host.core.control.scope_close.as_ref(),
             &terminal,
             self.host.core.clock.as_ref(),

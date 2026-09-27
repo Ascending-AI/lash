@@ -25,6 +25,11 @@ pub enum EmbedError {
         /// The binding identity of this core's backend.
         backend: String,
     },
+    #[error(transparent)]
+    /// Returned when the core would build without some obligation kind's
+    /// relay: its store set arms every kind, and a kind nothing delivers
+    /// stays owed forever (ADR 0109 §1.4).
+    ObligationRelayUnavailable(#[from] lash_core::drive::ObligationRelayUnavailable),
     #[error("model spec is required; hosts must supply explicit model metadata")]
     /// Returned when the session has no explicit model specification.
     MissingModelSpec,
@@ -277,6 +282,7 @@ impl EmbedError {
             }) => true,
             Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
+            | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
@@ -311,7 +317,8 @@ impl EmbedError {
     ///
     /// - builder/wiring variants of this enum (missing protocol plugin,
     ///   model spec, turn budget, commit budget, queued-work composition,
-    ///   handler context, and store/session mismatches) — the same call fails
+    ///   handler context, an obligation kind no relay can deliver, and
+    ///   store/session mismatches) — the same call fails
     ///   identically until the host changes its wiring;
     /// - typed runtime wiring, caller-invariant, unsupported-operation,
     ///   deterministic codec, and corrupt durable-state codes;
@@ -334,6 +341,7 @@ impl EmbedError {
         match self {
             Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
+            | Self::ObligationRelayUnavailable(_)
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget

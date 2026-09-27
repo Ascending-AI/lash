@@ -80,50 +80,29 @@ impl NativeQueuedWorkRunHandle {
         let _ = self.administration.set(source);
     }
 
-    /// Every obligation kind's relay this tick claims due rows for.
+    /// Every obligation kind's relay this tick claims due rows for, one per
+    /// kind the store set arms (ADR 0109 §1.4): lash-core assembles them
+    /// from the core's resolved ports, never per host.
     async fn relays(
         &self,
-        work: &Arc<dyn lash_core::SessionWorkEngine>,
-    ) -> Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> {
-        let backend = self.config.env.core.backend();
-        // Ingress first (ADR 0109 §3): an admitted input's drive is the
-        // work every other kind's session waits behind.
-        let mut relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
-            vec![Arc::new(
-                lash_core::runtime::drive::IngressRelay::over_backend(
-                    backend,
-                    Arc::clone(work),
-                    Arc::clone(&self.config.env.core.clock),
-                ),
-            )];
-        let scope_close: Option<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
-            lash_core::runtime::drive::scope_close_relay(
-                self.config.env.core.control.scope_close_obligations.clone(),
-                Arc::clone(&self.config.store_factory),
-                Arc::clone(&self.config.env.core.control.scope_close),
-            )
-            .map(|relay| {
-                Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
-            });
-        relays.push(Arc::new(
-            lash_core::runtime::drive::ControlIntentRelay::new(
-                backend.obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
-                Arc::clone(&self.config.store_factory),
-                Arc::clone(work),
-                Arc::clone(&self.config.env.core.control.scope_close),
-                Arc::clone(&self.config.env.core.clock),
-            )
-            .with_scope_close(scope_close.clone()),
-        ));
-        relays.extend(scope_close);
-        if let Some(source) = self.administration.get()
-            && let Some(administration) = source.administration().await
-        {
-            relays.push(Arc::new(
-                lash_core::session_delete::SessionDeleteRelay::new(administration),
-            ));
-        }
-        relays
+        ports: &super::work_drivers::ResolvedPorts,
+    ) -> std::result::Result<
+        Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>>,
+        lash_core::runtime::drive::ObligationRelayUnavailable,
+    > {
+        let administration = match self.administration.get() {
+            Some(source) => source.administration().await,
+            None => None,
+        };
+        lash_core::runtime::drive::obligation_relays(lash_core::runtime::drive::RelayParts {
+            backend: self.config.env.core.backend().clone(),
+            sessions: Arc::clone(&self.config.store_factory),
+            work: ports.queued_port(),
+            scopes: Arc::clone(&self.config.env.core.control.scope_close),
+            processes: Some(ports.process.clone()),
+            administration,
+            clock: Arc::clone(&self.config.env.core.clock),
+        })
     }
 
     /// The core's seat in the recovery leader election.
@@ -400,13 +379,15 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         page: std::num::NonZeroUsize,
     ) -> std::result::Result<lash_core::engine::ReconcileCursor, lash_core::StoreError> {
         // The environment's build-time queued port is a placeholder; the
-        // relays and arms ask the port the substrate resolved — the engine
-        // the core's sends deliver to.
-        let work: Arc<dyn lash_core::SessionWorkEngine> =
-            match self.substrate_slot.get().and_then(std::sync::Weak::upgrade) {
-                Some(slot) => slot.ports().await.queued_port(),
-                None => self.config.env.queued_work(),
-            };
+        // relays and arms ask the ports the substrate resolved — the engine
+        // the core's sends deliver to. A tick before the slot is bound, or
+        // after the core is gone, has nothing to deliver through: the next
+        // one runs.
+        let Some(slot) = self.substrate_slot.get().and_then(std::sync::Weak::upgrade) else {
+            return Ok(cursor.clone());
+        };
+        let ports = slot.ports().await;
+        let work = ports.queued_port();
         let process_port = self.config.env.process_work();
         let backend = self.config.env.core.backend();
         let drain = backend.generation_drain();
@@ -425,39 +406,15 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                 },
             );
         // Which recovery duties this deployment runs this tick (ADR 0109
-        // §1.7). The obligation slices register their relays here: ingress
-        // is S8-I's and scope close S8-S's (ADR 0109 §3), and the parent-end
-        // ledger row is its ParentEnd obligation, delivered through the same
-        // process registry and port the drain slot sees.
+        // §1.7).
         let duties = self.config.recovery.duties().await;
-        // The process-terminal and parent-end relays need this tick's process
-        // port, so they join the relays the core registers without one.
-        let mut relays = self.relays(&work).await;
-        if let (Some(registry), Some(port)) =
-            (self.config.env.process_registry(), process_port.as_ref())
-        {
-            relays.push(Arc::new(
-                lash_core::runtime::process_terminal::ProcessTerminalRelay::new(
-                    self.config
-                        .env
-                        .core
-                        .backend()
-                        .obligation_ledger(lash_core::store::ObligationKind::ProcessTerminal),
-                    Arc::clone(registry),
-                    Arc::clone(port),
-                ),
-            ));
-            relays.push(Arc::new(lash_core::runtime::drive::ParentEndRelay::new(
-                self.config
-                    .env
-                    .core
-                    .backend()
-                    .obligation_ledger(lash_core::store::ObligationKind::ParentEnd),
-                Arc::clone(registry),
-                Arc::clone(port),
-                Arc::clone(&self.config.env.core.clock),
-            )));
-        }
+        let relays = match self.relays(&ports).await {
+            Ok(relays) => relays,
+            Err(error) => {
+                tracing::error!(error = %error, "the reconcile tick cannot run every obligation relay");
+                return Ok(cursor.clone());
+            }
+        };
         let report = lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: self.config.store_factory.as_ref(),

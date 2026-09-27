@@ -445,12 +445,6 @@ fn scope_close_relay(
     )
 }
 
-/// Wire the host the law's drive runs on so its close step delivers through
-/// the obligation the terminal write armed.
-fn wire_scope_close_obligations(parts: &mut DriveParts, stores: &Arc<dyn crate::StoreSet>) {
-    parts.host.control.scope_close_obligations = Some(scope_close_ledger(stores));
-}
-
 /// The state of `root`'s armed scope-close obligation, if the row carries one.
 #[expect(
     clippy::expect_used,
@@ -660,7 +654,6 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         closes: Mutex::new(Vec::new()),
     });
     parts.host.control.scope_close = closes.clone();
-    wire_scope_close_obligations(&mut parts, &stores);
     let root = TurnId::from("root-close-crash");
     let child = until_root(&registry, &parts.session_id, &root).await;
     parts.enqueue("ask", Some(root.as_str())).await;
@@ -773,7 +766,6 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
     let mut parts = DriveParts::new(prefix, "root-close-parked", &effect_host, &stores, 8).await;
     let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
     parts.host.control.scope_close = closes.clone();
-    wire_scope_close_obligations(&mut parts, &stores);
     let parked = TurnId::from("root-close-parked");
     let child = until_root(&registry, &parts.session_id, &parked).await;
     parts.enqueue("ask", Some(parked.as_str())).await;
@@ -846,7 +838,6 @@ pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
     let mut parts = DriveParts::new(prefix, "root-settled", &effect_host, &stores, 8).await;
     let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
     parts.host.control.scope_close = closes.clone();
-    wire_scope_close_obligations(&mut parts, &stores);
     // An earlier drain admitted a named run and selected nothing before it
     // stopped: the run is the session's pending root.
     let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
@@ -918,7 +909,6 @@ pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
         Arc::clone(&registry),
         stores.clock(),
     ));
-    wire_scope_close_obligations(&mut parts, &stores);
     let root = TurnId::from("root-registry-close");
     let turn = lash_core::ScopeId::turn(parts.session_id.clone(), root.clone());
     let registration = || {

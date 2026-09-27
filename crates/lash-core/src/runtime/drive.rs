@@ -44,6 +44,7 @@ mod parent_end_relay;
 mod park;
 mod reconcile;
 pub mod relay;
+mod relays;
 mod root;
 pub mod scope_close;
 mod turn_config;
@@ -55,7 +56,10 @@ pub use park::StoreParkRecovery;
 pub use reconcile::{
     DrainHandOverPass, ReconcileParts, ReconcileProcesses, drain_hand_over_slot, reconcile_once,
 };
-pub use scope_close::{ScopeCloseRelay, deliver_scope_close, scope_close_relay};
+pub use relays::{
+    ObligationRelayUnavailable, RelayNeed, RelayParts, RelaySupply, obligation_relays,
+};
+pub use scope_close::{ScopeCloseRelay, deliver_scope_close};
 pub(crate) use turn_config::provider_binding_unavailable;
 pub use turn_config::{validate_route, validate_route_with};
 
@@ -818,8 +822,11 @@ impl LashRuntime {
                         session: session.clone(),
                         root: root.clone(),
                         sink: Arc::clone(&self.host.core.control.scope_close),
-                        obligations: self.host.core.control.scope_close_obligations.clone(),
-                        sessions: self.host.core.session_store_factory(),
+                        relay: Arc::new(scope_close::ScopeCloseRelay::over_backend(
+                            self.host.core.backend(),
+                            self.host.core.session_store_factory(),
+                            Arc::clone(&self.host.core.control.scope_close),
+                        )),
                         clock: Arc::clone(&self.host.core.clock),
                     }),
                     None,

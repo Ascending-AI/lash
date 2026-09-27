@@ -38,11 +38,9 @@ pub struct ParkedWork {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,
     pub(crate) scopes: Arc<dyn lash_core::engine::ScopeCloseSink>,
-    /// The `ScopeClose` kind's relay when the deployment's store serves its
-    /// ledger (ADR 0109 §3): a cancelled or forked root's scope close is its
-    /// obligation's immediate delivery.
-    pub(crate) scope_close_obligations:
-        Option<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>>,
+    /// The `ScopeClose` kind's relay (ADR 0109 §3): a cancelled or forked
+    /// root's scope close is its obligation's immediate delivery.
+    pub(crate) scope_close_obligations: Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>,
     /// The store set's `ControlIntent` obligation ledger: a verb's engine
     /// half is delivered through it (ADR 0109).
     pub(crate) intents: Arc<dyn lash_core::store::ObligationLedger>,

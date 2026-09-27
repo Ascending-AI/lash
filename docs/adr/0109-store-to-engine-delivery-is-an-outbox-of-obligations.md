@@ -199,8 +199,16 @@ pub async fn relay_due(relay: &dyn ObligationRelay, clock: &dyn Clock,
     limit: NonZeroUsize) -> Result<RelayPass, StoreError>;
 ```
 
-The reconcile tick holds `&[Arc<dyn ObligationRelay>]`; a slice adds its
-relay to the facade's list.
+The reconcile tick holds `&[Arc<dyn ObligationRelay>]`: one relay per
+`ObligationKind`, in `ObligationKind::ALL` order, assembled by
+`lash_core::runtime::drive::obligation_relays` from the parts a core
+resolves (the backend, the catalog, the session engine, the scope owner, the
+process registry and port, the session administration). A store set arms
+every kind, so no kind's relay is left to a host to wire: `LashCore` runs all
+of them on every builder path, the drive's close step and every close verb
+deliver a root's scope close through the backend's `ScopeClose` ledger, and a
+core that cannot supply some kind's delivery refuses to build with
+`EmbedError::ObligationRelayUnavailable { kind, need }` (FIG-3888).
 
 Settlement rule, applied by both entry points: `Ok` → `Delivered`;
 `Refused` → `Stall(refused)`; `Retryable` → `Stall(attempts_exhausted)` when

@@ -136,13 +136,11 @@ pub struct RuntimeControlConfig {
     /// [`NoScopeClose`](crate::engine::NoScopeClose); a host composition that
     /// owns lifetime scopes installs the process registry's
     /// [`RegistryScopeClose`](crate::runtime::process::RegistryScopeClose).
+    ///
+    /// A close reaches this sink only as the delivery of the `ScopeClose`
+    /// obligation the terminal transaction armed on the root's row, through
+    /// the backend's ledger of that kind (ADR 0109 §3).
     pub scope_close: Arc<dyn crate::engine::ScopeCloseSink>,
-    /// The `ScopeClose` kind's obligation ledger when the host's store
-    /// serves one (ADR 0109 §3): the terminal transaction arms each ended
-    /// root's close obligation on its own row, and a wired ledger turns the
-    /// close's delivery into the obligation's. `None` on a host without an
-    /// obligation substrate — its closes reach the sink directly.
-    pub scope_close_obligations: Option<Arc<dyn crate::store::ObligationLedger>>,
 }
 
 #[derive(Clone)]
@@ -216,7 +214,6 @@ impl RuntimeHostConfig {
                 tool_children,
                 open_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
                 scope_close: Arc::new(crate::engine::NoScopeClose),
-                scope_close_obligations: None,
             },
             tracing: RuntimeTracingConfig {
                 trace_sink: None,

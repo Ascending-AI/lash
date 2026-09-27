@@ -16,6 +16,16 @@ use crate::{
     ProcessWorkWiring, SessionStoreFactory, StoreBindingId, StoreSet, TriggerStore,
 };
 
+/// A decorator of one obligation kind's ledger.
+type ObligationLedgerLayer = Arc<
+    dyn Fn(
+            crate::store::ObligationKind,
+            Arc<dyn crate::store::ObligationLedger>,
+        ) -> Arc<dyn crate::store::ObligationLedger>
+        + Send
+        + Sync,
+>;
+
 /// One backend with some of its ports decorated. See the module
 /// documentation.
 #[derive(Clone)]
@@ -30,6 +40,7 @@ pub struct LayeredBackend {
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
+    obligation_ledgers: Option<ObligationLedgerLayer>,
     process_work: Option<ProcessWorkWiring>,
     session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
 }
@@ -47,6 +58,7 @@ impl LayeredBackend {
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
+            obligation_ledgers: None,
             process_work: inner.process_work(),
             session_work: inner.session_work(),
             inner,
@@ -179,6 +191,23 @@ impl LayeredBackend {
         self
     }
 
+    /// Answer every obligation kind's ledger with `layer` over the inner
+    /// store set's ledger of that kind. The layer runs on each ledger read,
+    /// so a recorder it installs keeps its state outside the ledger.
+    pub fn map_obligation_ledgers(
+        mut self,
+        layer: impl Fn(
+            crate::store::ObligationKind,
+            Arc<dyn crate::store::ObligationLedger>,
+        ) -> Arc<dyn crate::store::ObligationLedger>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.obligation_ledgers = Some(Arc::new(layer));
+        self
+    }
+
     /// The decorated backend, as the handle a host config takes.
     pub fn into_backend(self) -> Backend {
         let inner_stores = self.inner.stores();
@@ -193,6 +222,7 @@ impl LayeredBackend {
             process_env_store: self.process_env_store,
             attachment_store: self.attachment_store,
             module_artifacts: self.module_artifacts,
+            obligation_ledgers: self.obligation_ledgers,
         });
         Backend::new(Arc::new(LayeredEngine {
             stores,
@@ -224,6 +254,7 @@ impl LayeredStores {
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
+            obligation_ledgers: None,
             inner,
         })
     }
@@ -347,6 +378,7 @@ struct LayeredStoreSet {
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
+    obligation_ledgers: Option<ObligationLedgerLayer>,
 }
 
 impl StoreSet for LayeredStoreSet {
@@ -402,7 +434,11 @@ impl StoreSet for LayeredStoreSet {
         &self,
         kind: crate::store::ObligationKind,
     ) -> Arc<dyn crate::store::ObligationLedger> {
-        self.inner.obligation_ledger(kind)
+        let ledger = self.inner.obligation_ledger(kind);
+        match &self.obligation_ledgers {
+            Some(layer) => layer(kind, ledger),
+            None => ledger,
+        }
     }
 
     fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {

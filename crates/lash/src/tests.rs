@@ -2213,6 +2213,7 @@ mod aggregate_oracle;
 mod discovery_execution;
 mod failure_settlement;
 mod finalize_fault;
+mod obligation_relays;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;

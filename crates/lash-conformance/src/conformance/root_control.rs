@@ -351,9 +351,9 @@ impl Fixture {
             Arc::clone(&self.factory),
             Arc::clone(work) as Arc<dyn crate::SessionWorkEngine>,
             Arc::clone(close) as Arc<dyn ScopeCloseSink>,
+            Arc::new(self.scope_close_relay(close)),
             clock,
         )
-        .with_scope_close(Some(Arc::new(self.scope_close_relay(close))))
     }
     /// The verb's own immediate delivery of `intent`'s obligation.
     async fn apply(

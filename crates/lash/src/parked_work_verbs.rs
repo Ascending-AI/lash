@@ -227,9 +227,9 @@ impl ParkedWork {
             Arc::clone(&self.store_factory),
             Arc::clone(&self.work),
             Arc::clone(&self.scopes),
+            Arc::clone(&self.scope_close_obligations),
             Arc::clone(&self.clock),
         )
-        .with_scope_close(self.scope_close_obligations.clone())
         .deliver_intent(&intent)
         .await?;
         Ok((
