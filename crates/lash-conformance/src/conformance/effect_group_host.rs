@@ -1974,8 +1974,9 @@ pub async fn cancel_gives_every_unsettled_child_a_cancellation_terminal<F: Fn() 
     // after it. Every child holds exactly one terminal, so the late release
     // seated nothing: it neither replaced a cancellation nor took a rank of
     // its own.
+    let reader = make();
     let recorded = read_back_ranks(
-        make,
+        &reader,
         prefix,
         "cancel-terminals",
         &key,
@@ -2708,8 +2709,8 @@ async fn close(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn read_back_ranks<F: Fn() -> Host>(
-    make: &F,
+async fn read_back_ranks(
+    reader: &Host,
     prefix: &str,
     label: &str,
     key: &str,
@@ -2717,7 +2718,6 @@ async fn read_back_ranks<F: Fn() -> Host>(
     wake: GroupWakePolicy,
     disposition: LoserPolicy,
 ) -> Vec<GroupSettlement> {
-    let reader = make();
     let resumed = reader
         .scoped(admit(scope(prefix, label)))
         .expect("a scope binds on the reading host");
