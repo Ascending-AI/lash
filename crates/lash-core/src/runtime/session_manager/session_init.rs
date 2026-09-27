@@ -597,27 +597,6 @@ async fn recorded_session_state(
         })
 }
 
-/// Reopen an already-committed session through the ordinary open path: load
-/// its durable head, rebuild its plugin session from the recorded state, and
-/// assemble the runtime under the resumed-session assembly. Test seam for
-/// the reopen contract — the production redelivery path routes through
-/// `initialize_session`, which finishes a metadata-only row as a create
-/// rather than refusing it here.
-#[cfg(test)]
-pub(in crate::runtime::session_manager) async fn reopen_initialized_session(
-    current: &CurrentSessionCapability,
-    plan: &SessionInitPlan,
-    store: Arc<dyn crate::store::RuntimePersistence>,
-) -> Result<InitializedSession, crate::PluginError> {
-    let state = recorded_session_state(plan, &store).await?.ok_or_else(|| {
-        crate::PluginError::Session(format!(
-            "session `{}` committed its catalog row without a session head",
-            plan.session_id
-        ))
-    })?;
-    reopen_committed_session(current, plan, store, state).await
-}
-
 /// The reopen half of `initialize_session` against an already-loaded durable
 /// head: rebuild the plugin session from the recorded state and assemble the
 /// runtime under the resumed-session assembly.
@@ -1073,14 +1052,20 @@ impl RuntimeSessionServices {
                 // invocation and therefore cannot cross Tokio's `'static`
                 // spawn contract. Preserve their exact journal semantics by
                 // retaining the scoped controller on the calling task.
-                run_initialized_session_turn(
+                use futures_util::FutureExt as _;
+                match std::panic::AssertUnwindSafe(run_initialized_session_turn(
                     child.clone(),
                     input,
                     cancel,
                     scoped_effect_controller,
                     sink.clone(),
-                )
+                ))
+                .catch_unwind()
                 .await
+                {
+                    Ok(turn) => turn,
+                    Err(panic) => child_turn_panicked(panic),
+                }
             }
         };
         drop(sink);

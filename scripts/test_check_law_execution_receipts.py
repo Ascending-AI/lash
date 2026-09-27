@@ -982,6 +982,24 @@ class DeferredWiringTests(unittest.TestCase):
                 continue
             with self.subTest(entry=entry):
                 recipe = entry["recipe"]
+                if recipe == "pg-store":
+                    script = (
+                        MODULE.ROOT / "scripts/ci/store-tests.sh"
+                    ).read_text(encoding="utf-8")
+                    job = job_block(self.workflow, entry["ci_job"])
+                    self.assertIn("--test_arg=postgres_ingress", script)
+                    self.assertIn("--test_arg=--ignored", script)
+                    self.assertIn("--deferred pg-store", script)
+                    self.assertIn("//crates/lash-restate:lash-restate__unit_test", script)
+                    self.assertIn(
+                        f"- name: {entry['ci_step_name']}", job
+                    )
+                    self.assertIn("bash scripts/ci/store-tests.sh pg-store", job)
+                    self.assertIn(
+                        "crates/lash-restate/lash-restate__unit_test/test.outputs/law-receipts.txt",
+                        entry["receipt_artifact"],
+                    )
+                    continue
                 body = recipe_block(self.justfile, recipe)
                 artifact_dir = str(Path(entry["receipt_artifact"]).parent)
                 # The recipe exports LASH_LAW_RECEIPTS under the artifact dir,

@@ -61,6 +61,8 @@ lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-subagents = { workspace = true }
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 tempfile = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }

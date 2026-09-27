@@ -252,6 +252,17 @@ case "${suite}" in
         --labels tools/bazel/postgres_test_labels.txt \
         --crate-root crates/lash-postgres-store \
         --receipts-root bazel-testlogs/crates/lash-postgres-store
+      bazel_test \
+        --run_under=//tools/bazel:postgres_slot_runner \
+        --test_env=LASH_POSTGRES_SLOT_DIR \
+        --test_env=LASH_POSTGRES_SLOT_COUNT \
+        --test_arg=postgres_ingress \
+        --test_arg=--ignored \
+        --test_sharding_strategy=disabled \
+        //crates/lash-restate:lash-restate__unit_test
+      python3 scripts/check_law_execution_receipts.py \
+        --deferred pg-store \
+        --receipts-root bazel-testlogs/crates/lash-restate/lash-restate__unit_test
     else
       receipts="$(mktemp -d)/law-receipts.txt"
       LASH_LAW_RECEIPTS="${receipts}" \
@@ -259,6 +270,12 @@ case "${suite}" in
       python3 scripts/check_law_execution_receipts.py \
         --crate crates/lash-postgres-store \
         --receipts "${receipts}"
+      ingress_receipts="$(mktemp -d)/law-receipts.txt"
+      LASH_LAW_RECEIPTS="${ingress_receipts}" \
+        cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
+      python3 scripts/check_law_execution_receipts.py \
+        --deferred pg-store \
+        --receipts "${ingress_receipts}"
     fi
     ;;
 

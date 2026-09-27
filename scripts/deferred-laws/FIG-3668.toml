@@ -8,24 +8,8 @@
 # no other row may carry either field.
 #
 # The removed SQLite `turn_crash_level_1_tests` mount has its Restate-double
-# twin in `tests::turn_crash_on_the_double`. These rows track PostgreSQL
-# ingress mounts pending handler-bound turns and claim ceding pending B5.
-
-[[deferred]]
-file = "crates/lash-postgres-store/tests/conformance/direct_turn_acceptance.rs"
-claimant = "conformance::direct_turn_acceptance"
-suite = "direct_turn_acceptance_tests"
-recipe = "parked"
-ticket = "FIG-3923"
-reason = "the PostgreSQL store leg must drive its turns inside the Restate server double handler; its former SQL effect host was removed"
-
-[[deferred]]
-file = "crates/lash-postgres-store/tests/conformance/cancelled_turn_withheld_input.rs"
-claimant = "conformance::cancelled_turn_withheld_input"
-suite = "cancelled_turn_withheld_input_tests"
-recipe = "parked"
-ticket = "FIG-3923"
-reason = "the PostgreSQL store leg must drive its cancelled turns inside the Restate server double handler; its former SQL effect host was removed"
+# twin in `tests::turn_crash_on_the_double`. This row tracks claim ceding
+# pending B5.
 
 [[deferred]]
 file = "crates/lash-postgres-store/tests/conformance/restored_claim_cede.rs"

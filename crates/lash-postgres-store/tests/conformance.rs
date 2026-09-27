@@ -285,9 +285,8 @@ async fn double_law_backend(
     ((attachments, backend), stores, host, runner)
 }
 
-/// Retained fixture for ingress suites awaiting handler-bound Restate drives.
-/// Its backend already uses the PostgreSQL store set and Restate engine; the
-/// deferred laws must enter through `double_law_backend`'s runner in FIG-3923.
+/// The restored-claim conformance fixture uses this PostgreSQL backend while
+/// FIG-3862 replaces its legacy claim path.
 async fn pg_law_backend(
     storage: &PostgresStorage,
 ) -> (
@@ -1885,10 +1884,6 @@ mod process_retention;
 #[path = "conformance/restored_claim_cede.rs"]
 mod restored_claim_cede;
 include!("conformance/append_identity.rs");
-#[path = "conformance/cancelled_turn_withheld_input.rs"]
-mod cancelled_turn_withheld_input;
-#[path = "conformance/direct_turn_acceptance.rs"]
-mod direct_turn_acceptance;
 #[path = "conformance/injectors.rs"]
 mod injectors;
 lash_conformance::session_read_view_tests!({
