@@ -111,6 +111,39 @@ pub(crate) async fn gate_stamped_object_state(
     Ok(())
 }
 
+/// The stamped-state gate for a family whose `marker` row is written only
+/// once the object passed [`gate_stamped_object_state`]: it answers the
+/// decoded marker, or `None` for an object that holds none yet.
+///
+/// A marker in the current envelope means the whole object was gated before
+/// the marker was first written, and every row since was written stamped, so
+/// the full gate — a read of every value the object holds — runs only for an
+/// object without one. An object that keeps rows for its whole life (the
+/// durable-wait index retains one resolution fence per retired wait) would
+/// otherwise pay a read per retained row on every call (FIG-3843). The
+/// retired markers are still refused by name, and a marker without the
+/// envelope refuses typed like any other unstamped value.
+pub(crate) async fn gate_marked_object_state<T>(
+    ctx: &ObjectContext<'_>,
+    formats: &StoredValueFormats,
+    retired_keys: &[&'static str],
+    marker: &'static str,
+) -> Result<Option<T>, TerminalError>
+where
+    T: DeserializeOwned + 'static,
+{
+    for key in retired_keys {
+        if ctx.get::<Vec<u8>>(key).await?.is_some() {
+            return Err(stored_format_terminal(key, None, formats));
+        }
+    }
+    if let Some(marker) = get_stamped::<T>(ctx, marker, formats).await? {
+        return Ok(Some(marker));
+    }
+    gate_stamped_object_state(ctx, formats, retired_keys).await?;
+    Ok(None)
+}
+
 /// Whether `bytes` carry a format stamp at all. The version dispatch that
 /// follows decides whether the stamp is one this build reads.
 fn carries_format_stamp(bytes: &[u8]) -> bool {

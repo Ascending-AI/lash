@@ -1747,6 +1747,85 @@ pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write
     }
 }
 
+/// The number of state reads (`GetEagerStateCommand` frames) an invocation's
+/// output journals.
+fn journaled_state_reads(output: &[u8]) -> usize {
+    let mut reads = 0;
+    let mut cursor = 0;
+    while cursor < output.len() {
+        let header = u64::from_be_bytes(
+            output[cursor..cursor + 8]
+                .try_into()
+                .expect("Restate frame header"),
+        );
+        let payload_len =
+            usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).expect("Restate frame payload length");
+        if (header >> 48) as u16 == 0x0407 {
+            reads += 1;
+        }
+        cursor += 8 + payload_len;
+    }
+    reads
+}
+
+/// FIG-3843: a wait-registry object that passed the stamped-state gate — its
+/// stamped metadata row says so — is not gated again row by row. The index
+/// retains a resolution fence per retired wait for the session's life, so a
+/// call that read every retained row cost more with every turn the session
+/// ran. A call reads the same handful of rows whether the index retains one
+/// fence or sixty-four.
+#[tokio::test]
+pub(super) async fn a_gated_wait_registry_call_reads_no_row_per_retained_fence() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitRegistryImpl::default().serve())
+        .build();
+    let object_key = "fig3843-session";
+    let stamped = |body: serde_json::Value| {
+        serde_json::to_vec(&StampedValue {
+            format: crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+            body,
+        })
+        .expect("encode a stamped registry row")
+    };
+    let metadata =
+        serde_json::to_value(crate::durable_wait::RestateDurableWaitIndexMetadata::default())
+            .expect("encode the registry metadata");
+    let fence = serde_json::to_value(Resolution::Cancelled).expect("encode a retained fence");
+
+    let mut reads = Vec::new();
+    for fences in [1_usize, 64] {
+        let mut state = BTreeMap::from([(
+            crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
+            stamped(metadata.clone()),
+        )]);
+        for index in 0..fences {
+            state.insert(
+                format!("wait-index/v2/resolution/fence-{index:03}"),
+                stamped(fence.clone()),
+            );
+        }
+        let output = invoke_endpoint_body(
+            &endpoint,
+            "LashDurableWaitIndex",
+            "is_revoked",
+            fig1943_invocation_with_state(object_key, &(), &state),
+        )
+        .await
+        .expect("invoke is_revoked on a gated registry");
+        assert!(
+            restate_output_failure_message(&output)
+                .or_else(|| restate_error_message(&output))
+                .is_none(),
+            "a gated registry answers is_revoked"
+        );
+        reads.push(journaled_state_reads(&output));
+    }
+    assert_eq!(
+        reads[0], reads[1],
+        "a call's state reads do not grow with the retained fences: {reads:?}"
+    );
+}
+
 /// FIG-3814: the payload object's pre-stamp rows — the raw payload bytes and
 /// the bare `retired` bool — refuse typed before a write lands beside them,
 /// on the exclusive handlers through the object gate and on the shared read

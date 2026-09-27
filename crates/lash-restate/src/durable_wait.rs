@@ -1004,6 +1004,24 @@ pub(crate) fn durable_wait_address_from_state_key(
         .then_some(address)
 }
 
+/// The index's stamped-state gate, answering its metadata row when it has
+/// one. The row is written only once the object passed the full gate, so an
+/// index with one is gated by that row alone: the index retains a resolution
+/// fence per retired wait for the session's life, and gating every one of
+/// them on every call made each call cost more the longer the session ran
+/// (FIG-3843).
+async fn gate_durable_wait_index(
+    ctx: &ObjectContext<'_>,
+) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
+    object_state::gate_marked_object_state(
+        ctx,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        RETIRED_DURABLE_WAIT_STATE_KEYS,
+        DURABLE_WAIT_INDEX_METADATA_KEY,
+    )
+    .await
+}
+
 /// Load the index's metadata, initializing it for a pristine object.
 ///
 /// Restate object state is not part of an invocation's replayed journal: these
@@ -1016,19 +1034,7 @@ pub(crate) fn durable_wait_address_from_state_key(
 async fn load_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<RestateDurableWaitIndexMetadata, TerminalError> {
-    object_state::gate_stamped_object_state(
-        ctx,
-        &DURABLE_WAIT_REGISTRY_FORMATS,
-        RETIRED_DURABLE_WAIT_STATE_KEYS,
-    )
-    .await?;
-    if let Some(metadata) = object_state::get_stamped::<RestateDurableWaitIndexMetadata>(
-        ctx,
-        DURABLE_WAIT_INDEX_METADATA_KEY,
-        &DURABLE_WAIT_REGISTRY_FORMATS,
-    )
-    .await?
-    {
+    if let Some(metadata) = gate_durable_wait_index(ctx).await? {
         return Ok(metadata);
     }
 
@@ -1049,19 +1055,7 @@ async fn load_durable_wait_index_metadata(
 async fn read_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
-    object_state::gate_stamped_object_state(
-        ctx,
-        &DURABLE_WAIT_REGISTRY_FORMATS,
-        RETIRED_DURABLE_WAIT_STATE_KEYS,
-    )
-    .await?;
-    if let Some(metadata) = object_state::get_stamped::<RestateDurableWaitIndexMetadata>(
-        ctx,
-        DURABLE_WAIT_INDEX_METADATA_KEY,
-        &DURABLE_WAIT_REGISTRY_FORMATS,
-    )
-    .await?
-    {
+    if let Some(metadata) = gate_durable_wait_index(ctx).await? {
         return Ok(Some(metadata));
     }
     if ctx.get_keys().await?.is_empty() {
