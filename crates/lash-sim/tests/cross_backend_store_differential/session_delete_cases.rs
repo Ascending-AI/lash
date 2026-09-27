@@ -122,21 +122,29 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         "cleanup of an unarmed session",
         ledger.undelivered_cleanup(own).await.expect("cleanup"),
     ));
+    // The close ended `own`'s open root, and that terminal write armed its
+    // scope close (ADR 0109 §3); the other session's root is still open, so
+    // the ledger's repair arm arms it.
     let mut scope_closes = Vec::new();
     for session in [own, other] {
+        let armed = stores
+            .obligation_ledger(ObligationKind::ScopeClose)
+            .arm(
+                &ObligationKey::ScopeClose {
+                    session_id: session.clone(),
+                    root: root.clone(),
+                },
+                T0,
+            )
+            .await
+            .expect("arm the scope close");
+        out.push(format!(
+            "the repair arm arms the root of {} -> {}",
+            if session == own { "own" } else { "other" },
+            armed.is_some()
+        ));
         scope_closes.push(
-            stores
-                .obligation_ledger(ObligationKind::ScopeClose)
-                .arm(
-                    &ObligationKey::ScopeClose {
-                        session_id: session.clone(),
-                        root: root.clone(),
-                    },
-                    T0,
-                )
-                .await
-                .expect("arm the scope close")
-                .expect("the root owes nothing yet"),
+            armed.unwrap_or_else(|| lash_core::store::scope_close_obligation_id(session, &root)),
         );
     }
     let plans = [

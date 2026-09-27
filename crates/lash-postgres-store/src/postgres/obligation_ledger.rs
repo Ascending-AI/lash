@@ -187,8 +187,23 @@ pub(crate) async fn arm_obligation_tx(
     key: &ObligationKey,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
+    let id = ObligationId::mint(key.kind());
+    arm_obligation_id_tx(conn, key, &id, now_ms)
+        .await
+        .map(|armed| armed.map(|_| id))
+}
+
+/// [`arm_obligation_tx`] with the id the row's own transaction derived (ADR
+/// 0109 §1.1): a producer that must name its obligation afterwards — the
+/// terminal write naming its scope close — arms the id it derived rather
+/// than a minted one.
+pub(crate) async fn arm_obligation_id_tx(
+    conn: &mut sqlx::PgConnection,
+    key: &ObligationKey,
+    id: &ObligationId,
+    now_ms: u64,
+) -> Result<Option<ObligationId>, StoreError> {
     let kind = key.kind();
-    let id = ObligationId::mint(kind);
     let (sql, _) = obligation_sql(kind);
     let changed = key_query(sqlx::query(sql.arm.sql()), key)
         .bind(id.as_str())
@@ -197,7 +212,7 @@ pub(crate) async fn arm_obligation_tx(
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
-    Ok((changed == 1).then_some(id))
+    Ok((changed == 1).then(|| id.clone()))
 }
 
 /// One PostgreSQL ledger: `kind`'s statements over the store's pool.

@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use crate::drive::apply_control_intent;
+use crate::drive::relay::ObligationRelay;
 use crate::engine::{ScopeCloseSink, begin_session_close_replay_key};
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::store::{ControlIntent, ControlIntentState, StoreError};
@@ -36,6 +37,10 @@ pub struct SessionCloseServices {
     /// until the process registry's scope-close adapter is installed
     /// (FIG-3607 PR-2).
     pub scopes: Arc<dyn ScopeCloseSink>,
+    /// The `ScopeClose` kind's relay when the host wires its ledger (ADR
+    /// 0109 §3): each closed root's obligation gets its immediate delivery
+    /// here. `None` on a host without an obligation substrate.
+    pub scope_close_obligations: Option<Arc<dyn ObligationRelay>>,
     pub clock: Arc<dyn Clock>,
     /// The session-delete obligation's stores: the close's acknowledgement
     /// arms it, and the delete's relay delivers it (ADR 0109 §4).
@@ -171,6 +176,7 @@ pub async fn close_session(
         engine.as_ref(),
         services.work.as_ref(),
         services.scopes.as_ref(),
+        services.scope_close_obligations.as_deref(),
         &intent,
         services.clock.as_ref(),
     )

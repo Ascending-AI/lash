@@ -576,17 +576,6 @@ pub trait SessionStoreFactory:
         })
     }
 
-    /// Terminal roots in bounded lexicographic order for at-least-once scope close.
-    async fn list_terminal_roots(
-        &self,
-        _after: Option<(SessionId, TurnId)>,
-        _limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::store::RootTerminal>, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "list_terminal_roots",
-        })
-    }
-
     /// List the deployment's open control intents (pending, or failed and
     /// retryable) strictly after `after`, in id order, at most `limit`
     /// (FIG-3600 S7, ADR 0104 O4): what reconciliation re-applies, including

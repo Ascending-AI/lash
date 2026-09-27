@@ -746,6 +746,7 @@ pub(super) async fn fig3848_a_parked_root_owing_a_follow_on_is_cleared_when_the_
         &lash_core::engine::NoEngineControl,
         &lash_core::NoSessionWork::new(),
         &lash_core::engine::NoScopeClose,
+        None,
         &redrive,
         owed_run.clock.as_ref(),
     )

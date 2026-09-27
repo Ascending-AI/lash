@@ -277,6 +277,19 @@ impl std::fmt::Display for ObligationId {
     }
 }
 
+/// The derived id of a terminal root's scope-close obligation (ADR 0109
+/// §3): stable per `(session, root)` — the terminal transaction arms it, and
+/// the close's own delivery names the same id to claim it.
+#[must_use]
+pub fn scope_close_obligation_id(session_id: &SessionId, root: &TurnId) -> ObligationId {
+    ObligationId::new(format!(
+        "{}:{}:{}",
+        ObligationKind::ScopeClose.label(),
+        session_id.as_str(),
+        root.as_str()
+    ))
+}
+
 /// The token one claim stamps; every settling write compares it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ClaimToken(String);

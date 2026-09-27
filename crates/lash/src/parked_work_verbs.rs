@@ -226,6 +226,7 @@ impl ParkedWork {
             self.work.control().as_ref(),
             self.work.as_ref(),
             self.scopes.as_ref(),
+            self.scope_close_obligations.as_deref(),
             &intent,
             self.clock.as_ref(),
         )

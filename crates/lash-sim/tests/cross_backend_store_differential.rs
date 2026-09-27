@@ -1898,7 +1898,9 @@ impl BackendRunner {
         // A deliberately undecodable row cannot be read through the decoded
         // digest; the raw changed-table set is the comparison instead.
         let durable_state = match comparison {
-            ComparisonMode::Decoded => Some(self.raw_reader.observe().await),
+            ComparisonMode::Decoded => {
+                Some(self.raw_reader.observe(self.clock.timestamp_ms()).await)
+            }
             ComparisonMode::RawOnly => None,
         };
         let surface_answer = self.surface.answer.clone();

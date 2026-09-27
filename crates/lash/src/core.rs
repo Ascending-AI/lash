@@ -135,6 +135,14 @@ impl AdministrationSource {
             lash_core::session_close::SessionCloseServices {
                 work: queued,
                 scopes: Arc::clone(&resolved_env.core.control.scope_close),
+                scope_close_obligations: lash_core::runtime::drive::scope_close_relay(
+                    resolved_env.core.control.scope_close_obligations.clone(),
+                    Arc::clone(&self.store_factory),
+                    Arc::clone(&resolved_env.core.control.scope_close),
+                )
+                .map(|relay| {
+                    Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
+                }),
                 clock: Arc::clone(&resolved_env.core.clock),
                 deletes: lash_core::session_delete::SessionDeleteStores::of(
                     resolved_env.core.backend(),
@@ -342,6 +350,14 @@ impl LashCore {
         crate::parked_work::ParkedWork {
             work: self.env.queued_work(),
             scopes: Arc::clone(&self.env.core.control.scope_close),
+            scope_close_obligations: lash_core::runtime::drive::scope_close_relay(
+                self.env.core.control.scope_close_obligations.clone(),
+                Arc::clone(&self.store_factory),
+                Arc::clone(&self.env.core.control.scope_close),
+            )
+            .map(|relay| {
+                Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
+            }),
             store_factory: Arc::clone(&self.store_factory),
             process_registry: Arc::clone(&self.process_registry),
             clock: Arc::clone(&self.env.core.clock),

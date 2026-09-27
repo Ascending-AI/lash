@@ -10,9 +10,10 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    EnginePark, ParkCancelCause, ParkEventKind, RootStore, RootTerminal, RootTerminalCause,
-    RootTerminalKind, RootTerminalWriteDecision, close_admission, decide_root_terminal_write,
-    root_binding_conflict, stored_intent_kind, stored_intent_state,
+    EnginePark, ObligationKey, ParkCancelCause, ParkEventKind, RootStore, RootTerminal,
+    RootTerminalCause, RootTerminalKind, RootTerminalWriteDecision, close_admission,
+    decide_root_terminal_write, root_binding_conflict, scope_close_obligation_id,
+    stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
@@ -139,6 +140,17 @@ pub(crate) fn write_root_terminal_conn(
             terminal.root, terminal.session_id
         )));
     }
+    // A terminal root owes its scope close (ADR 0109 §3): the terminal
+    // transaction arms the row's obligation, due at the terminal instant.
+    crate::obligation_ledger::arm_obligation_id_tx(
+        tx,
+        &ObligationKey::ScopeClose {
+            session_id: terminal.session_id.clone(),
+            root: terminal.root.clone(),
+        },
+        &scope_close_obligation_id(&terminal.session_id, &terminal.root),
+        columns.at_ms,
+    )?;
     Ok(())
 }
 

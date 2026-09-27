@@ -28,9 +28,12 @@
 //! and a cancel or fork supersedes every redrive of the root still open, so
 //! a redrive never resumes a root after it re-parked or ended.
 
+use super::relay::{ObligationRelay, deliver_now};
+use super::scope_close::{ScopeCloseAttempt, deliver_scope_close};
 use crate::engine::{EngineRefusal, RootRef, ScopeCloseSink, SessionControlEngine};
 use crate::store::{
     ControlIntent, ControlIntentKind, ControlIntentState, IntentApplication, StoreError,
+    scope_close_obligation_id,
 };
 use crate::{Clock, SessionStoreFactory, SessionWorkEngine};
 
@@ -45,6 +48,11 @@ use crate::{Clock, SessionStoreFactory, SessionWorkEngine};
 /// - `CloseSession { roots }`: release each root's execution, then close the
 ///   session's scope and the roots'.
 ///
+/// `scope_close` is the `ScopeClose` kind's relay when the host wires its
+/// ledger (ADR 0109 §3): a released root's close is then its obligation's
+/// immediate delivery, which the ledger owns from there. `None` on a host
+/// without an obligation substrate; its closes reach `scopes` directly.
+///
 /// An engine refusal or a scope-close failure is retained on the intent
 /// (retryable unless the engine refused permanently) and answered as its
 /// state: the store half stands, and reconciliation finishes the rest. Only
@@ -54,6 +62,7 @@ pub async fn apply_control_intent(
     engine: &dyn SessionControlEngine,
     work: &dyn SessionWorkEngine,
     scopes: &dyn ScopeCloseSink,
+    scope_close: Option<&dyn ObligationRelay>,
     intent: &ControlIntent,
     clock: &dyn Clock,
 ) -> Result<ControlIntentState, StoreError> {
@@ -68,7 +77,7 @@ pub async fn apply_control_intent(
     };
     let applied = match &intent.kind {
         ControlIntentKind::CloseSession { roots } => {
-            close_session_engine_half(engine, scopes, &intent, roots).await
+            close_session_engine_half(engine, scopes, scope_close, &intent, roots, clock).await
         }
         ControlIntentKind::Redrive { root, .. } => {
             let target = RootRef {
@@ -88,7 +97,8 @@ pub async fn apply_control_intent(
             }
         }
         ControlIntentKind::Cancel { root, .. } | ControlIntentKind::Fork { root, .. } => {
-            release_root_engine_half(stores, engine, scopes, &intent, root).await
+            release_root_engine_half(stores, engine, scopes, scope_close, &intent, root, clock)
+                .await
         }
     };
     match applied {
@@ -150,8 +160,10 @@ impl From<EngineRefusal> for EngineHalfFailure {
 async fn close_session_engine_half(
     engine: &dyn SessionControlEngine,
     scopes: &dyn ScopeCloseSink,
+    scope_close: Option<&dyn ObligationRelay>,
     intent: &ControlIntent,
     roots: &[crate::TurnId],
+    clock: &dyn Clock,
 ) -> Result<(), EngineHalfFailure> {
     for root in roots {
         engine
@@ -163,6 +175,24 @@ async fn close_session_engine_half(
                 None,
             )
             .await?;
+    }
+    // Each closed root's armed obligation gets its immediate attempt here:
+    // the verdict stays the ledger's, whose retries the due pass owns, so a
+    // failure is reported, never fatal (ADR 0109 §3). The session's own
+    // scope close below carries no obligation of this kind.
+    if let Some(relay) = scope_close {
+        for root in roots {
+            let id = scope_close_obligation_id(&intent.session_id, root);
+            if let Err(error) = deliver_now(relay, &id, clock).await {
+                tracing::warn!(
+                    session_id = intent.session_id.as_str(),
+                    root = root.as_str(),
+                    error = %error,
+                    "the closed root's scope-close obligation missed its immediate \
+                     delivery; the due pass owns it"
+                );
+            }
+        }
     }
     scopes
         .close_session_scope(&intent.session_id, intent.id, roots)
@@ -177,8 +207,10 @@ async fn release_root_engine_half(
     stores: &dyn SessionStoreFactory,
     engine: &dyn SessionControlEngine,
     scopes: &dyn ScopeCloseSink,
+    scope_close: Option<&dyn ObligationRelay>,
     intent: &ControlIntent,
     root: &crate::TurnId,
+    clock: &dyn Clock,
 ) -> Result<(), EngineHalfFailure> {
     engine
         .release_root(
@@ -200,12 +232,22 @@ async fn release_root_engine_half(
             message: "root control intent has no terminal evidence".into(),
             retryable: false,
         })?;
-    scopes
-        .close_root_scope(&terminal)
+    match deliver_scope_close(scope_close, scopes, &terminal, clock)
         .await
         .map_err(|error| EngineHalfFailure {
             message: error.to_string(),
             retryable: true,
-        })?;
-    Ok(())
+        })? {
+        ScopeCloseAttempt::Delivered => Ok(()),
+        // The armed obligation owns the retry, but the intent's engine half
+        // still records that the close did not land when it ran — its
+        // failure is retained and retried like any engine-half miss.
+        ScopeCloseAttempt::Owed { retryable } => Err(EngineHalfFailure {
+            message: format!(
+                "root scope close left to its obligation ({})",
+                if retryable { "retryable" } else { "stalled" }
+            ),
+            retryable,
+        }),
+    }
 }

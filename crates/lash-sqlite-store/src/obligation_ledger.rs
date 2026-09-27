@@ -151,19 +151,32 @@ impl SqliteObligationLedger {
 /// own transaction: the helper a slice's producer calls on its transaction.
 /// `None` when the row is missing or already carries an obligation.
 pub(crate) fn arm_obligation_tx(
-    tx: &rusqlite::Connection,
+    conn: &rusqlite::Connection,
     key: &ObligationKey,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
+    let id = ObligationId::mint(key.kind());
+    arm_obligation_id_tx(conn, key, &id, now_ms).map(|armed| armed.map(|_| id))
+}
+
+/// [`arm_obligation_tx`] with the id the row's own transaction derived (ADR
+/// 0109 §1.1): a producer that must name its obligation afterwards — the
+/// terminal write naming its scope close — arms the id it derived rather
+/// than a minted one.
+pub(crate) fn arm_obligation_id_tx(
+    conn: &rusqlite::Connection,
+    key: &ObligationKey,
+    id: &ObligationId,
+    now_ms: u64,
+) -> Result<Option<ObligationId>, StoreError> {
     let kind = key.kind();
-    let id = ObligationId::mint(kind);
     let mut values = key_values(key);
     values.push(Value::Text(id.as_str().to_owned()));
     values.push(Value::Integer(sql_i64("obligation due instant", now_ms)?));
-    let changed = tx
+    let changed = conn
         .execute(obligation_sql(kind).arm.sql(), params_from_iter(values))
         .map_err(sqlite_error)?;
-    Ok((changed == 1).then_some(id))
+    Ok((changed == 1).then(|| id.clone()))
 }
 
 #[async_trait::async_trait]

@@ -92,9 +92,10 @@ impl crate::SessionWorkEngine for Work {
         self.0.clone()
     }
 }
+#[derive(Clone)]
 struct Close {
     store: Arc<dyn crate::RuntimePersistence>,
-    fail: AtomicBool,
+    fail: Arc<AtomicBool>,
     events: Arc<Mutex<Vec<&'static str>>>,
 }
 #[async_trait::async_trait]
@@ -124,6 +125,7 @@ impl ScopeCloseSink for Close {
 struct Fixture {
     parts: DriveParts,
     factory: Arc<dyn crate::SessionStoreFactory>,
+    stores: Arc<dyn crate::StoreSet>,
     root: TurnId,
     input: crate::InputId,
     park: TurnPark,
@@ -189,6 +191,7 @@ impl Fixture {
         Self {
             parts,
             factory: stores.session_store_factory(),
+            stores: stores.clone(),
             root,
             input,
             park,
@@ -219,10 +222,26 @@ impl Fixture {
             })),
             Close {
                 store: self.parts.store.clone(),
-                fail: AtomicBool::new(fail_close),
+                fail: Arc::new(AtomicBool::new(fail_close)),
                 events,
             },
         )
+    }
+
+    /// The `ScopeClose` kind's relay over the law's stores (ADR 0109 §3):
+    /// reads terminal evidence from the catalog, closes through `close`.
+    /// The law runs on a zero base backoff: a missed first attempt is due
+    /// again inside the same tick, the way the un-timed laws always ran.
+    fn scope_close_relay(&self, close: &Close) -> lash_core::runtime::drive::ScopeCloseRelay {
+        lash_core::runtime::drive::ScopeCloseRelay::new(
+            self.stores.obligation_ledger(ObligationKind::ScopeClose),
+            self.factory.clone(),
+            Arc::new(close.clone()),
+        )
+        .with_policy(lash_core::runtime::drive::relay::RelayPolicy {
+            base_backoff_ms: 0,
+            ..lash_core::runtime::drive::relay::RelayPolicy::default()
+        })
     }
     async fn apply(
         &self,
@@ -230,11 +249,13 @@ impl Fixture {
         close: &Close,
         intent: &ControlIntent,
     ) -> ControlIntentState {
+        let relay = self.scope_close_relay(close);
         lash_core::runtime::drive::apply_control_intent(
             self.factory.as_ref(),
             work.0.as_ref(),
             work,
             close,
+            Some(&relay),
             intent,
             self.parts.host.clock.as_ref(),
         )
@@ -242,6 +263,8 @@ impl Fixture {
         .expect("apply intent")
     }
     async fn reconcile(&self, work: &Work, close: &Close, tick: &str) -> ReconcileTick {
+        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
+            vec![Arc::new(self.scope_close_relay(close))];
         lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: self.factory.as_ref(),
@@ -250,7 +273,7 @@ impl Fixture {
                 processes: None,
                 clock: self.parts.host.clock.as_ref(),
                 duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
-                relays: &[],
+                relays: &relays,
             },
             &ReconcileCursor::default(),
             NonZeroUsize::MIN.saturating_add(63),
@@ -709,6 +732,8 @@ pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
                 }
             ));
         }
+        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
+            vec![Arc::new(f.scope_close_relay(&close))];
         let report = lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: f.factory.as_ref(),
@@ -717,7 +742,7 @@ pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
                 processes: None,
                 clock: f.parts.host.clock.as_ref(),
                 duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
-                relays: &[],
+                relays: &relays,
             },
             &ReconcileCursor::default(),
             NonZeroUsize::MIN.saturating_add(63),

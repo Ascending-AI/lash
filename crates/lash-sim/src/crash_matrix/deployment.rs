@@ -590,14 +590,6 @@ impl SessionStoreFactory for CrashSessionFactory {
         self.inner.list_reconcilable_sessions(after, limit).await
     }
 
-    async fn list_terminal_roots(
-        &self,
-        after: Option<(SessionId, lash_core::TurnId)>,
-        limit: std::num::NonZeroUsize,
-    ) -> StoreResult<Vec<lash_core::store::RootTerminal>> {
-        self.inner.list_terminal_roots(after, limit).await
-    }
-
     async fn list_open_control_intents(
         &self,
         after: Option<lash_core::store::ControlIntentId>,

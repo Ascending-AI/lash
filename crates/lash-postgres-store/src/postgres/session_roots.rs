@@ -135,6 +135,21 @@ pub(crate) async fn write_root_terminal_conn(
             terminal.root, terminal.session_id
         )));
     }
+    // A terminal root owes its scope close (ADR 0109 §3): the terminal
+    // transaction arms the row's obligation, due at the terminal instant.
+    crate::obligation_ledger::arm_obligation_id_tx(
+        conn,
+        &lash_core_execution::store::ObligationKey::ScopeClose {
+            session_id: terminal.session_id.clone(),
+            root: terminal.root.clone(),
+        },
+        &lash_core_execution::store::scope_close_obligation_id(
+            &terminal.session_id,
+            &terminal.root,
+        ),
+        columns.at_ms,
+    )
+    .await?;
     Ok(())
 }
 

@@ -1,20 +1,26 @@
 //! The recorded body of a logical root's scope close (FIG-3600 S7, FIG-3607
-//! item 7): it reads the root's terminal evidence and hands it to the host's
-//! scope owner. It runs only inside the engine's recorded `CloseRootScope`
-//! step, and only after the root's final commit wrote that evidence; a replay
-//! decodes the evidence it closed and never runs it.
+//! item 7, ADR 0109 §3): it reads the root's terminal evidence and delivers
+//! the close the terminal transaction armed — the `ScopeClose` obligation's
+//! immediate attempt when the host wires the kind's ledger, else the scope
+//! owner itself. It runs only inside the engine's recorded `CloseRootScope`
+//! step, and only after the root's final commit wrote that evidence; a
+//! replay decodes the evidence it closed and never runs it.
 //!
-//! A store or scope owner that did not answer is the attempt's fault, never
-//! the step's outcome: the body marks it with derivation retry authority, so
-//! an engine runs the close again until the owner acknowledges it.
+//! A store, ledger or scope owner that did not answer is the attempt's
+//! fault, never the step's outcome: the body marks it with derivation retry
+//! authority, so an engine runs the close again until it is handed to the
+//! obligation ledger (whose retries and stalls it then owns) or the owner
+//! acknowledges it.
 
 use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
+use crate::runtime::drive::deliver_scope_close;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
+use crate::store::ObligationLedger;
 use crate::{
-    RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectOutcome, RuntimeErrorCode, SessionId, StoreError, TurnId,
+    Clock, RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectOutcome, RuntimeErrorCode, SessionId, SessionStoreFactory, StoreError, TurnId,
 };
 
 /// The first execution of one `CloseRootScope` step.
@@ -23,6 +29,13 @@ pub(super) struct CloseRootScopeRunner {
     pub(super) session: SessionId,
     pub(super) root: TurnId,
     pub(super) sink: Arc<dyn ScopeCloseSink>,
+    /// The `ScopeClose` kind's ledger when the host wires one (ADR 0109
+    /// §3); the close is its obligation's immediate delivery, else the sink
+    /// answers directly.
+    pub(super) obligations: Option<Arc<dyn ObligationLedger>>,
+    /// The catalog the obligation's delivery reads terminal evidence from.
+    pub(super) sessions: Arc<dyn SessionStoreFactory>,
+    pub(super) clock: Arc<dyn Clock>,
 }
 
 fn attempt_fault(context: &str, error: StoreError) -> RuntimeEffectControllerError {
@@ -71,10 +84,21 @@ impl RuntimeEffectLocalRunner for CloseRootScopeRunner {
                     ),
                 )
             })?;
-        self.sink
-            .close_root_scope(&terminal)
-            .await
-            .map_err(|error| attempt_fault("root scope close", error))?;
+        let relay = super::scope_close::scope_close_relay(
+            self.obligations,
+            self.sessions,
+            Arc::clone(&self.sink),
+        );
+        deliver_scope_close(
+            relay
+                .as_ref()
+                .map(|relay| relay as &dyn super::relay::ObligationRelay),
+            self.sink.as_ref(),
+            &terminal,
+            self.clock.as_ref(),
+        )
+        .await
+        .map_err(|error| attempt_fault("root scope close", error))?;
         Ok(RuntimeEffectOutcome::CloseRootScope {
             terminal: Box::new(terminal),
         })

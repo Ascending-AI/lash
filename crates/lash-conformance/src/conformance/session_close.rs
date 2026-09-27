@@ -88,7 +88,17 @@ pub(super) fn administration(
         lash_core::ProcessEngineRegistry::new(),
         lash_core::session_close::SessionCloseServices {
             work: Arc::new(NoSessionWork::new()),
-            scopes,
+            scopes: scopes.clone(),
+            // The `ScopeClose` kind's relay over the law's stores (ADR 0109
+            // §3): the close's engine half gives each closed root's armed
+            // obligation its immediate delivery here.
+            scope_close_obligations: Some(Arc::new(
+                lash_core::runtime::drive::ScopeCloseRelay::new(
+                    stores.obligation_ledger(crate::store::ObligationKind::ScopeClose),
+                    stores.session_store_factory(),
+                    scopes,
+                ),
+            )),
             clock: stores.clock(),
             deletes: lash_core::session_delete::SessionDeleteStores::of_store_set(Arc::clone(
                 stores,
@@ -449,6 +459,7 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
             &lash_core::engine::NoEngineControl,
             &work,
             sink.as_ref(),
+            None,
             &first,
             clock.as_ref(),
         )
@@ -645,6 +656,7 @@ pub async fn session_delete_writes_exactly_one_close_row_via_its_intent(
             &lash_core::engine::NoEngineControl,
             &work,
             sink.as_ref(),
+            None,
             &intent,
             clock.as_ref(),
         )

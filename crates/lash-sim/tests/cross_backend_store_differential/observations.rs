@@ -229,6 +229,10 @@ pub(super) struct RawDurableState {
     pub(super) session_execution_leases: Vec<SessionExecutionLeaseObservation>,
     pub(super) pending_turn_inputs: Vec<PendingTurnInputObservation>,
     pub(super) queued_work: Vec<QueuedWorkObservation>,
+    /// `session_roots` rows carrying terminal evidence or a scope-close
+    /// obligation (ADR 0109 §3): armed ⇒ evidence ⇒ derived id, and the due
+    /// index's bound the §1.8 assertion checks at read time.
+    pub(super) scope_close_obligations: Vec<ScopeCloseObligationObservation>,
     // `process_*` and `trigger_*` are deliberately excluded: they are separate
     // subsystems with dedicated conformance suites, while this harness and its
     // operation vocabulary are scoped to one runtime session. Effect/await
@@ -285,6 +289,24 @@ pub(super) struct PendingTurnInputObservation {
     pub(super) input_id: String,
     pub(super) state: TurnInputStateKind,
     pub(super) claim_session_lease_generation: Option<u64>,
+}
+
+/// One `session_roots` row's terminal evidence and scope-close obligation
+/// (ADR 0109 §3). Every timestamp on this row is stamped from the harness's
+/// injected clock — the terminal transaction's own `at_ms` and the armed
+/// obligation's `due_at` alike — so the whole row is cross-backend
+/// comparable, unlike a column the database stamps itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ScopeCloseObligationObservation {
+    pub(super) root: String,
+    pub(super) terminal_kind: Option<String>,
+    pub(super) terminal_at_ms: Option<u64>,
+    pub(super) obligation_id: Option<String>,
+    pub(super) obligation_state: Option<String>,
+    pub(super) obligation_attempts: u64,
+    pub(super) obligation_due_at_ms: Option<u64>,
+    pub(super) obligation_stall_reason: Option<String>,
+    pub(super) obligation_settled_at_ms: Option<u64>,
 }
 
 // Backend-generated batch/item ids, physical enqueue sequences, and enqueue

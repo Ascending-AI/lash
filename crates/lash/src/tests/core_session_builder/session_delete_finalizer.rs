@@ -7,7 +7,7 @@ use super::*;
 
 use lash_core::drive::relay::{RelayPolicy, relay_due};
 use lash_core::session_delete::SessionDeleteRelay;
-use lash_core::store::{ObligationKey, ObligationKind, ObligationSettlement, StallReason};
+use lash_core::store::{ObligationKind, ObligationSettlement, StallReason};
 
 const SESSION: &str = "delete-finalizer";
 const ROOT: &str = "delete-finalizer-root";
@@ -21,8 +21,9 @@ fn now_ms() -> u64 {
 }
 
 /// A core whose session `SESSION` ran root `ROOT` and whose root still owes
-/// its scope close: what S8-S's terminal transaction arms, armed here by
-/// the ledger's repair arm.
+/// its scope close: the root's terminal transaction armed it (ADR 0109 §3)
+/// and the close step's immediate delivery failed — the registry refused the
+/// root's parent-end record once — so the obligation is due for a retry.
 async fn closing_fixture() -> Result<(LashCore, lash_core::store::ObligationId)> {
     closing_fixture_over(memory_backend().await).await
 }
@@ -30,8 +31,12 @@ async fn closing_fixture() -> Result<(LashCore, lash_core::store::ObligationId)>
 async fn closing_fixture_over(
     backend: Arc<lash_sqlite_store::SqliteBackend>,
 ) -> Result<(LashCore, lash_core::store::ObligationId)> {
+    let root_scope = lash_core::ScopeId::turn(SESSION, ROOT);
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend.into())
+        .map_process_registry(|registry| lash_core::fail_parent_end_once(registry, root_scope))
+        .into_backend();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
+        backend,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -44,18 +49,15 @@ async fn closing_fixture_over(
         .output()
         .await?;
     drop(session);
-    let scope_close = core
-        .backend
-        .obligation_ledger(ObligationKind::ScopeClose)
-        .arm(
-            &ObligationKey::ScopeClose {
-                session_id: SESSION.into(),
-                root: ROOT.into(),
-            },
-            now_ms(),
-        )
-        .await?
-        .expect("the root's row owes nothing yet");
+    let scope_close = lash_core::store::scope_close_obligation_id(&SESSION.into(), &ROOT.into());
+    assert_eq!(
+        core.backend
+            .obligation_ledger(ObligationKind::ScopeClose)
+            .state(&scope_close)
+            .await?,
+        Some(lash_core::store::ObligationState::Due),
+        "the root's failed close left its scope close owed"
+    );
     Ok((core, scope_close))
 }
 

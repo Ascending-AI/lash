@@ -281,6 +281,7 @@ async fn pause_resume(server: HarnessServer) {
         f.work.control().as_ref(),
         &f.work,
         &NoScopeClose,
+        None,
         &intent,
         &clock,
     )
@@ -468,6 +469,7 @@ async fn crash_gaps(server: HarnessServer) {
                     &engine,
                     &f.work,
                     &scopes,
+                    None,
                     &intent,
                     &clock,
                 )
@@ -591,6 +593,7 @@ async fn released_then_next(server: HarnessServer) {
         f.work.control().as_ref(),
         &f.work,
         &NoScopeClose,
+        None,
         &intent,
         &lash_core::facade_support::SystemClock,
     )
@@ -648,6 +651,7 @@ async fn released_then_repeated(server: HarnessServer) {
         f.work.control().as_ref(),
         &f.work,
         &NoScopeClose,
+        None,
         &intent,
         &lash_core::facade_support::SystemClock,
     )

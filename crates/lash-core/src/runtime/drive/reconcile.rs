@@ -2,9 +2,11 @@
 //! guaranteed owner of every piece of session work whose owner was lost.
 //!
 //! One tick, [`reconcile_once`], is engine-neutral and idempotent. It runs
-//! six arms, each bounded by the tick's page and resuming from its own
+//! five arms, each bounded by the tick's page and resuming from its own
 //! cursor, so a tick never serializes the fleet and one arm's failure never
-//! stops another:
+//! stops another. Due obligations — including the scope closes a terminal
+//! write armed (ADR 0109 §3) — are claimed through every registered kind's
+//! due index before the leader-only arms, not scanned out of their tables:
 //!
 //! 1. **Parks (O3).** The engine's own view of stalled work becomes lash
 //!    parks: [`SessionControlEngine::reconcile_parks`] reads what the engine
@@ -19,11 +21,9 @@
 //!    fire-and-forget; a process that dies between the two, a lost send, or a
 //!    re-ask the engine deduplicated all leave a durable row nothing drives,
 //!    and this arm asks again.
-//! 4. **Scopes.** Terminal evidence is revisited for idempotent scope close
-//!    after a crash between the commit and its notification.
-//! 5. **Parent-end plans (FIG-3822).** A named slot:
+//! 4. **Parent-end plans (FIG-3822).** A named slot:
 //!    [`reconcile_parent_end_plans_slot`].
-//! 6. **Drain hand-over (FIG-3799).** Every live process of a generation an
+//! 5. **Drain hand-over (FIG-3799).** Every live process of a generation an
 //!    operator marked draining is woken to hand its open wait to a successor
 //!    on the newest build: [`drain_hand_over_slot`].
 //!
@@ -184,6 +184,13 @@ pub async fn reconcile_once(
 
     // 2. Intents: re-apply every open intent's engine half.
     report.next.intents = cursor.intents;
+    // A released root's scope close is its obligation's delivery (ADR 0109
+    // §3) when the deployment registered the kind's relay.
+    let scope_close = parts
+        .relays
+        .iter()
+        .find(|relay| relay_kind(relay.as_ref()) == crate::store::ObligationKind::ScopeClose)
+        .map(|relay| relay.as_ref() as &dyn ObligationRelay);
     match parts
         .sessions
         .list_open_control_intents(cursor.intents, page)
@@ -199,6 +206,7 @@ pub async fn reconcile_once(
                     control.as_ref(),
                     parts.work,
                     parts.scopes,
+                    scope_close,
                     &intent,
                     parts.clock,
                 )
@@ -240,72 +248,6 @@ pub async fn reconcile_once(
                 arm: ReconcileArm::Drives,
                 error: error.to_string(),
             });
-        }
-    }
-
-    // Revisit terminal evidence after a crash between commit and scope close.
-    // The sink is idempotent, so no second completion ledger is needed here.
-    if parts.scopes.owns_scopes() {
-        match parts
-            .sessions
-            .list_terminal_roots(cursor.scopes.clone(), page)
-            .await
-        {
-            Ok(terminals) => {
-                let full = terminals.len() == page.get();
-                let mut next = None;
-                for terminal in terminals {
-                    next = Some((terminal.session_id.clone(), terminal.root.clone()));
-                    let controlling = match &terminal.cause {
-                        crate::store::RootTerminalCause::OperatorCancelled { intent }
-                        | crate::store::RootTerminalCause::Forked { intent, .. }
-                        | crate::store::RootTerminalCause::SessionDeleted { intent } => {
-                            Some(*intent)
-                        }
-                        _ => None,
-                    };
-                    // A verb's root closes once its engine half is done:
-                    // acknowledged, or refused for good (the release that
-                    // did not happen is surfaced on the intent; the root's
-                    // end stands).
-                    if let Some(intent) = controlling {
-                        match parts.sessions.load_intent(intent).await {
-                            Ok(Some(intent))
-                                if matches!(
-                                    intent.state,
-                                    crate::store::ControlIntentState::Acknowledged { .. }
-                                        | crate::store::ControlIntentState::Failed {
-                                            retryable: false,
-                                            ..
-                                        }
-                                ) => {}
-                            Ok(_) => continue,
-                            Err(error) => {
-                                report.failures.push(ReconcileFailure {
-                                    arm: ReconcileArm::Scopes,
-                                    error: error.to_string(),
-                                });
-                                continue;
-                            }
-                        }
-                    }
-                    match parts.scopes.close_root_scope(&terminal).await {
-                        Ok(()) => report.closed_scopes += 1,
-                        Err(error) => report.failures.push(ReconcileFailure {
-                            arm: ReconcileArm::Scopes,
-                            error: error.to_string(),
-                        }),
-                    }
-                }
-                report.next.scopes = if full { next } else { None };
-            }
-            Err(error) => {
-                report.next.scopes = cursor.scopes.clone();
-                report.failures.push(ReconcileFailure {
-                    arm: ReconcileArm::Scopes,
-                    error: error.to_string(),
-                });
-            }
         }
     }
 

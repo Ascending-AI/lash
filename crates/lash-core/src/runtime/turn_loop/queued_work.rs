@@ -686,6 +686,7 @@ impl LashRuntime {
             if let Some(root) = self.drive_root.as_mut() {
                 root.mark_settled(&settlement);
             }
+            self.deliver_settled_scope_close(&settlement).await;
             Box::pin(self.end_queue_drain(&selection.admission.scope, &lease, &store, false)).await;
             lease
                 .release_if_live()
@@ -950,8 +951,54 @@ impl LashRuntime {
         if let Some(root) = self.drive_root.as_mut() {
             root.mark_settled(&settlement);
         }
+        self.deliver_settled_scope_close(&settlement).await;
         Box::pin(self.end_queue_drain(&settled.scope, lease, store, false)).await;
         Ok(settled)
+    }
+
+    /// The scope close a settlement's terminal write armed (ADR 0109 §3):
+    /// delivered at once unless the drive running this root will record the
+    /// `CloseRootScope` step that delivers it — a settlement outside a drive
+    /// (an abandonment, or one of another root) otherwise waits for the due
+    /// pass. Best-effort: a failed attempt leaves the armed row to it.
+    async fn deliver_settled_scope_close(&self, settlement: &crate::store::QueuedRunCommit) {
+        let Some(terminal) = crate::store::settled_queued_root_terminal(
+            &self.state.session_id,
+            settlement,
+            self.host.core.clock.timestamp_ms(),
+        ) else {
+            return;
+        };
+        if self
+            .drive_root
+            .as_ref()
+            .is_some_and(|drive| drive.root() == terminal.root)
+        {
+            return;
+        }
+        let Some(relay) = crate::runtime::drive::scope_close_relay(
+            self.host.core.control.scope_close_obligations.clone(),
+            self.host.core.session_store_factory(),
+            Arc::clone(&self.host.core.control.scope_close),
+        ) else {
+            return;
+        };
+        if let Err(error) = crate::runtime::drive::deliver_scope_close(
+            Some(&relay),
+            self.host.core.control.scope_close.as_ref(),
+            &terminal,
+            self.host.core.clock.as_ref(),
+        )
+        .await
+        {
+            tracing::warn!(
+                session_id = terminal.session_id.as_str(),
+                root = terminal.root.as_str(),
+                error = %error,
+                "the settled root's scope-close obligation missed its immediate \
+                 delivery; the due pass owns it"
+            );
+        }
     }
 
     /// Abandon this session's unfinished queued run: settle it durably

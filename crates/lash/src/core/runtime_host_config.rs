@@ -30,6 +30,13 @@ impl LashCoreBuilder {
                 self.backend.clock(),
             ),
         });
+        // The terminal write arms each ended root's scope-close obligation;
+        // the kind's ledger is what the drive's close step, the session
+        // close and the reconcile tick deliver through (ADR 0109 §3).
+        core.control.scope_close_obligations = Some(
+            self.backend
+                .obligation_ledger(lash_core::store::ObligationKind::ScopeClose),
+        );
         Ok(self.apply_core_overrides(core))
     }
 

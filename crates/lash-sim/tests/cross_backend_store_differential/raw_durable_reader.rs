@@ -3,6 +3,117 @@ use sqlx::Row as _;
 
 type PendingTurnInputClaimRow = (String, i64, String, Option<String>, i64, Option<i64>);
 
+/// One `session_roots` row's terminal and obligation columns, as each
+/// backend's durable read hands them to [`scope_close_obligations`].
+type ScopeCloseObligationRow = (
+    String,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    i64,
+    Option<i64>,
+    Option<String>,
+    Option<i64>,
+);
+
+/// The `session_roots` obligation projection, with ADR 0109 §1.8's
+/// detection bound asserted per row as the durable read returns it:
+///
+/// - terminal evidence and the `ScopeClose` obligation arm together — a
+///   `terminal_kind` with no `obligation_id`, or an obligation id that is
+///   not the row's derived [`scope_close_obligation_id`], is a producer bug;
+/// - an undelivered obligation is always on the due index and its schedule
+///   is bounded — `obligation_due_at_ms` is never further out than one
+///   claim TTL (`claimed`) or one maximum backoff (`due`) from the read, so
+///   the next due pass finds it inside the tick bound rather than any pass
+///   rescanning terminal roots;
+/// - a settled row stamps when it settled.
+///
+/// `now_ms` is the clock the backend stamped these rows with: the harness's
+/// injected clock, so the bound is asserted in the same time base the
+/// obligations were armed under.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
+fn scope_close_obligations(
+    session_id: &SessionId,
+    now_ms: u64,
+    rows: Vec<ScopeCloseObligationRow>,
+) -> Vec<ScopeCloseObligationObservation> {
+    let policy = lash_core::runtime::drive::relay::RelayPolicy::default();
+    rows.into_iter()
+        .map(
+            |(
+                root,
+                terminal_kind,
+                terminal_at_ms,
+                obligation_id,
+                obligation_state,
+                obligation_attempts,
+                obligation_due_at_ms,
+                obligation_stall_reason,
+                obligation_settled_at_ms,
+            )| {
+                assert_eq!(
+                    terminal_kind.is_some(),
+                    obligation_id.is_some(),
+                    "root `{root}`: terminal evidence and its scope-close obligation arm \
+                     together (ADR 0109 §3)"
+                );
+                if let Some(id) = &obligation_id {
+                    let derived = lash_core::store::scope_close_obligation_id(
+                        session_id,
+                        &lash_core::TurnId::from(root.as_str()),
+                    );
+                    assert_eq!(
+                        id.as_str(),
+                        derived.as_str(),
+                        "root `{root}`: the armed obligation carries the row's derived id"
+                    );
+                }
+                match obligation_state.as_deref() {
+                    None => {}
+                    Some("due") | Some("claimed") => {
+                        let horizon = if obligation_state.as_deref() == Some("claimed") {
+                            policy.claim_ttl_ms
+                        } else {
+                            policy.max_backoff_ms
+                        };
+                        let due_at_ms = obligation_due_at_ms
+                            .expect("an undelivered obligation is on the due index")
+                            as u64;
+                        assert!(
+                            due_at_ms <= now_ms + horizon,
+                            "root `{root}`: obligation due at {due_at_ms} is beyond the \
+                             §1.8 detection horizon {horizon} ms past {now_ms}"
+                        );
+                    }
+                    Some("delivered") | Some("stalled") => {
+                        assert!(
+                            obligation_settled_at_ms.is_some(),
+                            "root `{root}`: a settled obligation stamps when it settled"
+                        );
+                    }
+                    Some(state) => panic!("root `{root}`: unknown obligation state `{state}`"),
+                }
+                ScopeCloseObligationObservation {
+                    root,
+                    terminal_kind,
+                    terminal_at_ms: terminal_at_ms.map(|at_ms| at_ms as u64),
+                    obligation_id,
+                    obligation_state,
+                    obligation_attempts: obligation_attempts as u64,
+                    obligation_due_at_ms: obligation_due_at_ms.map(|at_ms| at_ms as u64),
+                    obligation_stall_reason,
+                    obligation_settled_at_ms: obligation_settled_at_ms.map(|at_ms| at_ms as u64),
+                }
+            },
+        )
+        .collect()
+}
+
 impl RawDurableReader {
     pub(super) fn detach_store(&mut self) {
         match self {
@@ -28,7 +139,10 @@ impl RawDurableReader {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    pub(super) async fn observe(&self) -> RawDurableState {
+    /// `now_ms` is the caller's clock in the same time base the backend
+    /// stamped its rows with; the scope-close §1.8 bound is asserted
+    /// against it.
+    pub(super) async fn observe(&self, now_ms: u64) -> RawDurableState {
         match self {
             Self::Sqlite {
                 path,
@@ -41,6 +155,7 @@ impl RawDurableReader {
                     store
                         .as_ref()
                         .expect("SQLite reader is attached to a store"),
+                    now_ms,
                 )
                 .await
             }
@@ -311,6 +426,21 @@ impl RawDurableReader {
                 .expect("read Postgres queued-work items");
                 let queued_work =
                     queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
+                let obligation_rows: Vec<ScopeCloseObligationRow> = sqlx::query_as(
+                    "SELECT root, terminal_kind, terminal_at_ms, obligation_id,
+                            obligation_state, obligation_attempts::BIGINT, obligation_due_at_ms,
+                            obligation_stall_reason, obligation_settled_at_ms
+                     FROM lash_session_roots
+                     WHERE session_id = $1
+                       AND (terminal_kind IS NOT NULL OR obligation_state IS NOT NULL)
+                     ORDER BY root ASC",
+                )
+                .bind(session_id.as_str())
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres scope-close obligations");
+                let scope_close_obligations =
+                    scope_close_obligations(session_id, now_ms, obligation_rows);
                 RawDurableState {
                     head_revision,
                     leaf_node_id,
@@ -324,6 +454,7 @@ impl RawDurableReader {
                     session_execution_leases,
                     pending_turn_inputs,
                     queued_work,
+                    scope_close_obligations,
                 }
             }
         }
@@ -341,6 +472,7 @@ pub(super) async fn read_sqlite_durable_state(
     path: &Path,
     session_id: &SessionId,
     store: &Arc<dyn ConformancePersistence>,
+    now_ms: u64,
 ) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
     connection
@@ -678,6 +810,37 @@ pub(super) async fn read_sqlite_durable_state(
     };
     let queued_work =
         queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
+    let obligation_rows: Vec<ScopeCloseObligationRow> = {
+        let mut statement = connection
+            .prepare(
+                "SELECT root, terminal_kind, terminal_at_ms, obligation_id,
+                        obligation_state, obligation_attempts, obligation_due_at_ms,
+                        obligation_stall_reason, obligation_settled_at_ms
+                 FROM session_roots
+                 WHERE session_id = ?1
+                   AND (terminal_kind IS NOT NULL OR obligation_state IS NOT NULL)
+                 ORDER BY root ASC",
+            )
+            .expect("prepare SQLite scope-close obligation read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))
+            })
+            .expect("read SQLite scope-close obligations")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite scope-close obligations")
+    };
+    let scope_close_obligations = scope_close_obligations(session_id, now_ms, obligation_rows);
     RawDurableState {
         head_revision,
         leaf_node_id,
@@ -691,5 +854,6 @@ pub(super) async fn read_sqlite_durable_state(
         session_execution_leases,
         pending_turn_inputs,
         queued_work,
+        scope_close_obligations,
     }
 }

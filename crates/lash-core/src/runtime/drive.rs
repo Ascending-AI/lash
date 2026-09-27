@@ -43,6 +43,7 @@ mod park;
 mod reconcile;
 pub mod relay;
 mod root;
+pub mod scope_close;
 mod turn_config;
 
 pub use control::apply_control_intent;
@@ -52,6 +53,7 @@ pub use reconcile::{
     reconcile_drive_request, reconcile_once, reconcile_parent_end_plans_slot,
     reconcile_session_drives,
 };
+pub use scope_close::{ScopeCloseRelay, deliver_scope_close, scope_close_relay};
 pub(crate) use turn_config::provider_binding_unavailable;
 pub use turn_config::{validate_route, validate_route_with};
 
@@ -799,6 +801,9 @@ impl LashRuntime {
                         session: session.clone(),
                         root: root.clone(),
                         sink: Arc::clone(&self.host.core.control.scope_close),
+                        obligations: self.host.core.control.scope_close_obligations.clone(),
+                        sessions: self.host.core.session_store_factory(),
+                        clock: Arc::clone(&self.host.core.clock),
                     }),
                     None,
                 ),

@@ -84,6 +84,13 @@ impl NativeQueuedWorkRunHandle {
     async fn relays(&self) -> Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> {
         let mut relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
             Vec::new();
+        if let Some(relay) = lash_core::runtime::drive::scope_close_relay(
+            self.config.env.core.control.scope_close_obligations.clone(),
+            Arc::clone(&self.config.store_factory),
+            Arc::clone(&self.config.env.core.control.scope_close),
+        ) {
+            relays.push(Arc::new(relay));
+        }
         if let Some(source) = self.administration.get()
             && let Some(administration) = source.administration().await
         {
@@ -394,7 +401,8 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                 },
             );
         // Which recovery duties this deployment runs this tick (ADR 0109
-        // §1.7). The obligation slices register their relays here.
+        // §1.7). The obligation slices register their relays here: scope
+        // close is S8-S's (ADR 0109 §3).
         let duties = self.config.recovery.duties().await;
         // The process-terminal relay needs this tick's process port, so it
         // joins the relays the core registers without one.

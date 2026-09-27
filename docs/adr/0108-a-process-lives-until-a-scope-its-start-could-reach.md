@@ -109,14 +109,12 @@ The scope-close ledger (`parent_end_plans`) holds one row per closed scope.
 
 A root's scope closes at least once, and never for a parked root, which has
 no terminal evidence (L-C1). A crash between the terminal commit and the
-close leaves the evidence durable and the scope open. Recovery closes it in
-two ways:
-
-- an engine that redelivers the execution replays the root to its recorded
-  close step and runs it;
-- every reconcile tick's scopes arm closes each root listed as terminal
-  through the host's scope owner, whatever the engine. The close is
-  idempotent, so a later tick closing it again changes nothing.
+close leaves the evidence durable and the scope open. The root's terminal
+transaction arms the root row's scope-close obligation (ADR 0109), and the
+close's own transaction delivers it. An engine that redelivers the
+execution replays the root to its recorded close step; otherwise the relay
+takes the due obligation and closes it. A delivered close is never
+attempted again, and no pass rescans terminal roots.
 
 Applying the close row's plan then owes each process living `Until` the
 closed scope its cancel: the scope owner applies it when it can deliver, and

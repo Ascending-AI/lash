@@ -29,8 +29,6 @@ pub struct ReconcileCursor {
     /// The last live session the previous tick's drive arm read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drives: Option<SessionId>,
-    /// Last terminal root whose scope close was attempted.
-    pub scopes: Option<(SessionId, crate::TurnId)>,
     /// The last live process of a draining generation the previous tick's
     /// hand-over slot woke (FIG-3799), with that generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,8 +84,6 @@ pub enum ReconcileArm {
     ParentEndPlans,
     /// The FIG-3799 drain hand-over slot.
     DrainHandOver,
-    /// Terminal roots whose scope close may have been interrupted.
-    Scopes,
     /// Due obligations claimed through a kind's due index (ADR 0109 §1.4).
     Obligations,
 }
@@ -156,8 +152,6 @@ pub struct ReconcileTick {
     pub drain_hand_over: SlotPass,
     /// Every arm failure, in arm order.
     pub failures: Vec<ReconcileFailure>,
-    /// Idempotent terminal-root close calls completed.
-    pub closed_scopes: usize,
     /// Whether this tick ran the leader-only arms (ADR 0109 §1.7).
     pub led: bool,
     /// Each relay's due pass, in relay order; empty when this deployment

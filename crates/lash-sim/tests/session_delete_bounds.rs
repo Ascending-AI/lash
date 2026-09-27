@@ -17,8 +17,9 @@
 //!   `claimed_at + claim_ttl + T`, never before its expiry.
 //!
 //! The session's cleanup is a scope-close obligation on its one root, armed
-//! as the root's terminal transaction arms it (the S8-S slice) and delivered
-//! by hand when the law releases the delete.
+//! by the root's terminal transaction (ADR 0109 §3), left owed by a close
+//! whose parent-end record the registry refused once, and delivered by hand
+//! when the law releases the delete.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -27,7 +28,7 @@ use lash::LashCore;
 use lash_core::drive::relay::{RelayPass, RelayPolicy, relay_due};
 use lash_core::session_delete::SessionDeleteRelay;
 use lash_core::store::{
-    ObligationId, ObligationKey, ObligationKind, ObligationSettlement, ObligationState, StallReason,
+    ObligationId, ObligationKind, ObligationSettlement, ObligationState, StallReason,
 };
 use lash_core::testing::TestClock;
 use lash_core::{Backend, ClockWallTime, SessionId, TurnId};
@@ -50,12 +51,18 @@ struct Deployment {
     clippy::expect_used,
     reason = "test fixture: a deployment that fails to build aborts the law"
 )]
-async fn deployment(turns: usize) -> Deployment {
+async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
     let clock = Arc::new(TestClock::new(EPOCH_MS));
     let sqlite = lash_sqlite_store::SqliteBackend::memory_with_clock(clock.clone())
         .await
         .expect("open a memory backend");
     let backend = Backend::from(sqlite);
+    // The law's root's first parent-end record is refused once, so its
+    // close step's immediate delivery fails and its scope close stays owed.
+    let root_scope = lash_core::ScopeId::turn(session, root);
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
+        .map_process_registry(|registry| lash_core::fail_parent_end_once(registry, root_scope))
+        .into_backend();
     let scripts = (0..turns)
         .map(|_| {
             lash_sim::runtime_providers::runtime_script_for_text(
@@ -96,8 +103,10 @@ impl Deployment {
         self.clock.timestamp_ms()
     }
 
-    /// Run root `root` of `session` to its end, then arm the scope close its
-    /// terminal transaction owes.
+    /// Run root `root` of `session` to its end: its terminal transaction
+    /// arms the root's scope close (ADR 0109 §3), and the refused parent-end
+    /// record fails the close step's immediate delivery, so the close stays
+    /// owed.
     #[expect(
         clippy::expect_used,
         reason = "test fixture: a session that fails to run aborts the law"
@@ -111,18 +120,20 @@ impl Deployment {
             .await
             .expect("run the root");
         drop(handle);
-        self.backend
-            .obligation_ledger(ObligationKind::ScopeClose)
-            .arm(
-                &ObligationKey::ScopeClose {
-                    session_id: SessionId::from(session),
-                    root: TurnId::from(root),
-                },
-                self.now(),
-            )
-            .await
-            .expect("arm the scope close")
-            .expect("the root's row owes nothing yet")
+        let id = lash_core::store::scope_close_obligation_id(
+            &SessionId::from(session),
+            &TurnId::from(root),
+        );
+        assert_eq!(
+            self.backend
+                .obligation_ledger(ObligationKind::ScopeClose)
+                .state(&id)
+                .await
+                .expect("read the scope close"),
+            Some(ObligationState::Due),
+            "the root's failed close left its scope close owed"
+        );
+        id
     }
 
     #[expect(clippy::expect_used, reason = "test fixture")]
@@ -193,7 +204,7 @@ impl Deployment {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_held_delete_retries_within_its_windows_and_stalls_by_its_bound() {
     const SESSION: &str = "bounds-held";
-    let deployment = deployment(1).await;
+    let deployment = deployment(1, SESSION, "held-root").await;
     let scope_close = deployment.ended_root(SESSION, "held-root").await;
     let policy = RelayPolicy::default();
 
@@ -292,7 +303,7 @@ async fn a_held_delete_retries_within_its_windows_and_stalls_by_its_bound() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_delete_whose_verb_died_is_claimed_within_one_tick() {
     const SESSION: &str = "bounds-lost";
-    let deployment = deployment(1).await;
+    let deployment = deployment(1, SESSION, "lost-root").await;
     let scope_close = deployment.ended_root(SESSION, "lost-root").await;
     deployment
         .deliver(ObligationKind::ScopeClose, &scope_close)
@@ -325,7 +336,7 @@ async fn a_delete_whose_verb_died_is_claimed_within_one_tick() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_lapsed_claim_is_retaken_within_its_bound() {
     const SESSION: &str = "bounds-lapsed";
-    let deployment = deployment(1).await;
+    let deployment = deployment(1, SESSION, "lapsed-root").await;
     let scope_close = deployment.ended_root(SESSION, "lapsed-root").await;
     deployment
         .deliver(ObligationKind::ScopeClose, &scope_close)

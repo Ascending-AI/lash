@@ -434,6 +434,10 @@ pub const MATRIX: &[CaseSpec] = &[
         "a session close whose engine half fails retryably forever stalls typed at the attempt ceiling instead of retrying every tick",
     ),
     // --- Scope close (S-8) -------------------------------------------------
+    // A host that dies inside the close's immediate delivery leaves the
+    // root's scope-close obligation claimed (ADR 0109 §3): the replayed close
+    // step cannot take a live claim, so the relay retakes it once the claim
+    // lapses, and those two cells answer to §1.8's lapsed-claim bound.
     today(
         Seam::ScopeClose,
         CrashPoint::AfterStateCommit,
@@ -443,13 +447,13 @@ pub const MATRIX: &[CaseSpec] = &[
     today(
         Seam::ScopeClose,
         CrashPoint::DuringEngineDelivery,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaim,
         "a scope close the host died inside while delivering the child's cancel is delivered once",
     ),
     today(
         Seam::ScopeClose,
         CrashPoint::AfterDeliveryBeforeSettle,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaim,
         "a scope close whose child cancel was delivered but whose plan never settled settles",
     ),
     today(

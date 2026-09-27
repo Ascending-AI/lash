@@ -231,7 +231,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(turn_ingress::pending_inputs::PendingRootVerbStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::queued_batches::BatchRootVerbStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::queued_items::ItemRootVerbStatements::NEUTRAL);
-    statements.extend_from_slice(session_roots::roots::TerminalPageStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::root_inputs::SessionRootInputStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::control_intents::ControlIntentStatements::NEUTRAL);
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);

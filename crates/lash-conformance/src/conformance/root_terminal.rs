@@ -397,45 +397,129 @@ fn drive_once<'a>(
     })
 }
 
-/// One reconcile tick over the law's stores (ADR 0108 §5): its scopes arm is
-/// the engine-neutral owner of a terminal root's missing scope close, and
-/// closes each root listed as terminal through `scopes`, the host's scope
-/// owner. Returns how many scopes the tick closed; the scopes arm reports no
-/// failure.
-async fn reconcile_scopes(
+/// A clock that reads `inner`'s wall time `offset_ms` ahead: a due pass run
+/// under it sees a claim whose delivery crashed — held until its TTL — as
+/// lapsed, the way the next tick on a real clock sees it (ADR 0109 §1.4).
+#[derive(Debug)]
+struct OffsetClock {
+    inner: Arc<dyn lash_core::Clock>,
+    offset_ms: u64,
+}
+
+#[async_trait::async_trait]
+impl lash_core::Clock for OffsetClock {
+    fn now(&self) -> std::time::Instant {
+        self.inner.now()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        self.inner.timestamp_datetime() + chrono::Duration::milliseconds(self.offset_ms as i64)
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        self.inner.sleep(duration).await
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        self.inner.sleep_until(deadline).await
+    }
+}
+
+/// The `ScopeClose` kind's ledger over the law's stores (ADR 0109 §3).
+fn scope_close_ledger(
     stores: &Arc<dyn crate::StoreSet>,
-    scopes: &dyn ScopeCloseSink,
+) -> Arc<dyn lash_core::store::ObligationLedger> {
+    stores.obligation_ledger(lash_core::store::ObligationKind::ScopeClose)
+}
+
+/// The kind's relay over the law's stores: reads terminal evidence from the
+/// catalog, closes through `scopes`.
+fn scope_close_relay(
+    stores: &Arc<dyn crate::StoreSet>,
+    scopes: Arc<dyn ScopeCloseSink>,
+) -> lash_core::runtime::drive::ScopeCloseRelay {
+    lash_core::runtime::drive::ScopeCloseRelay::new(
+        scope_close_ledger(stores),
+        stores.session_store_factory(),
+        scopes,
+    )
+}
+
+/// Wire the host the law's drive runs on so its close step delivers through
+/// the obligation the terminal write armed.
+fn wire_scope_close_obligations(parts: &mut DriveParts, stores: &Arc<dyn crate::StoreSet>) {
+    parts.host.control.scope_close_obligations = Some(scope_close_ledger(stores));
+}
+
+/// The state of `root`'s armed scope-close obligation, if the row carries one.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the ledger answers its own read"
+)]
+async fn scope_close_state(
+    stores: &Arc<dyn crate::StoreSet>,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Option<lash_core::store::ObligationState> {
+    scope_close_ledger(stores)
+        .state(&lash_core::store::scope_close_obligation_id(
+            session_id, root,
+        ))
+        .await
+        .expect("read the root's scope-close obligation")
+}
+
+/// One reconcile tick over the law's stores (ADR 0108 §5, ADR 0109 §3): the
+/// scope-close relay's due pass is the engine-neutral owner of an armed but
+/// undelivered close — no terminal-root scan remains. Returns the tick's
+/// report; the obligations arm reports no failure.
+async fn reconcile_tick(
+    stores: &Arc<dyn crate::StoreSet>,
+    relay: &lash_core::runtime::drive::ScopeCloseRelay,
     clock: &dyn lash_core::Clock,
     tick: &str,
-) -> usize {
+) -> lash_core::engine::ReconcileTick {
     let factory = stores.session_store_factory();
     let work = crate::NoSessionWork::new();
+    let scopes = crate::engine::NoScopeClose;
+    let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
+        vec![Arc::new(relay.clone())];
     let report = lash_core::runtime::drive::reconcile_once(
         &lash_core::runtime::drive::ReconcileParts {
             sessions: factory.as_ref(),
             work: &work,
-            scopes,
+            scopes: &scopes,
             processes: None,
             clock,
             duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
-            relays: &[],
+            relays: &relays,
         },
         &lash_core::engine::ReconcileCursor::default(),
         std::num::NonZeroUsize::new(64).unwrap_or(std::num::NonZeroUsize::MIN),
         tick,
     )
     .await;
-    let scope_failures: Vec<_> = report
+    let obligation_failures: Vec<_> = report
         .failures
         .iter()
-        .filter(|failure| failure.arm == lash_core::engine::ReconcileArm::Scopes)
+        .filter(|failure| failure.arm == lash_core::engine::ReconcileArm::Obligations)
         .map(|failure| failure.error.clone())
         .collect();
     assert!(
-        scope_failures.is_empty(),
-        "the scopes arm closed every terminal root: {scope_failures:?}"
+        obligation_failures.is_empty(),
+        "the obligations arm delivered every due close: {obligation_failures:?}"
     );
-    report.closed_scopes
+    report
+}
+
+/// The `ScopeClose` pass one tick reported (claims, delivered, and the rest).
+fn scope_close_pass(report: &lash_core::engine::ReconcileTick) -> lash_core::engine::RelayPass {
+    report
+        .obligations
+        .iter()
+        .find(|(kind, _)| *kind == lash_core::store::ObligationKind::ScopeClose)
+        .map(|(_, pass)| *pass)
+        .unwrap_or_default()
 }
 
 /// One pass of the process worker over the law's stores: it delivers the
@@ -533,19 +617,21 @@ async fn owes_cancel(
         .is_some()
 }
 
-/// L-C1 (FIG-3607 item 7): a root's scope closes after its terminal evidence
-/// is durable, at least once, and never for a root that is parked.
+/// L-C1 (FIG-3607 item 7, ADR 0109 §3): a root's scope closes after its
+/// terminal evidence is durable, at least once, and never for a root that
+/// is parked.
 ///
 /// - **A crash between the commit and the close.** The execution that
-///   committed the root's end dies inside the close. The evidence stands and
-///   the scope is still open. The tier's recovery closes it: an engine that
-///   redelivers the execution replays the root to its recorded close step
-///   and runs it, and a reconcile tick's scopes arm closes every root whose
-///   evidence it lists, again on the next tick, so the close runs at least
-///   once. The process worker then delivers the cancel the close row owes
-///   the process living `Until` the root.
-/// - **A parked root.** It has no terminal evidence, so neither the drive nor
-///   the recovery closes its scope: its `Until` child owes nothing.
+///   committed the root's end dies inside the close's first delivery. The
+///   evidence stands, the scope is still open, and the obligation the
+///   terminal transaction armed on the root's own row is the recovery
+///   owner: a claim whose delivery crashed lapses at its TTL, the next due
+///   pass retakes it and delivers the close, and a further tick claims
+///   nothing — an already-delivered root is not closed again. The process
+///   worker then delivers the cancel the close row owes the process living
+///   `Until` the root.
+/// - **A parked root.** It has no terminal evidence, so neither the drive
+///   nor the recovery closes its scope: its `Until` child owes nothing.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -569,6 +655,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         closes: Mutex::new(Vec::new()),
     });
     parts.host.control.scope_close = closes.clone();
+    wire_scope_close_obligations(&mut parts, &stores);
     let root = TurnId::from("root-close-crash");
     let child = until_root(&registry, &parts.session_id, &root).await;
     parts.enqueue("ask", Some(root.as_str())).await;
@@ -594,6 +681,12 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         .await
         .expect("the root's terminal commit landed before the crash");
     assert_eq!(evidence.kind, RootTerminalKind::Answered);
+    assert_eq!(
+        scope_close_state(&stores, &parts.session_id, &root).await,
+        Some(lash_core::store::ObligationState::Claimed),
+        "the terminal transaction armed the root's scope-close obligation; \
+         the crashed delivery's claim still holds it"
+    );
     assert!(
         root_close_row(&registry, &parts.session_id, &root)
             .await
@@ -605,18 +698,51 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         "nothing has closed the child's scope yet"
     );
 
-    // The tier's recovery: the redelivered execution, then reconcile ticks.
+    // The tier's recovery: the redelivered execution replays the root to its
+    // recorded close step — the claimed obligation answers not-due, and the
+    // recorded outcome stands. The lapsed claim is the due pass's to retake.
     let _ = on_tier(&runner, &parts, move |runtime, scope| {
         drive_once(runtime, scope, request.clone())
     })
     .await;
-    let scopes = crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock());
-    for tick in ["root-close-recover", "root-close-again"] {
-        assert!(
-            reconcile_scopes(&stores, &scopes, parts.host.clock.as_ref(), tick).await >= 1,
-            "tick {tick} closed the ended root's scope, at least once"
-        );
-    }
+    assert_eq!(
+        closes.closes().len(),
+        1,
+        "no second close ran while the crashed claim held: {:?}",
+        closes.closes()
+    );
+
+    // The due pass once the claim lapses: it claims the armed row, delivers
+    // the close to the scope owner, and settles the row delivered. A second
+    // tick claims nothing — the delivered root is not closed again.
+    let relay = scope_close_relay(&stores, closes.clone());
+    let lapsed = OffsetClock {
+        inner: Arc::clone(&parts.host.clock),
+        offset_ms: lash_core::runtime::drive::relay::RelayPolicy::default().claim_ttl_ms + 1,
+    };
+    let first = reconcile_tick(&stores, &relay, &lapsed, "root-close-recover").await;
+    let pass = scope_close_pass(&first);
+    assert_eq!(
+        (pass.claimed, pass.delivered),
+        (1, 1),
+        "the due pass delivered the armed close once: {pass:?}"
+    );
+    assert_eq!(
+        scope_close_state(&stores, &parts.session_id, &root).await,
+        Some(lash_core::store::ObligationState::Delivered),
+        "the delivered close settled the obligation"
+    );
+    let closed_once = closes.closes().len();
+    let second = reconcile_tick(&stores, &relay, &lapsed, "root-close-again").await;
+    let pass = scope_close_pass(&second);
+    assert_eq!(pass.claimed, 0, "the second tick claimed nothing: {pass:?}");
+    assert_eq!(
+        closes.closes().len(),
+        closed_once,
+        "a second reconciliation tick does not close an already-delivered root: {:?}",
+        closes.closes()
+    );
+
     recovery_sweep(&stores, &effect_host).await;
     assert!(
         root_close_row(&registry, &parts.session_id, &root)
@@ -642,6 +768,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
     let mut parts = DriveParts::new(prefix, "root-close-parked", &effect_host, &stores, 8).await;
     let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
     parts.host.control.scope_close = closes.clone();
+    wire_scope_close_obligations(&mut parts, &stores);
     let parked = TurnId::from("root-close-parked");
     let child = until_root(&registry, &parts.session_id, &parked).await;
     parts.enqueue("ask", Some(parked.as_str())).await;
@@ -658,13 +785,23 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         .await
         .expect("park the root");
     drive(&runner, &parts, "root-close-parked-drive").await;
-    reconcile_scopes(
+    assert_eq!(
+        scope_close_state(&stores, &parts.session_id, &parked).await,
+        None,
+        "a parked root armed no scope-close obligation"
+    );
+    let tick = reconcile_tick(
         &stores,
-        &crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock()),
+        &scope_close_relay(&stores, closes.clone()),
         parts.host.clock.as_ref(),
         "root-close-parked",
     )
     .await;
+    assert_eq!(
+        scope_close_pass(&tick).claimed,
+        0,
+        "the due pass found no close to deliver"
+    );
     recovery_sweep(&stores, &effect_host).await;
     assert_eq!(
         terminal(&parts, &parked).await,
@@ -705,6 +842,7 @@ pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
     let mut parts = DriveParts::new(prefix, "root-settled", &effect_host, &stores, 8).await;
     let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
     parts.host.control.scope_close = closes.clone();
+    wire_scope_close_obligations(&mut parts, &stores);
     // An earlier drain admitted a named run and selected nothing before it
     // stopped: the run is the session's pending root.
     let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
@@ -776,6 +914,7 @@ pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
         Arc::clone(&registry),
         stores.clock(),
     ));
+    wire_scope_close_obligations(&mut parts, &stores);
     let root = TurnId::from("root-registry-close");
     let turn = lash_core::ScopeId::turn(parts.session_id.clone(), root.clone());
     let registration = || {

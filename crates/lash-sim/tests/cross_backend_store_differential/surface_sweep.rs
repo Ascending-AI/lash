@@ -165,7 +165,6 @@ pub(super) enum SurfaceMethod {
         stale: bool,
     },
     ListControlIntents,
-    ListTerminalRoots,
     ListReconcilableSessions,
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
@@ -273,7 +272,6 @@ impl SurfaceMethod {
                 fork: true,
             } => "surface:open_root_intent_fork",
             Self::ListControlIntents => "surface:list_control_intents",
-            Self::ListTerminalRoots => "surface:list_terminal_roots",
             Self::ListReconcilableSessions => "surface:list_reconcilable_sessions",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
@@ -838,7 +836,6 @@ pub(super) fn root_control_case(fork: bool) -> GeneratedCase {
         surface(SurfaceMethod::OpenRootIntent { fork, stale: false }),
         surface(SurfaceMethod::LoadIntent { known: true }),
         surface(SurfaceMethod::ListControlIntents),
-        surface(SurfaceMethod::ListTerminalRoots),
         surface(SurfaceMethod::ListReconcilableSessions),
         surface(SurfaceMethod::ListPendingTurnInputs),
         surface(SurfaceMethod::RootBinding),
@@ -1705,13 +1702,6 @@ impl BackendRunner {
                 "intents={}",
                 self.factory()
                     .list_control_intents(None, std::num::NonZeroUsize::MIN)
-                    .await?
-                    .len()
-            ),
-            SurfaceMethod::ListTerminalRoots => format!(
-                "terminals={}",
-                self.factory()
-                    .list_terminal_roots(None, std::num::NonZeroUsize::MIN)
                     .await?
                     .len()
             ),

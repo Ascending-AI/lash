@@ -648,37 +648,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         .map_err(sqlite_error)
     }
 
-    async fn list_terminal_roots(
-        &self,
-        after: Option<(SessionId, lash_sansio::TurnId)>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::store::RootTerminal>, StoreError> {
-        let Some(conn) = self.control_ledger().await? else {
-            return Ok(Vec::new());
-        };
-        conn.call(move |conn| {
-            let sql = &crate::session_roots::session_roots_sql().verbs;
-            let (session, root) = after
-                .map(|(s, r)| (s.to_string(), r.to_string()))
-                .unwrap_or_default();
-            let mut stmt = conn.prepare(sql.terminals.sql())?;
-            let keys = stmt
-                .query_map(params![session, root, limit.get() as i64], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(keys
-                .into_iter()
-                .map(|(s, r)| {
-                    crate::session_roots::root_terminal_conn(conn, &s.into(), &r.into())
-                        .and_then(|value| value.ok_or(StoreError::Contended))
-                })
-                .collect())
-        })
-        .await
-        .map_err(sqlite_error)?
-    }
-
     async fn list_open_control_intents(
         &self,
         after: Option<lash_core_execution::store::ControlIntentId>,

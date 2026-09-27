@@ -9,7 +9,8 @@
 //! 3. **No orphan.** No child process outlives its ended parent scope
 //!    uncancelled.
 //! 4. **Scopes closed.** Every terminal root the case names has its scope
-//!    closed: its parent-end plan is recorded and settled.
+//!    closed: its parent-end plan is recorded and settled, and its
+//!    scope-close obligation (ADR 0109 §3) is delivered or stalled typed.
 //! 5. **Deleted.** Every session the host asked to delete is deleted.
 //! 6. **Not wedged.** No lash drive of a live session is paused or left
 //!    running, and a fresh input sent after recovery is driven
@@ -22,6 +23,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use lash_core::store::{ObligationKind, ObligationState, scope_close_obligation_id};
 use lash_core::{ProcessId, ScopeId, SessionId, TurnId};
 
 use super::world::CrashWorld;
@@ -461,7 +463,39 @@ async fn check_children(world: &CrashWorld, expected: &Expected, violations: &mu
 
 async fn check_scopes(world: &CrashWorld, expected: &Expected, violations: &mut Vec<String>) {
     let registry = world.backend().process_registry();
+    let scope_closes = world
+        .backend()
+        .obligation_ledger(ObligationKind::ScopeClose);
+    let factory = world.backend().session_store_factory();
     for scope in &expected.closed_scopes {
+        // A root with terminal evidence owes its scope close as an ADR 0109
+        // obligation on its root row: it must be delivered, or stalled typed.
+        if let Some(lash_core::EffectOpener::Turn {
+            session_id,
+            turn_id,
+        }) = scope.opener()
+        {
+            match factory.root_terminal(session_id, turn_id).await {
+                Ok(Some(_)) => {
+                    let id = scope_close_obligation_id(session_id, turn_id);
+                    match scope_closes.state(&id).await {
+                        Ok(Some(ObligationState::Delivered | ObligationState::Stalled)) => {}
+                        // A deleted session's rows are gone with their
+                        // obligations; its physical delete waited for every
+                        // scope close it owed (ADR 0109 §4).
+                        Ok(None) if factory.session_was_deleted(session_id).await == Ok(true) => {}
+                        Ok(state) => violations.push(format!(
+                            "the scope-close obligation `{id}` of terminal root `{scope}` is {state:?}, neither delivered nor stalled"
+                        )),
+                        Err(error) => {
+                            violations.push(format!("read the scope-close obligation `{id}`: {error}"));
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => violations.push(format!("read the terminal of `{scope}`: {error}")),
+            }
+        }
         match registry.get_parent_end_plan(scope).await {
             Ok(Some(plan)) if plan.settled_at_ms.is_some() => {}
             Ok(Some(plan)) => violations.push(format!(
@@ -591,7 +625,7 @@ pub async fn probe_live_sessions(
 }
 
 /// What the engine and the stores hold, for a failed case's report: every
-/// lash invocation that has not completed, and every terminal root.
+/// lash invocation that has not completed, and every stalled scope close.
 pub async fn diagnose(world: &CrashWorld) -> Vec<String> {
     let mut lines: Vec<String> = world
         .server()
@@ -607,17 +641,17 @@ pub async fn diagnose(world: &CrashWorld) -> Vec<String> {
         .collect();
     match world
         .backend()
-        .session_store_factory()
-        .list_terminal_roots(None, PAGE)
+        .obligation_ledger(ObligationKind::ScopeClose)
+        .list_stalled(None, PAGE)
         .await
     {
-        Ok(roots) => lines.extend(roots.into_iter().map(|terminal| {
+        Ok(stalled) => lines.extend(stalled.into_iter().map(|stall| {
             format!(
-                "terminal: {}/{} {:?} {:?}",
-                terminal.session_id, terminal.root, terminal.kind, terminal.cause
+                "stalled scope close: {} {:?} attempts={} {:?}",
+                stall.id, stall.reason, stall.attempts, stall.last_error
             )
         })),
-        Err(error) => lines.push(format!("terminal roots unreadable: {error}")),
+        Err(error) => lines.push(format!("stalled scope closes unreadable: {error}")),
     }
     match world
         .backend()
