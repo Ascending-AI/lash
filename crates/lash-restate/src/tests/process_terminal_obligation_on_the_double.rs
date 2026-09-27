@@ -18,10 +18,11 @@ use lash_core::runtime::drive::relay::relay_due;
 use lash_core::runtime::process_terminal::ProcessTerminalRelay;
 use lash_core::store::{ObligationKind, ObligationState};
 
-/// Completes every run with a fixed success, or fails every attempt live,
-/// retryably, while `failing`.
+/// Completes every run with a fixed success, fails every attempt live,
+/// retryably, while `failing`, or never answers while `hanging`.
 struct TerminalRunner {
     failing: AtomicBool,
+    hanging: AtomicBool,
     runs: AtomicUsize,
 }
 
@@ -45,6 +46,9 @@ impl RestateProcessRunner for TerminalRunner {
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
+        if self.hanging.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         if self.failing.load(Ordering::SeqCst) {
             return Err(PluginError::Runtime(lash_core::RuntimeError::new(
                 lash_core::RuntimeErrorCode::RuntimeStore,
@@ -63,7 +67,9 @@ const MAX_ATTEMPTS: u64 = 3;
 struct World {
     server: lash_restate_test::RestateTestServer,
     ingress: RestateIngressClient,
+    admin: RestateAdminClient,
     registry: Arc<dyn ProcessRegistry>,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     deployment: RestateProcessDeployment,
     relay: ProcessTerminalRelay,
     runner: Arc<TerminalRunner>,
@@ -71,6 +77,16 @@ struct World {
 
 impl World {
     async fn new(seed: u64, failing: bool) -> Self {
+        Self::build(seed, failing, false).await
+    }
+
+    /// A world whose runner never answers: every submitted `run` stays
+    /// running until the engine stops it.
+    async fn new_hanging(seed: u64) -> Self {
+        Self::build(seed, false, true).await
+    }
+
+    async fn build(seed: u64, failing: bool, hanging: bool) -> Self {
         let server = lash_restate_test::RestateTestServer::new(
             lash_restate_test::ServerConfig::default().with_seed(seed),
         )
@@ -85,6 +101,7 @@ impl World {
         let continuations: Arc<dyn lash_core::ProcessContinuationStore> = sqlite_registry;
         let runner = Arc::new(TerminalRunner {
             failing: AtomicBool::new(failing),
+            hanging: AtomicBool::new(hanging),
             runs: AtomicUsize::new(0),
         });
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
@@ -114,7 +131,7 @@ impl World {
         let deployment = RestateProcessDeployment::new_for_test(
             connection.clone(),
             Arc::clone(&registry),
-            continuations,
+            Arc::clone(&continuations),
         );
         deployment.install_park_reconciler(crate::RestateAdminClient::new(connection.clone()));
         let port: Arc<dyn lash_core::ProcessWorkSubstrate> = deployment.test_process_work();
@@ -125,8 +142,10 @@ impl World {
         );
         Self {
             server,
+            admin: crate::RestateAdminClient::new(connection.clone()),
             ingress: RestateIngressClient::new(connection),
             registry,
+            continuations,
             deployment,
             relay,
             runner,
@@ -379,4 +398,96 @@ pub(super) async fn a_paused_terminal_segment_is_killed_once_its_terminal_is_pub
         .expect("read the process")
         .expect("the process is retained");
     assert_eq!(record.outcome, Some(stored), "the stored terminal stands");
+}
+
+/// FIG-3900: the lost-run scan reads the runs lash still waits on — the
+/// current segment of every live process — never a newest-first page of the
+/// engine's retained history. A kill whose failed run 65 newer retained
+/// failures crowd past the end of any such page still ends the process
+/// `SubstrateLost` and serves its waiter.
+#[tokio::test]
+pub(super) async fn a_killed_run_ends_substrate_lost_however_many_newer_failed_runs_are_kept() {
+    let world = World::new_hanging(3900).await;
+    let process_id = world.register().await;
+    let mut crowd = Vec::new();
+    for _ in 0..65 {
+        crowd.push(world.register().await);
+    }
+    world.sweep().await;
+    let target = |process: &ProcessId| format!("LashProcessWorkflow/{process}/run");
+    for process in [&process_id].into_iter().chain(crowd.iter()) {
+        world.wait_for_status(&target(process), "running").await;
+    }
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    while world
+        .registry
+        .get_process(&process_id)
+        .await
+        .expect("read the process")
+        .and_then(|record| record.first_started.map(|started| started.owner))
+        .is_none()
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the process's run never recorded its start"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let waiter = world.waiter(&process_id);
+
+    // The kill lands first, so the crowd's 65 failed runs are all newer in
+    // the engine's retained history and push the victim off a newest-64 page.
+    let victim_run = world.wait_for_status(&target(&process_id), "running").await;
+    assert_eq!(
+        world.server.kill_and_await(&victim_run.id).await,
+        Some(true),
+        "the victim's run is killed"
+    );
+    for process in &crowd {
+        let run = world.wait_for_status(&target(process), "running").await;
+        assert_eq!(
+            world.server.kill_and_await(&run.id).await,
+            Some(true),
+            "the crowd run is killed"
+        );
+    }
+
+    let pass = crate::process::park_reconcile::end_lost_process_runs(
+        &world.admin,
+        &world.registry,
+        &world.continuations,
+        std::num::NonZeroUsize::new(64).expect("non-zero"),
+    )
+    .await
+    .expect("the lost-run pass");
+    assert!(
+        pass.ended.contains(&process_id),
+        "the killed process ends however many newer failed runs are kept: {pass:?}"
+    );
+
+    // Every ended process armed its `ProcessTerminal` obligation; the
+    // relay's due passes page through them until the victim's publication
+    // serves its waiter.
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while !waiter.is_finished() {
+            world.relay_pass().await;
+        }
+    })
+    .await
+    .expect("the waiter is served once the relay publishes");
+    let outcome = waiter
+        .await
+        .expect("the waiter task")
+        .expect("the waiter's call");
+    assert!(
+        matches!(
+            outcome,
+            ProcessAwaitOutput::Abandoned { ref evidence, .. }
+                if evidence.writer
+                    == lash_core::AbandonWriter::ResumeRefused {
+                        reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+                    }
+        ),
+        "the killed process ends substrate-lost: {outcome:?}"
+    );
 }

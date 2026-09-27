@@ -34,8 +34,11 @@
 //! from the invocation that started the run, ends it `409 killed` with no
 //! lash code running. Restate runs a workflow key's `run` once, so no redrive
 //! or sweep ever reaches the process again. The same pass reads those runs
-//! back ([`end_lost_process_runs`]) and ends each live process whose current
-//! segment's run it was `Abandoned` with `ResumeRefused { SubstrateLost }`
+//! back ([`end_lost_process_runs`]): it walks the registry's live processes
+//! and asks the engine only about their current segments' runs, bounded by
+//! the work lash still waits on rather than the engine's retained history,
+//! so a killed run is found however many failed runs are kept since. Each
+//! such process ends `Abandoned` with `ResumeRefused { SubstrateLost }`
 //! (ADR 0110): its execution is lost as surely as a lost journal. The
 //! terminal transaction arms the `ProcessTerminal` publication, so the
 //! process's waiters are served.
@@ -164,32 +167,60 @@ pub(crate) struct LostRunPass {
 }
 
 /// End `SubstrateLost` every live process whose current segment's `run` the
-/// engine finished with a failure, reading the latest `limit` failed runs.
+/// engine finished with a failure.
+///
+/// The scan is bounded by the live processes lash still waits on, never by
+/// the engine's retained history: it reads the registry's non-terminal
+/// worklist in pages of `limit`, and asks Restate only about those
+/// processes' current segments' `run` invocations. A segment's external
+/// reference names its workflow key (a handover's reference carries no
+/// invocation id — the key is the owner), and a key's `run` executes once,
+/// so the key identifies the one run lash waits on.
 ///
 /// Idempotent: a process this pass ended is terminal, so the next pass that
-/// reads the same run leaves it. One run that fails to settle never fails the
-/// pass.
+/// reads the same run leaves it. One run that fails to settle never fails
+/// the pass.
 ///
 /// # Errors
-/// When Restate's admin query fails.
+/// When the registry's worklist or Restate's admin query fails.
 pub(crate) async fn end_lost_process_runs(
     admin: &RestateAdminClient,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
     limit: std::num::NonZeroUsize,
 ) -> Result<LostRunPass, PluginError> {
-    let runs = admin.failed_process_runs(limit).await.map_err(|error| {
-        PluginError::Session(format!("read failed process runs from Restate: {error}"))
-    })?;
     let mut pass = LostRunPass::default();
-    for run in runs {
-        match end_lost_run(registry, continuations, &run).await {
-            Ok(Some(process_id)) => pass.ended.push(process_id),
-            Ok(None) => pass.unchanged += 1,
-            Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
+    let mut continuation = None;
+    loop {
+        let page = registry.list_non_terminal_page(limit, continuation).await?;
+        continuation = page.continuation;
+        let segment_keys: Vec<String> = page
+            .records
+            .iter()
+            .filter_map(|record| {
+                let reference = record.external_ref.as_ref()?;
+                (reference.backend == "restate").then(|| {
+                    super::process_segment_workflow_key(&record.id, reference.segment_ordinal())
+                })
+            })
+            .collect();
+        let runs = admin
+            .failed_segment_runs(&segment_keys)
+            .await
+            .map_err(|error| {
+                PluginError::Session(format!("read failed process runs from Restate: {error}"))
+            })?;
+        for run in runs {
+            match end_lost_run(registry, continuations, &run).await {
+                Ok(Some(process_id)) => pass.ended.push(process_id),
+                Ok(None) => pass.unchanged += 1,
+                Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
+            }
+        }
+        if continuation.is_none() {
+            return Ok(pass);
         }
     }
-    Ok(pass)
 }
 
 /// End the process of failed segment `run`, when the run was its current

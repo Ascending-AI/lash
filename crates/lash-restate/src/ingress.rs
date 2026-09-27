@@ -1080,19 +1080,30 @@ impl RestateAdminClient {
         )).await
     }
 
-    /// The latest `limit` process segment runs that finished with a failure,
-    /// newest first, on every lane of the process workflow. A segment's run
+    /// The failed `run` invocations of the segment workflow keys in
+    /// `segment_keys`, on every lane of the process workflow. A segment's run
     /// answers its process's outcome as its output, so one that failed ended
     /// without it: an operator's kill, which Restate cascades from the
     /// invocation that started it, or a run the engine gave up on.
-    pub(crate) async fn failed_process_runs(
+    ///
+    /// The query is keyed by the segments lash still waits on — never a
+    /// newest-first page of the engine's retained history — so a killed run
+    /// is found however many failed runs the engine has kept since.
+    pub(crate) async fn failed_segment_runs(
         &self,
-        limit: std::num::NonZeroUsize,
+        segment_keys: &[String],
     ) -> Result<Vec<RestateInvocationStatus>, RestateHttpError> {
+        if segment_keys.is_empty() {
+            return Ok(Vec::new());
+        }
         let segments = service_lanes_sql(crate::LashService::ProcessWorkflow.name());
+        let keys = segment_keys
+            .iter()
+            .map(|key| sql_string_literal(key))
+            .collect::<Vec<_>>()
+            .join(", ");
         self.query_json(&format!(
-            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {segments} AND target_handler_name = 'run' AND status = 'completed' AND completion_result = 'failure' ORDER BY modified_at DESC LIMIT {}",
-            limit.get()
+            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {segments} AND target_handler_name = 'run' AND status = 'completed' AND completion_result = 'failure' AND target_service_key IN ({keys})"
         ))
         .await
     }
