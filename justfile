@@ -37,7 +37,8 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
-# Every run starts a private restate-server, the pinned binary.
+# The runs share one restate-server the process starts, the pinned binary,
+# each in a namespace of its own.
 toolbench model='z-ai/glm-5.3-flash' *args:
   LASH_RESTATE_SERVER_BIN="$(python3 "{{repo}}/scripts/ci/restate_suite.py" server-path)" \
     kiln run //examples/toolbench:toolbench -- --model "{{model}}" {{args}}
@@ -217,8 +218,10 @@ effect-group-conformance-e2e:
 
 # The server double's deployment laws against a live restate-server (FIG-3795
 # part B): newest-deployment routing and invocation pinning, so the double
-# cannot drift. Suite wiring lives in `scripts/restate-suites.toml` under
-# `server-double`.
+# cannot drift; and the deployment-namespace laws (FIG-3898): namespaced cores
+# share the server, and a registration over another deployment's names is
+# refused. Suite wiring lives in `scripts/restate-suites.toml` under
+# `server-double` and `namespaces`.
 server-double-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -227,6 +230,8 @@ server-double-e2e:
 
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite namespaces --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite namespaces --leg replay
 
 # The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
 # (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its

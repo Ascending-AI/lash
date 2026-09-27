@@ -21,14 +21,14 @@
 //! already in flight instead of starting a second waiter.
 
 use lash_core::{AwaitEventKey, ProcessId, Resolution};
-use restate_sdk::context::{ContextClient, WorkflowContext};
+use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::HandlerResult;
 use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, LashDurableWaitRegistryClient, RestateDurableWaitAddress,
-    RestateDurableWaitResolveRequest, durable_wait_index_object_key,
+    LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitResolveRequest,
+    durable_wait_index_object_key,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,8 +61,17 @@ pub trait LashProcessAttach {
     async fn run(request: Json<RestateProcessAttachRequest>) -> HandlerResult<Json<()>>;
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct LashProcessAttachImpl;
+/// [`LashProcessAttach`] in one deployment's namespace (FIG-3898).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LashProcessAttachImpl {
+    namespace: crate::RestateNamespace,
+}
+
+impl LashProcessAttachImpl {
+    pub(crate) fn new(namespace: crate::RestateNamespace) -> Self {
+        Self { namespace }
+    }
+}
 
 impl LashProcessAttach for LashProcessAttachImpl {
     async fn run(
@@ -73,9 +82,13 @@ impl LashProcessAttach for LashProcessAttachImpl {
         let RestateProcessAttachRequest { process_id, key } = request;
         // The terminal lives on the stable root, whatever lane the process's
         // last segment ran under (FIG-3795).
-        let output = crate::process::await_terminal_on_stable_root(&ctx, process_id.clone())
-            .call()
-            .await;
+        let output = crate::process::await_terminal_on_stable_root(
+            &ctx,
+            &self.namespace,
+            process_id.clone(),
+        )
+        .call()
+        .await;
         // A terminal is a fact, not an error of the wait: a failed or cancelled
         // process resolves its waiters successfully with that terminal as the
         // value, exactly as the inline await path returns it. Only a terminal
@@ -102,8 +115,9 @@ impl LashProcessAttach for LashProcessAttachImpl {
         // index retains the resolution for a registration that has not happened
         // yet, so a terminal that beats the parked turn's registration is not
         // lost.
-        let Json(_outcome) = ctx
-            .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_object_key(&address))
+        let Json(_outcome) = self
+            .namespace
+            .durable_wait_registry(&ctx, durable_wait_index_object_key(&address))
             .resolve(Json(RestateDurableWaitResolveRequest { key, resolution }))
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()

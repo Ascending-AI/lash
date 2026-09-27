@@ -30,27 +30,26 @@ pub use super::process_scheduling::ProcessWorkflowStartFailure;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
-    LashDurableWaitRegistryClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
-    RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
-    RestateDurableWaitResolveRefusal, RestateDurableWaitResolveRequest,
-    RestateDurableWaitResolveResponse, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
-    RestateTurnCancelWake, durable_wait_index_object_key, register_turn_cancel_gate,
-    restate_await_event_key_for_authority, restate_durable_wait_request, retire_turn_cancel_gate,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline,
+    RestateDurableWaitEffectRequest, RestateDurableWaitGroupChildMembershipRequest,
+    RestateDurableWaitGroupRequest, RestateDurableWaitResolveRefusal,
+    RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateTurnCancelGate,
+    RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
+    register_turn_cancel_gate, restate_await_event_key_for_authority, restate_durable_wait_request,
+    retire_turn_cancel_gate,
 };
 use crate::effect_group::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupCloseRequest,
     EffectGroupCloseResponse, EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
     EffectGroupDispatchRequest, EffectGroupDrainBlockersRequest, EffectGroupDrainBlockersResponse,
-    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadClient,
-    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
-    EffectGroupReadRankResponse, EffectGroupStateClient,
+    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadGetResponse,
+    EffectGroupProbeResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
 };
 use crate::process::{
     RestateProcessCancelRequest, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
     RestateProcessWorkflowPayload,
 };
-use crate::process_attach::{LashProcessAttachClient, RestateProcessAttachRequest};
+use crate::process_attach::RestateProcessAttachRequest;
 
 #[macro_use]
 mod segment_wait;
@@ -156,6 +155,7 @@ where
 /// in-flight invocation is unchanged.
 async fn race_turn_cancel_gate<'run, 'ctx, C, T>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     session_id: &SessionId,
     turn_cancel: RestateDurableWaitAwaitRequest,
     awakeable: impl Fn() -> (String, GateWait<'run, Json<RestateTurnCancelWake>>),
@@ -170,8 +170,14 @@ where
             TerminalError::from_error(crate::durable_wait::restate_unknown_or_revoked())
         })?;
     let (awakeable_id, awakeable_wait) = awakeable();
-    let gate = match register_turn_cancel_gate(context, session_id, turn_cancel.key, awakeable_id)
-        .await?
+    let gate = match register_turn_cancel_gate(
+        context,
+        namespace,
+        session_id,
+        turn_cancel.key,
+        awakeable_id,
+    )
+    .await?
     {
         RestateTurnCancelGate::Registered(gate) => gate,
         RestateTurnCancelGate::Revoked => {
@@ -184,7 +190,7 @@ where
     match first_of_gate_race(&*guarded, &*awakeable_wait).await? {
         GateRaceWinner::Guarded => {
             let value = guarded.await?;
-            retire_turn_cancel_gate(context, session_id, gate).await?;
+            retire_turn_cancel_gate(context, namespace, session_id, gate).await?;
             return Ok(RestateTurnCancelRaceOutcome::Completed(value));
         }
         GateRaceWinner::Gate => {}
@@ -220,6 +226,7 @@ where
     let (escalation_id, escalation) = awakeable();
     let escalation_gate = match register_turn_cancel_gate(
         context,
+        namespace,
         session_id,
         escalation_key,
         escalation_id,
@@ -243,7 +250,8 @@ where
             // keeps the deployed order — guarded value first, then the
             // retirement — byte for byte.
             let value = guarded.await;
-            let retirement = retire_turn_cancel_gate(context, session_id, escalation_gate).await;
+            let retirement =
+                retire_turn_cancel_gate(context, namespace, session_id, escalation_gate).await;
             let value = value?;
             retirement?;
             Ok(RestateTurnCancelRaceOutcome::Completed(value))
@@ -317,6 +325,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// races it.
     fn sleep_or_turn_cancel<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         process_cancel: ProcessCancelRace,
@@ -368,6 +377,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// one class and not the other: see [`ProcessWorkflowStartFailure`].
     fn start_process_workflow<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
@@ -378,6 +388,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn request_process_workflow_cancel<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         request: RestateProcessCancelRequest,
     ) -> crate::JournaledFuture<'run, ()>
     where
@@ -385,6 +396,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn await_event<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         cancellation: tokio_util::sync::CancellationToken,
@@ -399,6 +411,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// released `Cancelled`.
     fn await_event_or_turn_cancel<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
@@ -411,6 +424,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// hand-over promises (FIG-3799): see the `segment_wait` module.
     fn await_signal_or_segment_end<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         generation: lash_core::engine::BuildGeneration,
@@ -419,7 +433,9 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         'ctx: 'run,
     {
         let _ = generation;
-        Box::pin(segment_wait::cancel_only(self, request, replay_key))
+        Box::pin(segment_wait::cancel_only(
+            self, namespace, request, replay_key,
+        ))
     }
 
     /// A journaled peek of the running process workflow's own cancellation
@@ -439,6 +455,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn peek_event<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         address: RestateDurableWaitAddress,
         replay_key: String,
     ) -> crate::JournaledFuture<'run, Option<Resolution>>
@@ -447,6 +464,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn await_process_terminal<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         process_id: ProcessId,
     ) -> crate::JournaledFuture<'run, ProcessAwaitOutput>
     where
@@ -457,6 +475,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// segment's own cancel promise when `process_cancel` says so (FIG-3673).
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         process_cancel: ProcessCancelRace,
@@ -466,6 +485,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn resolve_event<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitResolveRequest,
     ) -> ResolveEventFuture<'run>
     where
@@ -479,6 +499,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// invocation's journal, not in this one's.
     fn attach_process_terminal<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         request: RestateProcessAttachRequest,
     ) -> crate::JournaledFuture<'run, ()>
     where
@@ -486,6 +507,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn update_session_waits<'run>(
         &'run self,
+        namespace: &'run crate::RestateNamespace,
         session_id: SessionId,
         revoke: bool,
     ) -> crate::JournaledFuture<'run, ()>
@@ -494,6 +516,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn session_is_revoked<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _session_id: SessionId,
     ) -> crate::JournaledFuture<'run, bool>
     where
@@ -508,6 +531,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// nothing.
     fn scope_effect_begin<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _index_key: String,
         _replay_key: String,
     ) -> crate::JournaledFuture<'run, bool>
@@ -519,6 +543,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn scope_effect_end<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _index_key: String,
         _replay_key: String,
     ) -> crate::JournaledFuture<'run, ()>
@@ -532,6 +557,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// is `index_key`, answering whether the scope admits it (FIG-2499).
     fn scope_group_record<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _index_key: String,
         _group_key: String,
     ) -> crate::JournaledFuture<'run, bool>
@@ -543,6 +569,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn effect_group_probe<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
     ) -> crate::JournaledFuture<'run, EffectGroupProbeResponse>
     where
@@ -573,6 +600,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn effect_group_open<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _request: EffectGroupOpenRequest,
     ) -> crate::JournaledFuture<'run, EffectGroupOpenResponse>
@@ -603,6 +631,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn effect_group_read_rank<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _request: EffectGroupReadRankRequest,
     ) -> crate::JournaledFuture<'run, EffectGroupReadRankResponse>
@@ -618,6 +647,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn effect_group_payload_get<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _payload_key: String,
     ) -> crate::JournaledFuture<'run, EffectGroupPayloadGetResponse>
     where
@@ -632,6 +662,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn effect_group_close<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _request: EffectGroupCloseRequest,
     ) -> crate::JournaledFuture<'run, EffectGroupCloseResponse>
@@ -650,6 +681,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// resolves before it can name its index (FIG-3409).
     fn scope_group_child_membership<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _index_key: String,
         _replay_key: String,
     ) -> crate::JournaledFuture<'run, Option<String>>
@@ -662,6 +694,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// The §4 boundary decision for one group child's final record.
     fn effect_group_commit_child<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _request: EffectGroupCommitChildRequest,
     ) -> crate::JournaledFuture<'run, EffectGroupCommitChildResponse>
@@ -676,6 +709,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// child still be admitted".
     fn effect_group_admit_semantic<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _request: EffectGroupAdmitSemanticRequest,
     ) -> crate::JournaledFuture<'run, EffectGroupAdmitSemanticResponse>
@@ -689,6 +723,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// durable §5 barrier read.
     fn effect_group_drain_blockers<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _commit_seq: u64,
     ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
@@ -705,6 +740,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// durable cancel promise when `process_cancel` says so (FIG-3673).
     fn await_effect_group_wait<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _request: RestateDurableWaitAwaitRequest,
         _replay_key: String,
         _turn_cancel: Option<RestateDurableWaitAwaitRequest>,
@@ -787,6 +823,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn sleep_or_turn_cancel<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     duration: Duration,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     process_cancel: ProcessCancelRace,
@@ -825,6 +862,7 @@ macro_rules! impl_restate_controller_context {
                         // keeps the timer behind the registration verdict.
                         race_turn_cancel_gate(
                             self,
+                            namespace,
                             &SessionId::from(session_id),
                             turn_cancel,
                             || gate_awakeable(self),
@@ -906,6 +944,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn start_process_workflow<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     process_id: lash_core::ProcessId,
                     registration: ProcessRegistration,
                     execution_context: ProcessExecutionContext,
@@ -919,7 +958,7 @@ macro_rules! impl_restate_controller_context {
                     let workflow_key = process_id.to_string();
                     let request = crate::services::routed_workflow::<_, _, RestateProcessWorkflowOutput>(
                         self,
-                        &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow),
+                        &namespace.stable(crate::LashService::ProcessWorkflow),
                         workflow_key,
                         "run",
                         RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
@@ -946,6 +985,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn request_process_workflow_cancel<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     request: RestateProcessCancelRequest,
                 ) -> crate::JournaledFuture<'run, ()>
                 where
@@ -956,7 +996,7 @@ macro_rules! impl_restate_controller_context {
                     let workflow_key = request.process_id.to_string();
                     let call = crate::services::routed_workflow::<_, _, ()>(
                         self,
-                        &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow),
+                        &namespace.stable(crate::LashService::ProcessWorkflow),
                         workflow_key,
                         "cancel",
                         request,
@@ -970,6 +1010,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn await_event<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
                     _cancellation: tokio_util::sync::CancellationToken,
@@ -979,8 +1020,7 @@ macro_rules! impl_restate_controller_context {
                 {
                     Box::pin(async move {
                         let address = RestateDurableWaitAddress::for_key(&request.key);
-                        let start = self
-                            .workflow_client::<LashDurableWaitWorkflowClient>(
+                        let start = namespace.durable_wait_workflow(self,
                                 address.workflow_key.clone(),
                             )
                             .await_resolution(Json(request.clone().into()))
@@ -992,8 +1032,7 @@ macro_rules! impl_restate_controller_context {
                                 Ok(resolution)
                             },
                             on_cancel => {
-                                let resolve_request = self
-                                    .object_client::<LashDurableWaitRegistryClient>(
+                                let resolve_request = namespace.durable_wait_registry(self,
                                         durable_wait_index_object_key(&address),
                                     )
                                     .resolve(Json(RestateDurableWaitResolveRequest {
@@ -1021,6 +1060,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn await_event_or_turn_cancel<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
@@ -1034,6 +1074,7 @@ macro_rules! impl_restate_controller_context {
                             if process_cancel == ProcessCancelRace::NotRaced {
                                 return self
                                     .await_event(
+                                        namespace,
                                         request,
                                         replay_key,
                                         tokio_util::sync::CancellationToken::new(),
@@ -1044,8 +1085,7 @@ macro_rules! impl_restate_controller_context {
                             // The event wait's CallCommand, then the promise's.
                             let event_address = RestateDurableWaitAddress::for_key(&request.key);
                             let event_key = request.key.clone();
-                            let event = self
-                                .workflow_client::<LashDurableWaitWorkflowClient>(
+                            let event = namespace.durable_wait_workflow(self,
                                     event_address.workflow_key.clone(),
                                 )
                                 .await_resolution(Json(request.into()))
@@ -1063,8 +1103,7 @@ macro_rules! impl_restate_controller_context {
                                     // Release the losing event wait, as a
                                     // turn-gate loser is released: nobody is
                                     // left to resolve it.
-                                    let resolve = self
-                                        .object_client::<LashDurableWaitRegistryClient>(
+                                    let resolve = namespace.durable_wait_registry(self,
                                             durable_wait_index_object_key(&event_address),
                                         )
                                         .resolve(Json(RestateDurableWaitResolveRequest {
@@ -1090,8 +1129,7 @@ macro_rules! impl_restate_controller_context {
                         // Same journal geometry as process await: the guarded
                         // wait's CallCommand is emitted first, then the gate's
                         // awakeable, then the registration.
-                        let event = self
-                            .workflow_client::<LashDurableWaitWorkflowClient>(
+                        let event = namespace.durable_wait_workflow(self,
                                 event_address.workflow_key.clone(),
                             )
                             .await_resolution(Json(request.into()))
@@ -1099,6 +1137,7 @@ macro_rules! impl_restate_controller_context {
                         let event = erase_gate_wait(event.call());
                         match race_turn_cancel_gate(
                             self,
+                            namespace,
                             &SessionId::from(session_id),
                             turn_cancel,
                             || gate_awakeable(self),
@@ -1115,8 +1154,7 @@ macro_rules! impl_restate_controller_context {
                                 // on the gate it is the waiter's job, or the
                                 // event workflow stays parked with nobody left
                                 // to resolve it.
-                                let resolve = self
-                                    .object_client::<LashDurableWaitRegistryClient>(
+                                let resolve = namespace.durable_wait_registry(self,
                                         durable_wait_index_object_key(&event_address),
                                     )
                                     .resolve(Json(RestateDurableWaitResolveRequest {
@@ -1139,14 +1177,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn peek_event<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     address: RestateDurableWaitAddress,
                     replay_key: String,
                 ) -> crate::JournaledFuture<'run, Option<Resolution>>
                 where
                     'ctx: 'run,
                 {
-                    let request = self
-                        .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+                    let request = namespace.durable_wait_workflow(self, address.workflow_key)
                         .peek()
                         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                     Box::pin(async move {
@@ -1157,13 +1195,13 @@ macro_rules! impl_restate_controller_context {
 
                 fn attach_process_terminal<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     request: RestateProcessAttachRequest,
                 ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
-                    let send = self
-                        .workflow_client::<LashProcessAttachClient>(
+                    let send = namespace.process_attach(self,
                             crate::process_attach::process_attach_workflow_key(&request.key),
                         )
                         .run(Json(request))
@@ -1176,12 +1214,13 @@ macro_rules! impl_restate_controller_context {
 
                 fn await_process_terminal<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     process_id: ProcessId,
                 ) -> crate::JournaledFuture<'run, ProcessAwaitOutput>
                 where
                     'ctx: 'run,
                 {
-                    let call = crate::process::await_terminal_on_stable_root(self, process_id).call();
+                    let call = crate::process::await_terminal_on_stable_root(self, namespace, process_id).call();
                     Box::pin(async move {
                         let Json(output) = call.await?;
                         Ok(output)
@@ -1190,6 +1229,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn await_process_terminal_or_turn_cancel<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     process_id: ProcessId,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     process_cancel: ProcessCancelRace,
@@ -1200,7 +1240,7 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Some(turn_cancel) = turn_cancel else {
                             let terminal =
-                                crate::process::await_terminal_on_stable_root(self, process_id)
+                                crate::process::await_terminal_on_stable_root(self, namespace, process_id)
                                     .call();
                             let promise = match process_cancel {
                                 ProcessCancelRace::Raced => {
@@ -1238,11 +1278,13 @@ macro_rules! impl_restate_controller_context {
                         // redrive after the cancellation adjudicator was added.
                         let process = crate::process::await_terminal_on_stable_root(
                             self,
+                            namespace,
                             process_id.clone(),
                         );
                         let process = erase_gate_wait(process.call());
                         let outcome = race_turn_cancel_gate(
                             self,
+                            namespace,
                             &SessionId::from(session_id),
                             turn_cancel,
                             || gate_awakeable(self),
@@ -1270,6 +1312,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn resolve_event<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     request: RestateDurableWaitResolveRequest,
                 ) -> ResolveEventFuture<'run>
                 where
@@ -1278,8 +1321,7 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let replay_key = request.key.key_id.clone();
                         let address = RestateDurableWaitAddress::for_key(&request.key);
-                        let resolve = self
-                            .object_client::<LashDurableWaitRegistryClient>(
+                        let resolve = namespace.durable_wait_registry(self,
                                 durable_wait_index_object_key(&address),
                             )
                             .resolve(Json(request))
@@ -1291,13 +1333,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn update_session_waits<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     session_id: SessionId,
                     revoke: bool,
                 ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
-                    let client = self.object_client::<LashDurableWaitRegistryClient>(session_id);
+                    let client = namespace.durable_wait_registry(self, session_id);
                     let request = if revoke {
                         client.revoke_all()
                     } else {
@@ -1312,13 +1355,13 @@ macro_rules! impl_restate_controller_context {
 
                 fn session_is_revoked<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     session_id: SessionId,
                 ) -> crate::JournaledFuture<'run, bool>
                 where
                     'ctx: 'run,
                 {
-                    let request = self
-                        .object_client::<LashDurableWaitRegistryClient>(session_id)
+                    let request = namespace.durable_wait_registry(self, session_id)
                         .is_revoked(Json(()));
                     let call = request.call();
                     Box::pin(async move {
@@ -1328,14 +1371,14 @@ macro_rules! impl_restate_controller_context {
                 }
                 fn scope_effect_begin<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     index_key: String,
                     replay_key: String,
                 ) -> crate::JournaledFuture<'run, bool>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<LashDurableWaitRegistryClient>(index_key)
+                    let call = namespace.durable_wait_registry(self, index_key)
                         .begin_effect(Json(RestateDurableWaitEffectRequest {
                             replay_key: replay_key.clone(),
                         }))
@@ -1348,14 +1391,14 @@ macro_rules! impl_restate_controller_context {
                 }
                 fn scope_effect_end<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     index_key: String,
                     replay_key: String,
                 ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<LashDurableWaitRegistryClient>(index_key)
+                    let call = namespace.durable_wait_registry(self, index_key)
                         .end_effect(Json(RestateDurableWaitEffectRequest {
                             replay_key: replay_key.clone(),
                         }))
@@ -1368,14 +1411,14 @@ macro_rules! impl_restate_controller_context {
                 }
                 fn scope_group_record<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     index_key: String,
                     group_key: String,
                 ) -> crate::JournaledFuture<'run, bool>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<LashDurableWaitRegistryClient>(index_key)
+                    let call = namespace.durable_wait_registry(self, index_key)
                         .record_group(Json(RestateDurableWaitGroupRequest { group_key }))
                         .call();
                     Box::pin(async move {
@@ -1386,13 +1429,13 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_probe<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     group_key: String,
                 ) -> crate::JournaledFuture<'run, EffectGroupProbeResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupStateClient>(group_key)
+                    let call = namespace.effect_group_state(self, group_key)
                         .probe()
                         .call();
                     Box::pin(async move {
@@ -1426,14 +1469,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_open<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     group_key: String,
                     request: EffectGroupOpenRequest,
                 ) -> crate::JournaledFuture<'run, EffectGroupOpenResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupStateClient>(group_key)
+                    let call = namespace.effect_group_state(self, group_key)
                         .open(Json(request))
                         .call();
                     Box::pin(async move {
@@ -1468,14 +1511,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_read_rank<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     group_key: String,
                     request: EffectGroupReadRankRequest,
                 ) -> crate::JournaledFuture<'run, EffectGroupReadRankResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupStateClient>(group_key)
+                    let call = namespace.effect_group_state(self, group_key)
                         .read_rank(Json(request))
                         .call();
                     Box::pin(async move {
@@ -1486,13 +1529,13 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_payload_get<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     payload_key: String,
                 ) -> crate::JournaledFuture<'run, EffectGroupPayloadGetResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupPayloadClient>(payload_key)
+                    let call = namespace.effect_group_payload(self, payload_key)
                         .get()
                         .call();
                     Box::pin(async move {
@@ -1503,14 +1546,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_close<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     group_key: String,
                     request: EffectGroupCloseRequest,
                 ) -> crate::JournaledFuture<'run, EffectGroupCloseResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupStateClient>(group_key)
+                    let call = namespace.effect_group_state(self, group_key)
                         .close(Json(request))
                         .call();
                     Box::pin(async move {
@@ -1520,14 +1563,14 @@ macro_rules! impl_restate_controller_context {
                 }
                 fn scope_group_child_membership<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     index_key: String,
                     replay_key: String,
                 ) -> crate::JournaledFuture<'run, Option<String>>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<LashDurableWaitRegistryClient>(index_key)
+                    let call = namespace.durable_wait_registry(self, index_key)
                         .group_child_membership(Json(
                             RestateDurableWaitGroupChildMembershipRequest {
                                 replay_key: replay_key.clone(),
@@ -1540,14 +1583,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_commit_child<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     group_key: String,
                     request: EffectGroupCommitChildRequest,
                 ) -> crate::JournaledFuture<'run, EffectGroupCommitChildResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupStateClient>(group_key)
+                    let call = namespace.effect_group_state(self, group_key)
                         .commit_child(Json(request))
                         .call();
                     Box::pin(async move { call.await.map(|Json(response)| response) })
@@ -1555,14 +1598,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_admit_semantic<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     group_key: String,
                     request: EffectGroupAdmitSemanticRequest,
                 ) -> crate::JournaledFuture<'run, EffectGroupAdmitSemanticResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupStateClient>(group_key)
+                    let call = namespace.effect_group_state(self, group_key)
                         .admit_semantic(Json(request))
                         .call();
                     Box::pin(async move { call.await.map(|Json(response)| response) })
@@ -1570,14 +1613,14 @@ macro_rules! impl_restate_controller_context {
 
                 fn effect_group_drain_blockers<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     group_key: String,
                     commit_seq: u64,
                 ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
                 where
                     'ctx: 'run,
                 {
-                    let call = self
-                        .object_client::<EffectGroupStateClient>(group_key)
+                    let call = namespace.effect_group_state(self, group_key)
                         .drain_blockers(Json(EffectGroupDrainBlockersRequest { commit_seq }))
                         .call();
                     Box::pin(async move { call.await.map(|Json(response)| response) })
@@ -1585,6 +1628,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn await_effect_group_wait<'run>(
                     &'run self,
+                    namespace: &'run crate::RestateNamespace,
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
@@ -1595,8 +1639,7 @@ macro_rules! impl_restate_controller_context {
                 {
                     Box::pin(async move {
                         let address = RestateDurableWaitAddress::for_key(&request.key);
-                        let call = self
-                            .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+                        let call = namespace.durable_wait_workflow(self, address.workflow_key)
                             .await_resolution(Json(request.into()))
                             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                         let Some(turn_cancel) = turn_cancel else {
@@ -1626,6 +1669,7 @@ macro_rules! impl_restate_controller_context {
                         let wait = erase_gate_wait(call.call());
                         Ok(race_turn_cancel_gate(
                             self,
+                            namespace,
                             &SessionId::from(session_id),
                             turn_cancel,
                             || gate_awakeable(self),

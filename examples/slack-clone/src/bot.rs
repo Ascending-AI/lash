@@ -160,6 +160,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // then drives through this endpoint.
     let _deployment = restate
         .serve_at(
+            &engine,
             config.restate_endpoint_addr,
             engine.endpoint_builder(worker).build(),
         )

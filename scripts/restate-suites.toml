@@ -96,6 +96,18 @@ endpoints = ["DEP_A", "DEP_B"]
 shards = 1
 timeout_seconds = 120
 
+# Deployment namespaces against the real server (FIG-3898): two cores in
+# distinct namespaces share the server without cross-talk, and a registration
+# over another deployment's names is refused. Two endpoint binds per shard, one
+# per core.
+[suites.namespaces]
+label = "//crates/lash-restate-test:namespaces__test"
+cwd = "crates/lash-restate-test"
+filters = ["live_restate_"]
+endpoints = ["NS_A", "NS_B"]
+shards = 1
+timeout_seconds = 180
+
 [suites.root-control]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"

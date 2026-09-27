@@ -66,6 +66,7 @@ pub(super) async fn cancel_redrives_successor_engine() {
         )),
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        &crate::services::DEFAULT_NAMESPACE,
     );
     let registration = executed_registration();
     let process_id = registry
@@ -414,9 +415,11 @@ pub(super) fn ingress_submit_maps_an_unregistered_service_to_the_terminal_code()
         status: 404,
         body: "not found".to_string(),
     };
-    let lash_core::PluginError::Runtime(error) =
-        crate::process::process_ingress_submit_error(&ProcessId::fixture("proc-1"), unregistered)
-    else {
+    let lash_core::PluginError::Runtime(error) = crate::process::process_ingress_submit_error(
+        &crate::services::DEFAULT_NAMESPACE,
+        &ProcessId::fixture("proc-1"),
+        unregistered,
+    ) else {
         panic!("ingress submit failures must stay typed runtime errors");
     };
     assert_eq!(
@@ -431,9 +434,11 @@ pub(super) fn ingress_submit_maps_an_unregistered_service_to_the_terminal_code()
         status: 503,
         body: "unavailable".to_string(),
     };
-    let lash_core::PluginError::Runtime(error) =
-        crate::process::process_ingress_submit_error(&ProcessId::fixture("proc-1"), transient)
-    else {
+    let lash_core::PluginError::Runtime(error) = crate::process::process_ingress_submit_error(
+        &crate::services::DEFAULT_NAMESPACE,
+        &ProcessId::fixture("proc-1"),
+        transient,
+    ) else {
         panic!("ingress submit failures must stay typed runtime errors");
     };
     assert_eq!(

@@ -44,8 +44,14 @@ pub(crate) struct ValidEmptyReport {
     output_tokens: i64,
 }
 
-pub(crate) async fn run() -> Response {
-    match run_fixture().await {
+/// The namespace the fixture's core binds lash's services under on the
+/// workbench's restate-server (ADR 0111).
+pub(crate) const NAMESPACE: &str = "agent-workbench-valid-empty";
+
+/// Run the fixture's core on `restate`: the workbench's own server, in
+/// [`NAMESPACE`].
+pub(crate) async fn run(restate: crate::local_restate::LocalRestate) -> Response {
+    match run_fixture(restate).await {
         Ok(report) => Json(report).into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -55,24 +61,23 @@ pub(crate) async fn run() -> Response {
     }
 }
 
-async fn run_fixture() -> Result<ValidEmptyReport, String> {
+async fn run_fixture(
+    restate: crate::local_restate::LocalRestate,
+) -> Result<ValidEmptyReport, String> {
     let transport = fixture_transport().map_err(|error| error.to_string())?;
     let (provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
         lash_sim::runtime_providers::OPENAI_COMPATIBLE,
         &transport,
     )
     .map_err(|error| error.to_string())?;
-    // The fixture's core is a second deployment beside the workbench's own:
-    // the engine binds lash's services under stable names, so it runs on a
-    // private local restate-server over a fresh SQLite memory store set
-    // (ADR 0104), stopped once the core has shut down.
-    let server = crate::local_restate::LocalRestateServer::spawn("agent-workbench-valid-empty")
-        .await
-        .map_err(|error| format!("{error:#}"))?;
+    // The fixture's core is a second deployment beside the workbench's own,
+    // on the same restate-server in a namespace of its own (ADR 0111), over a
+    // fresh SQLite memory store set (ADR 0104). Each run re-registers the
+    // namespace's names under the same authority.
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .map_err(|error| error.to_string())?;
-    let engine = server.restate().engine(Arc::new(stores));
+    let engine = restate.engine(Arc::new(stores));
     let mut builder = lash::LashCore::standard_builder(
         lash::Backend::new(engine.clone()),
         lash::TurnBudget::bounded(1),
@@ -95,9 +100,8 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
             .map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?;
-    let deployment = server
-        .restate()
-        .serve(engine.endpoint_builder(worker).build())
+    let deployment = restate
+        .serve(&engine, engine.endpoint_builder(worker).build())
         .await
         .map_err(|error| format!("{error:#}"))?;
     let operation = async {
@@ -175,7 +179,6 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
         .flush_trace_sink()
         .map_err(|error| format!("flush valid-empty trace: {error}"));
     drop(deployment);
-    drop(server);
     match (operation, shutdown, flush) {
         (Err(primary), shutdown, flush) => {
             if let Err(error) = shutdown {

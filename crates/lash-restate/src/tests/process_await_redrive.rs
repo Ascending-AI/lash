@@ -1557,7 +1557,7 @@ pub(super) fn fig1943_apply_state_commands(state: &mut BTreeMap<String, Vec<u8>>
 #[tokio::test]
 pub(super) async fn durable_wait_workflow_rejects_a_key_for_a_different_workflow_address() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitWorkflowImpl.serve())
+        .bind(LashDurableWaitWorkflowImpl::default().serve())
         .build();
     let key = restate_await_event_key(
         &ExecutionScope::runtime_operation("fig2005-forged-address"),
@@ -1592,7 +1592,7 @@ pub(super) async fn durable_wait_workflow_rejects_a_key_for_a_different_workflow
 pub(super) async fn durable_wait_workflow_rejects_an_inconsistent_key_preimage_before_promise_use()
 {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitWorkflowImpl.serve())
+        .bind(LashDurableWaitWorkflowImpl::default().serve())
         .build();
     let scope = durable_turn_scope("fig2065-forged-session", "fig2065-forged-turn");
     let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
@@ -1633,7 +1633,7 @@ pub(super) async fn durable_wait_workflow_rejects_an_inconsistent_key_preimage_b
 #[tokio::test]
 pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_before_state_write() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitRegistryImpl.serve())
+        .bind(LashDurableWaitRegistryImpl::default().serve())
         .build();
     let scope = durable_turn_scope("fig2005-forged-session", "fig2005-forged-turn");
     let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
@@ -1686,7 +1686,7 @@ pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_befo
 #[tokio::test]
 pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitRegistryImpl.serve())
+        .bind(LashDurableWaitRegistryImpl::default().serve())
         .build();
     let object_key = "fig3814-session";
     let key = restate_await_event_key(
@@ -1754,7 +1754,9 @@ pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write
 #[tokio::test]
 pub(super) async fn pre_stamp_effect_group_payload_state_refuses_typed_before_any_write() {
     let endpoint = Endpoint::builder()
-        .bind(crate::effect_group::EffectGroupPayload)
+        .bind(crate::effect_group::EffectGroupPayload::serve(
+            crate::effect_group::EffectGroupPayloadImpl,
+        ))
         .build();
     let object_key = "fig3814-group-payload";
     let raw_payload = vec![0xff_u8, 0x00, 0x13, 0x37];
@@ -1845,7 +1847,7 @@ pub(super) fn durable_wait_register_and_sweep_derive_the_same_address_for_every_
 #[tokio::test]
 pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitRegistryImpl.serve())
+        .bind(LashDurableWaitRegistryImpl::default().serve())
         .build();
     let object_key = "fig1943-session";
     let key = restate_await_event_key(
@@ -1938,7 +1940,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 #[tokio::test]
 pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_terminals() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitRegistryImpl.serve())
+        .bind(LashDurableWaitRegistryImpl::default().serve())
         .build();
     let object_key = "fig2946-session";
     let mut state = BTreeMap::new();

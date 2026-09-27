@@ -287,6 +287,7 @@ where
                 .inner
                 .context
                 .effect_group_admit_semantic(
+                    &self.inner.namespace,
                     binding.membership.group_key.clone(),
                     crate::effect_group::EffectGroupAdmitSemanticRequest {
                         replay_key: binding.child.replay_key.clone(),
@@ -331,7 +332,7 @@ where
         if !self
             .inner
             .context
-            .scope_effect_begin(index_key.clone(), replay_key.clone())
+            .scope_effect_begin(&self.inner.namespace, index_key.clone(), replay_key.clone())
             .await
             .map_err(|error| Self::record_error("begin_effect", error))?
         {
@@ -340,7 +341,7 @@ where
         let outcome = self.inner.execute_effect(envelope, local_executor).await;
         self.inner
             .context
-            .scope_effect_end(index_key, replay_key)
+            .scope_effect_end(&self.inner.namespace, index_key, replay_key)
             .await
             .map_err(|error| Self::record_error("end_effect", error))?;
         outcome
@@ -355,7 +356,11 @@ where
             && !self
                 .inner
                 .context
-                .scope_group_record(index_key, group.group_key().to_string())
+                .scope_group_record(
+                    &self.inner.namespace,
+                    index_key,
+                    group.group_key().to_string(),
+                )
                 .await
                 .map_err(|error| Self::record_error("record_group", error))?
         {

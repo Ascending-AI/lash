@@ -261,6 +261,8 @@ impl Routes {
             // in-process deployment is an `Endpoint`, not a URI to fetch.
             (HttpMethod::Post, ["deployments"]) => respond_json(201, &json!({})),
             (HttpMethod::Delete, ["deployments", id]) => self.delete_deployment(id, query),
+            (HttpMethod::Get, ["deployments", id]) => self.describe_deployment(id),
+            (HttpMethod::Get, ["services", service]) => self.describe_service(service),
             (
                 HttpMethod::Patch | HttpMethod::Put,
                 [
@@ -483,6 +485,44 @@ impl Routes {
 
     /// `DELETE /deployments/{id}[?force=]`: refuse while invocations stay
     /// pinned to it, unless forced.
+    /// `GET /deployments/{id}`: the deployment's id and the services it
+    /// serves. An in-process deployment is an `Endpoint`, not a URI, so the
+    /// description carries none.
+    fn describe_deployment(&self, id: &str) -> HttpResponse {
+        match self.shared.deployment(&super::ids::DeploymentId::new(id)) {
+            Some(deployment) => respond_json(
+                200,
+                &json!({
+                    "id": deployment.id.to_string(),
+                    "services": deployment.catalog.names().collect::<Vec<_>>(),
+                }),
+            ),
+            None => error(404, format!("deployment {id} not found")),
+        }
+    }
+
+    /// `GET /services/{name}`: the deployment a new invocation of the
+    /// service routes to — the newest one serving it — and the metadata its
+    /// discovery declared, as `restate-server` reports them.
+    fn describe_service(&self, service: &str) -> HttpResponse {
+        let Some(deployment) = self.shared.route(service) else {
+            return error(404, format!("service '{service}' not found"));
+        };
+        let metadata = deployment
+            .catalog
+            .service(service)
+            .map(|entry| entry.metadata.clone())
+            .unwrap_or_default();
+        respond_json(
+            200,
+            &json!({
+                "name": service,
+                "deployment_id": deployment.id.to_string(),
+                "metadata": metadata,
+            }),
+        )
+    }
+
     fn delete_deployment(&self, id: &str, query: &str) -> HttpResponse {
         let force = query
             .split('&')

@@ -375,9 +375,11 @@ impl Roll {
                         ingress.clone(),
                         test_restate_authority_id(),
                         generation(build),
+                        &crate::services::DEFAULT_NAMESPACE,
                     ),
                     session_driver: crate::RestateSessionDriverSlot::new(),
                     build_generation: generation(build),
+                    namespace: crate::RestateNamespace::default(),
                 },
             )
             .build()
@@ -928,10 +930,8 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
 
     // The drain's re-send, which FIG-3799 automates: the sender's lane, its
     // own generation stamped.
-    let lane = crate::services::ServiceRoute::generation(
-        crate::LashService::ProcessWorkflow,
-        generation("N"),
-    );
+    let lane = crate::services::DEFAULT_NAMESPACE
+        .generation(crate::LashService::ProcessWorkflow, generation("N"));
     roll.ingress
         .send_workflow_json(
             &lane.name(),
@@ -1120,10 +1120,8 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
     let park = roll.record(&process_id).await.park.expect("still parked");
     assert_eq!(park.attempts, 1, "{case}: no second refusal");
 
-    let lane = crate::services::ServiceRoute::generation(
-        crate::LashService::ProcessWorkflow,
-        generation("N"),
-    );
+    let lane = crate::services::DEFAULT_NAMESPACE
+        .generation(crate::LashService::ProcessWorkflow, generation("N"));
     let input = |sender: &'static str| {
         RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
             process_id: process_id.clone(),
@@ -1182,10 +1180,8 @@ async fn a_generation_lane_refuses_a_misrouted_input(seed: u64) {
         let roll = Roll::start(seed, PROGRAM, false).await;
         (roll.register_next()).await;
         let process_id = roll.register_process().await;
-        let lane = crate::services::ServiceRoute::generation(
-            crate::LashService::ProcessWorkflow,
-            generation("N"),
-        );
+        let lane = crate::services::DEFAULT_NAMESPACE
+            .generation(crate::LashService::ProcessWorkflow, generation("N"));
         let key = process_segment_workflow_key(&process_id, 1);
         roll.ingress
             .send_workflow_json(

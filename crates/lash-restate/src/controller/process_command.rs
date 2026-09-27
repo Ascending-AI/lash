@@ -214,6 +214,7 @@ async fn turn_stop_process_cancel_admission(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     authority_id: &RestateAuthorityId,
     sender_generation: Option<&lash_core::engine::BuildGeneration>,
     process_cancel: context::ProcessCancelRace,
@@ -341,6 +342,7 @@ where
                 *execution_context,
                 sender_generation.cloned(),
                 context,
+                namespace,
                 invocation,
             )
             .await?;
@@ -462,6 +464,7 @@ where
             trace_park("process");
             let first_wait = context
                 .await_process_terminal_or_turn_cancel(
+                    namespace,
                     process_id.clone(),
                     turn_cancel,
                     process_cancel,
@@ -543,7 +546,7 @@ where
                         })?;
                     if let Some(cancel_request) = cancel_request {
                         context
-                            .request_process_workflow_cancel(cancel_request)
+                            .request_process_workflow_cancel(namespace, cancel_request)
                             .await
                             .map_err(|err| {
                                 PluginError::Runtime(RuntimeError::new(
@@ -553,7 +556,10 @@ where
                             })?;
                     }
                     trace_park("process_after_turn_cancel");
-                    match context.await_process_terminal(process_id.clone()).await {
+                    match context
+                        .await_process_terminal(namespace, process_id.clone())
+                        .await
+                    {
                         Ok(output) => {
                             trace_resolve(
                                 "process_after_turn_cancel",
@@ -604,7 +610,7 @@ where
             })
             .await?;
             context
-                .attach_process_terminal(RestateProcessAttachRequest { process_id, key })
+                .attach_process_terminal(namespace, RestateProcessAttachRequest { process_id, key })
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
@@ -680,7 +686,10 @@ where
             let realization = admission.realization;
             let record = *admission.result?;
             context
-                .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(&record)?)
+                .request_process_workflow_cancel(
+                    namespace,
+                    RestateProcessCancelRequest::from_record(&record)?,
+                )
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
@@ -741,10 +750,13 @@ where
             )
             .map_err(PluginError::Runtime)?;
             context
-                .resolve_event(RestateDurableWaitResolveRequest {
-                    key,
-                    resolution: Resolution::Ok(event.payload.clone()),
-                })
+                .resolve_event(
+                    namespace,
+                    RestateDurableWaitResolveRequest {
+                        key,
+                        resolution: Resolution::Ok(event.payload.clone()),
+                    },
+                )
                 .await
                 .map_err(|err| {
                     PluginError::Runtime(RuntimeError::new(

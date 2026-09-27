@@ -92,6 +92,7 @@ pub(super) async fn recording_context_propagates_revoked_session_from_turn_cance
     let context = Arc::new(RecordingContext::default());
     RestateControllerContext::update_session_waits(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         SessionId::from("recording-revoked"),
         true,
     )
@@ -100,6 +101,7 @@ pub(super) async fn recording_context_propagates_revoked_session_from_turn_cance
 
     let outcome = RestateControllerContext::sleep_or_turn_cancel(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         Duration::from_secs(60),
         Some(test_turn_cancel_wait_request(
             &SessionId::from("recording-revoked"),
@@ -122,6 +124,7 @@ pub(super) async fn positional_replay_context_propagates_revoked_session_from_tu
     let context = Arc::new(PositionalReplayContext::default());
     RestateControllerContext::update_session_waits(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         SessionId::from("positional-revoked"),
         true,
     )
@@ -130,6 +133,7 @@ pub(super) async fn positional_replay_context_propagates_revoked_session_from_tu
 
     let outcome = RestateControllerContext::sleep_or_turn_cancel(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         Duration::from_secs(60),
         Some(test_turn_cancel_wait_request(
             &SessionId::from("positional-revoked"),
@@ -153,6 +157,7 @@ pub(super) async fn replayable_recording_context_propagates_revoked_session_from
     let context = Arc::new(ReplayableRecordingContext::default());
     RestateControllerContext::update_session_waits(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         SessionId::from("replayable-revoked"),
         true,
     )
@@ -161,6 +166,7 @@ pub(super) async fn replayable_recording_context_propagates_revoked_session_from
 
     let outcome = RestateControllerContext::sleep_or_turn_cancel(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         Duration::from_secs(60),
         Some(test_turn_cancel_wait_request(
             &SessionId::from("replayable-revoked"),
@@ -187,6 +193,7 @@ pub(super) async fn recording_context_process_await_reports_turn_cancelled() {
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
+            &crate::services::DEFAULT_NAMESPACE,
             ProcessId::fixture("recording-process-child"),
             Some(turn_cancel),
             crate::controller::context::ProcessCancelRace::NotRaced,
@@ -198,6 +205,7 @@ pub(super) async fn recording_context_process_await_reports_turn_cancelled() {
         test_turn_cancel_wait_request(&SessionId::from("recording-process"), &TurnId::from("turn"));
     RestateControllerContext::resolve_event(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         RestateDurableWaitResolveRequest {
             key: turn_cancel.key,
             resolution: Resolution::Cancelled,
@@ -228,6 +236,7 @@ pub(super) async fn positional_replay_context_process_await_reports_turn_cancell
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
+            &crate::services::DEFAULT_NAMESPACE,
             ProcessId::fixture("positional-process-child"),
             Some(turn_cancel),
             crate::controller::context::ProcessCancelRace::NotRaced,
@@ -241,6 +250,7 @@ pub(super) async fn positional_replay_context_process_await_reports_turn_cancell
     );
     RestateControllerContext::resolve_event(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         RestateDurableWaitResolveRequest {
             key: turn_cancel.key,
             resolution: Resolution::Cancelled,
@@ -271,6 +281,7 @@ pub(super) async fn replayable_recording_context_process_await_reports_turn_canc
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
+            &crate::services::DEFAULT_NAMESPACE,
             ProcessId::fixture("replayable-process-child"),
             Some(turn_cancel),
             crate::controller::context::ProcessCancelRace::NotRaced,
@@ -284,6 +295,7 @@ pub(super) async fn replayable_recording_context_process_await_reports_turn_canc
     );
     RestateControllerContext::resolve_event(
         &context,
+        &crate::services::DEFAULT_NAMESPACE,
         RestateDurableWaitResolveRequest {
             key: turn_cancel.key,
             resolution: Resolution::Cancelled,
@@ -308,6 +320,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
     let recording = Arc::new(RecordingContext::default());
     RestateControllerContext::sleep_or_turn_cancel(
         &recording,
+        &crate::services::DEFAULT_NAMESPACE,
         Duration::ZERO,
         Some(test_turn_cancel_wait_request(
             &SessionId::from("recording-complete"),
@@ -322,6 +335,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
     let positional = Arc::new(PositionalReplayContext::default());
     RestateControllerContext::sleep_or_turn_cancel(
         &positional,
+        &crate::services::DEFAULT_NAMESPACE,
         Duration::ZERO,
         Some(test_turn_cancel_wait_request(
             &SessionId::from("positional-complete"),
@@ -336,6 +350,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
     let replayable = Arc::new(ReplayableRecordingContext::default());
     RestateControllerContext::sleep_or_turn_cancel(
         &replayable,
+        &crate::services::DEFAULT_NAMESPACE,
         Duration::ZERO,
         Some(test_turn_cancel_wait_request(
             &SessionId::from("replayable-complete"),

@@ -95,8 +95,8 @@ args=(--base-url "$base_url" --artifact-dir "$artifact_dir")
 if [[ "${1:-}" == "--smoke-only" ]]; then
   args+=(--smoke-only)
 fi
-# Every live core runs on a private local restate-server (ADR 0104), the
-# pinned binary.
+# The live cores share one local restate-server the process starts (ADR 0104),
+# the pinned binary, each in a namespace of its own (ADR 0111).
 LASH_RESTATE_SERVER_BIN="$(python3 "$repo/scripts/ci/restate_suite.py" server-path)" \
   "$target_dir/debug/slack-clone-live-e2e" "${args[@]}" \
   2>&1 | tee "$artifact_dir/live-e2e.log"

@@ -347,7 +347,10 @@ impl Fixture {
                 server.fire_next_timer();
             }
             if !admin
-                .paused_session_drives(self.driver.session.as_str())
+                .paused_session_drives(
+                    &crate::services::DEFAULT_NAMESPACE,
+                    self.driver.session.as_str(),
+                )
                 .await
                 .expect("paused drives")
                 .is_empty()
@@ -362,7 +365,10 @@ impl Fixture {
     async fn paused_drives(&self) -> usize {
         self.harness
             .admin_client()
-            .paused_session_drives(self.driver.session.as_str())
+            .paused_session_drives(
+                &crate::services::DEFAULT_NAMESPACE,
+                self.driver.session.as_str(),
+            )
             .await
             .expect("paused drives")
             .len()
@@ -609,7 +615,10 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
     assert_eq!(
         f.harness
             .admin_client()
-            .paused_session_drives(f.driver.session.as_str())
+            .paused_session_drives(
+                &crate::services::DEFAULT_NAMESPACE,
+                f.driver.session.as_str()
+            )
             .await
             .expect("paused drives")
             .len(),
@@ -1162,7 +1171,7 @@ async fn one_failing_paused_execution_never_fails_the_park_page() {
         server.settle().await;
         server.fire_next_timer();
         paused = admin
-            .paused_work_page(None, NonZeroUsize::MIN)
+            .paused_work_page(&crate::services::DEFAULT_NAMESPACE, None, NonZeroUsize::MIN)
             .await
             .expect("paused listing");
         if !paused.is_empty() {
@@ -1242,6 +1251,7 @@ fn detached_session_work() -> crate::RestateSessionWork {
         crate::RestateAdminClient::new(crate::RestateConnection::new("http://127.0.0.1:9")),
         crate::RestateSessionDriverSlot::new(),
         BuildGeneration::for_test("recovery-interval"),
+        crate::RestateNamespace::default(),
         Arc::new(NoEngineControl),
     )
 }

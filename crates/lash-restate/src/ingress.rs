@@ -662,14 +662,14 @@ impl RestateIngressClient {
 
     pub(crate) async fn call_object_empty_json<R>(
         &self,
-        object: crate::LashService,
+        object: &crate::services::ServiceRoute,
         object_key: &str,
         handler: &str,
     ) -> Result<R, RestateHttpError>
     where
         R: DeserializeOwned,
     {
-        let object = restate_path_component(object.name());
+        let object = restate_path_component(&object.name());
         let object_key = restate_path_component(object_key);
         let handler = restate_path_component(handler);
         let path = format!("{object}/{object_key}/{handler}");
@@ -852,7 +852,9 @@ impl RestateIngressClient {
 /// name, or its name followed by a generation suffix `_g<G>` (FIG-3795).
 /// Restate's SQL reads `_` in a `LIKE` pattern as any one character, which
 /// only widens the match to names no lash or host service takes.
-fn service_lanes_sql(service: &str) -> String {
+/// [`RestateNamespace::service_lanes_sql`](crate::RestateNamespace) names a
+/// lash service's lanes in a deployment's namespace through it.
+pub(crate) fn service_lanes_sql(service: &str) -> String {
     format!(
         "(target_service_name = {} OR target_service_name LIKE {})",
         sql_string_literal(service),
@@ -880,6 +882,15 @@ struct RestateSendResponse {
     invocation_id: String,
     status: String,
 }
+/// One service's registration as the admin API reports it: the deployment
+/// serving the name and the discovery metadata it declared.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+pub(crate) struct RestateServiceRegistration {
+    pub(crate) deployment_id: String,
+    #[serde(default)]
+    pub(crate) metadata: std::collections::BTreeMap<String, String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct RestateAdminClient {
     connection: RestateConnection,
@@ -1052,11 +1063,12 @@ impl RestateAdminClient {
     /// runs one drive at a time and a paused one holds it.
     pub(crate) async fn paused_session_drives(
         &self,
+        namespace: &crate::RestateNamespace,
         session: &str,
     ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
         let session = sql_string_literal(session);
         let paused = RestateInvocationLifecycle::Paused.sql_literal();
-        let drives = service_lanes_sql(crate::LashService::SessionDriver.name());
+        let drives = namespace.service_lanes_sql(crate::LashService::SessionDriver);
         self.query_json(&format!(
             "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {drives} AND target_handler_name = 'drive' AND target_service_key = {session} ORDER BY id"
         ))
@@ -1065,6 +1077,7 @@ impl RestateAdminClient {
 
     pub(crate) async fn paused_work_page(
         &self,
+        namespace: &crate::RestateNamespace,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
@@ -1072,9 +1085,9 @@ impl RestateAdminClient {
         // Every lane of each pinned service (FIG-3795): a drive, root or
         // segment pinned to a generation lane pauses there, not under the
         // stable name.
-        let drives = service_lanes_sql(crate::LashService::SessionDriver.name());
-        let roots = service_lanes_sql(crate::LashService::TurnDriver.name());
-        let segments = service_lanes_sql(crate::LashService::ProcessWorkflow.name());
+        let drives = namespace.service_lanes_sql(crate::LashService::SessionDriver);
+        let roots = namespace.service_lanes_sql(crate::LashService::TurnDriver);
+        let segments = namespace.service_lanes_sql(crate::LashService::ProcessWorkflow);
         self.query_json(&format!(
             "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({drives} AND target_handler_name = 'drive') OR (({roots} OR {segments}) AND target_handler_name = 'run')) ORDER BY id LIMIT {}", limit.get()
         )).await
@@ -1091,12 +1104,13 @@ impl RestateAdminClient {
     /// is found however many failed runs the engine has kept since.
     pub(crate) async fn failed_segment_runs(
         &self,
+        namespace: &crate::RestateNamespace,
         segment_keys: &[String],
     ) -> Result<Vec<RestateInvocationStatus>, RestateHttpError> {
         if segment_keys.is_empty() {
             return Ok(Vec::new());
         }
-        let segments = service_lanes_sql(crate::LashService::ProcessWorkflow.name());
+        let segments = namespace.service_lanes_sql(crate::LashService::ProcessWorkflow);
         let keys = segment_keys
             .iter()
             .map(|key| sql_string_literal(key))
@@ -1106,6 +1120,95 @@ impl RestateAdminClient {
             "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {segments} AND target_handler_name = 'run' AND status = 'completed' AND completion_result = 'failure' AND target_service_key IN ({keys})"
         ))
         .await
+    }
+
+    /// Who serves `service` on the server now: the deployment that
+    /// registered it last and the metadata that registration declared, or
+    /// `None` when no deployment serves it.
+    pub(crate) async fn service_registration(
+        &self,
+        service: &str,
+    ) -> Result<Option<RestateServiceRegistration>, RestateHttpError> {
+        const OPERATION: &str = "Restate service lookup";
+        let url = format_restate_url(
+            self.connection.ingress_url(),
+            &format!("services/{}", restate_path_component(service)),
+        );
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Control,
+            OPERATION,
+            HttpRequest::new(HttpMethod::Get, &url, ""),
+        )
+        .await?;
+        if response.response.status == 404 {
+            return Ok(None);
+        }
+        if !response.is_success() {
+            return Err(status_error(OPERATION, url, response).await);
+        }
+        decode_response(OPERATION, &url, response).await.map(Some)
+    }
+
+    /// The URI the deployment `deployment_id` was registered at: `None` for
+    /// a deployment the server no longer holds, or one it holds without a
+    /// URI.
+    pub(crate) async fn deployment_uri(
+        &self,
+        deployment_id: &str,
+    ) -> Result<Option<String>, RestateHttpError> {
+        const OPERATION: &str = "Restate deployment lookup";
+        #[derive(serde::Deserialize)]
+        struct Deployment {
+            #[serde(default)]
+            uri: Option<String>,
+        }
+        let url = format_restate_url(
+            self.connection.ingress_url(),
+            &format!("deployments/{}", restate_path_component(deployment_id)),
+        );
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Control,
+            OPERATION,
+            HttpRequest::new(HttpMethod::Get, &url, ""),
+        )
+        .await?;
+        if response.response.status == 404 {
+            return Ok(None);
+        }
+        if !response.is_success() {
+            return Err(status_error(OPERATION, url, response).await);
+        }
+        decode_response::<Deployment>(OPERATION, &url, response)
+            .await
+            .map(|deployment| deployment.uri)
+    }
+
+    /// Register the endpoint at `uri` as a deployment, replacing any
+    /// deployment already registered at the same URI (`force`).
+    pub(crate) async fn register_deployment(&self, uri: &str) -> Result<(), RestateHttpError> {
+        const OPERATION: &str = "Restate deployment registration";
+        let url = format_restate_url(self.connection.ingress_url(), "deployments");
+        let body = serde_json::to_vec(&serde_json::json!({ "uri": uri, "force": true })).map_err(
+            |source| RestateHttpError::Encode {
+                operation: OPERATION,
+                url: url.clone(),
+                source,
+            },
+        )?;
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Control,
+            OPERATION,
+            HttpRequest::post(&url, body).with_header("content-type", "application/json"),
+        )
+        .await?;
+        if response.is_success() {
+            Ok(())
+        } else {
+            Err(status_error(OPERATION, url, response).await)
+        }
     }
 
     /// Resume a paused invocation: a fresh retry loop over its kept journal.
@@ -1599,7 +1702,7 @@ impl RestateHttpResponse {
     }
 }
 
-fn sql_string_literal(value: &str) -> String {
+pub(crate) fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 

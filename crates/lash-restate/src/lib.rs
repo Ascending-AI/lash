@@ -130,7 +130,7 @@ pub use effect_group::{
     EffectGroupSettlementTerminal, EffectGroupShape, EffectGroupWaitResolution,
 };
 pub use effect_host::RestateEffectHost;
-pub use engine::{RestateConfig, RestateEngine, deployment_path};
+pub use engine::{RestateConfig, RestateEngine, RestateRegistrationError, deployment_path};
 pub use formats::{EngineDurableFormat, durable_formats};
 pub use ingress::{
     DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
@@ -177,6 +177,7 @@ pub(crate) use process::{
     LashProcessWorkflow, LashProcessWorkflowImpl, RestateCoreProcessRunner, RestateProcessRunner,
 };
 pub(crate) use services::LashService;
+pub use services::{RestateNamespace, RestateNamespaceError};
 
 /// The wall clock a journaled wait request converts its deadline on when the
 /// invoking path carries no configured clock: a host-side await API has no

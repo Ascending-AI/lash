@@ -28,6 +28,7 @@ use super::{RestateControllerContext, effect_group_engine_error};
 /// The §4 boundary commit for one group child on the Restate tier.
 pub(super) async fn commit_group_child_final<'ctx, C>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     commit: GroupChildFinalCommit,
 ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError>
 where
@@ -42,7 +43,7 @@ where
     })?;
     let index_key = crate::durable_wait::durable_wait_index_key_for_scope(&scope);
     let Some(group_key) = context
-        .scope_group_child_membership(index_key, commit.replay_key.clone())
+        .scope_group_child_membership(namespace, index_key, commit.replay_key.clone())
         .await
         .map_err(|error| {
             effect_group_engine_error("LashDurableWaitIndex/group_child_membership", error)
@@ -52,6 +53,7 @@ where
     };
     let response = context
         .effect_group_commit_child(
+            namespace,
             group_key.clone(),
             EffectGroupCommitChildRequest {
                 replay_key: commit.replay_key.clone(),
@@ -99,6 +101,7 @@ where
 /// position was allocated, so waiting out each member once lifts the barrier.
 pub(super) async fn await_group_child_drain_admission<'ctx, C>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     group_key: &str,
     commit_seq: u64,
 ) -> Result<(), RuntimeEffectControllerError>
@@ -106,7 +109,7 @@ where
     C: RestateControllerContext<'ctx>,
 {
     let (wait_scope, positions) = match context
-        .effect_group_drain_blockers(group_key.to_string(), commit_seq)
+        .effect_group_drain_blockers(namespace, group_key.to_string(), commit_seq)
         .await
         .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blockers", error))?
     {
@@ -121,6 +124,7 @@ where
         let replay_key = request.key.key_id.clone();
         let resolution = match context
             .await_effect_group_wait(
+                namespace,
                 request,
                 replay_key,
                 None,

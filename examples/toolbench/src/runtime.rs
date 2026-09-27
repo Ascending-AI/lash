@@ -324,10 +324,10 @@ async fn run_turn(
 }
 
 /// A run's engine: lash-restate's engine over a fresh SQLite memory store
-/// set, on a private local restate-server (ADR 0104). The engine binds lash's
-/// services under stable names, so one server serves one core's deployment at
-/// a time; every run, concurrent ones included, gets a server of its own.
-/// Unit tests run on the Restate test double instead.
+/// set, on the local restate-server the process's runs share (ADR 0104). Every
+/// run, concurrent ones included, binds lash's services under a namespace of
+/// its own there (ADR 0111). Unit tests run on the Restate test double
+/// instead.
 struct RunSubstrate {
     backend: lash::Backend,
     engine: Serving,
@@ -340,19 +340,20 @@ enum Serving {
     )]
     Local {
         engine: Arc<lash::restate::RestateEngine>,
-        server: crate::local_restate::LocalRestateServer,
+        restate: crate::local_restate::LocalRestate,
+        server: Arc<crate::local_restate::LocalRestateServer>,
     },
     #[cfg(test)]
     Double(lash_restate_test::RestateTestBackend),
 }
 
-/// A served run substrate: the core's endpoint is registered with the run's
+/// A served run substrate: the core's endpoint is registered with the shared
 /// server until this drops. Fields drop in order: the deployment, then the
-/// server.
+/// run's hold on the server.
 enum ServedSubstrate {
     Local {
         _deployment: crate::local_restate::LocalDeployment,
-        _server: crate::local_restate::LocalRestateServer,
+        _server: Arc<crate::local_restate::LocalRestateServer>,
     },
     #[cfg(test)]
     Double {
@@ -374,14 +375,19 @@ impl RunSubstrate {
         }
         #[cfg(not(test))]
         {
-            let server = crate::local_restate::LocalRestateServer::spawn("toolbench").await?;
+            let server = crate::local_restate::LocalRestateServer::shared("toolbench").await?;
+            let restate = server.core("toolbench")?;
             let stores = lash::sqlite::SqliteStoreSet::memory()
                 .await
                 .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
-            let engine = server.restate().engine(Arc::new(stores));
+            let engine = restate.engine(Arc::new(stores));
             Ok(Self {
                 backend: lash::Backend::new(engine.clone()),
-                engine: Serving::Local { engine, server },
+                engine: Serving::Local {
+                    engine,
+                    restate,
+                    server,
+                },
             })
         }
     }
@@ -394,10 +400,13 @@ impl RunSubstrate {
         )
         .context("build the toolbench process worker")?;
         match self.engine {
-            Serving::Local { engine, server } => {
-                let deployment = server
-                    .restate()
-                    .serve(engine.endpoint_builder(worker).build())
+            Serving::Local {
+                engine,
+                restate,
+                server,
+            } => {
+                let deployment = restate
+                    .serve(&engine, engine.endpoint_builder(worker).build())
                     .await?;
                 Ok(ServedSubstrate::Local {
                     _deployment: deployment,
@@ -449,8 +458,8 @@ fn build_turn_core(
     } else {
         lash::TurnBudget::Unbounded
     };
-    // Every run is its own substrate: a fresh SQLite memory store set on a
-    // private restate-server, dropped with the run.
+    // Every run is its own substrate: a fresh SQLite memory store set in a
+    // namespace of its own on the shared restate-server, dropped with the run.
     let backend = substrate.backend.clone();
     let builder = match channel {
         crate::ChannelSelection::Standard => LashCore::standard_builder(backend, budget),

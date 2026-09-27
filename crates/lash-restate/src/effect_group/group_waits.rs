@@ -18,6 +18,7 @@ pub(super) fn wait_resolution(
 
 pub(super) async fn resolve_group_wait(
     ctx: &ObjectContext<'_>,
+    namespace: &crate::RestateNamespace,
     scope: &ExecutionScope,
     group_key: &str,
     kind: EffectGroupWaitKind<'_>,
@@ -26,8 +27,8 @@ pub(super) async fn resolve_group_wait(
     let key = group_wait_key(scope, group_key, kind)?;
     let replay_key = key.key_id.clone();
     let address = RestateDurableWaitAddress::for_key(&key);
-    let Json(_) = ctx
-        .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_object_key(&address))
+    let Json(_) = namespace
+        .durable_wait_registry(ctx, durable_wait_index_object_key(&address))
         .resolve(Json(RestateDurableWaitResolveRequest {
             key,
             resolution: wait_resolution(value)?,
@@ -56,16 +57,18 @@ pub(super) async fn resolve_group_wait(
 /// how far a child got.
 pub(super) async fn seal_cancel_decisions(
     ctx: &ObjectContext<'_>,
+    namespace: &crate::RestateNamespace,
     group_key: &str,
     shape: &EffectGroupShape,
     positions: &[usize],
 ) -> Result<(), TerminalError> {
-    fence_cancel_decided_completions(ctx, group_key, shape, positions).await?;
-    release_cancel_decided_waits(ctx, group_key, shape, positions).await
+    fence_cancel_decided_completions(ctx, namespace, group_key, shape, positions).await?;
+    release_cancel_decided_waits(ctx, namespace, group_key, shape, positions).await
 }
 
 async fn fence_cancel_decided_completions(
     ctx: &ObjectContext<'_>,
+    namespace: &crate::RestateNamespace,
     group_key: &str,
     shape: &EffectGroupShape,
     positions: &[usize],
@@ -85,10 +88,8 @@ async fn fence_cancel_decided_completions(
         let Some((scope, wait)) = envelope.command.group_child_completion_wait() else {
             continue;
         };
-        let Json(()) = ctx
-            .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_key_for_scope(
-                &scope,
-            ))
+        let Json(()) = namespace
+            .durable_wait_registry(ctx, durable_wait_index_key_for_scope(&scope))
             .fence_cancel_decided(Json(RestateDurableWaitCancelDecidedRequest { scope, wait }))
             .call()
             .await?;
@@ -108,6 +109,7 @@ async fn fence_cancel_decided_completions(
 /// it, and a redrive of the close answers the same way.
 async fn release_cancel_decided_waits(
     ctx: &ObjectContext<'_>,
+    namespace: &crate::RestateNamespace,
     group_key: &str,
     shape: &EffectGroupShape,
     positions: &[usize],
@@ -129,8 +131,8 @@ async fn release_cancel_decided_waits(
         };
         let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
-        let Json(_) = ctx
-            .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_object_key(&address))
+        let Json(_) = namespace
+            .durable_wait_registry(ctx, durable_wait_index_object_key(&address))
             .resolve(Json(RestateDurableWaitResolveRequest {
                 key,
                 resolution: Resolution::Cancelled,

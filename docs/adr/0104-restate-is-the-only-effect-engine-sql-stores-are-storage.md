@@ -269,6 +269,10 @@ the named option is `restate-lite`: Restate's in-process node. It is
 unpublished, its RocksDB budget defaults to 512 MiB, and it allows one running
 instance per process. A second lash-owned engine is not an option.
 
+**One server serves many deployments** ([ADR 0111](0111-a-deployment-namespace-prefixes-every-restate-name.md)):
+each deployment binds lash's services under a namespace of its own, and a
+registration over another deployment's names is refused.
+
 ### 5. Testing model
 
 Tests run on production semantics, in three kinds:

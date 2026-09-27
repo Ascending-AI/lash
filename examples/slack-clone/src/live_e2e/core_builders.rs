@@ -126,17 +126,17 @@ pub(super) fn echo_tools() -> Arc<dyn ToolProvider> {
 }
 
 /// A live-E2E core on a substrate of its own: a SQLite memory store set
-/// journaled by a private local restate-server, with the core's endpoint
-/// served and registered there (ADR 0104). The engine binds lash's services
-/// under stable names, so the swap's two concurrently running cores each get
-/// their own server.
+/// journaled by the local restate-server the process's cores share, with the
+/// core's endpoint served and registered there (ADR 0104) under a namespace of
+/// its own (ADR 0111), so the swap's two concurrently running cores share the
+/// server.
 ///
 /// Dereferences to the core. Fields drop in order: the core, then its
-/// deployment, then the server.
+/// deployment, then its hold on the server.
 pub(super) struct LiveCore {
     core: LashCore,
     _deployment: crate::local_restate::LocalDeployment,
-    _server: crate::local_restate::LocalRestateServer,
+    _server: Arc<crate::local_restate::LocalRestateServer>,
 }
 
 impl std::ops::Deref for LiveCore {
@@ -147,41 +147,44 @@ impl std::ops::Deref for LiveCore {
     }
 }
 
-/// A private restate-server and the engine over a fresh SQLite memory store
-/// set that reaches it.
-async fn live_engine(
-    label: &str,
-) -> Result<(
-    crate::local_restate::LocalRestateServer,
-    Arc<lash::restate::RestateEngine>,
-)> {
-    let server = crate::local_restate::LocalRestateServer::spawn(label).await?;
+/// A core's substrate on the shared restate-server: its namespace there,
+/// and the engine over a fresh SQLite memory store set that reaches it.
+struct LiveEngine {
+    server: Arc<crate::local_restate::LocalRestateServer>,
+    restate: crate::local_restate::LocalRestate,
+    engine: Arc<lash::restate::RestateEngine>,
+}
+
+/// The shared restate-server, in a namespace of `label`'s own.
+async fn live_engine(label: &str) -> Result<LiveEngine> {
+    let server = crate::local_restate::LocalRestateServer::shared("slack-live").await?;
+    let restate = server.core(label)?;
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
-    let engine = server.restate().engine(Arc::new(stores));
-    Ok((server, engine))
+    let engine = restate.engine(Arc::new(stores));
+    Ok(LiveEngine {
+        server,
+        restate,
+        engine,
+    })
 }
 
-/// Serve `core`'s endpoint on `server` and hand back the live core.
-async fn serve_live_core(
-    server: crate::local_restate::LocalRestateServer,
-    engine: &lash::restate::RestateEngine,
-    core: LashCore,
-) -> Result<LiveCore> {
+/// Serve `core`'s endpoint in `live`'s namespace and hand back the live core.
+async fn serve_live_core(live: LiveEngine, core: LashCore) -> Result<LiveCore> {
     let worker = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .context("live-E2E process worker config")?,
     )
     .context("build the live-E2E process worker")?;
-    let deployment = server
-        .restate()
-        .serve(engine.endpoint_builder(worker).build())
+    let deployment = live
+        .restate
+        .serve(&live.engine, live.engine.endpoint_builder(worker).build())
         .await?;
     Ok(LiveCore {
         core,
         _deployment: deployment,
-        _server: server,
+        _server: live.server,
     })
 }
 
@@ -201,9 +204,14 @@ pub(super) async fn standard_core(
     model: ModelSpec,
     spec: StandardCoreSpec<'_>,
 ) -> Result<LiveCore> {
-    let (server, engine) = live_engine("slack-live-standard").await?;
-    let core = standard_core_over(lash::Backend::new(engine.clone()), provider, model, spec)?;
-    serve_live_core(server, &engine, core).await
+    let live = live_engine("slack-live-standard").await?;
+    let core = standard_core_over(
+        lash::Backend::new(live.engine.clone()),
+        provider,
+        model,
+        spec,
+    )?;
+    serve_live_core(live, core).await
 }
 
 /// [`standard_core`] over `backend`, which a test hands the Restate double's.
@@ -250,8 +258,8 @@ pub(super) async fn rlm_core(
     tools: Arc<dyn ToolProvider>,
     trace_path: PathBuf,
 ) -> Result<LiveCore> {
-    let (server, engine) = live_engine("slack-live-rlm").await?;
-    let backend = lash::Backend::new(engine.clone());
+    let live = live_engine("slack-live-rlm").await?;
+    let backend = lash::Backend::new(live.engine.clone());
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -285,5 +293,5 @@ pub(super) async fn rlm_core(
             Uuid::new_v4().to_string(),
         ))
         .context("build RLM live-E2E core")?;
-    serve_live_core(server, &engine, core).await
+    serve_live_core(live, core).await
 }

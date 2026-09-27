@@ -96,6 +96,7 @@ pub(super) async fn build_endpoint(
         connection.clone(),
         test_restate_authority_id(),
         Some(generation(build)),
+        crate::RestateNamespace::default(),
     ));
     host.register_group_executors(Arc::new(BuildExecutors {
         build,
@@ -117,9 +118,11 @@ pub(super) async fn build_endpoint(
                 ingress,
                 test_restate_authority_id(),
                 generation(build),
+                &crate::services::DEFAULT_NAMESPACE,
             ),
             session_driver: crate::RestateSessionDriverSlot::new(),
             build_generation: generation(build),
+            namespace: crate::RestateNamespace::default(),
         },
     )
     .build();
@@ -190,12 +193,10 @@ async fn l4_a_groups_children_run_on_the_build_that_opened_it() {
         .register_with(endpoint_next, "build-N+1", recording("N+1", &served))
         .await
         .expect("register build N+1");
-    let lane = crate::services::ServiceRoute::generation(
-        crate::LashService::EffectGroupDispatch,
-        generation("N"),
-    )
-    .name()
-    .into_owned();
+    let lane = crate::services::DEFAULT_NAMESPACE
+        .generation(crate::LashService::EffectGroupDispatch, generation("N"))
+        .name()
+        .into_owned();
 
     // N's dispatcher crashes once after its first child send is issued and
     // replays onto its own lane.

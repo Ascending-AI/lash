@@ -19,13 +19,26 @@ use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient
 pub struct RestateTurnAttach {
     ingress: RestateIngressClient,
     authority_id: RestateAuthorityId,
+    namespace: crate::RestateNamespace,
 }
 
 impl RestateTurnAttach {
+    /// Attachment through `connection` to turns journaled under
+    /// `authority_id` by a deployment in the default namespace.
     pub fn new(connection: impl Into<RestateConnection>, authority_id: RestateAuthorityId) -> Self {
+        Self::in_namespace(connection, authority_id, crate::RestateNamespace::default())
+    }
+
+    /// [`new`](Self::new) for a deployment in `namespace` (FIG-3898).
+    pub fn in_namespace(
+        connection: impl Into<RestateConnection>,
+        authority_id: RestateAuthorityId,
+        namespace: crate::RestateNamespace,
+    ) -> Self {
         Self {
             ingress: RestateIngressClient::new(connection),
             authority_id,
+            namespace,
         }
     }
 
@@ -49,10 +62,14 @@ impl TurnAttach for RestateTurnAttach {
         )?;
         let durable_address = RestateDurableWaitAddress::for_key(&key);
         let workflow_key = durable_address.workflow_key.clone();
+        let service = self
+            .namespace
+            .stable(crate::LashService::DurableWaitWorkflow)
+            .name();
         let resolution = self
             .ingress
             .call_workflow_json::<_, Resolution>(
-                crate::LashService::DurableWaitWorkflow.name(),
+                &service,
                 &workflow_key,
                 "await_resolution",
                 &RestateDurableWaitAwaitRequest {
@@ -75,7 +92,7 @@ impl TurnAttach for RestateTurnAttach {
                 // deployment that is fine.
                 let message = if err.is_service_unregistered() {
                     crate::ingress::unresolvable_call_target_message(
-                        crate::LashService::DurableWaitWorkflow.name(),
+                        &service,
                         "await_resolution",
                         &err,
                     )

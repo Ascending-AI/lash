@@ -188,6 +188,8 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
     }
 }
 
+mod positional_replay;
+pub(super) use positional_replay::PositionalReplayContext;
 mod turn_cancel_gate;
 
 pub(super) use turn_cancel_gate::*;
@@ -400,6 +402,7 @@ impl RecordingContext {
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn attach_process_terminal<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: crate::process_attach::RestateProcessAttachRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
@@ -411,6 +414,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn scope_group_record<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _index_key: String,
         _group_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
@@ -423,6 +427,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn scope_group_child_membership<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _index_key: String,
         _replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
@@ -434,6 +439,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn effect_group_drain_blockers<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _commit_seq: u64,
     ) -> Pin<
@@ -458,6 +464,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn effect_group_read_rank<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _group_key: String,
         _request: crate::effect_group::EffectGroupReadRankRequest,
     ) -> Pin<
@@ -482,6 +489,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn await_effect_group_wait<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         _replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
@@ -524,6 +532,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn sleep_or_turn_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         _process_cancel: ProcessCancelRace,
@@ -551,6 +560,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn start_process_workflow<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
@@ -615,6 +625,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn request_process_workflow_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateProcessCancelRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
@@ -640,6 +651,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn await_event<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         cancellation: tokio_util::sync::CancellationToken,
@@ -713,6 +725,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn await_event_or_turn_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
@@ -733,6 +746,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn peek_event<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         address: RestateDurableWaitAddress,
         _replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
@@ -751,6 +765,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn await_process_terminal<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         process_id: ProcessId,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
     where
@@ -783,6 +798,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         _process_cancel: ProcessCancelRace,
@@ -801,6 +817,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn resolve_event<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitResolveRequest,
     ) -> ResolveEventFuture<'run>
     where
@@ -812,6 +829,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn update_session_waits<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         session_id: SessionId,
         revoke: bool,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
@@ -850,6 +868,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn session_is_revoked<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         session_id: SessionId,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
     where
@@ -863,6 +882,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn scope_effect_begin<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         _index_key: String,
         _replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
@@ -1898,246 +1918,6 @@ fn decode_recorded_runtime_effect(bytes: &[u8]) -> RecordedRuntimeEffect {
     serde_json::from_value(unwrapped).expect("recorded runtime effect")
 }
 
-#[derive(Default)]
-pub(super) struct PositionalReplayContext {
-    pub(super) sleeps: Mutex<Vec<u64>>,
-    pub(super) runs: Mutex<Vec<String>>,
-    pub(super) records: Mutex<Vec<(String, Vec<u8>)>>,
-    pub(super) replaying: AtomicBool,
-    replay_cursor: AtomicUsize,
-    pub(super) turn_cancel_gate: TestTurnCancelGate,
-}
-
-impl PositionalReplayContext {
-    pub(super) fn start_replay(&self) {
-        self.replaying.store(true, Ordering::SeqCst);
-        self.replay_cursor.store(0, Ordering::SeqCst);
-    }
-
-    pub(super) fn runs(&self) -> Vec<String> {
-        self.runs.lock_recover().clone()
-    }
-
-    pub(super) fn record_count(&self) -> usize {
-        self.records.lock_recover().len()
-    }
-}
-
-impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
-    fn attach_process_terminal<'run>(
-        &'run self,
-        _request: crate::process_attach::RestateProcessAttachRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(async move { Ok(()) })
-    }
-
-    fn sleep_send<'run>(
-        &'run self,
-        duration: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        self.sleeps.lock_recover().push(duration.as_millis() as u64);
-        Box::pin(async { Ok(()) })
-    }
-
-    fn sleep_or_turn_cancel<'run>(
-        &'run self,
-        duration: Duration,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, ()>
-    where
-        'ctx: 'run,
-    {
-        test_sleep_or_turn_cancel(self, &self.turn_cancel_gate, duration, turn_cancel, None)
-    }
-
-    fn run_json_send<'run, T, Fut>(
-        &'run self,
-        effect_name: String,
-        _retry_policy: Option<RunRetryPolicy>,
-        future: Fut,
-    ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = T> + Send + 'run,
-    {
-        self.runs.lock_recover().push(effect_name.clone());
-        if self.replaying.load(Ordering::SeqCst) {
-            let position = self.replay_cursor.fetch_add(1, Ordering::SeqCst);
-            let recorded = self.records.lock_recover().get(position).cloned();
-            return Box::pin(async move {
-                let (recorded_effect_name, bytes) = recorded.ok_or_else(|| {
-                    TerminalError::new(format!("missing recorded effect at position {position}"))
-                })?;
-                if recorded_effect_name != effect_name {
-                    return Err(TerminalError::new(format!(
-                        "recorded effect at position {position} was `{recorded_effect_name}`, got `{effect_name}`"
-                    )));
-                }
-                serde_json::from_slice(&bytes)
-                    .map(Json)
-                    .map_err(TerminalError::from_error)
-            });
-        }
-
-        let context = Arc::clone(self);
-        Box::pin(async move {
-            let value = future.await;
-            let bytes = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
-            context.records.lock_recover().push((effect_name, bytes));
-            Ok(Json(value))
-        })
-    }
-
-    fn start_process_workflow<'run>(
-        &'run self,
-        _process_id: lash_core::ProcessId,
-        _registration: ProcessRegistration,
-        _execution_context: ProcessExecutionContext,
-        _sender_generation: Option<lash_core::engine::BuildGeneration>,
-    ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(async {
-            Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
-                "process workflow start is unsupported",
-            )))
-        })
-    }
-
-    fn request_process_workflow_cancel<'run>(
-        &'run self,
-        _request: RestateProcessCancelRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(async { Err(TerminalError::new("process workflow cancel is unsupported")) })
-    }
-
-    fn await_event<'run>(
-        &'run self,
-        _request: RestateDurableWaitAwaitRequest,
-        _replay_key: String,
-        _cancellation: tokio_util::sync::CancellationToken,
-    ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(async { Err(TerminalError::new("event await is unsupported")) })
-    }
-
-    fn await_event_or_turn_cancel<'run>(
-        &'run self,
-        request: RestateDurableWaitAwaitRequest,
-        replay_key: String,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, Resolution>
-    where
-        'ctx: 'run,
-    {
-        test_await_event_or_turn_cancel(
-            self,
-            &self.turn_cancel_gate,
-            request,
-            replay_key,
-            turn_cancel,
-            None,
-        )
-    }
-
-    fn peek_event<'run>(
-        &'run self,
-        _address: RestateDurableWaitAddress,
-        _replay_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn await_process_terminal<'run>(
-        &'run self,
-        _process_id: ProcessId,
-    ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(std::future::pending())
-    }
-
-    fn await_process_terminal_or_turn_cancel<'run>(
-        &'run self,
-        process_id: ProcessId,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
-    where
-        'ctx: 'run,
-    {
-        test_await_process_terminal_or_turn_cancel(
-            self,
-            &self.turn_cancel_gate,
-            process_id,
-            turn_cancel,
-            None,
-        )
-    }
-
-    fn resolve_event<'run>(
-        &'run self,
-        request: RestateDurableWaitResolveRequest,
-    ) -> ResolveEventFuture<'run>
-    where
-        'ctx: 'run,
-    {
-        let outcome = if self.turn_cancel_gate.resolve(
-            &request.key,
-            RestateTurnCancelWake::for_gate_resolution(&request.resolution),
-        ) {
-            ResolveOutcome::Accepted
-        } else {
-            ResolveOutcome::UnknownOrRevoked
-        };
-        Box::pin(async move { Ok(RestateDurableWaitResolveResponse::Outcome(outcome)) })
-    }
-
-    fn update_session_waits<'run>(
-        &'run self,
-        session_id: SessionId,
-        revoke: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        if revoke {
-            self.turn_cancel_gate.revoke_session(&session_id);
-        }
-        Box::pin(async { Ok(()) })
-    }
-
-    fn session_is_revoked<'run>(
-        &'run self,
-        session_id: SessionId,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        let revoked = self.turn_cancel_gate.is_revoked(&session_id);
-        Box::pin(async move { Ok(revoked) })
-    }
-}
-
 impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     /// Journaled wake verdict (FIG-3149). A live wake records the verdict it
     /// observed; a replayed wake answers from that record, never from live
@@ -2180,24 +1960,30 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn attach_process_terminal<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: crate::process_attach::RestateProcessAttachRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        self.events.attach_process_terminal(request)
+        self.events
+            .attach_process_terminal(&crate::services::DEFAULT_NAMESPACE, request)
     }
 
     fn scope_group_child_membership<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         index_key: String,
         replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        self.events
-            .scope_group_child_membership(index_key, replay_key)
+        self.events.scope_group_child_membership(
+            &crate::services::DEFAULT_NAMESPACE,
+            index_key,
+            replay_key,
+        )
     }
 
     fn sleep_send<'run>(
@@ -2223,6 +2009,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn sleep_or_turn_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         process_cancel: ProcessCancelRace,
@@ -2293,6 +2080,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn start_process_workflow<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
@@ -2379,6 +2167,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn request_process_workflow_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateProcessCancelRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
@@ -2393,6 +2182,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn await_event<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         cancellation: tokio_util::sync::CancellationToken,
@@ -2400,11 +2190,17 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     where
         'ctx: 'run,
     {
-        self.events.await_event(request, replay_key, cancellation)
+        self.events.await_event(
+            &crate::services::DEFAULT_NAMESPACE,
+            request,
+            replay_key,
+            cancellation,
+        )
     }
 
     fn await_event_or_turn_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
@@ -2430,6 +2226,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn peek_event<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         address: RestateDurableWaitAddress,
         _replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
@@ -2469,16 +2266,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn await_process_terminal<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         process_id: ProcessId,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        self.events.await_process_terminal(process_id)
+        self.events
+            .await_process_terminal(&crate::services::DEFAULT_NAMESPACE, process_id)
     }
 
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         process_cancel: ProcessCancelRace,
@@ -2502,32 +2302,38 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn resolve_event<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         request: RestateDurableWaitResolveRequest,
     ) -> ResolveEventFuture<'run>
     where
         'ctx: 'run,
     {
-        self.events.resolve_event(request)
+        self.events
+            .resolve_event(&crate::services::DEFAULT_NAMESPACE, request)
     }
 
     fn update_session_waits<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         session_id: SessionId,
         revoke: bool,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        self.events.update_session_waits(session_id, revoke)
+        self.events
+            .update_session_waits(&crate::services::DEFAULT_NAMESPACE, session_id, revoke)
     }
 
     fn session_is_revoked<'run>(
         &'run self,
+        _namespace: &'run crate::RestateNamespace,
         session_id: SessionId,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        self.events.session_is_revoked(session_id)
+        self.events
+            .session_is_revoked(&crate::services::DEFAULT_NAMESPACE, session_id)
     }
 }

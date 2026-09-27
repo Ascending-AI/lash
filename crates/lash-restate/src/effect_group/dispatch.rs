@@ -128,7 +128,7 @@ impl EffectGroupDispatchImpl {
                     %refusal,
                     "a drifted tool child whose scope names no turn settles its refusal"
                 );
-                record_child_settlement(ctx, request, outcome.clone()).await
+                record_child_settlement(ctx, self.route.namespace(), request, outcome.clone()).await
             }
             Ok(None) => Err(crate::parked_turn_failure(format!("{label}: {refusal}"))),
             Err(error) => Err(std::io::Error::other(format!(
@@ -147,7 +147,10 @@ impl EffectGroupDispatchImpl {
         matches!(
             self.ingress
                 .call_object_empty_json::<EffectGroupProbeResponse>(
-                    crate::LashService::EffectGroupState,
+                    &self
+                        .route
+                        .namespace()
+                        .stable(crate::LashService::EffectGroupState),
                     group_key,
                     "probe",
                 )
@@ -195,8 +198,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         let recorded = crate::sentinel::record_generation!(&ctx, &self.build_generation)?;
         crate::sentinel::check_generation(&self.route.name(), &recorded, &self.build_generation)?;
         let own_id = ctx.invocation_id().to_string();
-        let Json(adopted) = ctx
-            .object_client::<EffectGroupStateClient>(request.group_key.clone())
+        let Json(adopted) = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, request.group_key.clone())
             .probe_and_adopt(Json(EffectGroupAdoptRequest {
                 invocation_id: own_id,
             }))
@@ -252,8 +257,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             .retry_policy(self.infinite_retry_policy.clone())
             .await?;
         if let Some(position) = missing {
-            let Json(outcome) = ctx
-                .object_client::<EffectGroupStateClient>(request.group_key.clone())
+            let Json(outcome) = self
+                .route
+                .namespace()
+                .effect_group_state(&ctx, request.group_key.clone())
                 .register_refusal(Json(EffectGroupRefusalRequest {
                     reason: EffectGroupRefusal::NoExecutor { position },
                 }))
@@ -315,8 +322,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call();
             let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
-            let Json(recorded) = ctx
-                .object_client::<EffectGroupStateClient>(request.group_key.clone())
+            let Json(recorded) = self
+                .route
+                .namespace()
+                .effect_group_state(&ctx, request.group_key.clone())
                 .record_dispatch(Json(EffectGroupRecordDispatchRequest {
                     position,
                     invocation_id: invocation_id.clone(),
@@ -338,8 +347,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             addresses.insert(position, invocation_id);
             calls.push((position, call));
         }
-        let Json(registered) = ctx
-            .object_client::<EffectGroupStateClient>(request.group_key.clone())
+        let Json(registered) = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, request.group_key.clone())
             .register_children(Json(EffectGroupRegisterRequest { addresses }))
             .call()
             .await?;
@@ -420,6 +431,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             request.shape.validate_wire()?;
             return record_child_settlement(
                 &ctx,
+                self.route.namespace(),
                 &request,
                 EffectGroupChildRunOutcome::Completed {
                     outcome: Err(refusal),
@@ -433,8 +445,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             position: request.position,
             invocation_id: own_id,
         };
-        let Json(first) = ctx
-            .object_client::<EffectGroupStateClient>(request.group_key.clone())
+        let Json(first) = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, request.group_key.clone())
             .admit_child(Json(admission_request.clone()))
             .call()
             .await?;
@@ -448,6 +462,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 // identity the group never recorded.
                 return record_child_settlement(
                     &ctx,
+                    self.route.namespace(),
                     &request,
                     EffectGroupChildRunOutcome::Completed {
                         outcome: Err(attach_expired_error(&request)),
@@ -459,7 +474,13 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 return Ok(Json(()));
             }
             EffectGroupAdmissionResponse::Refused => {
-                release_unadmitted_wait(ctx, self.authority_id.clone(), &request).await?;
+                release_unadmitted_wait(
+                    ctx,
+                    self.authority_id.clone(),
+                    self.route.namespace().clone(),
+                    &request,
+                )
+                .await?;
                 return Ok(Json(()));
             }
             EffectGroupAdmissionResponse::Retired => {
@@ -473,8 +494,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 )?;
                 let replay_key = key.key_id.clone();
                 let address = RestateDurableWaitAddress::for_key(&key);
-                let Json(_) = ctx
-                    .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+                let Json(_) = self
+                    .route
+                    .namespace()
+                    .durable_wait_workflow(&ctx, address.workflow_key)
                     .await_resolution(Json(
                         RestateDurableWaitAwaitRequest {
                             key,
@@ -487,8 +510,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                     .await?;
                 // ADMIT is notification only. Authorization always comes from
                 // this one fresh, mapping-exact call after the wake.
-                let Json(fresh) = ctx
-                    .object_client::<EffectGroupStateClient>(request.group_key.clone())
+                let Json(fresh) = self
+                    .route
+                    .namespace()
+                    .effect_group_state(&ctx, request.group_key.clone())
                     .admit_child(Json(admission_request))
                     .call()
                     .await?;
@@ -500,6 +525,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             EffectGroupAdmissionResponse::AttachExpired => {
                 return record_child_settlement(
                     &ctx,
+                    self.route.namespace(),
                     &request,
                     EffectGroupChildRunOutcome::Completed {
                         outcome: Err(attach_expired_error(&request)),
@@ -511,7 +537,13 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 return Ok(Json(()));
             }
             EffectGroupAdmissionResponse::Refused => {
-                release_unadmitted_wait(ctx, self.authority_id.clone(), &request).await?;
+                release_unadmitted_wait(
+                    ctx,
+                    self.authority_id.clone(),
+                    self.route.namespace().clone(),
+                    &request,
+                )
+                .await?;
                 return Ok(Json(()));
             }
             EffectGroupAdmissionResponse::Retired => {
@@ -533,10 +565,13 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         // scope index refuses the record, and a child whose scope is gone
         // settles nowhere.
         let child_replay_key = request.envelope.invocation.replay_key().to_string();
-        let Json(membership_admitted) = ctx
-            .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_key_for_scope(
-                request.envelope.invocation.execution_scope(),
-            ))
+        let Json(membership_admitted) = self
+            .route
+            .namespace()
+            .durable_wait_registry(
+                &ctx,
+                durable_wait_index_key_for_scope(request.envelope.invocation.execution_scope()),
+            )
             .record_group_child(Json(RestateDurableWaitGroupChildRequest {
                 replay_key: child_replay_key.clone(),
                 group_key: request.group_key.clone(),
@@ -553,7 +588,8 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             &request.group_key,
             EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
         )?;
-        let cancel_watch = watch_child_cancellation(&self.ingress, cancel_key);
+        let cancel_watch =
+            watch_child_cancellation(&self.ingress, self.route.namespace(), cancel_key);
         tokio::pin!(cancel_watch);
 
         if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
@@ -580,6 +616,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 .into());
             };
             let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
+                .in_namespace(self.route.namespace().clone())
                 .with_build_generation(self.build_generation.clone());
             // The child's own admitted controller, bound to its recorded
             // identity: the recorded pair — claim scope and the incarnation
@@ -658,7 +695,13 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                     .await;
             }
             refuse_unrecorded_abort(&request, &outcome)?;
-            return record_child_settlement(controller.context(), &request, outcome).await;
+            return record_child_settlement(
+                controller.context(),
+                self.route.namespace(),
+                &request,
+                outcome,
+            )
+            .await;
         }
 
         if matches!(
@@ -685,6 +728,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 .into());
             };
             let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
+                .in_namespace(self.route.namespace().clone())
                 .with_build_generation(self.build_generation.clone());
             let envelope = RuntimeEffectEnvelope {
                 group: None,
@@ -717,7 +761,13 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             // index handler that decided the cancel, the close or the
             // retirement, released it before it resolved this cancel wait
             // (ADR 0099 §12, FIG-3630).
-            return record_child_settlement(controller.context(), &request, outcome).await;
+            return record_child_settlement(
+                controller.context(),
+                self.route.namespace(),
+                &request,
+                outcome,
+            )
+            .await;
         }
 
         let cancellation = tokio_util::sync::CancellationToken::new();
@@ -772,7 +822,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             outcome = &mut run => outcome?,
         };
 
-        record_child_settlement(&ctx, &request, outcome).await
+        record_child_settlement(&ctx, self.route.namespace(), &request, outcome).await
     }
 
     async fn retire(
@@ -780,8 +830,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         ctx: SharedWorkflowContext<'_>,
         group_key: String,
     ) -> HandlerResult<Json<()>> {
-        let Json(retired) = ctx
-            .object_client::<EffectGroupStateClient>(group_key.clone())
+        let Json(retired) = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, group_key.clone())
             .retire()
             .call()
             .await?;
@@ -801,8 +853,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         for invocation_id in cleanup.dispatched.values() {
             ctx.invocation_handle(invocation_id.clone()).cancel();
         }
-        let Json(cancelled) = ctx
-            .object_client::<EffectGroupStateClient>(group_key.clone())
+        let Json(cancelled) = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, group_key.clone())
             .retirement_cancel()
             .call()
             .await?;
@@ -817,8 +871,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             }
         }
         for position in 0..cleanup.children() {
-            let Json(()) = ctx
-                .object_client::<EffectGroupPayloadClient>(payload_key(&group_key, position))
+            let Json(()) = self
+                .route
+                .namespace()
+                .effect_group_payload(&ctx, payload_key(&group_key, position))
                 .retire()
                 .call()
                 .await?;
@@ -861,10 +917,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             let key = group_wait_key(&cleanup.wait_scope, &group_key, kind)?;
             let replay_key = key.key_id.clone();
             let address = RestateDurableWaitAddress::for_key(&key);
-            let Json(()) = ctx
-                .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_object_key(
-                    &address,
-                ))
+            let Json(()) = self
+                .route
+                .namespace()
+                .durable_wait_registry(&ctx, durable_wait_index_object_key(&address))
                 .retain_resolution(Json(RestateDurableWaitResolveRequest {
                     key,
                     resolution: wait_resolution(resolution)?,
@@ -874,14 +930,18 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 .await?;
         }
         for position in 0..cleanup.children() {
-            let Json(()) = ctx
-                .object_client::<EffectGroupPayloadClient>(payload_key(&group_key, position))
+            let Json(()) = self
+                .route
+                .namespace()
+                .effect_group_payload(&ctx, payload_key(&group_key, position))
                 .delete_bytes()
                 .call()
                 .await?;
         }
-        let Json(finished) = ctx
-            .object_client::<EffectGroupStateClient>(group_key.clone())
+        let Json(finished) = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, group_key.clone())
             .finish_retirement()
             .call()
             .await?;
@@ -1020,12 +1080,15 @@ fn refuse_unrecorded_abort(
 /// journal recorded.
 async fn watch_child_cancellation(
     ingress: &RestateIngressClient,
+    namespace: &crate::RestateNamespace,
     key: AwaitEventKey,
 ) -> std::io::Result<()> {
     let address = RestateDurableWaitAddress::for_key(&key);
     let resolution = ingress
         .call_workflow_json::<_, Resolution>(
-            crate::LashService::DurableWaitWorkflow.name(),
+            &namespace
+                .stable(crate::LashService::DurableWaitWorkflow)
+                .name(),
             &address.workflow_key,
             "await_resolution",
             &RestateDurableWaitAwaitRequest {
@@ -1059,6 +1122,7 @@ async fn watch_child_cancellation(
 /// group to read.
 async fn record_child_settlement(
     ctx: &SharedWorkflowContext<'_>,
+    namespace: &crate::RestateNamespace,
     request: &EffectGroupChildRequest,
     outcome: EffectGroupChildRunOutcome,
 ) -> HandlerResult<Json<()>> {
@@ -1067,8 +1131,8 @@ async fn record_child_settlement(
     // committed reads `AlreadyCommitted` back with the same position; one
     // the cancel disposition beat is refused by name, and its payload
     // and settlement never write.
-    let Json(committed) = ctx
-        .object_client::<EffectGroupStateClient>(request.group_key.clone())
+    let Json(committed) = namespace
+        .effect_group_state(ctx, request.group_key.clone())
         .commit_child(Json(EffectGroupCommitChildRequest {
             replay_key: request.envelope.invocation.replay_key().to_string(),
         }))
@@ -1121,8 +1185,8 @@ async fn record_child_settlement(
         )?;
         let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
-        let Json(_) = ctx
-            .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+        let Json(_) = namespace
+            .durable_wait_workflow(ctx, address.workflow_key)
             .await_resolution(Json(
                 RestateDurableWaitAwaitRequest {
                     key,
@@ -1149,11 +1213,8 @@ async fn record_child_settlement(
                     request.group_key, request.position
                 ))
             })?;
-            let Json(put) = ctx
-                .object_client::<EffectGroupPayloadClient>(payload_key(
-                    &request.group_key,
-                    request.position,
-                ))
+            let Json(put) = namespace
+                .effect_group_payload(ctx, payload_key(&request.group_key, request.position))
                 .put(Json(EffectGroupPayloadPutRequest { bytes }))
                 .call()
                 .await?;
@@ -1173,8 +1234,8 @@ async fn record_child_settlement(
             }
         }
     };
-    let Json(recorded) = ctx
-        .object_client::<EffectGroupStateClient>(request.group_key.clone())
+    let Json(recorded) = namespace
+        .effect_group_state(ctx, request.group_key.clone())
         .record_settlement(Json(EffectGroupRecordSettlementRequest {
             position: request.position,
             terminal,
@@ -1203,12 +1264,13 @@ async fn record_child_settlement(
 async fn release_unadmitted_wait(
     ctx: SharedWorkflowContext<'_>,
     authority_id: crate::ingress::RestateAuthorityId,
+    namespace: crate::RestateNamespace,
     request: &EffectGroupChildRequest,
 ) -> HandlerResult<()> {
     let RuntimeEffectCommand::AwaitEvent { key } = &request.envelope.command else {
         return Ok(());
     };
-    let controller = RestateRuntimeEffectController::new(ctx, authority_id);
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id).in_namespace(namespace);
     lash_core::AwaitEventResolver::resolve_await_event(
         &controller,
         key,

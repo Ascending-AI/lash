@@ -244,6 +244,7 @@ impl From<RestateEffectError> for RuntimeEffectControllerError {
 
 async fn resolve_restate_await_event<'ctx, C>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     key: &AwaitEventKey,
     resolution: Resolution,
 ) -> Result<ResolveOutcome, RuntimeError>
@@ -251,10 +252,13 @@ where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
     context
-        .resolve_event(RestateDurableWaitResolveRequest {
-            key: key.clone(),
-            resolution,
-        })
+        .resolve_event(
+            namespace,
+            RestateDurableWaitResolveRequest {
+                key: key.clone(),
+                resolution,
+            },
+        )
         .await
         .map_err(|err| {
             RuntimeError::new(
@@ -278,6 +282,10 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     /// it. A controller a host builds inside its own handler names none, and
     /// its groups dispatch on the stable lane.
     build_generation: Option<lash_core::engine::BuildGeneration>,
+    /// The namespace of the deployment whose services this controller calls
+    /// (FIG-3898): the durable waits, process workflow and effect groups it
+    /// addresses are that namespace's.
+    namespace: crate::RestateNamespace,
     _ctx: PhantomData<&'ctx ()>,
 }
 
@@ -301,8 +309,22 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             options,
             trace: None,
             build_generation: None,
+            namespace: crate::RestateNamespace::default(),
             _ctx: PhantomData,
         }
+    }
+
+    /// Call the lash services of the deployment in `namespace` (FIG-3898).
+    /// A controller a host builds inside its own handler calls its own
+    /// deployment's namespace; unset, the default namespace's.
+    pub fn in_namespace(mut self, namespace: crate::RestateNamespace) -> Self {
+        self.namespace = namespace;
+        self
+    }
+
+    /// The namespace this controller's calls address.
+    pub fn namespace(&self) -> &crate::RestateNamespace {
+        &self.namespace
     }
 
     /// Run as a controller of the build of `generation`: the groups it
@@ -440,7 +462,7 @@ where
         if let Some(session_id) = session_id
             && self
                 .context
-                .session_is_revoked(SessionId::from(session_id.to_string()))
+                .session_is_revoked(&self.namespace, SessionId::from(session_id.to_string()))
                 .await
                 .map_err(|err| {
                     RuntimeError::new(
@@ -509,7 +531,7 @@ where
         if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Ok(ResolveOutcome::UnknownOrRevoked);
         }
-        resolve_restate_await_event(&self.context, key, resolution).await
+        resolve_restate_await_event(&self.context, &self.namespace, key, resolution).await
     }
 
     async fn peek_await_event(
@@ -521,7 +543,11 @@ where
         }
         self.require_active_session(key.scope.session_id()).await?;
         self.context
-            .peek_event(RestateDurableWaitAddress::for_key(key), key.key_id.clone())
+            .peek_event(
+                &self.namespace,
+                RestateDurableWaitAddress::for_key(key),
+                key.key_id.clone(),
+            )
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -556,7 +582,7 @@ where
             )
         })?;
         self.context
-            .await_event(request, replay_key, cancel)
+            .await_event(&self.namespace, request, replay_key, cancel)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -571,7 +597,11 @@ where
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
         self.context
-            .update_session_waits(SessionId::from(session_id.to_string()), true)
+            .update_session_waits(
+                &self.namespace,
+                SessionId::from(session_id.to_string()),
+                true,
+            )
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -586,7 +616,11 @@ where
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
         self.context
-            .update_session_waits(SessionId::from(session_id.to_string()), false)
+            .update_session_waits(
+                &self.namespace,
+                SessionId::from(session_id.to_string()),
+                false,
+            )
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -655,7 +689,7 @@ where
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let outcome = self
             .context
-            .await_signal_or_segment_end(request, replay_key, generation.clone())
+            .await_signal_or_segment_end(&self.namespace, request, replay_key, generation.clone())
             .await
             .map_err(|err| {
                 self.emit_trace(Some(invocation), || {
@@ -735,12 +769,14 @@ where
         // response reports — a reopen's retained route wins over the one
         // offered here. Every child the dispatcher sends goes to that same
         // lane, so the group runs on the build that opened it.
-        let dispatch_route = crate::services::ServiceRoute::own_or_stable(
-            crate::LashService::EffectGroupDispatch,
-            self.build_generation.as_ref(),
-        )
-        .name()
-        .into_owned();
+        let dispatch_route = self
+            .namespace
+            .own_or_stable(
+                crate::LashService::EffectGroupDispatch,
+                self.build_generation.as_ref(),
+            )
+            .name()
+            .into_owned();
         let open_request = EffectGroupOpenRequest {
             shape,
             dispatch_route: dispatch_route.clone(),
@@ -751,7 +787,7 @@ where
         let shape = &open_request.shape;
         let probe = self
             .context
-            .effect_group_probe(group_key.clone())
+            .effect_group_probe(&self.namespace, group_key.clone())
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/probe", error))?;
         if matches!(probe, EffectGroupProbeResponse::Absent)
@@ -779,7 +815,7 @@ where
         }
         let opened = self
             .context
-            .effect_group_open(group_key.clone(), open_request.clone())
+            .effect_group_open(&self.namespace, group_key.clone(), open_request.clone())
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/open", error))?;
         match opened {
@@ -798,6 +834,7 @@ where
                 let resolution = match self
                     .context
                     .await_effect_group_wait(
+                        &self.namespace,
                         request,
                         group_key.clone(),
                         None,
@@ -895,6 +932,7 @@ where
         let mut read = self
             .context
             .effect_group_read_rank(
+                &self.namespace,
                 handle.group_key().to_string(),
                 EffectGroupReadRankRequest {
                     rank,
@@ -915,6 +953,7 @@ where
             let resolution = match self
                 .context
                 .await_effect_group_wait(
+                    &self.namespace,
                     request,
                     handle.group_key().to_string(),
                     turn_cancel,
@@ -962,6 +1001,7 @@ where
             read = self
                 .context
                 .effect_group_read_rank(
+                    &self.namespace,
                     handle.group_key().to_string(),
                     EffectGroupReadRankRequest {
                         rank,
@@ -1004,7 +1044,10 @@ where
         ) {
             match self
                 .context
-                .effect_group_payload_get(payload_key(handle.group_key(), record.position))
+                .effect_group_payload_get(
+                    &self.namespace,
+                    payload_key(handle.group_key(), record.position),
+                )
                 .await
                 .map_err(|error| effect_group_engine_error("EffectGroupPayload/get", error))?
             {
@@ -1037,7 +1080,7 @@ where
         group_key: &str,
         rank: u64,
     ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        group_read::read_group_settlement(&self.context, group_key, rank).await
+        group_read::read_group_settlement(&self.context, &self.namespace, group_key, rank).await
     }
 
     async fn close_effect_group(
@@ -1048,7 +1091,11 @@ where
         let group_key = handle.group_key().to_string();
         let response = self
             .context
-            .effect_group_close(group_key.clone(), EffectGroupCloseRequest { disposition })
+            .effect_group_close(
+                &self.namespace,
+                group_key.clone(),
+                EffectGroupCloseRequest { disposition },
+            )
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/close", error))?;
         match response {
@@ -1083,7 +1130,7 @@ where
         lash_core::facade_support::EffectGroupChildCommitOutcome,
         RuntimeEffectControllerError,
     > {
-        group_commit::commit_group_child_final(&self.context, commit).await
+        group_commit::commit_group_child_final(&self.context, &self.namespace, commit).await
     }
 
     async fn await_group_child_drain_admission(
@@ -1091,7 +1138,13 @@ where
         group_key: &str,
         commit_seq: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
-        group_commit::await_group_child_drain_admission(&self.context, group_key, commit_seq).await
+        group_commit::await_group_child_drain_admission(
+            &self.context,
+            &self.namespace,
+            group_key,
+            commit_seq,
+        )
+        .await
     }
 
     /// Restate replays the invocation journal by position and compares each
@@ -1190,6 +1243,7 @@ where
                 command,
             } => execute_restate_process_command(
                 &self.context,
+                &self.namespace,
                 &self.authority_id,
                 self.build_generation.as_ref(),
                 self.options.process_cancel,
@@ -1229,6 +1283,7 @@ where
                     Box::pin(async move {
                         execute_restate_process_command(
                             &self.context,
+                            &self.namespace,
                             &self.authority_id,
                             self.build_generation.as_ref(),
                             self.options.process_cancel,
@@ -1280,7 +1335,12 @@ where
                 )?;
                 match self
                     .context
-                    .sleep_or_turn_cancel(duration, turn_cancel, self.options.process_cancel)
+                    .sleep_or_turn_cancel(
+                        &self.namespace,
+                        duration,
+                        turn_cancel,
+                        self.options.process_cancel,
+                    )
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(())) => {}
@@ -1408,6 +1468,7 @@ where
                 match self
                     .context
                     .await_event_or_turn_cancel(
+                        &self.namespace,
                         request,
                         replay_key,
                         turn_cancel,

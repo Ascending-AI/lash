@@ -24,6 +24,7 @@ use super::{RestateControllerContext, effect_group_engine_error};
 /// `NotSettled`/`Closed` pair.
 pub(super) async fn read_group_settlement<'ctx, C>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     group_key: &str,
     rank: u64,
 ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError>
@@ -32,6 +33,7 @@ where
 {
     let read = context
         .effect_group_read_rank(
+            namespace,
             group_key.to_string(),
             EffectGroupReadRankRequest {
                 rank,
@@ -64,7 +66,7 @@ where
         EffectGroupSettlementTerminal::StoredPayload
     ) {
         match context
-            .effect_group_payload_get(payload_key(group_key, record.position))
+            .effect_group_payload_get(namespace, payload_key(group_key, record.position))
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupPayload/get", error))?
         {

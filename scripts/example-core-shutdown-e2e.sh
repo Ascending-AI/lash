@@ -252,9 +252,9 @@ run_workbench_signal_with_streams_and_fixture() {
   marker="$dir/shutdown.marker"
   log="$dir/host.log"
   trace="$dir/trace.jsonl"
-  # The valid-empty fixture's nested core runs on a private restate-server.
+  # The valid-empty fixture's nested core runs on the workbench's own
+  # restate-server, in a namespace of its own.
   env AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
-    LASH_RESTATE_SERVER_BIN="$(python3 "$repo/scripts/ci/restate_suite.py" server-path)" \
     AGENT_WORKBENCH_ADDR="127.0.0.1:$port" \
     AGENT_WORKBENCH_RESTATE_ADDR="127.0.0.1:$restate_port" \
     AGENT_WORKBENCH_DATA_DIR="$dir/data" \

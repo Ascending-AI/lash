@@ -127,6 +127,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
             .with_retry_max_attempts(MAX_ATTEMPTS),
             session_driver: crate::RestateSessionDriverSlot::new(),
             build_generation: lash_core::engine::BuildGeneration::for_test("exhaustion-park"),
+            namespace: crate::RestateNamespace::default(),
         },
     )
     .build();
@@ -228,9 +229,14 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
     // Fix the build and resume through the park: the retry completes the
     // process once and the park closes.
     runner.fixed.store(true, Ordering::SeqCst);
-    let resumed = crate::resume_parked_process(&admin, &registry, &process_id)
-        .await
-        .expect("resume the parked process");
+    let resumed = crate::resume_parked_process(
+        &admin,
+        &crate::services::DEFAULT_NAMESPACE,
+        &registry,
+        &process_id,
+    )
+    .await
+    .expect("resume the parked process");
     assert_eq!(resumed.as_str(), paused.id.as_str());
     wait_for_status(&server, &target, "completed").await;
     let completed = registry

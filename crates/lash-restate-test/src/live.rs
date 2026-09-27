@@ -51,12 +51,14 @@ use lash_core::{AdmittedScope, SessionWorkEngine, StoreSet};
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
     RestateAdminClient, RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine,
-    RestateIngressClient, RestateInvocationId, RestateProcessServing, RestateProcessWorkerSlot,
+    RestateIngressClient, RestateInvocationId, RestateNamespace, RestateProcessServing,
+    RestateProcessWorkerSlot, RestateRegistrationError,
 };
 use restate_sdk::endpoint::{Endpoint, HandleOptions, ProtocolMode};
 
 use crate::backend::{
     ExplicitlyReconciledSessionWork, HANDLER_HOST, HandlerAttempt, HandlerHost, Parked, ParkedJobs,
+    bind_handler_host,
 };
 use crate::protocol::generated::{ProposeRunCompletionMessage, RunCommandMessage, StartMessage};
 use crate::protocol::{FrameDecoder, MessageType};
@@ -78,6 +80,9 @@ pub struct LiveConfig {
     /// A tag unique to this backend on the server: a workflow key runs once
     /// per server, and the server outlives one backend.
     pub run_tag: String,
+    /// The namespace the backend's services are named in (FIG-3898): two
+    /// backends serve one server side by side in distinct namespaces.
+    pub namespace: RestateNamespace,
 }
 
 /// Why a live backend could not come up.
@@ -91,8 +96,20 @@ pub enum LiveError {
     Listen { bind: SocketAddr, detail: String },
     #[error("the deployment at {url} could not register: {detail}")]
     Register { url: String, detail: String },
+    /// The engine refused the registration: another deployment on the
+    /// server serves its names (FIG-3898).
+    #[error(transparent)]
+    Registration(Box<RestateRegistrationError>),
+    #[error("the handler host's name is not a Restate service name: {0}")]
+    HandlerHostName(String),
     #[error("the admin API failed: {0}")]
     Admin(String),
+}
+
+impl From<RestateRegistrationError> for LiveError {
+    fn from(error: RestateRegistrationError) -> Self {
+        Self::Registration(Box::new(error))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -249,17 +266,21 @@ impl LiveRestateBackend {
                 admin_connection.clone(),
                 authority.clone(),
                 lash_core::engine::BuildGeneration::for_test("t0"),
-            ),
+            )
+            .with_namespace(config.namespace.clone()),
         ));
         let processes = RestateProcessWorkerSlot::new();
         let jobs = Arc::new(ParkedJobs::with_prefix(format!("{}-", config.run_tag)));
-        let endpoint = restate
-            .endpoint_builder(RestateProcessServing::from(processes.clone()))
-            .bind(HandlerHost {
+        let endpoint = bind_handler_host(
+            restate.endpoint_builder(RestateProcessServing::from(processes.clone())),
+            HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority,
-            })
-            .build();
+                namespace: config.namespace.clone(),
+            },
+        )
+        .map_err(LiveError::HandlerHostName)?
+        .build();
         let serving = Arc::new(Serving {
             endpoint,
             bind: config.endpoint_bind,
@@ -290,36 +311,33 @@ impl LiveRestateBackend {
         Ok(backend)
     }
 
+    /// Register the endpoint through the engine, which refuses a namespace
+    /// another deployment on the server serves (FIG-3898). A deployment
+    /// registered earlier at this backend's own URL — a world before this
+    /// one at the same address — is replaced.
     async fn register(&self) -> Result<(), LiveError> {
-        let url = self.inner.config.endpoint_url.clone();
-        let client = lash_http_transport::reqwest::Client::builder()
-            .no_proxy()
-            .build()
-            .map_err(|error| LiveError::Register {
-                url: url.clone(),
-                detail: error.to_string(),
-            })?;
-        let response = client
-            .post(format!(
-                "{}/deployments",
-                self.inner.config.admin_url.trim_end_matches('/')
-            ))
-            .json(&serde_json::json!({ "uri": url, "force": true }))
-            .send()
+        let url = &self.inner.config.endpoint_url;
+        self.inner
+            .restate
+            .register_deployment(url)
             .await
-            .map_err(|error| LiveError::Register {
-                url: url.clone(),
-                detail: error.to_string(),
-            })?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(LiveError::Register {
-                url,
-                detail: format!("{status} {body}"),
-            });
-        }
-        Ok(())
+            .map_err(|error| match error {
+                RestateRegistrationError::Admin(error) => LiveError::Register {
+                    url: url.clone(),
+                    detail: error.to_string(),
+                },
+                refusal => LiveError::Registration(Box::new(refusal)),
+            })
+    }
+
+    /// The namespace this backend's services are named in.
+    pub fn namespace(&self) -> &RestateNamespace {
+        &self.inner.config.namespace
+    }
+
+    /// `name`'s Restate name in this backend's namespace.
+    pub fn service_name(&self, name: &str) -> String {
+        self.inner.config.namespace.service_name(name)
     }
 
     /// The backend a runtime runs on: lash-restate's engine over the store
@@ -377,7 +395,7 @@ impl LiveRestateBackend {
         let key = self.inner.jobs.park(admitted, Parked::Replayed(attempt));
         let ran = self
             .ingress()
-            .call_workflow_json::<_, bool>(HANDLER_HOST, &key, "run", &key)
+            .call_workflow_json::<_, bool>(&self.service_name(HANDLER_HOST), &key, "run", &key)
             .await;
         self.inner.jobs.take(&key);
         match ran {
@@ -447,12 +465,30 @@ impl LiveRestateBackend {
 
     // --- The admin face ----------------------------------------------------
 
-    /// Every invocation the server holds, completed ones included.
+    /// Every invocation of this backend's namespace the server holds,
+    /// completed ones included.
     pub async fn invocations(&self) -> Result<Vec<LiveInvocation>, LiveError> {
         self.query(&format!(
-            "SELECT {INVOCATION_COLUMNS} FROM sys_invocation ORDER BY created_at"
+            "SELECT {INVOCATION_COLUMNS} FROM sys_invocation WHERE {} ORDER BY created_at",
+            self.own_invocations()
         ))
         .await
+    }
+
+    /// The `sys_invocation` filter on this backend's namespace: another
+    /// backend's invocations on the same server are never this one's to
+    /// read, settle or kill. A namespace holds no `.` and no `_`, so neither
+    /// pattern reaches past its own names.
+    fn own_invocations(&self) -> String {
+        let namespace = &self.inner.config.namespace;
+        if namespace.is_default() {
+            "target_service_name NOT LIKE '%.%'".to_owned()
+        } else {
+            format!(
+                "target_service_name LIKE {}",
+                sql_literal(&format!("{namespace}.%"))
+            )
+        }
     }
 
     /// One invocation's row.
@@ -548,7 +584,8 @@ impl LiveRestateBackend {
         while tokio::time::Instant::now() < deadline {
             let snapshot = match self
                 .query(&format!(
-                    "SELECT {INVOCATION_COLUMNS} FROM sys_invocation WHERE status != 'completed' ORDER BY id"
+                    "SELECT {INVOCATION_COLUMNS} FROM sys_invocation WHERE status != 'completed' AND {} ORDER BY id",
+                    self.own_invocations()
                 ))
                 .await
             {
@@ -579,7 +616,8 @@ impl LiveRestateBackend {
         for _ in 0..3 {
             let open = match self
                 .query(&format!(
-                    "SELECT {INVOCATION_COLUMNS} FROM sys_invocation WHERE status != 'completed'"
+                    "SELECT {INVOCATION_COLUMNS} FROM sys_invocation WHERE status != 'completed' AND {}",
+                    self.own_invocations()
                 ))
                 .await
             {

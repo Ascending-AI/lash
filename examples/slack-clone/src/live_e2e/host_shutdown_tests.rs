@@ -123,7 +123,7 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
         shutdown_called: Arc::clone(&shutdown_called),
     });
     let temp = tempfile::tempdir().expect("temporary trace directory");
-    // The Restate test double stands in for the live core's private server.
+    // The Restate test double stands in for the live core's shared server.
     let double = lash_restate_test::backend(0, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate double");

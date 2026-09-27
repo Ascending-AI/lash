@@ -72,6 +72,7 @@ impl P16RaceProbe for P16RaceProbeImpl {
             "event" => race_label(
                 RestateControllerContext::await_event_or_turn_cancel(
                     &ctx,
+                    &crate::services::DEFAULT_NAMESPACE,
                     probe_wait_request()?,
                     "probe".to_string(),
                     None,
@@ -82,6 +83,7 @@ impl P16RaceProbe for P16RaceProbeImpl {
             "rank" => race_label(
                 RestateControllerContext::await_effect_group_wait(
                     &ctx,
+                    &crate::services::DEFAULT_NAMESPACE,
                     probe_wait_request()?,
                     "probe".to_string(),
                     None,
@@ -92,6 +94,7 @@ impl P16RaceProbe for P16RaceProbeImpl {
             "process" => race_label(
                 RestateControllerContext::await_process_terminal_or_turn_cancel(
                     &ctx,
+                    &crate::services::DEFAULT_NAMESPACE,
                     ProcessId::fixture("p16-race-probe-child"),
                     None,
                     ProcessCancelRace::Raced,

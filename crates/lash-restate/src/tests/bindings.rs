@@ -78,7 +78,7 @@ async fn discovered_service_names(endpoint: &Endpoint) -> BTreeSet<String> {
 fn lash_service_names() -> BTreeSet<String> {
     LASH_SERVICES
         .iter()
-        .map(|service| service.name().to_string())
+        .map(|service| service.base_name().to_string())
         .collect()
 }
 
@@ -91,10 +91,13 @@ fn bindings_generation() -> lash_core::engine::BuildGeneration {
 /// service under its stable name, each pinned one under its stable name and
 /// under the build's generation lane (FIG-3795).
 fn lash_lane_names() -> BTreeSet<String> {
-    crate::services::lash_service_routes(&bindings_generation())
-        .iter()
-        .map(|route| route.name().into_owned())
-        .collect()
+    crate::services::lash_service_routes(
+        &crate::services::DEFAULT_NAMESPACE,
+        &bindings_generation(),
+    )
+    .iter()
+    .map(|route| route.name().into_owned())
+    .collect()
 }
 
 /// A Restate backend over a memory store set, and the process worker of a
@@ -185,7 +188,7 @@ async fn the_endpoint_builder_binds_every_lash_service() {
     assert_eq!(discovered, lash_lane_names());
     let generation = bindings_generation();
     for service in LASH_SERVICES {
-        let lane = format!("{}{}", service.name(), generation.service_suffix());
+        let lane = format!("{}{}", service.base_name(), generation.service_suffix());
         assert_eq!(
             discovered.contains(&lane),
             service.lane_class() == crate::services::LaneClass::Pinned,
@@ -225,8 +228,8 @@ async fn a_generation_lane_serves_the_same_handlers_as_its_stable_name() {
         .iter()
         .filter(|service| service.lane_class() == crate::services::LaneClass::Pinned)
     {
-        let lane = format!("{}{}", service.name(), generation.service_suffix());
-        assert_eq!(handlers(service.name()), handlers(&lane), "{lane}");
+        let lane = format!("{}{}", service.base_name(), generation.service_suffix());
+        assert_eq!(handlers(service.base_name()), handlers(&lane), "{lane}");
     }
 }
 

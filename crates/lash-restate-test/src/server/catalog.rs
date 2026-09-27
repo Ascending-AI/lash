@@ -91,6 +91,8 @@ pub struct HandlerSpec {
 pub struct ServiceEntry {
     pub kind: ServiceKind,
     pub handlers: BTreeMap<String, HandlerSpec>,
+    /// The service's discovery metadata, which the admin API reports.
+    pub metadata: BTreeMap<String, String>,
 }
 
 /// Every service the endpoint binds, by name.
@@ -171,6 +173,8 @@ impl Catalog {
             retry: Retry,
             #[serde(default)]
             inactivity_timeout: Option<u64>,
+            #[serde(default)]
+            metadata: BTreeMap<String, String>,
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -246,6 +250,7 @@ impl Catalog {
                 ServiceEntry {
                     kind: service.ty,
                     handlers,
+                    metadata: service.metadata,
                 },
             );
         }

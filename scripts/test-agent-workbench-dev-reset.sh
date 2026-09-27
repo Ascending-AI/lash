@@ -346,19 +346,7 @@ fi
 exec /usr/bin/python3 "$@"
 MOCK
 
-cat > "$mock_bin/restate-server" <<'MOCK'
-#!/usr/bin/env bash
-# The launcher only hands this path to the workbench fixture as
-# LASH_RESTATE_SERVER_BIN; the mock workbench never executes it.
-exit 0
-MOCK
-
 chmod +x "$mock_bin"/*
-# A caller-provided server path wins over the launcher's pinned-binary lookup,
-# which is what keeps the default-path fixture — a bare copy of
-# agent-workbench-dev.sh without scripts/ci/restate_suite.py beside it — able
-# to start the valid-empty-completion scenario at all.
-export LASH_RESTATE_SERVER_BIN="$mock_bin/restate-server"
 : > "$mock_state/deployments"
 : > "$mock_state/registration-payloads"
 : > "$mock_state/docker-rm.log"

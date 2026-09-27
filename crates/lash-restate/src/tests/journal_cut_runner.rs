@@ -425,7 +425,7 @@ mod served_only_outside_a_run {
             .filter(|invocation| {
                 invocation
                     .target
-                    .starts_with(crate::LashService::ProcessWorkflow.name())
+                    .starts_with(crate::LashService::ProcessWorkflow.base_name())
             })
             .count()
     }

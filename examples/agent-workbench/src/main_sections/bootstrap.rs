@@ -519,9 +519,17 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         let app = if dev_provider_scenario
             == Some(failure_provider::DevProviderScenario::ValidEmptyCompletion)
         {
+            let fixture = crate::local_restate::LocalRestate {
+                ingress_url: state.restate_ingress_url.clone(),
+                admin_url: state.restate_admin_url.clone(),
+                authority: restate_authority_id.clone(),
+                namespace: lash_restate::RestateNamespace::default(),
+            }
+            .in_namespace(crate::valid_empty_completion::NAMESPACE)?;
             app.route(
                 "/dev/valid-empty-completion",
-                get(crate::valid_empty_completion::page).post(crate::valid_empty_completion::run),
+                get(crate::valid_empty_completion::page)
+                    .post(move || crate::valid_empty_completion::run(fixture.clone())),
             )
         } else {
             app

@@ -20,8 +20,8 @@ use lash_core::{
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
     RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateHttpError,
-    RestateIngressClient, RestateProcessServing, RestateProcessWorkerSlot, RestateSessionWork,
-    turn_workflow_key,
+    RestateIngressClient, RestateNamespace, RestateProcessServing, RestateProcessWorkerSlot,
+    RestateRegistrationError, RestateSessionWork, turn_workflow_key,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -63,6 +63,20 @@ pub enum BackendError {
     Stores(String),
     #[error("the Restate authority id is invalid: {0}")]
     Authority(String),
+    /// The engine refused to register its deployment: another deployment on
+    /// the server serves its names (FIG-3898).
+    #[error(transparent)]
+    Registration(Box<RestateRegistrationError>),
+    /// The handler host's name in the backend's namespace is not a Restate
+    /// service name.
+    #[error("the handler host's name is not a Restate service name: {0}")]
+    HandlerHostName(String),
+}
+
+impl From<RestateRegistrationError> for BackendError {
+    fn from(error: RestateRegistrationError) -> Self {
+        Self::Registration(Box::new(error))
+    }
 }
 
 /// A server double with lash-restate's engine wired to it: the handle a test
@@ -175,6 +189,62 @@ impl RestateTestBackend {
         let server = RestateTestServer::new(config)?;
         let follower = Arc::clone(&clock);
         server.on_time_moved(Arc::new(move |now_ms| follower.set(now_ms)));
+        Self::build_on(
+            server,
+            clock,
+            false,
+            RestateNamespace::default(),
+            segment_effect_budget,
+            first_label,
+            first_hooks,
+            decorate_stores,
+        )
+        .await
+    }
+
+    /// Another lash deployment on this backend's server, in `namespace`
+    /// (FIG-3898): its own engine over a fresh SQLite memory store set on the
+    /// server's clock, under an authority of its own, with every lash
+    /// service and the handler host bound under `namespace`'s names. The two
+    /// share nothing but the server. Its endpoint registers through
+    /// [`RestateEngine::register_deployment`], so a namespace another
+    /// deployment on the server already serves is refused with
+    /// [`BackendError::Registration`]. The open-handler lender is bound only
+    /// on the server's first backend.
+    pub async fn beside(
+        &self,
+        namespace: RestateNamespace,
+        label: impl Into<String>,
+    ) -> Result<Self, BackendError> {
+        Self::build_on(
+            self.server.clone(),
+            Arc::clone(&self.clock),
+            true,
+            namespace,
+            None,
+            label,
+            DeploymentHooks::default(),
+            |stores| stores,
+        )
+        .await
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::fn_params_excessive_bools,
+        reason = "the server's first backend and one beside it differ in every one"
+    )]
+    async fn build_on(
+        server: RestateTestServer,
+        clock: Arc<TestClock>,
+        beside: bool,
+        namespace: RestateNamespace,
+        segment_effect_budget: Option<u64>,
+        first_label: impl Into<String>,
+        first_hooks: DeploymentHooks,
+        decorate_stores: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
+    ) -> Result<Self, BackendError> {
+        let first_label = first_label.into();
         // The double is deterministic under its seed, so its registrar mints
         // the sequential test ids: one seed names the same processes on
         // every run.
@@ -191,9 +261,14 @@ impl RestateTestBackend {
         );
         let connection =
             RestateConnection::with_transport(server.ingress_url(), server.transport());
-        let authority =
-            RestateAuthorityId::new(format!("lash-restate-test-{}", server.config().seed))
-                .map_err(|error| BackendError::Authority(error.to_string()))?;
+        // The server's first deployment journals under the seed's authority;
+        // a deployment beside it under one of its own.
+        let authority = RestateAuthorityId::new(if beside {
+            format!("lash-restate-test-{}-{first_label}", server.config().seed)
+        } else {
+            format!("lash-restate-test-{}", server.config().seed)
+        })
+        .map_err(|error| BackendError::Authority(error.to_string()))?;
         let engine_stores = decorate_stores(Arc::clone(&stores) as Arc<dyn StoreSet>);
         let restate = Arc::new(RestateEngine::new(
             Arc::clone(&engine_stores),
@@ -202,7 +277,8 @@ impl RestateTestBackend {
                 connection.clone(),
                 authority.clone(),
                 server.config().build_generation.clone(),
-            ),
+            )
+            .with_namespace(namespace.clone()),
         ));
         // The endpoint exists before any core over this backend does, so it
         // serves processes on whatever worker the fixture installs later.
@@ -214,18 +290,31 @@ impl RestateTestBackend {
             None => serving,
         };
         let loans = Arc::new(crate::open_handler::Loans::default());
-        let endpoint = restate
-            .endpoint_builder(serving)
-            .bind(HandlerHost {
+        let builder = bind_handler_host(
+            restate.endpoint_builder(serving),
+            HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority: authority.clone(),
-            })
-            .bind(crate::open_handler::HandlerLender {
+                namespace: namespace.clone(),
+            },
+        )
+        .map_err(BackendError::HandlerHostName)?;
+        let builder = if namespace.is_default() {
+            builder.bind(crate::open_handler::HandlerLender {
                 loans: Arc::clone(&loans),
             })
-            .build();
+        } else {
+            builder
+        };
+        // An in-process deployment is registered through the Rust API; the
+        // engine's registration still runs its name check against the
+        // server's admin API first, and the double acknowledges the admin
+        // registration it then sends.
+        restate
+            .register_deployment(&format!("restate-test:{}", deployment_name(&first_label)))
+            .await?;
         server
-            .register_with(endpoint, first_label, first_hooks)
+            .register_with(builder.build(), first_label, first_hooks)
             .await?;
         Ok(Self {
             server,
@@ -256,19 +345,39 @@ impl RestateTestBackend {
         label: impl Into<String>,
         hooks: DeploymentHooks,
     ) -> Result<DeploymentId, BackendError> {
-        let endpoint = self
-            .restate
-            .sibling_build(generation)
-            .endpoint_builder(self.processes.clone())
-            .bind(HandlerHost {
+        let builder = bind_handler_host(
+            self.restate
+                .sibling_build(generation)
+                .endpoint_builder(self.processes.clone()),
+            HandlerHost {
                 jobs: Arc::clone(&self.jobs),
                 authority: self.authority.clone(),
-            })
-            .bind(crate::open_handler::HandlerLender {
+                namespace: self.namespace().clone(),
+            },
+        )
+        .map_err(BackendError::HandlerHostName)?;
+        let builder = if self.namespace().is_default() {
+            builder.bind(crate::open_handler::HandlerLender {
                 loans: Arc::clone(&self.loans),
             })
-            .build();
-        Ok(self.server.register_with(endpoint, label, hooks).await?)
+        } else {
+            builder
+        };
+        Ok(self
+            .server
+            .register_with(builder.build(), label, hooks)
+            .await?)
+    }
+
+    /// The namespace this backend's services are named in (FIG-3898).
+    pub fn namespace(&self) -> &RestateNamespace {
+        self.restate.namespace()
+    }
+
+    /// `name`'s Restate name in this backend's namespace: what a crash rule,
+    /// a hold or an invocation view names one of its services by.
+    pub fn service_name(&self, name: &str) -> String {
+        self.namespace().service_name(name)
     }
 
     /// The server double: time, crashes, operator commands, introspection.
@@ -352,7 +461,7 @@ impl RestateTestBackend {
     pub fn crash_session_drive(&self, point: CrashPoint) {
         self.server.crash_on(
             CrashRule::new(point)
-                .service(SESSION_DRIVER_SERVICE)
+                .service(self.service_name(SESSION_DRIVER_SERVICE))
                 .within_attempts(1),
         );
     }
@@ -363,7 +472,7 @@ impl RestateTestBackend {
     pub fn crash_turn_drive(&self, point: CrashPoint) {
         self.server.crash_on(
             CrashRule::new(point)
-                .service(TURN_DRIVER_SERVICE)
+                .service(self.service_name(TURN_DRIVER_SERVICE))
                 .within_attempts(1),
         );
     }
@@ -379,7 +488,7 @@ impl RestateTestBackend {
     /// never drives.
     pub async fn hold_session_drive(&self, session: &lash_core::SessionId) -> crate::Hold {
         self.server
-            .hold(SESSION_DRIVER_SERVICE, session.as_str())
+            .hold(&self.service_name(SESSION_DRIVER_SERVICE), session.as_str())
             .await
     }
 
@@ -495,10 +604,11 @@ impl RestateTestBackend {
     ) -> Result<String, String> {
         let key = self.jobs.park(admitted, parked);
         let ingress = self.ingress();
-        let call = ingress.call_workflow_json::<_, bool>(HANDLER_HOST, &key, "run", &key);
+        let handler_host = self.service_name(HANDLER_HOST);
+        let call = ingress.call_workflow_json::<_, bool>(&handler_host, &key, "run", &key);
         // A job whose handler exhausted its retries is paused, not failed:
         // report it at once instead of waiting out the attach ceiling.
-        let target = format!("{HANDLER_HOST}/{key}/run");
+        let target = format!("{handler_host}/{key}/run");
         let paused = async {
             loop {
                 if let Some(view) = self
@@ -715,39 +825,90 @@ impl ParkedJobs {
 pub(crate) struct HandlerHost {
     pub(crate) jobs: Arc<ParkedJobs>,
     pub(crate) authority: RestateAuthorityId,
+    /// The namespace of the deployment the host serves: the controller it
+    /// runs a job on calls that namespace's lash services, and the host is
+    /// bound under its name there.
+    pub(crate) namespace: RestateNamespace,
 }
 
-#[restate_sdk::workflow(name = "LashTestHandlerHost")]
-impl HandlerHost {
-    #[handler]
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(key): Json<String>,
-    ) -> HandlerResult<Json<bool>> {
-        let Some((admitted, job, crashing)) = self.jobs.next_run(&key) else {
-            return Err(TerminalError::new(format!(
-                "job `{key}` is not parked on this backend; its handler was re-invoked after it ran"
-            ))
-            .into());
-        };
-        let controller =
-            lash_restate::RestateRuntimeEffectController::new(ctx, self.authority.clone());
-        let scoped = controller
-            .scoped_effect_controller(admitted)
-            .map_err(TerminalError::from_error)?;
-        match (CatchUnwind { inner: job(scoped) }).await {
-            Ok(()) => Ok(Json(true)),
-            Err(()) if crashing => {
-                self.jobs.mark_crashed(&key);
-                Err(HandlerError::from(std::io::Error::other(format!(
-                    "job `{key}` crashed; the server replays it into the redrive"
-                ))))
-            }
-            Err(()) => {
-                Err(TerminalError::new(format!("job `{key}` panicked in its handler")).into())
+/// [`HandlerHost`]'s service, declared through the trait API: its generated
+/// dispatcher is a nameable type, so the binding can name the service in its
+/// deployment's namespace.
+mod handler_host {
+    #![allow(
+        deprecated,
+        reason = "Restate SDK 0.11's trait service API is the one whose dispatcher a binding can rename"
+    )]
+
+    use super::*;
+
+    #[restate_sdk::workflow]
+    #[name = "LashTestHandlerHost"]
+    pub(crate) trait HandlerHostService {
+        async fn run(key: Json<String>) -> HandlerResult<Json<bool>>;
+    }
+
+    /// Bind `host` on `builder` under [`HANDLER_HOST`] in its namespace, or
+    /// report the name Restate refuses.
+    pub(crate) fn bind_handler_host(
+        builder: restate_sdk::endpoint::Builder,
+        host: HandlerHost,
+    ) -> Result<restate_sdk::endpoint::Builder, String> {
+        use restate_sdk::service::Discoverable as _;
+        let name = host.namespace.service_name(HANDLER_HOST);
+        let mut discovery = ServeHandlerHostService::<HandlerHost>::discover();
+        discovery.name = restate_sdk::discovery::ServiceName::try_from(name.clone())
+            .map_err(|error| format!("`{name}`: {error}"))?;
+        Ok(
+            builder.bind(restate_sdk::service::macro_support::service_definition(
+                host.serve(),
+                discovery,
+            )),
+        )
+    }
+
+    impl HandlerHostService for HandlerHost {
+        async fn run(
+            &self,
+            ctx: WorkflowContext<'_>,
+            Json(key): Json<String>,
+        ) -> HandlerResult<Json<bool>> {
+            let Some((admitted, job, crashing)) = self.jobs.next_run(&key) else {
+                return Err(TerminalError::new(format!(
+                    "job `{key}` is not parked on this backend; its handler was re-invoked after it ran"
+                ))
+                .into());
+            };
+            let controller =
+                lash_restate::RestateRuntimeEffectController::new(ctx, self.authority.clone())
+                    .in_namespace(self.namespace.clone());
+            let scoped = controller
+                .scoped_effect_controller(admitted)
+                .map_err(TerminalError::from_error)?;
+            match (CatchUnwind { inner: job(scoped) }).await {
+                Ok(()) => Ok(Json(true)),
+                Err(()) if crashing => {
+                    self.jobs.mark_crashed(&key);
+                    Err(HandlerError::from(std::io::Error::other(format!(
+                        "job `{key}` crashed; the server replays it into the redrive"
+                    ))))
+                }
+                Err(()) => {
+                    Err(TerminalError::new(format!("job `{key}` panicked in its handler")).into())
+                }
             }
         }
+    }
+}
+
+pub(crate) use handler_host::bind_handler_host;
+
+/// A registration URI's last segment for the deployment labelled `label`.
+fn deployment_name(label: &str) -> String {
+    if label.is_empty() {
+        "first".to_owned()
+    } else {
+        label.to_owned()
     }
 }
 

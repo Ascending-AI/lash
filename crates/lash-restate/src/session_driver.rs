@@ -285,6 +285,9 @@ pub struct RestateSessionWork {
     /// The drain generation of the build scheduling drives: every drive
     /// request it sends is stamped with it.
     build_generation: BuildGeneration,
+    /// The namespace the deployment's session services are named in
+    /// (FIG-3898).
+    namespace: crate::RestateNamespace,
     control: Arc<dyn lash_core::engine::SessionControlEngine>,
 }
 
@@ -298,6 +301,7 @@ impl RestateSessionWork {
         admin: RestateAdminClient,
         slot: RestateSessionDriverSlot,
         build_generation: BuildGeneration,
+        namespace: crate::RestateNamespace,
         control: Arc<dyn lash_core::engine::SessionControlEngine>,
     ) -> Self {
         Self {
@@ -305,6 +309,7 @@ impl RestateSessionWork {
             admin,
             slot,
             build_generation,
+            namespace,
             control,
         }
     }
@@ -335,7 +340,7 @@ impl RestateSessionWork {
         };
         self.ingress
             .send_object_json_idempotent_bounded(
-                LashService::SessionDriver.name(),
+                &self.namespace.stable(LashService::SessionDriver).name(),
                 session.as_str(),
                 DRIVE_HANDLER,
                 &body,
@@ -356,10 +361,9 @@ impl RestateSessionWork {
         request: DriveRequestId,
         generation: &BuildGeneration,
     ) -> Result<crate::RestateInvocationId, crate::RestateHttpError> {
-        let route = crate::services::ServiceRoute::generation(
-            LashService::SessionDriver,
-            generation.clone(),
-        );
+        let route = self
+            .namespace
+            .generation(LashService::SessionDriver, generation.clone());
         let body = RestateSessionDriveRequest {
             drive_version: LASH_SESSION_DRIVE_VERSION,
             request: DriveRequest {
@@ -398,7 +402,7 @@ impl RestateSessionWork {
         };
         self.ingress
             .call_object_json_idempotent(
-                LashService::SessionDriver.name(),
+                &self.namespace.stable(LashService::SessionDriver).name(),
                 session.as_str(),
                 DRIVE_HANDLER,
                 &body,
@@ -419,7 +423,7 @@ impl RestateSessionWork {
         let key = turn_workflow_key(session, root);
         match self
             .ingress
-            .attach_workflow_run(LashService::TurnDriver.name(), &key)
+            .attach_workflow_run(&self.namespace.stable(LashService::TurnDriver).name(), &key)
             .await
         {
             Err(crate::RestateHttpError::Status { body, .. }) => decode_drive_refusal(&body),
@@ -699,12 +703,13 @@ impl LashSessionImpl {
         slot: RestateSessionDriverSlot,
         authority_id: RestateAuthorityId,
         build_generation: BuildGeneration,
+        namespace: &crate::RestateNamespace,
     ) -> Self {
         Self {
             slot,
             authority_id,
             build_generation,
-            route: crate::services::ServiceRoute::stable(LashService::SessionDriver),
+            route: namespace.stable(LashService::SessionDriver),
         }
     }
 
@@ -722,12 +727,13 @@ impl LashTurnImpl {
         slot: RestateSessionDriverSlot,
         authority_id: RestateAuthorityId,
         build_generation: BuildGeneration,
+        namespace: &crate::RestateNamespace,
     ) -> Self {
         Self {
             slot,
             authority_id,
             build_generation,
-            route: crate::services::ServiceRoute::stable(LashService::TurnDriver),
+            route: namespace.stable(LashService::TurnDriver),
         }
     }
 
@@ -748,7 +754,7 @@ fn retired_generation(service: LashService, found: u32) -> HandlerError {
         format!(
             "{} request carries lash-session-drive-v{found}; this handler journals generation \
              {LASH_SESSION_DRIVE_VERSION}",
-            service.name()
+            service.base_name()
         ),
     ))
 }
@@ -873,7 +879,11 @@ async fn drive_session_journal(
         )));
     }
     let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
-    crate::sentinel::check_generation(LashService::SessionDriver.name(), &recorded, generation)?;
+    crate::sentinel::check_generation(
+        &route.namespace().stable(LashService::SessionDriver).name(),
+        &recorded,
+        generation,
+    )?;
     // The generation lane is resume-only (FIG-3795): it serves a drive whose
     // request was stamped for exactly this generation. A request naming
     // another generation, sent there by error, is refused before any command
@@ -891,8 +901,9 @@ async fn drive_session_journal(
             ),
         ));
     }
-    let driver = slot.driver_for(LashService::SessionDriver.name())?;
+    let driver = slot.driver_for(&route.namespace().stable(LashService::SessionDriver).name())?;
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
+        .in_namespace(route.namespace().clone())
         .with_build_generation(generation.clone());
     let admission_scope = drive_admission_scope(&request.session, &request.request);
     let mut ran = Vec::new();
@@ -925,7 +936,7 @@ async fn drive_session_journal(
                 // (FIG-3795), and its outcome reads back under the same route.
                 let outcome = match crate::services::routed_workflow::<_, _, RootOutcome>(
                     controller.context(),
-                    &crate::services::ServiceRoute::stable(LashService::TurnDriver),
+                    &route.namespace().stable(LashService::TurnDriver),
                     key.clone(),
                     "run",
                     RestateTurnDriveRequest {
@@ -949,7 +960,7 @@ async fn drive_session_journal(
                         let recorded =
                             crate::services::routed_workflow::<_, (), Option<RootOutcome>>(
                                 controller.context(),
-                                &crate::services::ServiceRoute::stable(LashService::TurnDriver),
+                                &route.namespace().stable(LashService::TurnDriver),
                                 key,
                                 "outcome",
                                 (),
@@ -1051,7 +1062,11 @@ async fn run_root_journal(
         )));
     }
     let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
-    crate::sentinel::check_generation(LashService::TurnDriver.name(), &recorded, generation)?;
+    crate::sentinel::check_generation(
+        &route.namespace().stable(LashService::TurnDriver).name(),
+        &recorded,
+        generation,
+    )?;
     // The generation lane serves a root the latest build refused, re-sent by
     // the drain under the generation the drive that admitted it ran on
     // (`sender_generation`). A request naming another generation, or none,
@@ -1072,8 +1087,9 @@ async fn run_root_journal(
             ),
         ));
     }
-    let driver = slot.driver_for(LashService::TurnDriver.name())?;
+    let driver = slot.driver_for(&route.namespace().stable(LashService::TurnDriver).name())?;
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
+        .in_namespace(route.namespace().clone())
         .with_build_generation(generation.clone());
     let scoped = controller
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
@@ -1303,6 +1319,7 @@ mod tests {
             )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
+            crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );
         work.schedule_drive(
@@ -1356,6 +1373,7 @@ mod tests {
             )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
+            crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );
         work.schedule_drive(
@@ -1432,6 +1450,7 @@ mod tests {
             )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
+            crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );
 
@@ -1497,6 +1516,7 @@ mod tests {
             )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
+            crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );
         let first = work.await_drive(&session, &request).await;

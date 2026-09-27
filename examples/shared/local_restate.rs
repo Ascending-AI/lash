@@ -11,10 +11,14 @@
 //! * [`LocalRestate::from_env`] reads the addresses a launcher hands the host
 //!   (`scripts/ci/with-service.sh restate`, or a dev script that keeps a
 //!   server running beside a long-lived host).
-//! * [`LocalRestateServer::spawn`] starts a private server for one core. The
-//!   engine binds lash's services under stable names (`LashSession`,
-//!   `LashTurn`, ...), so one server serves one core's deployment at a time;
-//!   a host that runs several independent cores at once gives each its own.
+//! * [`LocalRestateServer::shared`] starts a server this process's cores
+//!   share, and stops it once the last of them lets go.
+//!
+//! Several cores share one server by namespace (ADR 0111): each core's engine
+//! binds lash's services under its own namespace, and the server refuses a
+//! registration over names another core's deployment holds. A host that runs
+//! several independent cores at once takes a namespace for each
+//! ([`LocalRestateServer::core`], [`LocalRestate::in_namespace`]).
 //!
 //! Each example includes this file with `#[path]` and uses the part it needs.
 
@@ -26,14 +30,14 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
 /// The environment variable naming the `restate-server` binary
-/// [`LocalRestateServer::spawn`] starts; `restate-server` on `PATH` otherwise.
+/// [`LocalRestateServer::shared`] starts; `restate-server` on `PATH` otherwise.
 /// Launch scripts set it to `python3 scripts/ci/restate_suite.py server-path`,
 /// the pinned release binary.
 pub(crate) const RESTATE_SERVER_BIN_ENV: &str = "LASH_RESTATE_SERVER_BIN";
@@ -41,12 +45,14 @@ pub(crate) const RESTATE_SERVER_BIN_ENV: &str = "LASH_RESTATE_SERVER_BIN";
 /// How long a spawned server has to answer its health endpoints.
 const SERVER_READY: Duration = Duration::from_secs(60);
 
-/// The addresses of a local `restate-server`.
+/// The addresses of a local `restate-server`, and the namespace and authority
+/// a core's deployment there binds lash's services under.
 #[derive(Clone, Debug)]
 pub(crate) struct LocalRestate {
     pub(crate) ingress_url: String,
     pub(crate) admin_url: String,
     pub(crate) authority: lash::restate::RestateAuthorityId,
+    pub(crate) namespace: lash::restate::RestateNamespace,
 }
 
 impl LocalRestate {
@@ -63,6 +69,26 @@ impl LocalRestate {
             admin_url: read("RESTATE_ADMIN_URL")?,
             authority: lash::restate::RestateAuthorityId::new(read("RESTATE_AUTHORITY_ID")?)
                 .map_err(|error| anyhow::anyhow!("RESTATE_AUTHORITY_ID: {error}"))?,
+            namespace: lash::restate::RestateNamespace::default(),
+        })
+    }
+
+    /// This server, for a core of its own in `namespace`: the core's
+    /// authority is this one's, qualified by the namespace.
+    pub(crate) fn in_namespace(&self, namespace: &str) -> Result<Self> {
+        let namespace = namespace
+            .parse::<lash::restate::RestateNamespace>()
+            .map_err(|error| anyhow::anyhow!("Restate namespace `{namespace}`: {error}"))?;
+        let authority = lash::restate::RestateAuthorityId::new(format!(
+            "{}.{namespace}",
+            self.authority.binding_id()
+        ))
+        .map_err(|error| anyhow::anyhow!("Restate authority for {namespace}: {error}"))?;
+        Ok(Self {
+            ingress_url: self.ingress_url.clone(),
+            admin_url: self.admin_url.clone(),
+            authority,
+            namespace,
         })
     }
 
@@ -77,28 +103,32 @@ impl LocalRestate {
                 self.ingress_url.clone(),
                 self.admin_url.clone(),
                 self.authority.clone(),
-            ),
+            )
+            .with_namespace(self.namespace.clone()),
         ))
     }
 
-    /// Serve `endpoint` on a free loopback port and register it with the
-    /// server. The deployment serves until the returned handle drops.
+    /// Serve `engine`'s `endpoint` on a free loopback port and register it
+    /// with the server. The deployment serves until the returned handle drops.
     pub(crate) async fn serve(
         &self,
+        engine: &lash::restate::RestateEngine,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
-        self.serve_at(SocketAddr::from(([127, 0, 0, 1], 0)), endpoint)
+        self.serve_at(engine, SocketAddr::from(([127, 0, 0, 1], 0)), endpoint)
             .await
     }
 
-    /// Serve `endpoint` at `addr` and register it with the server. The
-    /// deployment serves until the returned handle drops.
+    /// Serve `engine`'s `endpoint` at `addr` and register it with the server,
+    /// which refuses it when another deployment holds its namespace's names.
+    /// The deployment serves until the returned handle drops.
     ///
     /// Restate pins an in-flight invocation to the deployment it started on,
     /// so a host that restarts against a server that outlives it serves the
     /// same `addr` again.
     pub(crate) async fn serve_at(
         &self,
+        engine: &lash::restate::RestateEngine,
         addr: SocketAddr,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
@@ -115,25 +145,16 @@ impl LocalRestate {
                 })
                 .await;
         });
-        let response = reqwest::Client::new()
-            .post(format!(
-                "{}/deployments",
-                self.admin_url.trim_end_matches('/')
-            ))
-            .json(&serde_json::json!({ "uri": uri, "force": true }))
-            .send()
-            .await
-            .context("register the endpoint with the Restate admin API")?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            bail!("Restate refused the deployment at {uri}: {status} {body}");
-        }
-        Ok(LocalDeployment {
+        let deployment = LocalDeployment {
             addr: local,
             stop: Some(stop),
             serving,
-        })
+        };
+        engine
+            .register_deployment(&uri)
+            .await
+            .with_context(|| format!("register the Restate deployment at {uri}"))?;
+        Ok(deployment)
     }
 }
 
@@ -160,19 +181,41 @@ impl Drop for LocalDeployment {
     }
 }
 
-/// A private `restate-server` this process started, on free loopback ports
-/// and a scratch data directory. Dropping it kills the server and removes
-/// the directory.
+/// A `restate-server` this process started, on free loopback ports and a
+/// scratch data directory, shared by the process's cores. Dropping the last
+/// handle kills the server and removes the directory.
 pub(crate) struct LocalRestateServer {
     restate: LocalRestate,
+    cores: AtomicU64,
     child: Child,
     base_dir: PathBuf,
 }
 
 impl LocalRestateServer {
+    /// The server this process's cores share, started labelled `label` if no
+    /// core holds it. It stops once the last handle drops.
+    pub(crate) async fn shared(label: &str) -> Result<Arc<Self>> {
+        static SHARED: tokio::sync::Mutex<Weak<LocalRestateServer>> =
+            tokio::sync::Mutex::const_new(Weak::new());
+        let mut shared = SHARED.lock().await;
+        if let Some(server) = shared.upgrade() {
+            return Ok(server);
+        }
+        let server = Arc::new(Self::spawn(label).await?);
+        *shared = Arc::downgrade(&server);
+        Ok(server)
+    }
+
+    /// This server for a new core labelled `label`: a namespace of its own,
+    /// `label` and an ordinal, so concurrent cores never share lash's names.
+    pub(crate) fn core(&self, label: &str) -> Result<LocalRestate> {
+        let ordinal = self.cores.fetch_add(1, Ordering::Relaxed);
+        self.restate.in_namespace(&format!("{label}-{ordinal}"))
+    }
+
     /// Start a server labelled `label` and wait until it answers. The binary
     /// is [`RESTATE_SERVER_BIN_ENV`]'s, or `restate-server` on `PATH`.
-    pub(crate) async fn spawn(label: &str) -> Result<Self> {
+    async fn spawn(label: &str) -> Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let ordinal = NEXT.fetch_add(1, Ordering::Relaxed);
         let run = format!("{label}-{}-{ordinal}", std::process::id());
@@ -234,7 +277,9 @@ impl LocalRestateServer {
                 admin_url: format!("http://127.0.0.1:{admin}"),
                 authority: lash::restate::RestateAuthorityId::new(format!("{label}:{run}"))
                     .map_err(|error| anyhow::anyhow!("Restate authority for {run}: {error}"))?,
+                namespace: lash::restate::RestateNamespace::default(),
             },
+            cores: AtomicU64::new(0),
             child,
             base_dir,
         };
@@ -242,7 +287,7 @@ impl LocalRestateServer {
         Ok(server)
     }
 
-    /// The server's addresses and authority.
+    /// The server's addresses and authority, in the default namespace.
     pub(crate) fn restate(&self) -> &LocalRestate {
         &self.restate
     }

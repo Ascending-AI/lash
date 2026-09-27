@@ -169,6 +169,7 @@ impl Engine {
                 endpoint_bind: target.endpoint_bind,
                 endpoint_url: target.endpoint_url.clone(),
                 run_tag: run_tag(seed),
+                namespace: lash_restate::RestateNamespace::default(),
             })
             .await
             .map(Self::Live)

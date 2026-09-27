@@ -71,7 +71,8 @@ pub struct ProcessParkReconcileReport {
     pub unchanged: usize,
 }
 
-/// Park the process of every paused `LashProcessWorkflow` segment.
+/// Park the process of every paused `LashProcessWorkflow` segment in
+/// `namespace`.
 ///
 /// Idempotent: a process whose park already refuses is left as it is, so a
 /// repeated pass over the same pause writes nothing.
@@ -81,11 +82,12 @@ pub struct ProcessParkReconcileReport {
 /// part-way is retried whole by the next one.
 pub async fn reconcile_process_parks(
     admin: &RestateAdminClient,
+    namespace: &crate::RestateNamespace,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
 ) -> Result<ProcessParkReconcileReport, PluginError> {
     let paused = admin
-        .paused_invocations(LashService::ProcessWorkflow.name())
+        .paused_invocations(&namespace.stable(LashService::ProcessWorkflow).name())
         .await
         .map_err(|error| {
             PluginError::Session(format!(
@@ -185,6 +187,7 @@ pub(crate) struct LostRunPass {
 /// When the registry's worklist or Restate's admin query fails.
 pub(crate) async fn end_lost_process_runs(
     admin: &RestateAdminClient,
+    namespace: &crate::RestateNamespace,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
     limit: std::num::NonZeroUsize,
@@ -205,7 +208,7 @@ pub(crate) async fn end_lost_process_runs(
             })
             .collect();
         let runs = admin
-            .failed_segment_runs(&segment_keys)
+            .failed_segment_runs(namespace, &segment_keys)
             .await
             .map_err(|error| {
                 PluginError::Session(format!("read failed process runs from Restate: {error}"))
@@ -327,6 +330,7 @@ async fn release_terminal_segment(
 /// Restate refuses the resume.
 pub async fn resume_parked_process(
     admin: &RestateAdminClient,
+    namespace: &crate::RestateNamespace,
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &ProcessId,
 ) -> Result<RestateInvocationId, PluginError> {
@@ -341,7 +345,7 @@ pub async fn resume_parked_process(
     };
     let invocation = match &park.engine {
         Some(engine) => RestateInvocationId::new(engine.as_str().to_string()),
-        None => paused_invocation_of(admin, process_id)
+        None => paused_invocation_of(admin, namespace, process_id)
             .await?
             .ok_or_else(|| {
                 PluginError::Session(format!(
@@ -363,10 +367,11 @@ pub async fn resume_parked_process(
 /// The paused `run` invocation of any of `process_id`'s segments.
 async fn paused_invocation_of(
     admin: &RestateAdminClient,
+    namespace: &crate::RestateNamespace,
     process_id: &ProcessId,
 ) -> Result<Option<RestateInvocationId>, PluginError> {
     let paused = admin
-        .paused_invocations(LashService::ProcessWorkflow.name())
+        .paused_invocations(&namespace.stable(LashService::ProcessWorkflow).name())
         .await
         .map_err(|error| {
             PluginError::Session(format!(

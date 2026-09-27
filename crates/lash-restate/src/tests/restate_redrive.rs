@@ -34,18 +34,21 @@ impl Fig3460ReplayHeaderProbe for Fig3460ReplayHeaderProbeImpl {
     ) -> HandlerResult<Json<()>> {
         RestateControllerContext::scope_effect_begin(
             &ctx,
+            &crate::services::DEFAULT_NAMESPACE,
             input.index_key.clone(),
             input.replay_key.clone(),
         )
         .await?;
         RestateControllerContext::scope_effect_end(
             &ctx,
+            &crate::services::DEFAULT_NAMESPACE,
             input.index_key.clone(),
             input.replay_key.clone(),
         )
         .await?;
         RestateControllerContext::scope_group_child_membership(
             &ctx,
+            &crate::services::DEFAULT_NAMESPACE,
             input.index_key,
             input.replay_key,
         )
@@ -124,7 +127,7 @@ async fn fig1128_deadline_wire_typed_refusal_and_no_deadline_shape() {
         "timeout_ms": 30_000,
     });
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitWorkflowImpl.serve())
+        .bind(LashDurableWaitWorkflowImpl::default().serve())
         .build();
     let refused = invoke_endpoint(
         &endpoint,

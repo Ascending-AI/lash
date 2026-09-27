@@ -704,6 +704,7 @@ impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
     ) -> HandlerResult<Json<()>> {
         let outcome = RestateControllerContext::sleep_or_turn_cancel(
             &ctx,
+            &crate::services::DEFAULT_NAMESPACE,
             Duration::from_millis(input.duration_ms),
             None,
             crate::controller::context::ProcessCancelRace::Raced,

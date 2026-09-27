@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 180,
+  "cargo_target_count": 181,
   "feature_lane_units": [
     {
       "features": [
@@ -16198,7 +16198,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 239,
+  "generated_label_count": 240,
   "packages": [
     {
       "declared_features": [
@@ -17886,6 +17886,12 @@
           "tags": []
         },
         {
+          "cargo": "namespaces",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:namespaces__test",
+          "tags": []
+        },
+        {
           "cargo": "one_driver",
           "kind": "test",
           "label": "//crates/lash-restate-test:one_driver__test",
@@ -17960,6 +17966,7 @@
           "//crates/lash-restate-test:follow_on_crash_replay__test",
           "//crates/lash-restate-test:host_send_wait__test",
           "//crates/lash-restate-test:lash-restate-test__unit_test",
+          "//crates/lash-restate-test:namespaces__test",
           "//crates/lash-restate-test:one_driver__test",
           "//crates/lash-restate-test:process_crash_replay__test",
           "//crates/lash-restate-test:process_successor_after_prune__test",

@@ -138,6 +138,7 @@ enum SignalWaitPromise {
 /// does.
 pub(super) async fn cancel_only<'ctx, 'run, C>(
     context: &'run C,
+    namespace: &'run crate::RestateNamespace,
     request: RestateDurableWaitAwaitRequest,
     replay_key: String,
 ) -> Result<RestateTurnCancelRaceOutcome<SignalWaitOutcome>, TerminalError>
@@ -147,7 +148,13 @@ where
 {
     Ok(
         match context
-            .await_event_or_turn_cancel(request, replay_key, None, ProcessCancelRace::Raced)
+            .await_event_or_turn_cancel(
+                namespace,
+                request,
+                replay_key,
+                None,
+                ProcessCancelRace::Raced,
+            )
             .await?
         {
             RestateTurnCancelRaceOutcome::Completed(resolution) => {
@@ -222,6 +229,7 @@ macro_rules! process_signal_wait_method {
     ($promises:ident, $context:ident, $ctx_lifetime:lifetime) => {
         fn await_signal_or_segment_end<'run>(
             &'run self,
+            namespace: &'run crate::RestateNamespace,
             request: RestateDurableWaitAwaitRequest,
             replay_key: String,
             generation: lash_core::engine::BuildGeneration,
@@ -230,7 +238,7 @@ macro_rules! process_signal_wait_method {
             $ctx_lifetime: 'run,
         {
             Box::pin(process_signal_wait_body!(
-                $promises, $context, 'run, self, request, replay_key, generation
+                $promises, $context, 'run, self, namespace, request, replay_key, generation
             ))
         }
     };
@@ -238,16 +246,14 @@ macro_rules! process_signal_wait_method {
 
 macro_rules! process_signal_wait_body {
     (
-        $promises:ident, $context:ident, $run:lifetime, $ctx:expr,
+        $promises:ident, $context:ident, $run:lifetime, $ctx:expr, $namespace:ident,
         $request:ident, $replay_key:ident, $generation:ident
     ) => {
         async move {
             let context = $ctx;
             let event_address = RestateDurableWaitAddress::for_key(&$request.key);
-            let event = context
-                .workflow_client::<LashDurableWaitWorkflowClient>(
-                    event_address.workflow_key.clone(),
-                )
+            let event = $namespace
+                .durable_wait_workflow(context, event_address.workflow_key.clone())
                 .await_resolution(Json($request.clone().into()))
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), $replay_key.clone());
             let event = erase_gate_wait(event.call());
@@ -261,10 +267,8 @@ macro_rules! process_signal_wait_body {
             };
             let outcome = race_signal_wait(event, cancel, hand_over, &$generation).await?;
             if matches!(outcome, RestateTurnCancelRaceOutcome::ProcessCancelled) {
-                let resolve = context
-                    .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_object_key(
-                        &event_address,
-                    ))
+                let resolve = $namespace
+                    .durable_wait_registry(context, durable_wait_index_object_key(&event_address))
                     .resolve(Json(RestateDurableWaitResolveRequest {
                         key: $request.key,
                         resolution: Resolution::Cancelled,

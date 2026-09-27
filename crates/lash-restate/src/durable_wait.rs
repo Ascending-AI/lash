@@ -635,6 +635,7 @@ pub(crate) enum RestateTurnCancelGate {
 /// the `register_awakeable` call and its revocation verdict.
 pub(crate) async fn register_turn_cancel_gate<'ctx, C>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     session_id: &SessionId,
     key: AwaitEventKey,
     awakeable_id: String,
@@ -644,8 +645,8 @@ where
 {
     let entry = RestateDurableWaitAwakeableRequest { key, awakeable_id };
     let replay_key = entry.key.key_id.clone();
-    let register = context
-        .object_client::<LashDurableWaitRegistryClient>(session_id)
+    let register = namespace
+        .durable_wait_registry(context, session_id)
         .register_awakeable(Json(entry.clone()))
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(registration) = register.call().await?;
@@ -662,6 +663,7 @@ where
 /// it owes a wake to, so every winning branch must retire its gate.
 pub(crate) async fn retire_turn_cancel_gate<'ctx, C>(
     context: &C,
+    namespace: &crate::RestateNamespace,
     session_id: &SessionId,
     entry: RestateDurableWaitAwakeableRequest,
 ) -> Result<(), TerminalError>
@@ -669,8 +671,8 @@ where
     C: ContextClient<'ctx>,
 {
     let replay_key = entry.key.key_id.clone();
-    let unregister = context
-        .object_client::<LashDurableWaitRegistryClient>(session_id)
+    let unregister = namespace
+        .durable_wait_registry(context, session_id)
         .unregister_awakeable(Json(entry))
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(()) = unregister.call().await?;
@@ -697,8 +699,17 @@ pub trait LashDurableWaitWorkflow {
     ) -> HandlerResult<Json<ResolveOutcome>>;
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct LashDurableWaitWorkflowImpl;
+/// [`LashDurableWaitWorkflow`] in one deployment's namespace (FIG-3898).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LashDurableWaitWorkflowImpl {
+    namespace: crate::RestateNamespace,
+}
+
+impl LashDurableWaitWorkflowImpl {
+    pub(crate) fn new(namespace: crate::RestateNamespace) -> Self {
+        Self { namespace }
+    }
+}
 
 impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
     async fn await_resolution(
@@ -720,8 +731,9 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let address = verify_durable_wait_workflow_key(ctx.key(), &request.key)?;
         let index_key = durable_wait_index_object_key(&address);
         let replay_key = request.key.key_id.clone();
-        let registration = ctx
-            .object_client::<LashDurableWaitRegistryClient>(index_key.clone())
+        let registration = self
+            .namespace
+            .durable_wait_registry(&ctx, index_key.clone())
             .register(Json(RestateDurableWaitIndexRequest {
                 key: request.key.clone(),
             }))
@@ -776,8 +788,9 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         // a previously parked invocation can execute. Fully parked v2
         // invocations never reach it; pre-stamp object state is instead
         // refused typed at the registry's stamped-state gate.
-        let settle = ctx
-            .object_client::<LashDurableWaitRegistryClient>(index_key)
+        let settle = self
+            .namespace
+            .durable_wait_registry(&ctx, index_key)
             .settle(Json(RestateDurableWaitSettleRequest {
                 key: request.key,
                 resolution: resolution.clone(),
@@ -900,8 +913,18 @@ pub trait LashDurableWaitRegistry {
     ) -> HandlerResult<Json<()>>;
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct LashDurableWaitRegistryImpl;
+/// [`LashDurableWaitRegistry`] in one deployment's namespace (FIG-3898).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LashDurableWaitRegistryImpl {
+    namespace: crate::RestateNamespace,
+}
+
+impl LashDurableWaitRegistryImpl {
+    pub(crate) fn new(namespace: crate::RestateNamespace) -> Self {
+        Self { namespace }
+    }
+}
+
 pub(crate) fn durable_wait_index_state_key(address: &RestateDurableWaitAddress) -> String {
     let classification = match address.classification {
         RestateDurableWaitClassification::DurableWait => "durable",
@@ -1111,6 +1134,7 @@ async fn read_outstanding_waits(
 
 async fn resolve_indexed_waits(
     ctx: &ObjectContext<'_>,
+    namespace: &crate::RestateNamespace,
     waits: Vec<AwaitEventKey>,
     mirror_outcomes: bool,
 ) -> HandlerResult<()> {
@@ -1119,8 +1143,8 @@ async fn resolve_indexed_waits(
         let address = RestateDurableWaitAddress::for_key(&key);
         let workflow_key = address.workflow_key.clone();
         let resolution = Resolution::Cancelled;
-        let resolve = ctx
-            .workflow_client::<LashDurableWaitWorkflowClient>(workflow_key)
+        let resolve = namespace
+            .durable_wait_workflow(ctx, workflow_key)
             .resolve(Json(RestateDurableWaitResolveRequest {
                 key,
                 resolution: resolution.clone(),
@@ -1158,6 +1182,7 @@ fn mirror_resolve_outcome(
 /// the index untouched and answers `false`.
 async fn revoke_index(
     ctx: &ObjectContext<'_>,
+    namespace: &crate::RestateNamespace,
     only_if_quiescent: bool,
 ) -> HandlerResult<Json<bool>> {
     let mut metadata = load_durable_wait_index_metadata(ctx).await?;
@@ -1169,7 +1194,7 @@ async fn revoke_index(
         || (only_if_quiescent
             && (!waits.is_empty()
                 || !metadata.awakeables.is_empty()
-                || !scope_effects_and_groups_are_quiescent(ctx).await?))
+                || !scope_effects_and_groups_are_quiescent(ctx, namespace).await?))
     {
         return Ok(Json(false));
     }
@@ -1185,7 +1210,7 @@ async fn revoke_index(
     for entry in awakeables {
         revoke_durable_wait_awakeable(ctx, &entry);
     }
-    resolve_indexed_waits(ctx, waits, false).await?;
+    resolve_indexed_waits(ctx, namespace, waits, false).await?;
     Ok(Json(true))
 }
 
@@ -1195,6 +1220,7 @@ async fn revoke_index(
 /// that never closed it does not fence its scope forever.
 async fn scope_effects_and_groups_are_quiescent(
     ctx: &ObjectContext<'_>,
+    namespace: &crate::RestateNamespace,
 ) -> Result<bool, TerminalError> {
     let keys = ctx.get_keys().await?;
     if keys
@@ -1209,8 +1235,8 @@ async fn scope_effects_and_groups_are_quiescent(
             .strip_prefix(DURABLE_WAIT_INDEX_GROUP_PREFIX)
             .map(|group_key| (state_key, group_key))
     }) {
-        let Json(unsettled) = ctx
-            .object_client::<crate::effect_group::EffectGroupStateClient>(group_key.to_string())
+        let Json(unsettled) = namespace
+            .effect_group_state(ctx, group_key.to_string())
             .unsettled_children()
             .call()
             .await?;
@@ -1323,8 +1349,9 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let _metadata = load_durable_wait_index_metadata(&ctx).await?;
         let workflow_key = address.workflow_key.clone();
         let replay_key = request.key.key_id.clone();
-        let Json(_) = ctx
-            .workflow_client::<LashDurableWaitWorkflowClient>(workflow_key)
+        let Json(_) = self
+            .namespace
+            .durable_wait_workflow(&ctx, workflow_key)
             .resolve(Json(request.clone()))
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
@@ -1363,8 +1390,9 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             resolve_durable_wait_awakeable(&ctx, &request, &resolution);
             return Ok(Json(RestateDurableWaitRegistration::Registered));
         }
-        let peek = ctx
-            .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+        let peek = self
+            .namespace
+            .durable_wait_workflow(&ctx, address.workflow_key)
             .peek()
             .header(
                 LASH_REPLAY_KEY_HEADER.to_string(),
@@ -1442,8 +1470,9 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         }
         let resolution = request.resolution.clone();
         let replay_key = request.key.key_id.clone();
-        let resolve = ctx
-            .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key.clone())
+        let resolve = self
+            .namespace
+            .durable_wait_workflow(&ctx, address.workflow_key.clone())
             .resolve(Json(request.clone()))
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
         let Json(outcome) = resolve.call().await?;
@@ -1512,12 +1541,12 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 &RestateDurableWaitAddress::for_key(key),
             ));
         }
-        resolve_indexed_waits(&ctx, waits, true).await?;
+        resolve_indexed_waits(&ctx, &self.namespace, waits, true).await?;
         Ok(Json(()))
     }
 
     async fn revoke_all(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        revoke_index(&ctx, false).await?;
+        revoke_index(&ctx, &self.namespace, false).await?;
         Ok(Json(()))
     }
 
@@ -1526,7 +1555,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         ctx: ObjectContext<'_>,
         Json(()): Json<()>,
     ) -> HandlerResult<Json<bool>> {
-        revoke_index(&ctx, true).await
+        revoke_index(&ctx, &self.namespace, true).await
     }
 
     async fn retire_scope(
@@ -1534,7 +1563,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         ctx: ObjectContext<'_>,
         Json(()): Json<()>,
     ) -> HandlerResult<Json<bool>> {
-        revoke_index(&ctx, false).await
+        revoke_index(&ctx, &self.namespace, false).await
     }
 
     async fn reinstate(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {

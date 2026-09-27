@@ -1111,6 +1111,7 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
         cancel_ingress,
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        &crate::services::DEFAULT_NAMESPACE,
     ));
     let registration = executed_registration();
     let process_id = registry
@@ -1194,6 +1195,7 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
         )),
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        &crate::services::DEFAULT_NAMESPACE,
     ));
     let registration = session_turn_registration();
     let process_id = registry
@@ -1337,6 +1339,7 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
         )),
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        &crate::services::DEFAULT_NAMESPACE,
     ));
     let registration = executed_registration();
     let process_id = registry
@@ -1415,6 +1418,7 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
         RestateIngressClient::new(connection),
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        &crate::services::DEFAULT_NAMESPACE,
     );
     let registration = executed_registration();
     let process_id = registry
@@ -1479,6 +1483,7 @@ pub(super) async fn a_broken_cancel_watch_fails_the_attempt_after_its_retries() 
         )),
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        &crate::services::DEFAULT_NAMESPACE,
     );
 
     let error = tokio::time::timeout(
@@ -1523,6 +1528,7 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
         )),
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        &crate::services::DEFAULT_NAMESPACE,
     );
 
     let error = workflow

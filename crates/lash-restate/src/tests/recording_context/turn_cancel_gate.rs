@@ -231,6 +231,7 @@ where
         let Some(turn_cancel) = turn_cancel else {
             return race_test_process_cancel(
                 context.await_event(
+                    &crate::services::DEFAULT_NAMESPACE,
                     request,
                     replay_key,
                     tokio_util::sync::CancellationToken::new(),
@@ -257,6 +258,7 @@ where
         let event_key = request.key.clone();
         let mut escalated = false;
         let guarded = context.await_event(
+            &crate::services::DEFAULT_NAMESPACE,
             request,
             replay_key,
             tokio_util::sync::CancellationToken::new(),
@@ -274,7 +276,7 @@ where
                         }
                         TestTurnCancelWakeStep::Unwind(wake) => {
                             if wake != RestateTurnCancelWake::SessionRevoked {
-                                context.resolve_event(RestateDurableWaitResolveRequest {
+                                context.resolve_event(&crate::services::DEFAULT_NAMESPACE, RestateDurableWaitResolveRequest {
                                     key: event_key,
                                     resolution: Resolution::Cancelled,
                                 }).await?;
@@ -305,7 +307,8 @@ where
 {
     Box::pin(async move {
         let Some(turn_cancel) = turn_cancel else {
-            let guarded = context.await_process_terminal(process_id);
+            let guarded =
+                context.await_process_terminal(&crate::services::DEFAULT_NAMESPACE, process_id);
             return race_test_process_cancel(
                 async move { guarded.await.map(Box::new) },
                 process_cancel,
@@ -328,7 +331,8 @@ where
             }
         };
         let mut escalated = false;
-        let guarded = context.await_process_terminal(process_id);
+        let guarded =
+            context.await_process_terminal(&crate::services::DEFAULT_NAMESPACE, process_id);
         tokio::pin!(guarded);
         loop {
             tokio::select! {

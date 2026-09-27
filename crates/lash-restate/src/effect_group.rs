@@ -33,10 +33,9 @@ use sha2::{Digest, Sha256};
 
 use crate::RestateIngressClient;
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, LashDurableWaitRegistryClient, LashDurableWaitWorkflowClient,
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitGroupChildRequest,
-    RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
-    durable_wait_index_object_key, restate_await_event_key,
+    LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
+    RestateDurableWaitGroupChildRequest, RestateDurableWaitResolveRequest,
+    durable_wait_index_key_for_scope, durable_wait_index_object_key, restate_await_event_key,
 };
 use crate::object_state::{self, StoredValueFormats};
 
@@ -529,12 +528,73 @@ fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupStateRecord) {
     object_state::set_stamped(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS, record);
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct EffectGroupState;
+/// An effect group's lifecycle and settlement rank, one object per group.
+// The registered service keeps its `EffectGroupIndex` name (FIG-3814).
+#[restate_sdk::object]
+#[name = "EffectGroupIndex"]
+pub(crate) trait EffectGroupState {
+    #[shared]
+    async fn probe() -> HandlerResult<Json<EffectGroupProbeResponse>>;
+    #[shared]
+    async fn unsettled_children() -> HandlerResult<Json<usize>>;
+    async fn open(
+        request: Json<EffectGroupOpenRequest>,
+    ) -> HandlerResult<Json<EffectGroupOpenResponse>>;
+    async fn probe_and_adopt(
+        request: Json<EffectGroupAdoptRequest>,
+    ) -> HandlerResult<Json<EffectGroupProbeAdoptResponse>>;
+    async fn record_dispatch(
+        request: Json<EffectGroupRecordDispatchRequest>,
+    ) -> HandlerResult<Json<EffectGroupRecordDispatchResponse>>;
+    async fn register_children(
+        request: Json<EffectGroupRegisterRequest>,
+    ) -> HandlerResult<Json<EffectGroupRegisterResponse>>;
+    async fn register_refusal(
+        request: Json<EffectGroupRefusalRequest>,
+    ) -> HandlerResult<Json<EffectGroupRegisterRefusalResponse>>;
+    async fn admit_child(
+        request: Json<EffectGroupAdmissionRequest>,
+    ) -> HandlerResult<Json<EffectGroupAdmissionResponse>>;
+    async fn commit_child(
+        request: Json<EffectGroupCommitChildRequest>,
+    ) -> HandlerResult<Json<EffectGroupCommitChildResponse>>;
+    async fn admit_semantic(
+        request: Json<EffectGroupAdmitSemanticRequest>,
+    ) -> HandlerResult<Json<EffectGroupAdmitSemanticResponse>>;
+    #[shared]
+    async fn drain_blockers(
+        request: Json<EffectGroupDrainBlockersRequest>,
+    ) -> HandlerResult<Json<EffectGroupDrainBlockersResponse>>;
+    async fn record_settlement(
+        request: Json<EffectGroupRecordSettlementRequest>,
+    ) -> HandlerResult<Json<EffectGroupRecordSettlementResponse>>;
+    #[shared]
+    async fn read_rank(
+        request: Json<EffectGroupReadRankRequest>,
+    ) -> HandlerResult<Json<EffectGroupReadRankResponse>>;
+    async fn close(
+        request: Json<EffectGroupCloseRequest>,
+    ) -> HandlerResult<Json<EffectGroupCloseResponse>>;
+    async fn retire() -> HandlerResult<Json<EffectGroupRetireResponse>>;
+    async fn finish_retirement() -> HandlerResult<Json<EffectGroupFinishRetirementResponse>>;
+    async fn retirement_cancel() -> HandlerResult<Json<EffectGroupRetirementCancelResponse>>;
+}
 
-#[restate_sdk::object(name = "EffectGroupIndex")]
-impl EffectGroupState {
-    #[handler]
+/// [`EffectGroupState`] in one deployment's namespace: the durable-wait
+/// index a group's waits and scope records live in is its namespace's
+/// (FIG-3898).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct EffectGroupStateImpl {
+    namespace: crate::RestateNamespace,
+}
+
+impl EffectGroupStateImpl {
+    pub(crate) fn new(namespace: crate::RestateNamespace) -> Self {
+        Self { namespace }
+    }
+}
+
+impl EffectGroupState for EffectGroupStateImpl {
     async fn probe(
         &self,
         ctx: SharedObjectContext<'_>,
@@ -552,7 +612,6 @@ impl EffectGroupState {
     /// How many of this group's children have no settlement yet: the count
     /// the owning scope's quiescence proof reads (FIG-2499). An absent or
     /// retired group, or one whose live record is gone, has none.
-    #[handler]
     async fn unsettled_children(&self, ctx: SharedObjectContext<'_>) -> HandlerResult<Json<usize>> {
         let unsettled = match load_index_shared(&ctx).await? {
             Some(record) => record.live().map_or(0, |live| {
@@ -565,7 +624,6 @@ impl EffectGroupState {
         Ok(Json(unsettled))
     }
 
-    #[handler]
     async fn open(
         &self,
         ctx: ObjectContext<'_>,
@@ -575,7 +633,9 @@ impl EffectGroupState {
         // The route is recorded verbatim, so it must name a dispatcher lane
         // a deployment binds (FIG-3795): an opener cannot declare a route
         // no dispatch could ever run under.
-        if !crate::services::ServiceRoute::parse(&request.dispatch_route)
+        if !self
+            .namespace
+            .parse(&request.dispatch_route)
             .is_some_and(|route| route.service() == crate::LashService::EffectGroupDispatch)
         {
             return Err(TerminalError::new(format!(
@@ -666,7 +726,6 @@ impl EffectGroupState {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn probe_and_adopt(
         &self,
         ctx: ObjectContext<'_>,
@@ -706,7 +765,6 @@ impl EffectGroupState {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn record_dispatch(
         &self,
         ctx: ObjectContext<'_>,
@@ -754,6 +812,7 @@ impl EffectGroupState {
         ) {
             resolve_group_wait(
                 &ctx,
+                &self.namespace,
                 &shape.wait_scope,
                 &group_key,
                 EffectGroupWaitKind::Admit(request.position),
@@ -764,7 +823,6 @@ impl EffectGroupState {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn register_children(
         &self,
         ctx: ObjectContext<'_>,
@@ -794,6 +852,7 @@ impl EffectGroupState {
                 store_index(&ctx, record.clone());
                 resolve_group_wait(
                     &ctx,
+                    &self.namespace,
                     &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Ready,
@@ -820,7 +879,6 @@ impl EffectGroupState {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn register_refusal(
         &self,
         ctx: ObjectContext<'_>,
@@ -847,6 +905,7 @@ impl EffectGroupState {
                 store_index(&ctx, record.clone());
                 resolve_group_wait(
                     &ctx,
+                    &self.namespace,
                     &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Ready,
@@ -858,6 +917,7 @@ impl EffectGroupState {
                 for position in 0..shape.children() {
                     resolve_group_wait(
                         &ctx,
+                        &self.namespace,
                         &shape.wait_scope,
                         &group_key,
                         EffectGroupWaitKind::Admit(position),
@@ -880,7 +940,6 @@ impl EffectGroupState {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn admit_child(
         &self,
         ctx: ObjectContext<'_>,
@@ -914,7 +973,6 @@ impl EffectGroupState {
     /// index sees it at the point — every committed sibling below this
     /// child's position still owed a seat — so the caller waits on durable
     /// wakes rather than polling.
-    #[handler]
     async fn commit_child(
         &self,
         ctx: ObjectContext<'_>,
@@ -985,7 +1043,6 @@ impl EffectGroupState {
     /// authority to finish its drain and a live one has no decision to lose
     /// to. An absent or retired group is `UnknownGroup`: a reaped index has
     /// no live state to arbitrate under.
-    #[handler]
     async fn admit_semantic(
         &self,
         ctx: ObjectContext<'_>,
@@ -1018,7 +1075,6 @@ impl EffectGroupState {
     /// caller parks on each one's drained wake — the engine's own durable
     /// wake, never a poll. An absent or retired group holds no committed
     /// children, so nothing blocks.
-    #[handler]
     async fn drain_blockers(
         &self,
         ctx: SharedObjectContext<'_>,
@@ -1044,7 +1100,6 @@ impl EffectGroupState {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn record_settlement(
         &self,
         ctx: ObjectContext<'_>,
@@ -1100,6 +1155,7 @@ impl EffectGroupState {
                     })?;
                 resolve_group_wait(
                     &ctx,
+                    &self.namespace,
                     &live.shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Rank(rank),
@@ -1139,6 +1195,7 @@ impl EffectGroupState {
         store_index(&ctx, record.clone());
         resolve_group_wait(
             &ctx,
+            &self.namespace,
             &wait_scope,
             &group_key,
             EffectGroupWaitKind::Rank(rank),
@@ -1149,6 +1206,7 @@ impl EffectGroupState {
         // above this child resume their drains off this wake.
         resolve_group_wait(
             &ctx,
+            &self.namespace,
             &wait_scope,
             &group_key,
             EffectGroupWaitKind::Drained(request.position),
@@ -1160,6 +1218,7 @@ impl EffectGroupState {
         // deployment until the group closes or retires.
         resolve_group_wait(
             &ctx,
+            &self.namespace,
             &wait_scope,
             &group_key,
             EffectGroupWaitKind::Cancel(&replay_key),
@@ -1169,7 +1228,6 @@ impl EffectGroupState {
         Ok(Json(EffectGroupRecordSettlementResponse::Recorded { rank }))
     }
 
-    #[handler]
     async fn read_rank(
         &self,
         ctx: SharedObjectContext<'_>,
@@ -1216,7 +1274,6 @@ impl EffectGroupState {
         }))
     }
 
-    #[handler]
     async fn close(
         &self,
         ctx: ObjectContext<'_>,
@@ -1292,7 +1349,7 @@ impl EffectGroupState {
                 live.settled_positions.insert(position, rank);
             }
         }
-        seal_cancel_decisions(&ctx, &group_key, &shape, &decided).await?;
+        seal_cancel_decisions(&ctx, &self.namespace, &group_key, &shape, &decided).await?;
         let live = record.live()?.clone();
         record.lifecycle = EffectGroupLifecycle::Closed {
             effective: effective.into(),
@@ -1328,6 +1385,7 @@ impl EffectGroupState {
                     })?;
                 resolve_group_wait(
                     &ctx,
+                    &self.namespace,
                     &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Rank(rank),
@@ -1336,6 +1394,7 @@ impl EffectGroupState {
                 .await?;
                 resolve_group_wait(
                     &ctx,
+                    &self.namespace,
                     &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Cancel(shape.replay_key(position)?),
@@ -1344,6 +1403,7 @@ impl EffectGroupState {
                 .await?;
                 resolve_group_wait(
                     &ctx,
+                    &self.namespace,
                     &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Admit(position),
@@ -1358,7 +1418,6 @@ impl EffectGroupState {
         Ok(Json(EffectGroupCloseResponse::Closed))
     }
 
-    #[handler]
     async fn retire(
         &self,
         ctx: ObjectContext<'_>,
@@ -1445,7 +1504,6 @@ impl EffectGroupState {
         Ok(Json(EffectGroupRetireResponse::Retired { cleanup }))
     }
 
-    #[handler]
     async fn finish_retirement(
         &self,
         ctx: ObjectContext<'_>,
@@ -1471,7 +1529,6 @@ impl EffectGroupState {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn retirement_cancel(
         &self,
         ctx: ObjectContext<'_>,
@@ -1532,11 +1589,12 @@ impl EffectGroupState {
                 .collect::<Vec<_>>();
             (facts.clone(), ranks, changed, live.shape.clone())
         };
-        seal_cancel_decisions(&ctx, &group_key, &shape, &decided).await?;
+        seal_cancel_decisions(&ctx, &self.namespace, &group_key, &shape, &decided).await?;
         store_index(&ctx, record.clone());
         for (position, rank) in ranks.iter().copied() {
             resolve_group_wait(
                 &ctx,
+                &self.namespace,
                 &facts.wait_scope,
                 &group_key,
                 EffectGroupWaitKind::Rank(rank),
@@ -1545,6 +1603,7 @@ impl EffectGroupState {
             .await?;
             resolve_group_wait(
                 &ctx,
+                &self.namespace,
                 &facts.wait_scope,
                 &group_key,
                 EffectGroupWaitKind::Cancel(facts.replay_key(position)?),
@@ -1553,6 +1612,7 @@ impl EffectGroupState {
             .await?;
             resolve_group_wait(
                 &ctx,
+                &self.namespace,
                 &facts.wait_scope,
                 &group_key,
                 EffectGroupWaitKind::Admit(position),
@@ -1578,7 +1638,7 @@ pub use payload::{
     EFFECT_GROUP_PAYLOAD_FORMAT_VERSION, EffectGroupPayloadGetResponse,
     EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
 };
-pub(crate) use payload::{EffectGroupPayload, EffectGroupPayloadClient};
+pub(crate) use payload::{EffectGroupPayload, EffectGroupPayloadClient, EffectGroupPayloadImpl};
 pub(crate) fn payload_key(group_key: &str, position: usize) -> String {
     let digest = Sha256::digest(group_key.as_bytes());
     format!("{:x}:{position}", digest)

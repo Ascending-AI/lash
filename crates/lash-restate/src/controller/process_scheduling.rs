@@ -38,6 +38,7 @@ impl ProcessWorkflowStartFailure {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn schedule_restate_process<'ctx, C>(
     registry: Arc<dyn ProcessRegistry>,
     started: lash_core::runtime::RegisteredProcessStart,
@@ -45,6 +46,7 @@ pub(super) async fn schedule_restate_process<'ctx, C>(
     execution_context: lash_core::ProcessExecutionContext,
     sender_generation: Option<lash_core::engine::BuildGeneration>,
     context: &C,
+    namespace: &crate::RestateNamespace,
     invocation: &RuntimeEffectInvocation,
 ) -> Result<(ProcessRecord, lash_core::StoreRealization), RuntimeEffectControllerError>
 where
@@ -63,6 +65,7 @@ where
     let process_id = record.id.clone();
     let invocation_id = match context
         .start_process_workflow(
+            namespace,
             process_id.clone(),
             registration,
             execution_context,
@@ -143,6 +146,11 @@ where
             };
         }
     };
+    // A new process starts on the stable lane (FIG-3795): the newest build
+    // runs segment 0.
+    let route = namespace
+        .stable(crate::LashService::ProcessWorkflow)
+        .to_string();
     let Json(record) = context
         .run_json_or_retry_send(
             process_command_journal_name(invocation, "process-start-external-ref"),
@@ -152,13 +160,9 @@ where
                         &process_id,
                         ProcessExternalRef {
                             backend: "restate".to_string(),
-                            // A new process starts on the stable lane
-                            // (FIG-3795): the newest build runs segment 0.
                             id: format!(
                                 "{}/{}",
-                                crate::services::ServiceRoute::stable(
-                                    crate::LashService::ProcessWorkflow
-                                ),
+                                route,
                                 crate::process::process_segment_workflow_key(&process_id, 0)
                             ),
                             metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),

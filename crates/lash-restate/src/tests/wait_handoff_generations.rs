@@ -451,6 +451,7 @@ impl HandOff {
             connection.clone(),
             test_restate_authority_id(),
             Some(generation.clone()),
+            crate::RestateNamespace::default(),
         ));
         let worker = recovery_worker(Arc::clone(registry), Arc::clone(sessions)).await;
         let endpoint = crate::services::bind_lash_services(
@@ -465,13 +466,14 @@ impl HandOff {
                     Arc::clone(continuations),
                     ingress.clone(),
                     test_restate_authority_id(),
-                    generation.clone(),
+                    generation.clone(), &crate::services::DEFAULT_NAMESPACE
                 )
                 // A held segment keeps retrying for as long as a law holds
                 // it — through a lease's lapse, too — and never pauses.
                 .with_retry_max_attempts(10_000),
                 session_driver: crate::RestateSessionDriverSlot::new(),
                 build_generation: generation,
+                namespace: crate::RestateNamespace::default(),
             },
         )
         .build();
@@ -586,6 +588,7 @@ impl HandOff {
     async fn wake(&self, process_id: &ProcessId) {
         crate::process::deliver_process_hand_over(
             &self.ingress,
+            &crate::services::DEFAULT_NAMESPACE,
             self.continuations.as_ref(),
             process_id,
             &lash_core::engine::BuildGeneration::for_test("N"),
@@ -668,6 +671,7 @@ impl HandOff {
         let drain = lash_core::StoreSet::generation_drain(&self.stores);
         let port = crate::process::RestateProcessIngressRunner::over_ingress(
             self.ingress.clone(),
+            crate::RestateNamespace::default(),
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
         );

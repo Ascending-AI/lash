@@ -644,6 +644,7 @@ impl LiveConformanceHarness {
                 build_generation: lash_core::engine::BuildGeneration::for_test(
                     "effect-group-conformance",
                 ),
+            namespace: crate::RestateNamespace::default(),
             },
         )
         .bind(ScopeLivenessProbeImpl.serve())
@@ -718,8 +719,10 @@ impl LiveConformanceHarness {
             self.admin_client(),
             self.session_driver.clone(),
             lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
+            crate::RestateNamespace::default(),
             Arc::new(crate::session_control::RestateSessionControl {
                 admin: self.admin_client(),
+                namespace: crate::RestateNamespace::default(),
                 processes: self.stores.process_registry(),
                 continuations: self.stores.process_registry()
                     as Arc<dyn lash_core::ProcessContinuationStore>,
@@ -956,7 +959,7 @@ impl LiveConformanceHarness {
         );
         let probe = ingress
             .call_object_empty_json::<crate::EffectGroupProbeResponse>(
-                crate::LashService::EffectGroupState,
+                &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
                 &operation,
                 "probe",
             )
@@ -1113,7 +1116,11 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(crate::LashService::EffectGroupState, &group_key, "retire")
+            .call_object_empty_json(
+                &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+                &group_key,
+                "retire",
+            )
             .await
             .expect("the wait group tombstones");
         println!("EFFECT_GROUP_WITNESS unstarted-wait-child-release PASS");
@@ -1251,7 +1258,11 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(crate::LashService::EffectGroupState, &group_key, "retire")
+            .call_object_empty_json(
+                &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+                &group_key,
+                "retire",
+            )
             .await
             .expect("the admitting group tombstones");
         println!("EFFECT_GROUP_WITNESS admitting-wait-child-release PASS");
@@ -1891,7 +1902,7 @@ async fn run_design_witnesses(
     );
     let retired: EffectGroupRetireResponse = ingress
         .call_object_empty_json(
-            crate::LashService::EffectGroupState,
+            &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
             &admission_group,
             "retire",
         )
@@ -1927,7 +1938,11 @@ async fn run_design_witnesses(
         .await
         .expect("send-record-gap witness opens");
     let _: EffectGroupRetireResponse = ingress
-        .call_object_empty_json(crate::LashService::EffectGroupState, &gap_group, "retire")
+        .call_object_empty_json(
+            &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+            &gap_group,
+            "retire",
+        )
         .await
         .expect("send-record-gap witness tombstones");
     let executions_before_child = gap_executions.load(Ordering::SeqCst);

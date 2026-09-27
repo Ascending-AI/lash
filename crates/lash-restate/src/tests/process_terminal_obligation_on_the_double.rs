@@ -121,6 +121,7 @@ impl World {
                 build_generation: lash_core::engine::BuildGeneration::for_test(
                     "process-terminal-obligation",
                 ),
+                namespace: crate::RestateNamespace::default(),
             },
         )
         .build();
@@ -200,7 +201,8 @@ impl World {
             let key = process_id.to_string();
             ingress
                 .call_workflow_json::<_, ProcessAwaitOutput>(
-                    &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow)
+                    &crate::services::DEFAULT_NAMESPACE
+                        .stable(crate::LashService::ProcessWorkflow)
                         .name(),
                     &key,
                     "await_terminal",
@@ -454,6 +456,7 @@ pub(super) async fn a_killed_run_ends_substrate_lost_however_many_newer_failed_r
 
     let pass = crate::process::park_reconcile::end_lost_process_runs(
         &world.admin,
+        &crate::services::DEFAULT_NAMESPACE,
         &world.registry,
         &world.continuations,
         std::num::NonZeroUsize::new(64).expect("non-zero"),

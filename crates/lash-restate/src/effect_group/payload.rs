@@ -41,12 +41,25 @@ pub struct EffectGroupPayloadPutRequest {
     pub bytes: Vec<u8>,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct EffectGroupPayload;
+/// A group's successful result bytes, one object per group child.
+#[restate_sdk::object]
+#[name = "EffectGroupPayload"]
+pub(crate) trait EffectGroupPayload {
+    async fn put(
+        request: Json<EffectGroupPayloadPutRequest>,
+    ) -> HandlerResult<Json<EffectGroupPayloadPutResponse>>;
+    #[shared]
+    async fn get() -> HandlerResult<Json<EffectGroupPayloadGetResponse>>;
+    async fn retire() -> HandlerResult<Json<()>>;
+    async fn delete_bytes() -> HandlerResult<Json<()>>;
+}
 
-#[restate_sdk::object(name = "EffectGroupPayload")]
-impl EffectGroupPayload {
-    #[handler]
+/// The [`EffectGroupPayload`] handlers: they call no other service, so
+/// they are the same in every namespace.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EffectGroupPayloadImpl;
+
+impl EffectGroupPayload for EffectGroupPayloadImpl {
     async fn put(
         &self,
         ctx: ObjectContext<'_>,
@@ -85,7 +98,6 @@ impl EffectGroupPayload {
         Ok(Json(response))
     }
 
-    #[handler]
     async fn get(
         &self,
         ctx: SharedObjectContext<'_>,
@@ -114,7 +126,6 @@ impl EffectGroupPayload {
         ))
     }
 
-    #[handler]
     async fn retire(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
         object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
         object_state::set_stamped(
@@ -126,7 +137,6 @@ impl EffectGroupPayload {
         Ok(Json(()))
     }
 
-    #[handler]
     async fn delete_bytes(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
         object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
         ctx.clear(PAYLOAD_STATE_KEY);

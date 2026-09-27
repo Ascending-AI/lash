@@ -124,6 +124,7 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
                 ingress.clone(),
                 test_restate_authority_id(),
                 lash_core::engine::BuildGeneration::for_test(generation),
+                &crate::services::DEFAULT_NAMESPACE,
             )
             .with_retry_max_attempts(MAX_ATTEMPTS)
             .serve(),

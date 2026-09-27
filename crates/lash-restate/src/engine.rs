@@ -16,7 +16,7 @@ use lash_core::{EffectHost as _, SessionWorkEngine, StoreSet};
 use crate::effect_host::RestateEffectHost;
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 use crate::process::{RestateProcessDeployment, RestateProcessServing};
-use crate::services::{LashServiceParts, bind_lash_services};
+use crate::services::{LashServiceParts, RestateNamespace, bind_lash_services};
 use crate::session_driver::RestateSessionWork;
 use crate::turn::RestateTurnAttach;
 
@@ -29,6 +29,7 @@ pub struct RestateConfig {
     build_generation: BuildGeneration,
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
     admin_connection: RestateConnection,
+    namespace: RestateNamespace,
 }
 
 impl RestateConfig {
@@ -60,7 +61,24 @@ impl RestateConfig {
             build_generation,
             process_event_sink: None,
             admin_connection: admin_connection.into(),
+            namespace: RestateNamespace::default(),
         }
+    }
+
+    /// Name every Restate service the engine serves and calls under
+    /// `namespace` (FIG-3898): `ns.LashSession`, `ns.LashProcessWorkflow`,
+    /// and so on. Unset, the engine keeps the default namespace's bare names,
+    /// which is all a deployment alone on its server needs. Deployments that
+    /// share one server each take a distinct namespace;
+    /// [`RestateEngine::register_deployment`] refuses one that would take
+    /// over another's names.
+    ///
+    /// The namespace is part of every durable name the deployment records,
+    /// so a changed namespace is a new deployment: work its predecessor
+    /// journaled stays under the old names.
+    pub fn with_namespace(mut self, namespace: RestateNamespace) -> Self {
+        self.namespace = namespace;
+        self
     }
 
     /// Install a host-facing [`ProcessEventSink`] on the process registry
@@ -82,6 +100,8 @@ impl RestateConfig {
 pub struct RestateEngine {
     stores: Arc<dyn StoreSet>,
     connection: RestateConnection,
+    admin: crate::RestateAdminClient,
+    namespace: RestateNamespace,
     build_generation: BuildGeneration,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
@@ -97,26 +117,32 @@ impl RestateEngine {
             build_generation,
             process_event_sink,
             admin_connection,
+            namespace,
         } = config;
         let effect_host = Arc::new(RestateEffectHost::new_for_build(
             connection.clone(),
             authority.clone(),
             Some(build_generation.clone()),
+            namespace.clone(),
         ));
-        let process = Arc::new(RestateProcessDeployment::new_with_sink(
+        let process = Arc::new(RestateProcessDeployment::in_namespace(
             connection.clone(),
             authority,
             stores.process_registry(),
             stores.process_continuations(),
             process_event_sink,
+            namespace.clone(),
         ));
+        let admin = crate::RestateAdminClient::new(admin_connection);
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
             crate::RestateAdminClient::new(connection.clone()),
             crate::RestateSessionDriverSlot::new(),
             build_generation.clone(),
+            namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
-                admin: crate::RestateAdminClient::new(admin_connection),
+                admin: admin.clone(),
+                namespace: namespace.clone(),
                 processes: stores.process_registry(),
                 continuations: stores.process_continuations(),
             }),
@@ -124,6 +150,8 @@ impl RestateEngine {
         Self {
             stores,
             connection,
+            admin,
+            namespace,
             build_generation,
             effect_host,
             process,
@@ -178,8 +206,73 @@ impl RestateEngine {
                     .workflow(processes.into(), self.build_generation.clone()),
                 session_driver: self.session_work.driver_slot().clone(),
                 build_generation: self.build_generation.clone(),
+                namespace: self.namespace.clone(),
             },
         )
+    }
+
+    /// Register the endpoint at `uri` with the server as a deployment of
+    /// this engine, unless another lash deployment already serves one of its
+    /// names (FIG-3898).
+    ///
+    /// Restate hands every new call to a service name to the deployment that
+    /// registered the name last, so registering over another deployment's
+    /// names would take over its work in silence. Every lash service a
+    /// deployment binds declares the Restate authority it journals under, and
+    /// this reads that claim for each of the engine's names first: a name
+    /// claimed by another authority refuses the registration with
+    /// [`RestateRegistrationError::NameTaken`], before anything is
+    /// registered. Deployments of one authority share their names — a newer
+    /// build, or the same deployment coming back — and so does the
+    /// deployment already registered at `uri` itself, which this registration
+    /// replaces. A name registered without a claim is taken over.
+    ///
+    /// The check and the registration are two admin calls, so two
+    /// deployments that register the same names at once can both pass it.
+    ///
+    /// # Errors
+    /// [`RestateRegistrationError::NameTaken`] for a name another deployment
+    /// holds; [`RestateRegistrationError::Admin`] when the admin API fails
+    /// or refuses the registration.
+    #[allow(
+        clippy::result_large_err,
+        reason = "RestateHttpError travels unboxed across the crate's admin and ingress API"
+    )]
+    pub async fn register_deployment(&self, uri: &str) -> Result<(), RestateRegistrationError> {
+        let authority = self.effect_host.authority_id().binding_id();
+        for &service in crate::services::LASH_SERVICES {
+            let name = self.namespace.stable(service).name();
+            let Some(registration) = self.admin.service_registration(&name).await? else {
+                continue;
+            };
+            let Some(claim) = registration
+                .metadata
+                .get(crate::services::CLAIM_AUTHORITY_METADATA)
+            else {
+                continue;
+            };
+            if claim == authority {
+                continue;
+            }
+            let registered_at = self
+                .admin
+                .deployment_uri(&registration.deployment_id)
+                .await?;
+            if registered_at
+                .as_deref()
+                .is_some_and(|registered| same_uri(registered, uri))
+            {
+                continue;
+            }
+            return Err(RestateRegistrationError::NameTaken {
+                service: name.into_owned(),
+                deployment_id: registration.deployment_id,
+                claimed_by: claim.clone(),
+                uri: uri.to_owned(),
+            });
+        }
+        self.admin.register_deployment(uri).await?;
+        Ok(())
     }
 
     /// Another build of this engine's code in the same process: the same
@@ -193,11 +286,19 @@ impl RestateEngine {
         Self {
             stores: Arc::clone(&self.stores),
             connection: self.connection.clone(),
+            admin: self.admin.clone(),
+            namespace: self.namespace.clone(),
             build_generation,
             effect_host: Arc::clone(&self.effect_host),
             process: Arc::clone(&self.process),
             session_work: Arc::clone(&self.session_work),
         }
+    }
+
+    /// The namespace every Restate service of this engine is named in
+    /// (FIG-3898).
+    pub fn namespace(&self) -> &RestateNamespace {
+        &self.namespace
     }
 
     /// The Restate effect host every runtime of this engine runs on.
@@ -280,6 +381,39 @@ impl std::fmt::Debug for RestateEngine {
             .field("authority", &self.effect_host.turn_control_binding_id())
             .finish_non_exhaustive()
     }
+}
+
+/// Why [`RestateEngine::register_deployment`] did not register a deployment.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum RestateRegistrationError {
+    /// Another lash deployment serves `service`: registering would take
+    /// over its calls. The deployments need distinct namespaces
+    /// ([`RestateConfig::with_namespace`]).
+    #[error(
+        "Restate service `{service}` is served by deployment `{deployment_id}` of authority \
+         `{claimed_by}`; registering `{uri}` would take over its calls, so it was not \
+         registered: give each deployment on the server its own namespace"
+    )]
+    NameTaken {
+        /// The contested Restate service name.
+        service: String,
+        /// The deployment serving it now.
+        deployment_id: String,
+        /// The authority that deployment journals under.
+        claimed_by: String,
+        /// The URI this registration would have registered.
+        uri: String,
+    },
+    /// The admin API failed, or refused the registration itself.
+    #[error(transparent)]
+    Admin(#[from] crate::RestateHttpError),
+}
+
+/// Whether two deployment URIs name one endpoint: Restate reports a
+/// registered URI with the trailing `/` it normalizes to.
+fn same_uri(left: &str, right: &str) -> bool {
+    left.trim_end_matches('/') == right.trim_end_matches('/')
 }
 
 /// The path, below a deployment's base URI, under which a build of drain

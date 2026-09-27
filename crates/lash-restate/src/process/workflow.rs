@@ -313,9 +313,11 @@ impl<R> LashProcessWorkflowImpl<R> {
         cancel_ingress: RestateIngressClient,
         authority_id: crate::RestateAuthorityId,
         build_generation: lash_core::engine::BuildGeneration,
+        namespace: &crate::RestateNamespace,
     ) -> Self {
         let parent_end_delivery = Arc::new(super::RestateProcessIngressRunner::over_ingress(
             cancel_ingress.clone(),
+            namespace.clone(),
             Arc::clone(&registry),
             Arc::clone(&continuations),
         ));
@@ -327,6 +329,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             parent_end_delivery,
             authority_id,
             build_generation,
+            namespace,
         )
     }
 
@@ -347,9 +350,11 @@ impl<R> LashProcessWorkflowImpl<R> {
             parent_end_delivery,
             crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
             lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+            &crate::RestateNamespace::default(),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new_inner(
         runner: Arc<R>,
         registry: Arc<dyn ProcessRegistry>,
@@ -358,6 +363,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         parent_end_delivery: Arc<dyn lash_core::ProcessWorkSubstrate>,
         authority_id: crate::RestateAuthorityId,
         build_generation: lash_core::engine::BuildGeneration,
+        namespace: &crate::RestateNamespace,
     ) -> Self {
         Self {
             runner,
@@ -369,7 +375,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             parent_end_delivery,
             authority_id,
             build_generation,
-            route: ServiceRoute::stable(LashService::ProcessWorkflow),
+            route: namespace.stable(LashService::ProcessWorkflow),
             trace_sink: None,
             trace_context: lash_trace::TraceContext::default(),
         }
@@ -478,7 +484,7 @@ where
         } else {
             routed_workflow::<_, _, ()>(
                 context,
-                &ServiceRoute::stable(LashService::ProcessWorkflow),
+                &self.route.namespace().stable(LashService::ProcessWorkflow),
                 process_id.to_string(),
                 "complete_terminal",
                 RestateProcessCompleteRequest {
@@ -1233,7 +1239,8 @@ where
             .process_segment_drive()
             .segment_generation(self.build_generation.clone());
         let controller =
-            RestateRuntimeEffectController::with_options(ctx, self.authority_id.clone(), options);
+            RestateRuntimeEffectController::with_options(ctx, self.authority_id.clone(), options)
+                .in_namespace(self.route.namespace().clone());
         let trace = self
             .trace_sink
             .as_ref()
@@ -1349,7 +1356,7 @@ where
         // route is recorded with the handover, so the external reference, a
         // forwarded cancel and a redrive all address the recorded route
         // rather than recomputing one.
-        let successor_route = ServiceRoute::stable(LashService::ProcessWorkflow);
+        let successor_route = self.route.namespace().stable(LashService::ProcessWorkflow);
         let route = successor_route.name().into_owned();
         let written_generation = Some(self.build_generation.clone());
         let reference_id = format!("{route}/{successor_key}");

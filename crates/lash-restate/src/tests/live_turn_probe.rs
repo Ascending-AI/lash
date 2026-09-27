@@ -546,7 +546,7 @@ impl LiveTurnRunner {
         tokio::spawn(async move {
             ingress
                 .call_workflow_json::<_, crate::RestateProcessWorkflowOutput>(
-                    crate::LashService::ProcessWorkflow.name(),
+                    crate::LashService::ProcessWorkflow.base_name(),
                     &key,
                     "run",
                     &input,
@@ -850,7 +850,7 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
                 // run to its next yield, and that poll would find the body.
                 let killed = self
                     .admin
-                    .kill_workflow_run(crate::LashService::ProcessWorkflow.name(), &key)
+                    .kill_workflow_run(crate::LashService::ProcessWorkflow.base_name(), &key)
                     .await;
                 let _ = crashed.call.await;
                 self.admin.purge_invocation(&killed).await;

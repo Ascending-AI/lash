@@ -103,6 +103,7 @@ pub(crate) fn process_segment_workflow_key(process_id: &ProcessId, segment_ordin
 /// still completes the terminal there.
 pub(crate) fn await_terminal_on_stable_root<'ctx, C>(
     ctx: &C,
+    namespace: &crate::RestateNamespace,
     process_id: ProcessId,
 ) -> restate_sdk::context::Request<
     'ctx,
@@ -114,7 +115,7 @@ where
 {
     crate::services::routed_workflow(
         ctx,
-        &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow),
+        &namespace.stable(crate::LashService::ProcessWorkflow),
         process_id.to_string(),
         "await_terminal",
         RestateProcessAwaitRequest { process_id },
@@ -159,6 +160,7 @@ fn terminal_process_output(error: PluginError) -> ProcessAwaitOutput {
 /// (FIG-1579).
 /// Every other failure stays in the retryable ingress class.
 pub(crate) fn process_ingress_submit_error(
+    namespace: &crate::RestateNamespace,
     process_id: &ProcessId,
     err: crate::RestateHttpError,
 ) -> PluginError {
@@ -166,7 +168,7 @@ pub(crate) fn process_ingress_submit_error(
         PluginError::Runtime(RuntimeError::new(
             RuntimeErrorCode::EngineServiceUnregistered,
             crate::ingress::unregistered_service_message(
-                crate::LashService::ProcessWorkflow.name(),
+                &namespace.stable(crate::LashService::ProcessWorkflow).name(),
                 "run",
                 &err,
             ),
@@ -477,6 +479,9 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
 /// registry lease is needed at the Restate tier.
 pub struct RestateProcessIngressRunner {
     ingress: RestateIngressClient,
+    /// The namespace the deployment's process workflow is named in
+    /// (FIG-3898).
+    namespace: crate::RestateNamespace,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     event_sink: Option<Arc<dyn ProcessEventSink>>,
@@ -488,13 +493,30 @@ pub struct RestateProcessIngressRunner {
 type ParkReconciler = Arc<std::sync::OnceLock<crate::RestateAdminClient>>;
 
 impl RestateProcessIngressRunner {
+    /// The runner of a deployment in the default namespace.
     pub fn new(
         connection: impl Into<RestateConnection>,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     ) -> Self {
+        Self::in_namespace(
+            connection,
+            registry,
+            continuations,
+            crate::RestateNamespace::default(),
+        )
+    }
+
+    /// [`new`](Self::new) for a deployment in `namespace` (FIG-3898).
+    pub fn in_namespace(
+        connection: impl Into<RestateConnection>,
+        registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        namespace: crate::RestateNamespace,
+    ) -> Self {
         Self {
             ingress: RestateIngressClient::new(connection),
+            namespace,
             registry,
             continuations,
             event_sink: None,
@@ -506,11 +528,13 @@ impl RestateProcessIngressRunner {
     /// workflow's, to deliver its ended scope's cancels (FIG-3822).
     pub(crate) fn over_ingress(
         ingress: RestateIngressClient,
+        namespace: crate::RestateNamespace,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     ) -> Self {
         Self {
             ingress,
+            namespace,
             registry,
             continuations,
             event_sink: None,
@@ -613,7 +637,8 @@ impl RestateProcessIngressRunner {
         // segment 0 is admitted from any sender.
         let route = latest_handover.as_ref().map_or_else(
             || {
-                crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow)
+                self.namespace
+                    .stable(crate::LashService::ProcessWorkflow)
                     .to_string()
             },
             |handover| handover.route.clone(),
@@ -649,7 +674,7 @@ impl RestateProcessIngressRunner {
                 },
             )
             .await
-            .map_err(|err| process_ingress_submit_error(&process_id, err))?;
+            .map_err(|err| process_ingress_submit_error(&self.namespace, &process_id, err))?;
         // Record the durable backend reference so the process is observably
         // owned by Restate, mirroring `schedule_restate_process`.
         self.registry
@@ -674,7 +699,8 @@ impl RestateProcessIngressRunner {
         // by the next pass; it never stops this one.
         if let Some(admin) = self.park_reconciler.get()
             && let Err(error) =
-                reconcile_process_parks(admin, &self.registry, &self.continuations).await
+                reconcile_process_parks(admin, &self.namespace, &self.registry, &self.continuations)
+                    .await
         {
             tracing::warn!(
                 error = %error,
@@ -789,7 +815,10 @@ impl RestateProcessIngressRunner {
         let outcome = self
             .ingress
             .call_workflow_json::<_, ProcessAwaitOutput>(
-                &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow).name(),
+                &self
+                    .namespace
+                    .stable(crate::LashService::ProcessWorkflow)
+                    .name(),
                 process_id.as_str(),
                 "await_terminal",
                 &RestateProcessAwaitRequest {
@@ -807,7 +836,10 @@ impl RestateProcessIngressRunner {
                 Err(PluginError::Runtime(RuntimeError::new(
                     RuntimeErrorCode::EngineProcessAwait,
                     crate::ingress::unresolvable_call_target_message(
-                        crate::LashService::ProcessWorkflow.name(),
+                        &self
+                            .namespace
+                            .stable(crate::LashService::ProcessWorkflow)
+                            .name(),
                         "await_terminal",
                         &err,
                     ),
@@ -858,7 +890,14 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
         request: &lash_core::CancelRequest,
         delivery_key: &str,
     ) -> Result<(), PluginError> {
-        deliver_process_cancel(&self.ingress, process_id, request, delivery_key).await
+        deliver_process_cancel(
+            &self.ingress,
+            &self.namespace,
+            process_id,
+            request,
+            delivery_key,
+        )
+        .await
     }
 
     /// The drain's wake (FIG-3799): a one-way send to the live segment's
@@ -872,6 +911,7 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
     ) -> Result<(), PluginError> {
         deliver_process_hand_over(
             &self.ingress,
+            &self.namespace,
             self.continuations.as_ref(),
             process_id,
             generation,
@@ -891,7 +931,7 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
         output: &ProcessAwaitOutput,
         _key: &str,
     ) -> Result<(), PluginError> {
-        publish_process_terminal(&self.ingress, process_id, output).await
+        publish_process_terminal(&self.ingress, &self.namespace, process_id, output).await
     }
 }
 
@@ -902,6 +942,7 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
 /// over yet.
 pub(crate) async fn deliver_process_hand_over(
     ingress: &RestateIngressClient,
+    namespace: &crate::RestateNamespace,
     continuations: &dyn lash_core::ProcessContinuationStore,
     process_id: &ProcessId,
     generation: &lash_core::engine::BuildGeneration,
@@ -910,7 +951,12 @@ pub(crate) async fn deliver_process_hand_over(
         Some(handover) if handover.segment_ordinal > 0 => {
             (handover.segment_ordinal, handover.route)
         }
-        _ => (0, crate::LashService::ProcessWorkflow.name().to_owned()),
+        _ => (
+            0,
+            namespace
+                .stable(crate::LashService::ProcessWorkflow)
+                .to_string(),
+        ),
     };
     ingress
         .send_workflow_json_idempotent(
@@ -945,12 +991,13 @@ pub(crate) async fn deliver_process_hand_over(
 /// delivery on Restate, ADR 0109 §3).
 pub(crate) async fn publish_process_terminal(
     ingress: &RestateIngressClient,
+    namespace: &crate::RestateNamespace,
     process_id: &ProcessId,
     output: &ProcessAwaitOutput,
 ) -> Result<(), PluginError> {
     ingress
         .call_workflow_json::<_, ()>(
-            &crate::services::ServiceRoute::stable(crate::LashService::ProcessWorkflow).name(),
+            &namespace.stable(crate::LashService::ProcessWorkflow).name(),
             process_id.as_str(),
             "complete_terminal",
             &RestateProcessCompleteRequest {
@@ -964,7 +1011,7 @@ pub(crate) async fn publish_process_terminal(
                 PluginError::Runtime(RuntimeError::new(
                     RuntimeErrorCode::EngineServiceUnregistered,
                     crate::ingress::unresolvable_call_target_message(
-                        crate::LashService::ProcessWorkflow.name(),
+                        &namespace.stable(crate::LashService::ProcessWorkflow).name(),
                         "complete_terminal",
                         &error,
                     ),
@@ -982,13 +1029,14 @@ pub(crate) async fn publish_process_terminal(
 /// ([`ProcessWorkSubstrate::deliver_cancel`] on Restate).
 pub(crate) async fn deliver_process_cancel(
     ingress: &RestateIngressClient,
+    namespace: &crate::RestateNamespace,
     process_id: &ProcessId,
     request: &lash_core::CancelRequest,
     delivery_key: &str,
 ) -> Result<(), PluginError> {
     ingress
         .send_workflow_json_idempotent(
-            crate::LashService::ProcessWorkflow.name(),
+            &namespace.stable(crate::LashService::ProcessWorkflow).name(),
             &process_segment_workflow_key(process_id, 0),
             "cancel",
             &RestateProcessCancelRequest::new(process_id.clone(), request.clone()),
@@ -1013,6 +1061,7 @@ pub struct RestateProcessDeployment {
     ingress: RestateIngressClient,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     authority_id: crate::RestateAuthorityId,
+    namespace: crate::RestateNamespace,
     park_reconciler: ParkReconciler,
 }
 
@@ -1053,16 +1102,38 @@ impl RestateProcessDeployment {
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         sink: Option<Arc<dyn ProcessEventSink>>,
     ) -> Self {
+        Self::in_namespace(
+            connection,
+            authority_id,
+            registry,
+            continuations,
+            sink,
+            crate::RestateNamespace::default(),
+        )
+    }
+
+    /// [`new_with_sink`](Self::new_with_sink) for a deployment in
+    /// `namespace` (FIG-3898): the process workflow it submits to, awaits
+    /// and reconciles is that namespace's.
+    pub fn in_namespace(
+        connection: impl Into<RestateConnection>,
+        authority_id: crate::RestateAuthorityId,
+        registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        sink: Option<Arc<dyn ProcessEventSink>>,
+        namespace: crate::RestateNamespace,
+    ) -> Self {
         let connection = connection.into();
         let fault_sink = sink.clone();
         let park_reconciler = ParkReconciler::default();
         let watched = watch_process_registry_with_sink(registry, sink);
         let registry = Arc::clone(watched.registry());
         let ingress_runner = Arc::new(
-            RestateProcessIngressRunner::new(
+            RestateProcessIngressRunner::in_namespace(
                 connection.clone(),
                 Arc::clone(&registry),
                 Arc::clone(&continuations),
+                namespace.clone(),
             )
             .with_event_sink(fault_sink)
             .with_park_reconciler(Arc::clone(&park_reconciler)),
@@ -1078,6 +1149,7 @@ impl RestateProcessDeployment {
             ingress: RestateIngressClient::new(connection),
             continuations,
             authority_id,
+            namespace,
             park_reconciler,
         }
     }
@@ -1140,6 +1212,7 @@ impl RestateProcessDeployment {
             self.ingress.clone(),
             self.authority_id.clone(),
             build_generation,
+            &self.namespace,
         );
         if let Some(selector) = segment_effect_budget {
             workflow = workflow.with_segment_effect_budget(selector);

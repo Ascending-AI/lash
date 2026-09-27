@@ -19,6 +19,12 @@ let outcome = handle
     .await?;
 ```
 
+Several deployments share one `restate-server` by namespace (ADR 0111):
+`RestateConfig::with_namespace` prefixes every service name the engine binds or
+calls (`alpha.LashSession`), and `RestateEngine::register_deployment` registers
+the endpoint only when no other deployment holds those names. The default
+namespace keeps the bare names.
+
 `accept_restate` journals the input id before it accepts, so every replay of the
 handler submits under the same id; `outcome_restate` follows the root in bounded,
 journaled probes, so the wait survives suspension, replay, and a turn longer than

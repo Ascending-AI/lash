@@ -249,7 +249,7 @@ impl World {
     fn cancel_invocations(&self, id: &ProcessId) -> usize {
         let target = format!(
             "{}/{}/cancel",
-            crate::LashService::ProcessWorkflow.name(),
+            crate::LashService::ProcessWorkflow.base_name(),
             id
         );
         self.harness
@@ -266,7 +266,7 @@ impl World {
     async fn cancel_signal(&self, id: &ProcessId) -> crate::RestateProcessCancelSignal {
         crate::RestateIngressClient::new(self.harness.connection())
             .call_workflow_json::<_, crate::RestateProcessCancelSignal>(
-                crate::LashService::ProcessWorkflow.name(),
+                crate::LashService::ProcessWorkflow.base_name(),
                 id.as_str(),
                 "await_cancel",
                 &crate::RestateProcessAwaitRequest {
@@ -536,7 +536,7 @@ async fn a_process_end_cancels_its_cancel_children_on_restate() {
         .await;
     crate::RestateIngressClient::new(world.harness.connection())
         .call_workflow_json::<_, crate::RestateProcessWorkflowOutput>(
-            crate::LashService::ProcessWorkflow.name(),
+            crate::LashService::ProcessWorkflow.base_name(),
             &crate::process::process_segment_workflow_key(&parent_id, 0),
             "run",
             &crate::RestateProcessWorkflowInput {

@@ -3551,19 +3551,6 @@ start_detached() {
     "RESTATE_ADMIN_URL=$restate_admin_url"
     "AGENT_WORKBENCH_DATA_DIR=$data_dir"
   )
-  # The valid-empty fixture runs its core on a private restate-server beside
-  # the workbench's own, the pinned binary. A caller-provided
-  # LASH_RESTATE_SERVER_BIN is authoritative — restate_suite.py's server-path
-  # gives it the same precedence — so resolving it again would only make the
-  # launch depend on this script living at a repository root.
-  if [[ "${AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO:-}" = "valid-empty-completion" ]]; then
-    local restate_server="${LASH_RESTATE_SERVER_BIN:-}"
-    if [[ -z "$restate_server" ]]; then
-      restate_server="$(python3 "$repo_root/scripts/ci/restate_suite.py" server-path)" \
-        || die "could not locate the pinned restate-server binary"
-    fi
-    workbench_env+=("LASH_RESTATE_SERVER_BIN=$restate_server")
-  fi
   printf '\n[%s] starting agent-workbench at %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$workbench_url" >> "$log_file"
   if command -v setsid >/dev/null 2>&1; then
     (

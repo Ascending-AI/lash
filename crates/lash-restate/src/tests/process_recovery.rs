@@ -1031,9 +1031,9 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
     let service =
         LashProcessWorkflowImpl::new_for_test(runner, registry, continuation_store()).serve();
     let discovery = discover_service(&service);
-    let wait_workflow = LashDurableWaitWorkflowImpl.serve();
+    let wait_workflow = LashDurableWaitWorkflowImpl::default().serve();
     let wait_workflow_discovery = discover_service(&wait_workflow);
-    let wait_index = LashDurableWaitRegistryImpl.serve();
+    let wait_index = LashDurableWaitRegistryImpl::default().serve();
     let wait_index_discovery = discover_service(&wait_index);
     let endpoint = Endpoint::builder()
         .bind(service)

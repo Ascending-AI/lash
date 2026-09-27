@@ -33,15 +33,15 @@ fn generation(build: &'static str) -> lash_core::engine::BuildGeneration {
 }
 
 fn stable_session() -> crate::services::ServiceRoute {
-    crate::services::ServiceRoute::stable(LashService::SessionDriver)
+    crate::services::DEFAULT_NAMESPACE.stable(LashService::SessionDriver)
 }
 
 fn session_lane(build: &'static str) -> crate::services::ServiceRoute {
-    crate::services::ServiceRoute::generation(LashService::SessionDriver, generation(build))
+    crate::services::DEFAULT_NAMESPACE.generation(LashService::SessionDriver, generation(build))
 }
 
 fn turn_lane(build: &'static str) -> crate::services::ServiceRoute {
-    crate::services::ServiceRoute::generation(LashService::TurnDriver, generation(build))
+    crate::services::DEFAULT_NAMESPACE.generation(LashService::TurnDriver, generation(build))
 }
 
 /// One session's items: open ones in arrival order, and every item a root
@@ -326,9 +326,11 @@ impl SessionRoll {
                         ingress.clone(),
                         test_restate_authority_id(),
                         generation(build),
+                        &crate::services::DEFAULT_NAMESPACE,
                     ),
                     session_driver: slot.clone(),
                     build_generation: generation(build),
+                    namespace: crate::RestateNamespace::default(),
                 },
             )
             .build()

@@ -25,6 +25,10 @@ use crate::{RestateAdminClient, RestateInvocationId};
 
 pub(crate) struct RestateSessionControl {
     pub(crate) admin: RestateAdminClient,
+    /// The namespace whose drives, roots and segments this control reads
+    /// and settles (FIG-3898): another deployment's paused work on the same
+    /// server is never this one's.
+    pub(crate) namespace: crate::RestateNamespace,
     pub(crate) processes: Arc<dyn lash_core::ProcessRegistry>,
     pub(crate) continuations: Arc<dyn lash_core::ProcessContinuationStore>,
 }
@@ -69,7 +73,7 @@ impl RestateSessionControl {
             None => {
                 self.admin
                     .workflow_invocation_status(
-                        crate::LashService::TurnDriver.name(),
+                        &self.namespace.stable(crate::LashService::TurnDriver).name(),
                         &turn_workflow_key(&target.session, &target.root),
                         "run",
                     )
@@ -81,7 +85,9 @@ impl RestateSessionControl {
         // the root's session. A follow-on's recovery runs under an admitted
         // name of its own, so the key's root may differ from the park's.
         if let Some(status) = status.as_ref()
-            && (!crate::services::ServiceRoute::parse(&status.target_service_name)
+            && (!self
+                .namespace
+                .parse(&status.target_service_name)
                 .is_some_and(|route| route.service() == crate::LashService::TurnDriver)
                 || status.target_handler_name != "run"
                 || status
@@ -112,7 +118,9 @@ impl RestateSessionControl {
         };
         // Any lane of the service (FIG-3795): a paused invocation keeps the
         // lane it was pinned under.
-        let service = crate::services::ServiceRoute::parse(&invocation.target_service_name)
+        let service = self
+            .namespace
+            .parse(&invocation.target_service_name)
             .map(|route| route.service());
         if service == Some(crate::LashService::SessionDriver) {
             self.reconcile_drive(parks, invocation, key.as_str().into(), report)
@@ -256,7 +264,7 @@ impl RestateSessionControl {
     ) -> Result<bool, EngineRefusal> {
         let paused = self
             .admin
-            .paused_session_drives(session.as_str())
+            .paused_session_drives(&self.namespace, session.as_str())
             .await
             .map_err(refusal)?;
         for drive in &paused {
@@ -316,9 +324,14 @@ impl SessionControlEngine for RestateSessionControl {
         if current.park_id != park {
             return Err(refusal("process park was superseded"));
         }
-        crate::process::resume_parked_process(&self.admin, &self.processes, process)
-            .await
-            .map_err(refusal)?;
+        crate::process::resume_parked_process(
+            &self.admin,
+            &self.namespace,
+            &self.processes,
+            process,
+        )
+        .await
+        .map_err(refusal)?;
         Ok(EngineAck::Resumed)
     }
 
@@ -360,7 +373,11 @@ impl SessionControlEngine for RestateSessionControl {
     ) -> Result<ParkReconcileReport, EngineRefusal> {
         let invocations = self
             .admin
-            .paused_work_page(page.after.as_ref().map(|c| c.as_str()), page.limit)
+            .paused_work_page(
+                &self.namespace,
+                page.after.as_ref().map(|c| c.as_str()),
+                page.limit,
+            )
             .await
             .map_err(refusal)?;
         let mut report = ParkReconcileReport::default();
@@ -386,6 +403,7 @@ impl SessionControlEngine for RestateSessionControl {
         // runs that key again. End each one `SubstrateLost` (ADR 0110).
         match crate::process::park_reconcile::end_lost_process_runs(
             &self.admin,
+            &self.namespace,
             &self.processes,
             &self.continuations,
             page.limit,
