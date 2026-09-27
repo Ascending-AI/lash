@@ -308,16 +308,6 @@ pub(crate) fn flow_to_json_value(value: &FlowValue) -> Value {
         }
         FlowValue::Record(record) => flow_record_to_json_value(record),
         FlowValue::Projected(value) => {
-            // A model view changes printing, not the value passed to another tool.
-            if value.projection_ref().is_some_and(|reference| {
-                reference.get("kind").and_then(Value::as_str)
-                    == Some(lashlang::TOOL_RESULT_MODEL_VIEW_KIND)
-            }) {
-                return value
-                    .materialize()
-                    .map(|value| flow_to_json_value(&value))
-                    .unwrap_or(Value::Null);
-            }
             let entry = match value
                 .projection_ref()
                 .cloned()
@@ -460,11 +450,6 @@ async fn resolve_placeholder(
         .projection_ref()
         .cloned()
         .ok_or_else(|| format!("projection `{name}` carries no reference"))?;
-    if let Some(restored) =
-        lash_lashlang_runtime::restore_tool_result_model_view_projection(&ref_json)
-    {
-        return restored;
-    }
     let reference = serde_json::from_value::<ProjectionRef>(ref_json.clone())
         .map_err(|err| format!("invalid projection ref for `{name}`: {err}"))?;
     let resolved = projection_resolver

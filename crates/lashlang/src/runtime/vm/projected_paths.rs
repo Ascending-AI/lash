@@ -67,9 +67,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if matches!(inner, Value::Ref(_)) {
             return Ok(inner);
         }
-        if projected.has_model_view() {
-            return Ok(inner);
-        }
         Ok(ProjectedValue::propagate_field(
             projected.name(),
             &field.text,
@@ -97,9 +94,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             },
         };
         if matches!(inner, Value::Ref(_)) {
-            return Ok(inner);
-        }
-        if projected.has_model_view() {
             return Ok(inner);
         }
         Ok(ProjectedValue::propagate_index(

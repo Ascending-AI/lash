@@ -321,17 +321,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), arguments @ ..] = values.as_slice()
             && method.as_str() == javascript_substrate::CONSOLE_OBSERVATION_TEXT
         {
-            if let [Value::Projected(projected)] = arguments
-                && projected.has_model_view()
-            {
-                self.stack.push(arguments[0].clone());
-                return Ok(());
-            }
             let text =
                 javascript_substrate::javascript_console_observation_text(&self.heap, arguments)?;
             // Rendering writes each output byte once.
             self.charge_intrinsic_work(text.len());
-            self.stack.push(Value::String(text.into()));
+            if let [value] = arguments {
+                // This intrinsic feeds Print directly. Keep its original value
+                // alongside the usual console text for the host's view lookup.
+                let original = self.heap.export_for_instruction(value)?;
+                self.stack.push(Value::Tuple(
+                    vec![
+                        Value::String("__lash_console_observation_v1".into()),
+                        original,
+                        Value::String(text.into()),
+                    ]
+                    .into(),
+                ));
+            } else {
+                self.stack.push(Value::String(text.into()));
+            }
             return Ok(());
         }
         if let [Value::String(method), value, rest @ ..] = values.as_slice()

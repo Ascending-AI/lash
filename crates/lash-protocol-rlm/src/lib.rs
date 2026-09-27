@@ -67,3 +67,4 @@ pub fn render_tool_example_for_typescript_catalog(example: &str) -> String {
     dialect::TypescriptDialect::prompt_only(lash_lashlang_runtime::LashlangSurface::default())
         .render_tool_example(example)
 }
+pub(crate) const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;

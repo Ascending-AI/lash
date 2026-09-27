@@ -21,6 +21,7 @@ use lashlang::{
 use serde_json::Value;
 
 use super::cell_run::{CellRun, LashlangCellOpener};
+use super::model_views::ModelViews;
 use crate::projection::{flow_to_json_value, format_output_value};
 
 pub(super) struct HostBridge<'run> {
@@ -31,6 +32,8 @@ pub(super) struct HostBridge<'run> {
     cell: Arc<Result<CellRun, LashlangCellOpener>>,
     print_projector: std::sync::Arc<dyn ValueProjector>,
     observations: Mutex<Vec<Observation>>,
+    model_views: Mutex<ModelViews>,
+    latest_view_call_in_cell: Mutex<BTreeMap<String, usize>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
     next_tool_index: Mutex<usize>,
@@ -56,6 +59,7 @@ pub(super) struct HostBridgeConfig<'run> {
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
     pub artifact_store: lashlang::LashlangArtifacts,
+    pub model_views: ModelViews,
 }
 
 type HostAbilityFuture<'a> =
@@ -68,6 +72,8 @@ impl<'run> HostBridge<'run> {
             ctx: config.ctx,
             print_projector: config.print_projector,
             observations: Mutex::new(Vec::new()),
+            model_views: Mutex::new(config.model_views),
+            latest_view_call_in_cell: Mutex::new(BTreeMap::new()),
             printed_images: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
             next_tool_index: Mutex::new(0),
@@ -103,15 +109,27 @@ impl<'run> HostBridge<'run> {
 
     fn consume_reply(
         &self,
+        index: usize,
         reply: ToolInvocationReply,
         replay_key: &str,
     ) -> (
         Result<FlowValue, ExecutionHostError>,
         Option<lash_core::ToolCallRecord>,
     ) {
+        if reply.record.is_some() {
+            self.model_views.lock_recover().record_at(
+                index,
+                &reply.output,
+                &mut self.latest_view_call_in_cell.lock_recover(),
+            );
+        }
         let result =
             protocol_tool_output_to_lashlang_value(&reply.output, replay_key, &self.cancellation);
         (result, reply.record)
+    }
+
+    pub(super) fn model_views(&self) -> ModelViews {
+        self.model_views.lock_recover().clone()
     }
 
     fn record_executed_call(
@@ -147,7 +165,7 @@ impl<'run> HostBridge<'run> {
         } else {
             lash_core::ExecutedCallOutcome::Err
         };
-        let (result, host_record) = self.consume_reply(reply, replay_key);
+        let (result, host_record) = self.consume_reply(index, reply, replay_key);
         if let Some(host_record) = host_record {
             self.record_executed_call(index, operation.to_string(), outcome, Some(host_record))?;
         }
@@ -625,7 +643,8 @@ impl HostBridge<'_> {
                 lash_core::ExecutedCallOutcome::Err
             }
         };
-        let (result, host_record) = self.consume_reply(reply, in_flight.command.key.as_str());
+        let (result, host_record) =
+            self.consume_reply(index, reply, in_flight.command.key.as_str());
         self.record_executed_call(index, source_operation, outcome, host_record)?;
         result
     }
@@ -839,7 +858,7 @@ impl HostBridge<'_> {
                         lash_core::ExecutedCallOutcome::Err
                     }
                 };
-                let (result, host_record) = self.consume_reply(reply, replay_key);
+                let (result, host_record) = self.consume_reply(*execution_index, reply, replay_key);
                 self.record_executed_call(
                     *execution_index,
                     source_operation.clone(),
@@ -892,21 +911,36 @@ impl HostBridge<'_> {
     }
 
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {
-        let attachment_store = self.ctx.attachment_store();
-        let images = collect_printed_images(&value, attachment_store.as_ref()).await?;
-        let is_model_view =
-            matches!(&value, FlowValue::Projected(projected) if projected.has_model_view());
-        let display_value = if is_model_view {
-            value.clone()
-        } else {
-            materialize_nested_model_views(&value)
+        let (lookup_value, display_value) = match &value {
+            FlowValue::Tuple(items) if matches!(&items[..], [FlowValue::String(marker), _, FlowValue::String(_)] if marker.as_str() == "__lash_console_observation_v1") =>
+            {
+                let FlowValue::String(text) = &items[2] else {
+                    unreachable!()
+                };
+                (&items[1], FlowValue::String(text.clone()))
+            }
+            _ => (&value, value.clone()),
         };
+        let attachment_store = self.ctx.attachment_store();
+        let images = collect_printed_images(&display_value, attachment_store.as_ref()).await?;
+        let model_view = self
+            .model_views
+            .lock_recover()
+            .for_print(lookup_value)
+            .map(str::to_owned);
+        let is_model_view = model_view.is_some();
         let projected_text = {
             let _phase = self.ctx.named_phase("rlm_lashlang.print_project");
-            self.print_projector
-                .project(ValueProjectionContext::new(&display_value))
+            if let Some(view) = &model_view {
+                crate::rlm_support::print_history_projector().project(ValueProjectionContext::new(
+                    &FlowValue::String(view.clone().into()),
+                ))
+            } else {
+                self.print_projector
+                    .project(ValueProjectionContext::new(&display_value))
+            }
         };
-        let raw_text = format_output_value(&display_value);
+        let raw_text = model_view.unwrap_or_else(|| format_output_value(&display_value));
         let projection =
             crate::rlm_support::observation_projection_metadata(&raw_text, &projected_text);
         self.observations.lock_recover().push(Observation {
@@ -1018,48 +1052,6 @@ impl HostBridge<'_> {
                 Box::pin(async move { Ok(AbilityResult::Value(value)) })
             }
         }
-    }
-}
-
-pub(super) fn materialize_nested_model_views(value: &FlowValue) -> FlowValue {
-    if !contains_model_view(value) {
-        return value.clone();
-    }
-    match value {
-        FlowValue::Projected(projected) if projected.has_model_view() => projected
-            .materialize()
-            .map(|value| materialize_nested_model_views(&value))
-            .unwrap_or_else(|_| value.clone()),
-        FlowValue::List(items) => FlowValue::List(
-            items
-                .iter()
-                .map(materialize_nested_model_views)
-                .collect::<Vec<_>>()
-                .into(),
-        ),
-        FlowValue::Tuple(items) => FlowValue::Tuple(
-            items
-                .iter()
-                .map(materialize_nested_model_views)
-                .collect::<Vec<_>>()
-                .into(),
-        ),
-        FlowValue::Record(record) => FlowValue::Record(Arc::new(
-            record
-                .iter()
-                .map(|(key, value)| (key.to_string(), materialize_nested_model_views(value)))
-                .collect(),
-        )),
-        _ => value.clone(),
-    }
-}
-
-fn contains_model_view(value: &FlowValue) -> bool {
-    match value {
-        FlowValue::Projected(projected) => projected.has_model_view(),
-        FlowValue::List(items) | FlowValue::Tuple(items) => items.iter().any(contains_model_view),
-        FlowValue::Record(record) => record.iter().any(|(_, value)| contains_model_view(value)),
-        _ => false,
     }
 }
 

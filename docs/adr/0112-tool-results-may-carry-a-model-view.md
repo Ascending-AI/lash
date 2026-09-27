@@ -15,21 +15,26 @@ program still holds the complete result.
 ## Decision
 
 A successful tool output may carry optional plain text called `model_view`.
-Lashlang receives the structured result and can index it as before. The view
-follows the whole value through variables, containers, and function returns.
-`print(x)` and single-argument `console.log(x)` show the view when `x` is the
-whole result. Printing the container itself uses its structured shape.
-Multi-argument console calls retain their existing rendering.
-Member reads turn the result into an ordinary structured value and drop the
-view. Mutations also drop it because the tool's text no longer describes the
-changed value. `JSON.stringify` and Bound Variables
-use the structured value.
+The program always receives the ordinary structured result. Lash keeps a
+session table from the canonical hash of each tool result to its view. A later
+result with the same content replaces the earlier view. `print(x)` and a
+single-argument `console.log(x)` show the view while `x` still equals a whole
+tool result. Once the value changes, printing uses the ordinary value.
+Printing a container or a part of a result uses the ordinary value unless it
+also equals a whole result from another tool call. Multi-argument console
+calls keep their existing rendering.
 
-The recorded tool call retains the structured result and the optional view.
-The live projection keeps one copy of the structured value. Its durable
-reference stores compact JSON for that value and the view, then rebuilds the
-projection on restore. RLM snapshot v27 follows the pre-1.0 bump-and-refuse
-rule because history now records which printed outputs came from model views.
+The table is filled from recorded tool replies, so cell replay uses the same
+content and view. Completed cells do not replay when an execution snapshot is
+restored. The snapshot therefore stores only the hash-to-view table, without
+copying result bodies. RLM snapshot v27 marks this new root field. Recorded
+call records keep views up to 64 KiB.
+
+Content matching keeps presentation outside Lashlang values. A projected
+wrapper lost mutations through containers and function parameters, changed
+single-argument tool calls, and merged identical results on restore. Ordinary
+values preserve the runtime's existing aliasing, mutation, serialization,
+durable change detection, and restore behavior.
 
 Tools know which fields and excerpts a reader needs. Letting them write that
 text preserves their intended presentation without changing the general
@@ -49,11 +54,11 @@ exist. If the content has attachments, it keeps both under `structured` and
 
 ## Consequences
 
-The tool may control the text the model sees when it prints a whole result.
+The tool may control the text the model sees when it prints a whole unchanged result.
 The usual print history string budget still applies. History records a flag
 for each viewed output so text beginning with `{` or `[` is not parsed again
 as JSON and text containing `omitted` or `truncated` is not labeled as a
-preview. Mutation removes the view from the changed value. A viewed result
-costs the tool's text plus one compact serialized copy of its structured value
-in the durable reference; the reference restores that value after a checkpoint.
+preview. Mutation changes the content hash, so the changed value prints
+normally. The execution snapshot stores a content hash and view for each
+distinct recorded result, with the latest view winning for identical content.
 Single-argument `console.log` uses the same view and history flag as `print`.

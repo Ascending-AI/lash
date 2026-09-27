@@ -604,17 +604,6 @@ fn javascript_json_stringify_with_errors(
     array_element: bool,
 ) -> Result<String, RuntimeError> {
     match value {
-        Value::Projected(projected) if projected.has_model_view() => {
-            javascript_json_stringify_with_errors(
-                heap,
-                &projected.materialize()?,
-                active,
-                whitelist,
-                gap,
-                depth,
-                array_element,
-            )
-        }
         Value::Ref(id) => {
             if !active.insert(*id) {
                 return Err(RuntimeError::type_error(

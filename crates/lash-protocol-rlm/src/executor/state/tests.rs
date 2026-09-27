@@ -10,6 +10,53 @@ use lashlang::{
 use serde_json::json;
 
 #[test]
+fn model_views_use_canonical_content_and_survive_execution_restore() {
+    let mut state = RlmExecutionState::new();
+    let first = json!({"z": 1, "a": [2]});
+    state
+        .model_views
+        .record(&lash_core::ToolCallOutput::success(first.clone()).with_model_view("first"));
+    state.model_views.record(
+        &lash_core::ToolCallOutput::success(json!({"a": [2], "z": 1}))
+            .with_model_view("most recent"),
+    );
+    assert_eq!(
+        state
+            .model_views
+            .for_print(&lashlang::from_json(first.clone())),
+        Some("most recent")
+    );
+    state
+        .rlm
+        .insert_global("r", lashlang::from_json(first.clone()))
+        .expect("bind an ordinary result");
+    assert_eq!(
+        state.bound_variable_values(&BTreeSet::new()),
+        vec![("r".to_string(), lashlang::from_json(first.clone()))]
+    );
+    assert_eq!(
+        state
+            .model_views
+            .for_print(&lashlang::from_json(json!({"z": 1, "a": [2, 3]}))),
+        None
+    );
+    state.mark_execution_started();
+    let hydrated = hydrate(
+        state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("snapshot the view table"),
+    );
+    let mut restored = RlmExecutionState::new();
+    restored
+        .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        .expect("restore the view table");
+    assert_eq!(
+        restored.model_views.for_print(&lashlang::from_json(first)),
+        Some("most recent")
+    );
+}
+
+#[test]
 fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     use lash_lashlang_runtime::{
         DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredTriggerResolutionRecord,
@@ -127,6 +174,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         ]),
         deferred_resolutions: deferred_resolutions.clone(),
         deferred_trigger_resolutions: deferred_trigger_resolutions.clone(),
+        model_views: ModelViews::default(),
     };
 
     assert_field_schema(
@@ -138,6 +186,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             "globals",
             "deferred_resolutions",
             "deferred_trigger_resolutions",
+            "model_views",
         ],
         &[serialized_fields(&root)],
     );
@@ -892,7 +941,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 #[test]
 fn version_27_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "86a776657273696f6e1ba6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "87a776657273696f6e1ba6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
         "0ea7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
         "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
         "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
@@ -906,7 +955,7 @@ fn version_27_root_encodes_to_golden_bytes() {
         "a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e",
         "6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e",
         "5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61",
-        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380",
+        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380ab6d6f64656c5f766965777380",
     );
 
     let mut resolutions = BTreeMap::new();
@@ -969,6 +1018,7 @@ fn version_27_root_encodes_to_golden_bytes() {
         },
         deferred_trigger_resolutions:
             lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
+        model_views: ModelViews::default(),
     };
 
     let encoded = rmp_serde::to_vec_named(&root).expect("encode the golden root");
@@ -1305,52 +1355,6 @@ fn excludes_direct_projected_globals() {
     assert!(
         !vars.iter().any(|(name, _)| name == "projected"),
         "{vars:?}"
-    );
-}
-
-#[test]
-fn bound_variables_include_viewed_values_at_their_structured_shape() {
-    let structured = serde_json::json!({"items": [{"id": "item-0"}]});
-    let viewed = FlowValue::Projected(lash_lashlang_runtime::tool_result_model_view_projection(
-        structured.clone(),
-        "Search results".to_string(),
-    ));
-    let mut state = RlmExecutionState::new();
-    state.rlm.insert_global("r", viewed.clone()).expect("r");
-    state
-        .rlm
-        .insert_global("array", FlowValue::List(vec![viewed.clone()].into()))
-        .expect("array");
-    let mut record = FlowRecord::new();
-    record.insert("r".to_string(), viewed);
-    state
-        .rlm
-        .insert_global("object", FlowValue::Record(Arc::new(record)))
-        .expect("object");
-
-    let values = state.bound_variable_values(&BTreeSet::new());
-    let rendered = crate::rlm_support::render_bound_variables(
-        &mut crate::rlm_support::BoundVariableRenderCache::default(),
-        &values,
-        &[],
-        crate::dialect::DialectPromptVocabulary::default(),
-    );
-    for name in ["r", "array", "object"] {
-        assert!(rendered.contains(&format!("- `{name}`")), "{rendered}");
-    }
-    assert!(rendered.contains("type ArrayItem"), "{rendered}");
-    assert!(rendered.contains("type Object"), "{rendered}");
-    assert!(rendered.contains("item-0"), "{rendered}");
-    assert!(!rendered.contains("Search results"), "{rendered}");
-    let values = values
-        .iter()
-        .map(|(name, value)| (name.as_str(), crate::projection::flow_to_json_value(value)))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    assert_eq!(values.get("r"), Some(&structured));
-    assert_eq!(values.get("array"), Some(&serde_json::json!([structured])));
-    assert_eq!(
-        values.get("object"),
-        Some(&serde_json::json!({"r": structured}))
     );
 }
 

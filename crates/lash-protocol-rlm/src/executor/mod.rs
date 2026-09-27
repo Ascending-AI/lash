@@ -1,5 +1,6 @@
 mod cell_run;
 mod host_bridge;
+mod model_views;
 mod snapshot;
 mod state;
 
@@ -630,6 +631,7 @@ async fn execute_code_inner(
         deferred_execution_grants,
         cell_bindings,
         artifact_store: artifact_store.clone(),
+        model_views: state.model_views.clone(),
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()
@@ -641,6 +643,7 @@ async fn execute_code_inner(
         Box::pin(lashlang::execute(compiled, &mut state.rlm, &env)).await
     };
     state.scratch = env.take_recycled_scratch().unwrap_or_default();
+    state.model_views = host.model_views();
     let runtime_failure = env.take_runtime_failure();
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_finished(trace, &result, runtime_failure.as_ref());

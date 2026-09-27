@@ -7,8 +7,8 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
-// v27 carries the model-view output indices in the RLM driver state. A replay
-// must retain the print mode of each output across a checkpoint.
+// v27 adds the session's content-keyed model views to the execution state.
+// A restored cell needs earlier tools' views without replaying those cells.
 // v26 carries Lashlang snapshot v13 and VM continuation v25, whose heaps may
 // hold a binding cell (FIG-3707). A v25 body embeds the v12/v24 substrate
 // shapes this reader does not decode, so the boundary is a version.

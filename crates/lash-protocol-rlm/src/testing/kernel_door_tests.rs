@@ -80,9 +80,14 @@ impl lash_core::ToolProvider for ViewedToolProvider {
             .then(|| std::sync::Arc::new(viewed_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let id = call
+            .args
+            .get("variant")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("item-0");
         let outcome = lash_core::ToolOutcomeDone::ok(serde_json::json!({
-            "items": [{"id": "item-0", "detail": {"excerpt": "complete passage"}}]
+            "items": [{"id": id, "detail": {"excerpt": "complete passage"}}]
         }));
         let outcome = if self.with_view {
             outcome.with_model_view("Search results\n0. item-0: complete passage")
@@ -137,8 +142,21 @@ async fn run_cell(
     context: lash_core::RuntimeExecutionContext<'_>,
     code: &str,
 ) -> lash_core::ExecResponse {
-    crate::executor::execute_code_with_channel_and_bounds(
+    run_cell_in(
         &mut crate::executor::RlmExecutionState::for_engine("typescript"),
+        context,
+        code,
+    )
+    .await
+}
+
+async fn run_cell_in(
+    state: &mut crate::executor::RlmExecutionState,
+    context: lash_core::RuntimeExecutionContext<'_>,
+    code: &str,
+) -> lash_core::ExecResponse {
+    crate::executor::execute_code_with_channel_and_bounds(
+        state,
         context,
         lash_core::ExecRequest {
             language: "typescript".to_string(),
@@ -203,7 +221,7 @@ async fn a_tool_model_view_prints_without_changing_the_program_result() {
         );
         let response = run_cell(
             context,
-            "const r = await search.find({}); function same(x) { return x; } const alias = r; const boxed = [r]; console.log(r); print(r); print(alias); print(boxed[0]); print(same(r)); print(JSON.stringify(r)); console.log(r, 'tail'); print(r.items[0].id); print(r); print([r]); finish(r.items[0].id);",
+            "const r = await search.find({}); function same(x) { return x; } const alias = r; const boxed = [r]; console.log(r); print(r); print(alias); print(boxed[0]); print(same(r)); print(JSON.stringify(r)); console.log(r, 'tail'); print(r.items[0].id); print(r); print([r]); await search.find(r); finish(r.items[0].id);",
         )
         .await;
         assert_eq!(response.error, None);
@@ -230,11 +248,10 @@ async fn a_tool_model_view_prints_without_changing_the_program_result() {
         assert!(!response.observations[6].is_model_view);
         assert_eq!(response.observations[7].text, "item-0");
         assert!(!response.observations[7].is_model_view);
-        for observation in &response.observations[8..] {
-            assert!(observation.text.contains("\"items\""));
-            assert!(!observation.text.contains("Search results"));
-            assert!(!observation.is_model_view);
-        }
+        assert_eq!(response.observations[8].text, response.observations[0].text);
+        assert_eq!(response.observations[8].is_model_view, with_view);
+        assert!(response.observations[9].text.contains("\"items\""));
+        assert!(!response.observations[9].is_model_view);
         let record = response.calls[0]
             .host_record
             .as_ref()
@@ -247,8 +264,188 @@ async fn a_tool_model_view_prints_without_changing_the_program_result() {
             record.output.model_view.as_deref(),
             with_view.then_some("Search results\n0. item-0: complete passage")
         );
+        assert_eq!(
+            response.calls[1]
+                .host_record
+                .as_ref()
+                .expect("forwarded call is recorded")
+                .args,
+            record.output.value_for_projection(),
+            "a result used as the only argument keeps the ordinary object payload"
+        );
         handler.close().await.expect("close the handler");
     }
+}
+
+#[tokio::test]
+async fn viewed_results_mutate_like_plain_results() {
+    let mutations = [
+        "r.extra = 1",
+        "const alias = r; alias.extra = 1",
+        "const a = [r]; a[0].extra = 1",
+        "const box = { r }; box.r.extra = 1",
+        "function set(x) { x.extra = 1; } set(r)",
+        "r.items.push({ id: 'new' })",
+        "const a = [r]; a[0].items.push({ id: 'new' })",
+        "r.items[0].detail.excerpt = 'changed'",
+    ];
+    for mutation in mutations {
+        let code = format!(
+            "const r = await search.find({{}}); {mutation}; print(r); finish(JSON.stringify(r));"
+        );
+        let mut replies = Vec::new();
+        for with_view in [false, true] {
+            let double =
+                super::kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
+            let handler = double
+                .open_handler(super::default_cell_scope())
+                .await
+                .expect("open the handler");
+            let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+                super::double_ports(&double, &handler),
+                std::sync::Arc::new(ViewedToolProvider { with_view }),
+                lash_core::ToolCatalog::from_tool_definitions(vec![viewed_definition()]),
+            );
+            let response = run_cell(context, &code).await;
+            assert_eq!(response.error, None, "{mutation}");
+            assert_eq!(response.observations.len(), 1, "{mutation}");
+            assert!(!response.observations[0].is_model_view, "{mutation}");
+            replies.push(response);
+            handler.close().await.expect("close the handler");
+        }
+        assert_eq!(
+            replies[0].observations, replies[1].observations,
+            "{mutation}"
+        );
+        assert_eq!(
+            replies[0].terminal_finish, replies[1].terminal_finish,
+            "{mutation}"
+        );
+    }
+}
+
+async fn run_viewed_cell_in(
+    state: &mut crate::executor::RlmExecutionState,
+    code: &str,
+) -> lash_core::ExecResponse {
+    let double = super::kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(super::default_cell_scope())
+        .await
+        .expect("open the handler");
+    let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+        super::double_ports(&double, &handler),
+        std::sync::Arc::new(ViewedToolProvider { with_view: true }),
+        lash_core::ToolCatalog::from_tool_definitions(vec![viewed_definition()]),
+    );
+    let response = run_cell_in(state, context, code).await;
+    handler.close().await.expect("close the handler");
+    response
+}
+
+#[tokio::test]
+async fn identical_results_restore_as_independent_objects_with_views() {
+    let mut state = crate::executor::RlmExecutionState::for_engine("typescript");
+    let first = run_viewed_cell_in(
+        &mut state,
+        "let first = await search.find({}); let second = await search.find({}); print(first);",
+    )
+    .await;
+    assert_eq!(first.error, None);
+    assert!(first.observations[0].is_model_view);
+    let hydrated = state
+        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .expect("snapshot both results and the view table");
+    let mut restored = crate::executor::RlmExecutionState::for_engine("typescript");
+    restored
+        .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        .expect("restore both results and the view table");
+    let second = run_viewed_cell_in(
+        &mut restored,
+        "print(first); console.log(second); first.extra = 1; print(first); print(second); finish({first, second});",
+    )
+    .await;
+    assert_eq!(second.error, None);
+    assert_eq!(second.observations.len(), 4);
+    assert!(second.observations[0].is_model_view);
+    assert!(second.observations[1].is_model_view);
+    assert!(!second.observations[2].is_model_view);
+    assert!(second.observations[3].is_model_view);
+    let result = second
+        .terminal_finish
+        .expect("finish both restored results");
+    assert_eq!(result["first"]["extra"], 1);
+    assert!(result["second"].get("extra").is_none());
+}
+
+#[tokio::test]
+async fn replacing_a_result_with_the_same_view_saves_its_new_content() {
+    let mut state = crate::executor::RlmExecutionState::for_engine("typescript");
+    let response = run_viewed_cell_in(
+        &mut state,
+        "let r = await search.find({variant: 'item-0'}); r = await search.find({variant: 'item-1'}); print(r);",
+    )
+    .await;
+    assert_eq!(response.error, None);
+    assert!(response.observations[0].is_model_view);
+    let hydrated = state
+        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .expect("snapshot the replacement");
+    let mut restored = crate::executor::RlmExecutionState::for_engine("typescript");
+    restored
+        .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        .expect("restore the replacement");
+    let after = run_viewed_cell_in(&mut restored, "print(r); finish(r.items[0].id);").await;
+    assert_eq!(after.error, None);
+    assert!(after.observations[0].is_model_view);
+    assert_eq!(after.terminal_finish, Some(serde_json::json!("item-1")));
+}
+
+#[tokio::test]
+async fn structured_operations_are_the_same_with_and_without_a_view() {
+    let code = r#"
+        const r = await search.find({});
+        const { items } = r;
+        const entries = Object.entries(r);
+        const map = new Map([['result', r]]);
+        print([r]);
+        print({r});
+        print(`id:${items[0].id}`);
+        print({...r});
+        print(JSON.stringify(r));
+        print(entries);
+        print(map);
+        finish({json: JSON.stringify(r), entries, spread: {...r}, mapped: map.get('result')});
+    "#;
+    let mut replies = Vec::new();
+    for with_view in [false, true] {
+        let double =
+            super::kernel_double(SEED + 30, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(super::default_cell_scope())
+            .await
+            .expect("open the handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            super::double_ports(&double, &handler),
+            std::sync::Arc::new(ViewedToolProvider { with_view }),
+            lash_core::ToolCatalog::from_tool_definitions(vec![viewed_definition()]),
+        );
+        let response = run_cell(context, code).await;
+        assert_eq!(response.error, None);
+        assert_eq!(response.observations.len(), 7);
+        for (index, observation) in response.observations.iter().enumerate() {
+            assert_eq!(observation.is_model_view, with_view && index == 3);
+        }
+        replies.push(response);
+        handler.close().await.expect("close the handler");
+    }
+    for index in [0, 1, 2, 4, 5, 6] {
+        assert_eq!(
+            replies[0].observations[index],
+            replies[1].observations[index]
+        );
+    }
+    assert_eq!(replies[0].terminal_finish, replies[1].terminal_finish);
 }
 
 /// A cell whose context installs its own parent invocation claims that

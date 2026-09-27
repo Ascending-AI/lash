@@ -93,12 +93,12 @@ pub use runtime::{
     ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
     ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf,
     ResourceOperationBatchResult, ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep,
-    SleepKind, Snapshot, SnapshotDecodeError, State, TOOL_RESULT_MODEL_VIEW_KIND,
-    VM_CONTINUATION_FORMAT_VERSION, Value, ValueProjectionContext, ValueProjector, Vm,
-    VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
-    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
-    VmProfileContinuation, VmRunOutcome, cancel_checkpoint_reached, compile, execute, from_json,
-    is_javascript_builtin_global, is_process_handle, prewarm, unwrap_type_value,
+    SleepKind, Snapshot, SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value,
+    ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
+    cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
+    is_process_handle, prewarm, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::projection::{prune_protected_bindings, prune_reserved_projected_bindings};
 
 use super::apply_global_defaults;
+use super::model_views::ModelViews;
 use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -26,6 +27,7 @@ pub(super) struct RlmSnapshotRoot {
     globals: BTreeMap<String, PersistedValue>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
+    model_views: ModelViews,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -246,6 +248,7 @@ fn probe_snapshot_version(data: &[u8]) -> Result<u32, RlmSnapshotError> {
 enum RootNode {
     Root,
     Globals,
+    ModelViews,
     Global,
     Deferred,
     DeferredTrigger,
@@ -280,6 +283,7 @@ impl RootNode {
         use RootNode::*;
         match (self, segment.key()) {
             (Root, Some("globals")) => Globals,
+            (Root, Some("model_views")) => ModelViews,
             (Root, Some("deferred_resolutions")) => Deferred,
             (Root, Some("deferred_trigger_resolutions")) => DeferredTrigger,
             (Globals, Some(_)) => Global,
@@ -334,7 +338,7 @@ fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
     use RootNode::*;
     match root_node(path) {
         Root => CanonicalMapOrder::Declared(ROOT_FIELDS),
-        Globals | Resolutions | Json => CanonicalMapOrder::Sorted,
+        Globals | ModelViews | Resolutions | Json => CanonicalMapOrder::Sorted,
         Global => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
         Deferred => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
         DeferredTrigger => CanonicalMapOrder::Declared(DEFERRED_TRIGGER_RESOLUTION_FIELDS),
@@ -529,6 +533,7 @@ pub(super) struct RlmExecutionCheckpoint {
     rlm: FlowState,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
+    model_views: ModelViews,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_baseline: DurableBaseline,
     persisted_leaf_keys: BTreeSet<String>,
@@ -553,6 +558,7 @@ pub struct RlmExecutionState {
     /// Trigger-definition outcomes remain separate from tool grants so a
     /// mixed link cannot execute one provider family through the other.
     pub(super) deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
+    pub(super) model_views: ModelViews,
     /// The body each binding's fragment was last captured as, and the
     /// baseline those bodies stand for. The two move together: a capture
     /// installs both, and a rollback or checkpoint restore rewinds both.
@@ -587,6 +593,7 @@ impl RlmExecutionState {
             deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
             deferred_trigger_resolutions:
                 lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
+            model_views: ModelViews::default(),
             persisted_globals: BTreeMap::new(),
             persisted_baseline: DurableBaseline::default(),
             persisted_leaf_keys: BTreeSet::new(),
@@ -618,6 +625,7 @@ impl RlmExecutionState {
             rlm: self.rlm.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
+            model_views: self.model_views.clone(),
             persisted_globals: self.persisted_globals.clone(),
             persisted_baseline: self.persisted_baseline.clone(),
             persisted_leaf_keys: self.persisted_leaf_keys.clone(),
@@ -633,6 +641,7 @@ impl RlmExecutionState {
         self.rlm = checkpoint.rlm;
         self.deferred_resolutions = checkpoint.deferred_resolutions;
         self.deferred_trigger_resolutions = checkpoint.deferred_trigger_resolutions;
+        self.model_views = checkpoint.model_views;
         self.persisted_globals = checkpoint.persisted_globals;
         self.persisted_baseline = checkpoint.persisted_baseline;
         self.persisted_leaf_keys = checkpoint.persisted_leaf_keys;
@@ -827,6 +836,7 @@ impl RlmExecutionState {
             globals: next_globals.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
+            model_views: self.model_views.clone(),
         };
         let encoded = rmp_serde::to_vec_named(&root).map_err(|error| {
             SessionError::Protocol(format!("failed to encode RLM snapshot root: {error}"))
@@ -987,6 +997,7 @@ impl RlmExecutionState {
         self.rlm = next_rlm;
         self.deferred_resolutions = parsed.deferred_resolutions;
         self.deferred_trigger_resolutions = parsed.deferred_trigger_resolutions;
+        self.model_views = parsed.model_views;
         self.persisted_globals = parsed.globals;
         self.persisted_baseline = baseline;
         self.persisted_leaf_keys = leaf_keys_for_values(&self.persisted_globals);
@@ -1061,21 +1072,17 @@ impl RlmExecutionState {
     ///
     /// Excludes the reserved `history` binding, the supplied `exclude` names
     /// (read-only values, which get their own type-only section), and any
-    /// value that still contains read-only projected data after model views
-    /// have been replaced with their structured values.
+    /// value that contains read-only projected data.
     pub(crate) fn bound_variable_values(
         &self,
         exclude: &BTreeSet<String>,
     ) -> Vec<(String, FlowValue)> {
         let mut out = Vec::new();
         for (name, value) in self.rlm.globals().iter() {
-            if name == "history" || exclude.contains(name) {
+            if name == "history" || exclude.contains(name) || value.contains_projected() {
                 continue;
             }
-            let value = super::host_bridge::materialize_nested_model_views(value);
-            if !value.contains_projected() {
-                out.push((name.to_string(), value));
-            }
+            out.push((name.to_string(), value.clone()));
         }
         out
     }

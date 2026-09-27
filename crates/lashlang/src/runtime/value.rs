@@ -39,7 +39,6 @@ pub const LASH_PROCESS_NAME_KEY: &str = "process_name";
 pub const LASH_MODULE_REF_KEY: &str = "module_ref";
 pub const LASH_PROCESS_REF_KEY: &str = "process_ref";
 pub const LASH_HOST_REQUIREMENTS_REF_KEY: &str = "host_requirements_ref";
-pub const TOOL_RESULT_MODEL_VIEW_KIND: &str = "tool_result_model_view";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListValue {
@@ -763,56 +762,6 @@ impl ProjectedValue {
         }
     }
 
-    /// A scalar tool result whose whole-value rendering is supplied by its tool.
-    /// The reference holds only the view; the durable writer adds the value.
-    pub fn scalar_with_model_view(
-        name: impl Into<Arc<str>>,
-        value: Value,
-        projection_ref: serde_json::Value,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            kind: ProjectedKind::Scalar(Arc::new(value)),
-            projection_ref: Some(projection_ref),
-        }
-    }
-
-    pub fn has_model_view(&self) -> bool {
-        self.model_view().is_some()
-    }
-
-    pub(crate) fn shares_model_view_value(&self, other: &Self) -> bool {
-        match (&self.kind, &other.kind) {
-            (ProjectedKind::Scalar(left), ProjectedKind::Scalar(right)) => {
-                self.has_model_view() && other.has_model_view() && Arc::ptr_eq(left, right)
-            }
-            _ => false,
-        }
-    }
-
-    fn model_view(&self) -> Option<&str> {
-        let reference = self.projection_ref.as_ref()?;
-        (reference.get("kind")?.as_str()? == TOOL_RESULT_MODEL_VIEW_KIND)
-            .then(|| reference.get("key")?.get("view")?.as_str())
-            .flatten()
-    }
-
-    pub(crate) fn durable_projection_ref(&self) -> Option<serde_json::Value> {
-        let mut reference = self.projection_ref.clone()?;
-        if self.has_model_view()
-            && let ProjectedKind::Scalar(value) = &self.kind
-            && let Some(key) = reference
-                .get_mut("key")
-                .and_then(serde_json::Value::as_object_mut)
-        {
-            key.insert(
-                "value_json".to_string(),
-                serde_json::Value::String(super::json::to_json_direct(value).to_string()),
-            );
-        }
-        Some(reference)
-    }
-
     pub fn custom(name: impl Into<Arc<str>>, value: Arc<dyn ProjectedHostDescriptor>) -> Self {
         Self::custom_inner(name, value, None)
     }
@@ -1203,9 +1152,6 @@ impl ProjectedValue {
 
     pub fn render(&self) -> Result<String, RuntimeError> {
         self.refuse_if_unavailable()?;
-        if let Some(model_view) = self.model_view() {
-            return Ok(model_view.to_string());
-        }
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => stringify_value(value).unwrap_or_default(),
             ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Render) {

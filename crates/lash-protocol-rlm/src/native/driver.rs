@@ -53,7 +53,7 @@ impl NativeDriver {
 }
 
 const MAX_EXEC_TOOL_CALL_RECORDS: usize = 128;
-const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
+use crate::MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES;
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
     fn project_visible_assistant_prose(&self, text: &str) -> String {

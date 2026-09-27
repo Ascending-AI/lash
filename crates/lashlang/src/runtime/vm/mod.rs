@@ -76,14 +76,6 @@ use super::{
     unwrap_type_value,
 };
 
-fn materialize_except_model_view(value: Value) -> Result<Value, RuntimeError> {
-    if matches!(&value, Value::Projected(projected) if projected.has_model_view()) {
-        Ok(value)
-    } else {
-        materialize_value(value)
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct SlotState {
     values: Vec<Option<Value>>,
@@ -145,7 +137,7 @@ impl SlotState {
         projected_bindings: Option<&ProjectedBindings>,
     ) -> Result<(), RuntimeError> {
         self.ensure_assignable(slot, slot_names, projected_bindings)?;
-        self.values[slot] = Some(materialize_except_model_view(value)?);
+        self.values[slot] = Some(materialize_value(value)?);
         Ok(())
     }
 
@@ -217,7 +209,7 @@ impl SlotState {
                     extras.insert_symbolized(
                         name.symbol,
                         name.text.clone(),
-                        materialize_except_model_view(value)?,
+                        materialize_value(value)?,
                     );
                 }
                 None => {
@@ -1086,7 +1078,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     fn step_instruction(&mut self, instruction: Instruction) -> Result<VmStep, RuntimeError> {
         match instruction {
             Instruction::LoadField { slot, field } => {
-                self.materialize_model_view_slot(slot)?;
                 let value = self.load_slot(slot)?.clone();
                 let field = self.chunk.names[field].clone();
                 let value = match value {
@@ -1096,7 +1087,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             Instruction::LoadFieldUnwrap { slot, field } => {
-                self.materialize_model_view_slot(slot)?;
                 let value = self.load_slot(slot)?.clone();
                 let field = self.chunk.names[field].clone();
                 let value = match value {
@@ -1141,11 +1131,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         .ok_or_else(|| RuntimeError::UndefinedVariable {
                             name: root_name.text.to_string(),
                         })?;
-                if let Value::Projected(projected) = root
-                    && projected.has_model_view()
-                {
-                    *root = projected.materialize()?;
-                }
                 assign_path(root, path, indexes, value, &self.chunk.names)?;
                 self.stack.truncate(index_start);
                 self.last_value = Some(last_value);
