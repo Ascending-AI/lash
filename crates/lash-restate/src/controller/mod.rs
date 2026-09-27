@@ -522,16 +522,20 @@ where
             return Err(restate_unknown_or_revoked());
         }
         self.require_active_session(key.scope.session_id()).await?;
-        let clock = lash_core::facade_support::SystemClock;
         let replay_key = key.key_id.clone();
-        let request = journaled_restate_durable_wait_request(&self.context, key, deadline, &clock)
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EngineEffectController,
-                    err.to_string(),
-                )
-            })?;
+        let request = journaled_restate_durable_wait_request(
+            &self.context,
+            key,
+            deadline,
+            crate::system_clock(),
+        )
+        .await
+        .map_err(|err| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::EngineEffectController,
+                err.to_string(),
+            )
+        })?;
         self.context
             .await_event(request, replay_key, cancel)
             .await

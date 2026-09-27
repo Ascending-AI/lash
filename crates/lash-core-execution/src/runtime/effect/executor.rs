@@ -1,5 +1,5 @@
 use crate::ClockWallTime;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,7 +26,6 @@ mod turn_control_authority;
 pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
 
 pub use await_event_support::await_event_scope_not_retirable;
-pub use control::EffectControllerTaskRequest;
 pub use control::RuntimeEffectControllerHandle;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
@@ -38,6 +37,7 @@ pub use control::{
     SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation,
     ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
+pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;
@@ -188,7 +188,7 @@ pub(super) struct LocalDirectEffectRunner {
 /// of a scalar call's attempt.
 struct LocalToolAttemptEffectRunner<'run> {
     context: crate::RuntimeExecutionContext<'run>,
-    child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+    child_trace_hooks: BTreeMap<String, crate::ToolChildExecutionTraceHook>,
     completion_key: Option<crate::AwaitEventKey>,
 }
 
@@ -803,7 +803,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
 
     pub(crate) fn tool_attempt(
         context: crate::RuntimeExecutionContext<'run>,
-        child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+        child_trace_hooks: BTreeMap<String, crate::ToolChildExecutionTraceHook>,
         completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = context.replay_validation_trace();

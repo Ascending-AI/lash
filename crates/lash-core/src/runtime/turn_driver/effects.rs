@@ -5,7 +5,7 @@ trait ClaimRows {
 
     fn rows(&self) -> &[Self::Row];
     fn row_key(row: &Self::Row) -> &str;
-    fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>);
+    fn retain_rows(&mut self, overlapping: &std::collections::BTreeSet<String>);
 }
 
 impl ClaimRows for crate::QueuedWorkClaimData {
@@ -19,7 +19,7 @@ impl ClaimRows for crate::QueuedWorkClaimData {
         &row.batch_id
     }
 
-    fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>) {
+    fn retain_rows(&mut self, overlapping: &std::collections::BTreeSet<String>) {
         self.batches
             .retain(|batch| !overlapping.contains(Self::row_key(batch)));
     }
@@ -36,7 +36,7 @@ impl ClaimRows for crate::TurnInputClaimData {
         &row.input_id
     }
 
-    fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>) {
+    fn retain_rows(&mut self, overlapping: &std::collections::BTreeSet<String>) {
         self.inputs
             .retain(|input| !overlapping.contains(Self::row_key(input)));
         self.applications
@@ -59,7 +59,7 @@ fn merge_pending_claim_authority<C: ClaimRows>(
     mut on_lower_authority: impl FnMut(
         &mut crate::WorkClaim<C>,
         &mut crate::WorkClaim<C>,
-        &std::collections::HashSet<String>,
+        &std::collections::BTreeSet<String>,
     ),
 ) -> Result<(), RuntimeError> {
     for pending in pending_claims.iter_mut() {
@@ -75,7 +75,7 @@ fn merge_pending_claim_authority<C: ClaimRows>(
                     .any(|incoming_row| C::row_key(incoming_row) == C::row_key(pending_row))
             })
             .map(|row| C::row_key(row).to_string())
-            .collect::<std::collections::HashSet<_>>();
+            .collect::<std::collections::BTreeSet<_>>();
         if overlapping.is_empty() {
             continue;
         }
@@ -167,8 +167,8 @@ fn merge_pending_queue_claim_authority(
 fn merge_pending_turn_input_claim_authority(
     pending_drives: &mut Vec<crate::TurnInputClaim>,
     incoming: &mut crate::TurnInputClaim,
-) -> Result<std::collections::HashSet<String>, RuntimeError> {
-    let mut already_delivered = std::collections::HashSet::new();
+) -> Result<std::collections::BTreeSet<String>, RuntimeError> {
+    let mut already_delivered = std::collections::BTreeSet::new();
     let mut pending_claims = pending_drives.iter_mut().collect::<Vec<_>>();
     merge_pending_claim_authority(
         &mut pending_claims,
@@ -972,7 +972,7 @@ mod claim_authority_tests {
 
         assert_eq!(
             already_delivered,
-            std::collections::HashSet::from(["input-a".to_string()])
+            std::collections::BTreeSet::from(["input-a".to_string()])
         );
         assert!(pending.is_empty());
         assert_eq!(incoming.inputs.len(), 1);

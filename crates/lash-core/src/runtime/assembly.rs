@@ -195,7 +195,7 @@ pub(super) struct LlmStreamState<'a> {
     /// accumulation: a prefix-extending completion forwards only the unseen
     /// tail through the plugin transform, while a non-prefix correction seals
     /// with the provider's text verbatim.
-    pub(super) block_raw_text: &'a mut std::collections::HashMap<String, String>,
+    pub(super) block_raw_text: &'a mut std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

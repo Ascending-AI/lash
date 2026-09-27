@@ -52,6 +52,7 @@ pub trait ProjectionResolver: Send + Sync {
 #[derive(Clone, Default)]
 pub struct ProjectionRegistry {
     memory: Arc<std::sync::RwLock<BTreeMap<String, Arc<dyn ProjectedHostDescriptor>>>>,
+    next_memory_key: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ProjectionRegistry {
@@ -61,7 +62,11 @@ impl ProjectionRegistry {
 
     pub fn register_memory(&self, value: Arc<dyn ProjectedHostDescriptor>) -> ProjectionRef {
         let descriptor_type = value.type_name().to_string();
-        let key = uuid::Uuid::new_v4().to_string();
+        let key = format!(
+            "memory-{}",
+            self.next_memory_key
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         self.memory.write_recover().insert(key.clone(), value);
         ProjectionRef::new("memory", serde_json::Value::String(key))
             .with_descriptor_type(descriptor_type)
@@ -316,6 +321,15 @@ mod tests {
             panic!("duplicate session and turn binding should fail");
         };
         assert_eq!(err.name(), "current_query");
+    }
+
+    #[test]
+    fn register_memory_mints_a_deterministic_key_sequence() {
+        let registry = ProjectionRegistry::new();
+        let first = registry.register_memory(Arc::new(TestProjectedValue));
+        let second = registry.register_memory(Arc::new(TestProjectedValue));
+        assert_eq!(first.key, serde_json::json!("memory-0"));
+        assert_eq!(second.key, serde_json::json!("memory-1"));
     }
 
     #[tokio::test]

@@ -106,7 +106,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// the run itself created is sufficient capability to await/cancel it —
     /// run-local children do not require session observer edges (the ephemeral
     /// execution scope must never appear in durable grant state).
-    started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<ProcessId>>>,
+    started_process_ids: Arc<std::sync::Mutex<std::collections::BTreeSet<ProcessId>>>,
     /// Nested durable-controller failure captured while a language runtime
     /// owns the stack. Its fixed host-reply API must unwind before the
     /// enclosing code-execution effect can abort.
@@ -1535,11 +1535,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         )]
         let (owned_controller, task_requests): (
             Arc<dyn crate::RuntimeEffectController>,
-            Option<
-                tokio::sync::mpsc::UnboundedReceiver<
-                    crate::runtime::effect::EffectControllerTaskRequest,
-                >,
-            >,
+            Option<crate::runtime::effect::EffectControllerTaskRequests>,
         ) = if let Some(owned) = scoped.owned_controller() {
             (owned, None)
         } else {

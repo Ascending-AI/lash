@@ -96,7 +96,10 @@ pub use validation::{
 };
 
 pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner, ServedOnly};
-pub use executor::{EffectTaskController, drive_effect_controller_task, effect_groups_unsupported};
+pub use executor::{
+    EffectControllerTaskRequests, EffectTaskController, drive_effect_controller_task,
+    effect_groups_unsupported,
+};
 pub use executor::{RUN_SEAL_OPERATION, RuntimeEffectControllerHandle, TurnCancelWait};
 pub use outcome::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,

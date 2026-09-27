@@ -9,8 +9,8 @@ mod tests {
     use crate::tool_dispatch::{ToolAttemptEffectIdentity, ToolDispatchContext};
     use crate::{
         EffectHost, ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef,
-        ProcessExecutionEnvSpec, RuntimeEffectCommand, ScopedEffectController, SessionId, ToolId,
-        ToolManifest, ToolRetryPolicy,
+        ProcessExecutionEnvSpec, RuntimeEffectCommand, ScopedEffectController, SessionId, StoreSet,
+        ToolId, ToolManifest, ToolRetryPolicy,
     };
 
     /// Serves `search` as the request records it, so the child's own tool is
@@ -341,7 +341,8 @@ mod tests {
             .expect("a static controller is shared");
         let env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
             double.lash_backend().process_env_store();
-        let tool_children = ToolChildHost::new(&host, Arc::clone(&env_store));
+        let tool_children =
+            ToolChildHost::new(&host, Arc::clone(&env_store), double.stores().clock());
         let mut request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
         let opener_ref = crate::ProcessId::fixture("worker");
         request.scope.opener = crate::EffectOpener::process(opener_ref.clone());
@@ -425,7 +426,11 @@ mod tests {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
-        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
+        let tool_children = ToolChildHost::new(
+            &host,
+            double.lash_backend().process_env_store(),
+            double.stores().clock(),
+        );
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
@@ -481,7 +486,11 @@ mod tests {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
-        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
+        let tool_children = ToolChildHost::new(
+            &host,
+            double.lash_backend().process_env_store(),
+            double.stores().clock(),
+        );
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
@@ -508,7 +517,11 @@ mod tests {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
-        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
+        let tool_children = ToolChildHost::new(
+            &host,
+            double.lash_backend().process_env_store(),
+            double.stores().clock(),
+        );
         let mut request = request();
         request.cancellation_authority =
             crate::TurnControlBindingId::new("a-binding-this-host-did-not-mint")
@@ -529,7 +542,11 @@ mod tests {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
-        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
+        let tool_children = ToolChildHost::new(
+            &host,
+            double.lash_backend().process_env_store(),
+            double.stores().clock(),
+        );
         let controller = durable_child_controller(&host);
         let request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
         crate::validate_recorded_authorities(&tool_children, &controller, &request)
@@ -543,7 +560,11 @@ mod tests {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
-        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
+        let tool_children = ToolChildHost::new(
+            &host,
+            double.lash_backend().process_env_store(),
+            double.stores().clock(),
+        );
         let controller = durable_child_controller(&host);
         let request = durably_admitted_request(&host, ToolChildCompletionRouting::Durable);
         crate::validate_recorded_authorities(&tool_children, &controller, &request)
@@ -572,7 +593,8 @@ mod tests {
             .expect("a static controller is shared");
         let env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
             double.lash_backend().process_env_store();
-        let tool_children = ToolChildHost::new(&host, Arc::clone(&env_store));
+        let tool_children =
+            ToolChildHost::new(&host, Arc::clone(&env_store), double.stores().clock());
         // A journaled host's child is a durable participant, so its recorded
         // request carries the cancellation binding the host derives for its scope.
         let mut request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);

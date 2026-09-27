@@ -87,7 +87,9 @@ impl QueuedRunPosition {
 }
 
 /// Ordered references remain admission evidence after the queue rows settle.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum QueuedRunMember {
     Input(InputId),
     Batch(BatchId),

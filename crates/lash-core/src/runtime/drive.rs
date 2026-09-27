@@ -548,13 +548,11 @@ impl LashRuntime {
         }
         let store = self.drive_store()?;
         // A generation this build cannot run is refused typed before
-        // anything is admitted (FIG-3619). The body records the resident head
-        // as the admission's view of the session; the root's recorded claim,
-        // taken under the lease on a head refreshed there, is the head the
-        // root runs on (FIG-3682).
-        store.read_session_state_version().await.map_err(|error| {
-            drive_abort(None, crate::runtime::runtime_error_from_store_commit(error))
-        })?;
+        // anything is admitted (FIG-3619): the recorded step's first read is
+        // that same gate, so no unrecorded read precedes it here. The body
+        // records the resident head as the admission's view of the session;
+        // the root's recorded claim, taken under the lease on a head
+        // refreshed there, is the head the root runs on (FIG-3682).
         let scope = drive_admission_scope(&request.session, &request.request);
         let host = Arc::clone(&self.host.core.control.effect_host);
         let admission_controller = step_controller(controller, host.as_ref(), scope.clone())

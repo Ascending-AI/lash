@@ -162,40 +162,47 @@ const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v2/group-child/"
 const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
 
 #[cfg(test)]
-type WaitRegistrationWitness = tokio::sync::oneshot::Sender<RestateDurableWaitRegistration>;
+mod wait_registration_witness {
+    use super::*;
 
-#[cfg(test)]
-static WAIT_REGISTRATION_WITNESSES: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<String, WaitRegistrationWitness>>,
-> = std::sync::LazyLock::new(Default::default);
+    type WaitRegistrationWitness = tokio::sync::oneshot::Sender<RestateDurableWaitRegistration>;
 
-/// The receiver fires from the index handler, so an unfinished ingress task is
-/// never mistaken for durable registration. The workflow key keeps concurrent
-/// live tests independent.
-#[cfg(test)]
-pub(crate) fn arm_wait_registration_witness(
-    key: &AwaitEventKey,
-) -> tokio::sync::oneshot::Receiver<RestateDurableWaitRegistration> {
-    let address = RestateDurableWaitAddress::for_key(key);
-    let (send, receive) = tokio::sync::oneshot::channel();
-    WAIT_REGISTRATION_WITNESSES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(address.workflow_key, send);
-    receive
-}
+    static WAIT_REGISTRATION_WITNESSES: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<String, WaitRegistrationWitness>>,
+    > = std::sync::LazyLock::new(Default::default);
 
-#[cfg(test)]
-fn observe_wait_registration(key: &AwaitEventKey, registration: &RestateDurableWaitRegistration) {
-    let address = RestateDurableWaitAddress::for_key(key);
-    if let Some(witness) = WAIT_REGISTRATION_WITNESSES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .remove(&address.workflow_key)
-    {
-        let _ = witness.send(registration.clone());
+    /// The receiver fires from the index handler, so an unfinished ingress task is
+    /// never mistaken for durable registration. The workflow key keeps concurrent
+    /// live tests independent.
+    pub(crate) fn arm_wait_registration_witness(
+        key: &AwaitEventKey,
+    ) -> tokio::sync::oneshot::Receiver<RestateDurableWaitRegistration> {
+        let address = RestateDurableWaitAddress::for_key(key);
+        let (send, receive) = tokio::sync::oneshot::channel();
+        WAIT_REGISTRATION_WITNESSES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(address.workflow_key, send);
+        receive
+    }
+
+    pub(super) fn observe_wait_registration(
+        key: &AwaitEventKey,
+        registration: &RestateDurableWaitRegistration,
+    ) {
+        let address = RestateDurableWaitAddress::for_key(key);
+        if let Some(witness) = WAIT_REGISTRATION_WITNESSES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&address.workflow_key)
+        {
+            let _ = witness.send(registration.clone());
+        }
     }
 }
+
+#[cfg(test)]
+pub(crate) use wait_registration_witness::arm_wait_registration_witness;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RestateDurableWaitAddress {
@@ -1286,7 +1293,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             RestateDurableWaitRegistration::Registered
         };
         #[cfg(test)]
-        observe_wait_registration(&request.key, &registration);
+        wait_registration_witness::observe_wait_registration(&request.key, &registration);
         Ok(Json(registration))
     }
 

@@ -215,6 +215,10 @@ pub struct EffectTaskController {
     await_event_authority_binding_id: Option<String>,
 }
 
+/// The request stream a scoped task controller's caller hands to
+/// [`drive_effect_controller_task`]: the receiving end of the proxy's queue.
+pub type EffectControllerTaskRequests = mpsc::UnboundedReceiver<EffectControllerTaskRequest>;
+
 impl EffectTaskController {
     pub fn scoped(
         controller: &dyn RuntimeEffectController,
@@ -222,7 +226,7 @@ impl EffectTaskController {
     ) -> Result<
         (
             ScopedEffectController<'static>,
-            mpsc::UnboundedReceiver<EffectControllerTaskRequest>,
+            EffectControllerTaskRequests,
         ),
         RuntimeError,
     > {
@@ -626,7 +630,7 @@ pub async fn drive_effect_controller_task(
     scope: ExecutionScope,
     envelope: RuntimeEffectEnvelope,
     local_executor: RuntimeEffectLocalExecutor<'static>,
-    mut requests: mpsc::UnboundedReceiver<EffectControllerTaskRequest>,
+    mut requests: EffectControllerTaskRequests,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     let (root_tx, root_rx) = oneshot::channel();
     let root = EffectControllerTaskRequest::Execute {

@@ -12,7 +12,7 @@ mod tests {
     use crate::tool_dispatch::{ToolAttemptEffectIdentity, ToolDispatchContext};
     use crate::{
         EffectHost, ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvSpec,
-        RuntimeEffectCommand, SessionId, ToolId, ToolManifest, ToolRetryPolicy,
+        RuntimeEffectCommand, SessionId, StoreSet, ToolId, ToolManifest, ToolRetryPolicy,
     };
 
     const SESSION: &str = "child-session";
@@ -189,7 +189,11 @@ mod tests {
         fn worker(&self) -> Worker {
             Worker {
                 host: Arc::clone(&self.host),
-                tool_children: ToolChildHost::new(&self.host, Arc::clone(&self.env_store)),
+                tool_children: ToolChildHost::new(
+                    &self.host,
+                    Arc::clone(&self.env_store),
+                    self.double.stores().clock(),
+                ),
             }
         }
 

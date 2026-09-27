@@ -287,7 +287,7 @@ impl RuntimeTurnDriver<'_> {
         let mut stream_accumulator = LlmStreamAccumulator::default();
         let mut stream_evidence = crate::LlmStreamEvidence::default();
         let mut abort_requested = false;
-        let mut block_raw_text = std::collections::HashMap::new();
+        let mut block_raw_text = std::collections::BTreeMap::new();
         let mut plugin_reasoning_blocks = 0u64;
         let mut completed_part_index = 0usize;
         let mut reasoning_publication = ReasoningPublicationState::default();
@@ -418,6 +418,7 @@ impl RuntimeTurnDriver<'_> {
                                         );
                                     }
                                     let (resp, _) = synthesize_protocol_abort(
+                                        call_id.clone(),
                                         stream_state.stream_accumulator,
                                         stream_state.streamed_usage.clone(),
                                         stream_state.stream_evidence,
@@ -428,6 +429,7 @@ impl RuntimeTurnDriver<'_> {
                             }
                         }
                         let (resp, aborted_call_record) = synthesize_protocol_abort(
+                            call_id.clone(),
                             stream_state.stream_accumulator,
                             stream_state.streamed_usage.clone(),
                             stream_state.stream_evidence,
@@ -463,7 +465,7 @@ impl RuntimeTurnDriver<'_> {
                             let payload = e.into_panic();
                             let message = crate::panic_containment::payload_message(payload.as_ref());
                             call_record = Some(crate::LlmCallRecord {
-                                call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
+                                call_id: call_id.clone(),
                                 label: None,
                                 replay_drops: completion_sideband.replay_drops(),
                                 attempts: vec![crate::AttemptRecord {

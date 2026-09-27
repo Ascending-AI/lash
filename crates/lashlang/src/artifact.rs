@@ -1,5 +1,3 @@
-#[cfg(test)]
-use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -701,8 +699,8 @@ pub(crate) struct InMemoryLashlangArtifactStore {
 #[derive(Default)]
 struct InMemoryArtifactState {
     modules: BTreeMap<String, Vec<u8>>,
-    owners: HashSet<(String, lash_core_execution::ArtifactOwner)>,
-    retired_owners: HashSet<lash_core_execution::ArtifactOwner>,
+    owners: Vec<(String, lash_core_execution::ArtifactOwner)>,
+    retired_owners: Vec<lash_core_execution::ArtifactOwner>,
 }
 
 #[cfg(test)]
@@ -751,7 +749,10 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
             .modules
             .entry(module_ref.to_string())
             .or_insert_with(|| bytes.to_vec());
-        state.owners.insert((module_ref.to_string(), owner.clone()));
+        let edge = (module_ref.to_string(), owner.clone());
+        if !state.owners.contains(&edge) {
+            state.owners.push(edge);
+        }
         Ok(())
     }
 
@@ -769,7 +770,10 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
                 "missing module artifact `{module_ref}`"
             )));
         }
-        state.owners.insert((module_ref.to_string(), owner.clone()));
+        let edge = (module_ref.to_string(), owner.clone());
+        if !state.owners.contains(&edge) {
+            state.owners.push(edge);
+        }
         Ok(())
     }
 
@@ -792,8 +796,11 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
                 artifact: format!("module artifact `{module_ref}`"),
             });
         }
-        state.owners.insert((module_ref.to_string(), to.clone()));
-        state.owners.remove(&from_edge);
+        let to_edge = (module_ref.to_string(), to.clone());
+        if !state.owners.contains(&to_edge) {
+            state.owners.push(to_edge);
+        }
+        state.owners.retain(|edge| edge != &from_edge);
         Ok(())
     }
 
@@ -803,9 +810,8 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
-        state
-            .owners
-            .remove(&(module_ref.to_string(), owner.clone()));
+        let edge = (module_ref.to_string(), owner.clone());
+        state.owners.retain(|candidate| candidate != &edge);
         if !state
             .owners
             .iter()
@@ -826,7 +832,9 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
             ));
         }
         let mut state = self.state.lock_recover();
-        state.retired_owners.insert(owner.clone());
+        if !state.retired_owners.contains(owner) {
+            state.retired_owners.push(owner.clone());
+        }
         let affected = state
             .owners
             .iter()

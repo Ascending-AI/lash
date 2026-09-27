@@ -178,5 +178,13 @@ pub(crate) use process::{
 };
 pub(crate) use services::LashService;
 
+/// The wall clock a journaled wait request converts its deadline on when the
+/// invoking path carries no configured clock: a host-side await API has no
+/// clock channel, so the request names the system clock through this seam
+/// rather than inside scanned drive code.
+pub(crate) fn system_clock() -> &'static dyn lash_core::Clock {
+    &lash_core::facade_support::SystemClock
+}
+
 #[cfg(test)]
 mod tests;

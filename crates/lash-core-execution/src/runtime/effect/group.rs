@@ -9,7 +9,7 @@
 //! These types live beside `envelope.rs` rather than inside it only because the
 //! two together outgrew the production file-size budget.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 pub use lash_sansio::GroupWakePolicy;
@@ -241,7 +241,7 @@ impl RuntimeEffectGroup {
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut first_seen_at: HashMap<&str, usize> = HashMap::with_capacity(children.len());
+        let mut first_seen_at: BTreeMap<&str, usize> = BTreeMap::new();
         for (index, child) in children.iter().enumerate() {
             let replay_key = child.invocation.replay_key();
             if let Some(first) = first_seen_at.insert(replay_key, index) {

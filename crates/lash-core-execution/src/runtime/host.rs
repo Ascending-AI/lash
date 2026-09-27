@@ -189,6 +189,7 @@ impl RuntimeHostConfig {
             effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
                 &effect_host,
                 Arc::clone(&process_env_store),
+                Arc::clone(&clock),
             ));
         if let Some(tool_children) = &tool_children {
             tool_children.with_clock(Arc::clone(&clock));
@@ -327,6 +328,7 @@ impl RuntimeHostConfig {
             effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
                 &effect_host,
                 Arc::clone(&self.durability.process_env_store),
+                Arc::clone(&self.clock),
             ))
         {
             tool_children.with_clock(Arc::clone(&self.clock));

@@ -128,7 +128,7 @@ pub struct ToolChildHost {
 
 impl ToolChildHost {
     /// Wires tool-child routing for one effect host, with a fresh live-opener
-    /// registry and the system clock.
+    /// registry and the given clock.
     ///
     /// The registry is per host and never static: two hosts in one process —
     /// which the conformance suites build routinely — must not see each other's
@@ -142,12 +142,13 @@ impl ToolChildHost {
     pub fn new(
         host: &Arc<dyn EffectHost>,
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+        clock: Arc<dyn crate::Clock>,
     ) -> Arc<Self> {
         Arc::new(Self {
             openers: Arc::new(LiveOpenerRegistry::new()),
             host: Arc::downgrade(host),
             process_env_store: Arc::new(std::sync::Mutex::new(process_env_store)),
-            clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),
+            clock: Arc::new(std::sync::Mutex::new(clock)),
             context_source: Arc::new(std::sync::Mutex::new(Vec::new())),
             #[cfg(any(test, feature = "testing"))]
             law_fallback: Arc::new(std::sync::OnceLock::new()),

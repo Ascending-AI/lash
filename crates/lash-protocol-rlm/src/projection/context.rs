@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_core::{
@@ -35,8 +35,8 @@ pub fn decode_rlm_protocol_event(event: &lash_core::ProtocolEvent) -> Option<Rlm
 #[derive(Clone, Debug)]
 pub struct RlmHistoryProjection {
     history: Vec<RlmHistoryItem>,
-    chronological_indices: HashMap<usize, usize>,
-    suppressed_chronological_indices: HashSet<usize>,
+    chronological_indices: BTreeMap<usize, usize>,
+    suppressed_chronological_indices: BTreeSet<usize>,
 }
 
 impl RlmHistoryProjection {
@@ -46,7 +46,7 @@ impl RlmHistoryProjection {
         let suppressed_chronological_indices =
             completed_turn_internal_indices(projection.entries());
         let mut history = Vec::with_capacity(projection.entries().len());
-        let mut chronological_indices = HashMap::with_capacity(projection.entries().len());
+        let mut chronological_indices = BTreeMap::new();
         for entry in projection.entries() {
             if suppressed_chronological_indices.contains(&entry.index) {
                 continue;
@@ -122,8 +122,8 @@ impl RlmHistoryProjection {
 /// A terminal step with no committed message remains unchanged.
 fn completed_turn_internal_indices(
     entries: &[lash_core::facade_support::ChronologicalEntry],
-) -> HashSet<usize> {
-    let mut suppressed = HashSet::new();
+) -> BTreeSet<usize> {
+    let mut suppressed = BTreeSet::new();
     let mut assistant_content_indices = Vec::new();
     let mut terminal_step = None;
 
@@ -677,8 +677,8 @@ mod tests {
         let empty = HistoryProjectedValue {
             projection: Arc::new(RlmHistoryProjection {
                 history: Vec::new(),
-                chronological_indices: HashMap::new(),
-                suppressed_chronological_indices: HashSet::new(),
+                chronological_indices: BTreeMap::new(),
+                suppressed_chronological_indices: BTreeSet::new(),
             }),
         };
         assert!(matches!(

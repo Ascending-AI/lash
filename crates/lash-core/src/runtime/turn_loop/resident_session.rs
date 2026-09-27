@@ -167,6 +167,10 @@ pub struct ResidentSessionContinuity {
     /// Most recent physical turn committed by this runtime, paired with the
     /// resulting session revision for observation-envelope attribution.
     last_committed_observation_turn: Option<(u64, TurnId)>,
+    /// Number of invalidation incidents this handle has minted. The count —
+    /// not a random draw — names each incident's decision id, so a replay of
+    /// the same drive traces the same ids.
+    invalidation_incidents: u64,
 }
 
 impl ResidentSessionContinuity {
@@ -178,6 +182,7 @@ impl ResidentSessionContinuity {
             graph_head_stale: Arc::new(AtomicBool::new(false)),
             last_committed_lease_continuity: None,
             last_committed_observation_turn: None,
+            invalidation_incidents: 0,
         }
     }
 
@@ -196,11 +201,11 @@ impl ResidentSessionContinuity {
     /// incident that opened it.
     pub(in crate::runtime) fn invalidate(&mut self, session_id: &SessionId) {
         if matches!(self.validity, ResidentSessionState::Valid) {
+            self.invalidation_incidents += 1;
             self.validity = ResidentSessionState::Invalidated {
                 decision_id: format!(
                     "resident-session-reload:{}:{}",
-                    session_id,
-                    uuid::Uuid::new_v4()
+                    session_id, self.invalidation_incidents
                 ),
             };
         }
@@ -656,5 +661,33 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state()
             .await
             .map_err(|err| SessionError::Protocol(err.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalidation_mints_a_deterministic_incident_sequence() {
+        let session_id = SessionId::from("session-a");
+        let mut continuity = ResidentSessionContinuity::fresh();
+
+        continuity.invalidate(&session_id);
+        assert_eq!(
+            continuity.validity(),
+            &ResidentSessionState::Invalidated {
+                decision_id: "resident-session-reload:session-a:1".to_string(),
+            }
+        );
+
+        continuity.mark_adopted(None);
+        continuity.invalidate(&session_id);
+        assert_eq!(
+            continuity.validity(),
+            &ResidentSessionState::Invalidated {
+                decision_id: "resident-session-reload:session-a:2".to_string(),
+            }
+        );
     }
 }

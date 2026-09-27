@@ -104,7 +104,7 @@ impl TurnBoundary {
         let scope = crate::ExecutionScope::turn(&state.session_id, "test-turn");
         Self::from_state_with_clock(
             state,
-            Arc::new(crate::SystemClock),
+            Arc::new(lash_core_ids::test_clock::TestClock::new(1_700_000_000_000)),
             scope,
             crate::CommitBudget::bounded(1024 * 1024, 512),
         )

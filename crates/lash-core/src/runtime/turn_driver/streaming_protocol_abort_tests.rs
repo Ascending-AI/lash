@@ -20,9 +20,18 @@ fn abort_persists_request_disposition_and_typed_interruption() {
         ..Default::default()
     };
 
-    let (response, record) =
-        synthesize_protocol_abort(&accumulator, LlmUsage::default(), &evidence, Vec::new());
+    let (response, record) = synthesize_protocol_abort(
+        crate::LlmCallId("call-under-abort".to_string()),
+        &accumulator,
+        LlmUsage::default(),
+        &evidence,
+        Vec::new(),
+    );
 
+    assert_eq!(
+        record.call_id,
+        crate::LlmCallId("call-under-abort".to_string())
+    );
     assert_eq!(
         response
             .generation_disposition
@@ -65,6 +74,7 @@ fn abort_retains_provider_usage_delivered_before_preemption() {
         .expect("provider usage without execution identity remains mergeable");
 
     let (response, record) = synthesize_protocol_abort(
+        crate::LlmCallId("call-under-abort".to_string()),
         &LlmStreamAccumulator::default(),
         usage.clone(),
         &evidence,
@@ -79,6 +89,7 @@ fn abort_retains_provider_usage_delivered_before_preemption() {
 #[test]
 fn abort_suppression_updates_response_and_attempt_together() {
     let (response, mut record) = synthesize_protocol_abort(
+        crate::LlmCallId("call-under-abort".to_string()),
         &LlmStreamAccumulator::default(),
         LlmUsage::default(),
         &crate::LlmStreamEvidence {

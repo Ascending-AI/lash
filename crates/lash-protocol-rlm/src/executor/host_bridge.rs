@@ -1,5 +1,5 @@
 use lash_sansio::sync::{LockResultExt, MutexExt};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -289,7 +289,7 @@ pub(super) struct LashlangExecutionTrace {
     resource_call_ids: std::sync::Arc<Mutex<BTreeMap<(String, u64), String>>>,
     pending_resource_starts:
         std::sync::Arc<Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
-    active_nodes: std::sync::Arc<Mutex<HashSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,
+    active_nodes: std::sync::Arc<Mutex<BTreeSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,
     waiting_nodes: lash_lashlang_runtime::TraceWaitBookkeeping,
 }
 
@@ -1318,7 +1318,7 @@ async fn collect_printed_images(
     value: &FlowValue,
     attachment_store: &lash_core::facade_support::SessionAttachmentStore,
 ) -> Result<Vec<AttachmentRef>, ExecutionHostError> {
-    let mut seen = HashSet::new();
+    let mut seen = BTreeSet::new();
     let mut images = Vec::new();
     collect_printed_images_inner(value, attachment_store, &mut seen, &mut images).await?;
     Ok(images)
@@ -1327,7 +1327,7 @@ async fn collect_printed_images(
 fn collect_printed_images_inner<'a>(
     value: &'a FlowValue,
     attachment_store: &'a lash_core::facade_support::SessionAttachmentStore,
-    seen: &'a mut HashSet<String>,
+    seen: &'a mut BTreeSet<String>,
     images: &'a mut Vec<AttachmentRef>,
 ) -> ProjectedFuture<'a, Result<(), ExecutionHostError>> {
     Box::pin(async move {

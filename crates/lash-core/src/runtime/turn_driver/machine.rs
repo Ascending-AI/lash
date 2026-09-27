@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 /// Names the assistant messages the protocol driver appends after its final
 /// model call: the turn's reply as the protocol materialized it.
@@ -10,11 +10,11 @@ use std::collections::HashSet;
 /// so a message appended later by a finalize-turn hook never displaces it.
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct ProtocolReplyTracker {
-    assistant_ids_at_last_model_call: Option<HashSet<String>>,
+    assistant_ids_at_last_model_call: Option<BTreeSet<String>>,
 }
 
 impl ProtocolReplyTracker {
-    fn assistant_ids<'a>(messages: impl Iterator<Item = &'a Message>) -> HashSet<String> {
+    fn assistant_ids<'a>(messages: impl Iterator<Item = &'a Message>) -> BTreeSet<String> {
         messages
             .filter(|message| message.role == MessageRole::Assistant)
             .map(|message| message.id.clone())

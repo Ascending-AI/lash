@@ -850,8 +850,12 @@ fn install_child_host(
     process_env_store: &Arc<dyn lash_core::ProcessExecutionEnvStore>,
 ) -> Arc<ToolChildHost> {
     let dyn_host: Arc<dyn EffectHost> = Arc::clone(host) as Arc<dyn EffectHost>;
-    host.install_tool_child_host(ToolChildHost::new(&dyn_host, Arc::clone(process_env_store)))
-        .expect("a host that routes tool children installs the child host")
+    host.install_tool_child_host(ToolChildHost::new(
+        &dyn_host,
+        Arc::clone(process_env_store),
+        Arc::new(SystemClock),
+    ))
+    .expect("a host that routes tool children installs the child host")
 }
 
 /// The cancellation authority the opener records on a child at group
@@ -1322,7 +1326,11 @@ async fn a_child_runs_under_the_opener_that_admitted_it_not_the_one_reoffering_i
     // is absent — and answer `None`.
     let world_b = world(&path).await;
     let dyn_b: Arc<dyn EffectHost> = Arc::clone(&world_b) as Arc<dyn EffectHost>;
-    let child_host_b = Arc::new(ToolChildHost::new(&dyn_b, Arc::clone(&env_store)));
+    let child_host_b = Arc::new(ToolChildHost::new(
+        &dyn_b,
+        Arc::clone(&env_store),
+        Arc::new(SystemClock),
+    ));
     let resolvers = Arc::new(DifferentialResolvers {
         staged: Mutex::new(HashMap::new()),
         retained: Arc::clone(&child_host_b),
@@ -1712,7 +1720,11 @@ async fn the_oracle_goes_red_when_offered_executors_match_by_key_alone() {
         .replay_driver()
         .set_offered_child_selection(OfferedChildSelection::KeyOnly);
     let dyn_b: Arc<dyn EffectHost> = Arc::clone(&world_b) as Arc<dyn EffectHost>;
-    let child_host_b = Arc::new(ToolChildHost::new(&dyn_b, Arc::clone(&env_store)));
+    let child_host_b = Arc::new(ToolChildHost::new(
+        &dyn_b,
+        Arc::clone(&env_store),
+        Arc::new(SystemClock),
+    ));
     let resolvers = Arc::new(DifferentialResolvers {
         staged: Mutex::new(HashMap::new()),
         retained: Arc::clone(&child_host_b),

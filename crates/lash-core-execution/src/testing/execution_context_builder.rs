@@ -675,8 +675,12 @@ pub fn wire_test_tool_children(
     host: &Arc<dyn crate::EffectHost>,
 ) -> Option<crate::runtime::effect::LiveOpenerGuard> {
     let tool_children = host.install_tool_child_host(
-        crate::runtime::effect::ToolChildHost::new(host, Arc::clone(process_env_store))
-            .with_clock(Arc::clone(&dispatch.clock)),
+        crate::runtime::effect::ToolChildHost::new(
+            host,
+            Arc::clone(process_env_store),
+            Arc::clone(&dispatch.clock),
+        )
+        .with_clock(Arc::clone(&dispatch.clock)),
     )?;
     let admitted = dispatch.effect_controller.scoped().admitted_scope().clone();
     let opener = crate::runtime::effect::opener_for_execution_scope(&admitted)?;

@@ -94,10 +94,12 @@ pub struct DrainEndWorld {
 pub fn install_drain_end_executors(
     host: Arc<dyn EffectHost>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    clock: Arc<dyn crate::Clock>,
 ) -> Arc<dyn EffectHost> {
     host.install_tool_child_host(crate::facade_support::ToolChildHost::new(
         &host,
         process_env_store,
+        clock,
     ))
     .expect("a fresh host takes the tool-child resolver")
     .with_law_fallback(

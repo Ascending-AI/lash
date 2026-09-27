@@ -698,7 +698,7 @@ impl LashRuntime {
                             .map(QueuedRunMember::Input)
                     }));
                 }
-                let mut seen = std::collections::HashSet::new();
+                let mut seen = std::collections::BTreeSet::new();
                 withheld.retain(|member| seen.insert(member.clone()));
                 let switched = matches!(prepared.outcome(), TurnOutcome::AgentFrameSwitch { .. });
                 let cancelled = matches!(

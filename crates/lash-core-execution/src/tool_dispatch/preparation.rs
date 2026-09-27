@@ -45,7 +45,7 @@ pub async fn dispatch_tool_call_with_execution_context<'run>(
         call_id: tool_context
             .tool_call_id()
             .map(ToOwned::to_owned)
-            .unwrap_or_else(|| format!("tool:{}", uuid::Uuid::new_v4())),
+            .unwrap_or_else(|| format!("tool:{}:{}", context.session_id, tool_name)),
         tool_name,
         args,
         replay: None,

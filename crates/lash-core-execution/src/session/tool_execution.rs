@@ -8,7 +8,7 @@ use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
     ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// v3 (FIG-3586) retires the opener occurrence ordinal v2 folded into the
@@ -1519,7 +1519,7 @@ impl RuntimeExecutionContext<'_> {
                         retry_grant.as_deref(),
                     );
                     let intent_trace_hook = child_execution_trace_hook.clone();
-                    let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
+                    let trace_hooks: BTreeMap<String, crate::ToolChildExecutionTraceHook> =
                         child_execution_trace_hook
                             .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
                             .unwrap_or_default();

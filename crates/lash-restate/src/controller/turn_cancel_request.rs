@@ -6,10 +6,7 @@ use lash_core::{
 };
 
 use crate::RestateAuthorityId;
-use crate::durable_wait::{
-    RestateDurableWaitAwaitRequest, restate_await_event_key_for_authority,
-    restate_durable_wait_request,
-};
+use crate::durable_wait::{RestateDurableWaitAwaitRequest, restate_await_event_key_for_authority};
 
 fn restate_turn_cancel_wait_request(
     authority_id: &RestateAuthorityId,
@@ -75,11 +72,10 @@ fn restate_turn_cancel_gate_request(
         scope,
         AwaitEventWaitIdentity::TurnCancelGate,
     )?;
-    Ok(restate_durable_wait_request(
-        &key,
-        None,
-        &lash_core::facade_support::SystemClock,
-    ))
+    Ok(RestateDurableWaitAwaitRequest {
+        key,
+        deadline: None,
+    })
 }
 
 pub(crate) fn restate_timer_turn_cancel_wait_request(

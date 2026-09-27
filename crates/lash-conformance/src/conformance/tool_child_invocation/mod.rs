@@ -1649,6 +1649,7 @@ fn install_child_host(
     host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
         host,
         Arc::clone(process_env_store),
+        Arc::new(crate::facade_support::SystemClock),
     ))
     .expect("a tier that routes tool children installs the child host")
 }

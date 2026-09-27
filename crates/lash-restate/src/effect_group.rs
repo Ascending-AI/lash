@@ -15,8 +15,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[cfg(test)]
-use std::collections::HashMap;
-#[cfg(test)]
 use std::sync::Mutex;
 
 use lash_core::{
@@ -43,10 +41,6 @@ use crate::durable_wait::{
 use crate::object_state::{self, StoredValueFormats};
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
-
-#[cfg(test)]
-static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
-    std::sync::OnceLock::new();
 
 mod drain_barrier;
 mod group_waits;
@@ -490,27 +484,37 @@ pub(crate) fn cancel_wait_request(
 }
 
 #[cfg(test)]
-pub(crate) fn arm_admission_witness(group_key: &str) -> Arc<tokio::sync::Notify> {
-    let hook = Arc::new(tokio::sync::Notify::new());
-    ADMISSION_WITNESSES
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(group_key.to_owned(), Arc::clone(&hook));
-    hook
+mod admission_witness {
+    use super::*;
+
+    static ADMISSION_WITNESSES: std::sync::OnceLock<
+        Mutex<std::collections::HashMap<String, Arc<tokio::sync::Notify>>>,
+    > = std::sync::OnceLock::new();
+
+    pub(crate) fn arm(group_key: &str) -> Arc<tokio::sync::Notify> {
+        let hook = Arc::new(tokio::sync::Notify::new());
+        ADMISSION_WITNESSES
+            .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(group_key.to_owned(), Arc::clone(&hook));
+        hook
+    }
+
+    pub(super) fn notify(group_key: &str) {
+        if let Some(hook) = ADMISSION_WITNESSES
+            .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(group_key)
+        {
+            hook.notify_one();
+        }
+    }
 }
 
 #[cfg(test)]
-fn notify_admission_witness(group_key: &str) {
-    if let Some(hook) = ADMISSION_WITNESSES
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .remove(group_key)
-    {
-        hook.notify_one();
-    }
-}
+pub(crate) use admission_witness::arm as arm_admission_witness;
 
 fn phase(lifecycle: &EffectGroupLifecycle) -> EffectGroupPhase {
     match lifecycle {
@@ -894,7 +898,7 @@ impl EffectGroupState {
         );
         #[cfg(test)]
         if response == EffectGroupAdmissionResponse::NotYetRecorded {
-            notify_admission_witness(&group_key);
+            admission_witness::notify(&group_key);
         }
         Ok(Json(response))
     }

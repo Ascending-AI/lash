@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
 use lash_core_execution::store::RuntimePersistence;
-use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
+use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory, StoreSet};
 use lash_sansio::SessionId;
 
 use super::{Retained, SUBSTRATE};
@@ -41,10 +41,12 @@ async fn sqlite_drain_end_world(retained: Retained<TestEngineBackend>) -> DrainE
         effect_host: lash_conformance::install_drain_end_executors(
             backend.effect_host() as Arc<dyn EffectHost>,
             backend.process_env_store(),
+            backend.stores().clock(),
         ),
         group_host: Some(lash_conformance::install_drain_end_executors(
             group_host as Arc<dyn EffectHost>,
             backend.process_env_store(),
+            backend.stores().clock(),
         )),
         stores: backend.as_stores(),
     };
