@@ -110,7 +110,7 @@ pub(super) fn administration(
 
 /// The `ControlIntent` relay a deployment's reconcile tick runs, over the
 /// store set's ledger and `scopes`, on `clock`.
-fn intent_relay(
+pub(super) fn intent_relay(
     stores: &Arc<dyn StoreSet>,
     scopes: Arc<dyn ScopeCloseSink>,
     clock: Arc<dyn lash_core::Clock>,
@@ -331,22 +331,19 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
     }
 }
 
-/// L-D2: a pending turn-cancel closure pins the session, so deletion refuses
-/// before the close transaction or scope owner runs.
+/// Pin session `id` with a pending turn-cancel closure: a turn that
+/// authorized its closure and has not yet committed past it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_refused_deletion_closes_nothing(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn StoreSet>,
-    _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
+pub(super) async fn pin_a_turn_cancel_closure(
+    store: &dyn crate::RuntimePersistence,
+    id: &SessionId,
 ) {
-    let (id, store) = session(&stores, prefix, "refused-close").await;
     let lease = store
         .try_claim_session_execution_lease(
-            &id,
+            id,
             &crate::LeaseOwnerIdentity::opaque("close-law", "close-law:incarnation"),
             "close-law:executor",
             60_000,
@@ -355,12 +352,12 @@ pub async fn a_refused_deletion_closes_nothing(
         .expect("claim closure lease")
         .acquired()
         .expect("closure lease is free");
-    let address = crate::TurnAddress::new(&id, TurnId::from("pinned-turn"));
+    let address = crate::TurnAddress::new(id, TurnId::from("pinned-turn"));
     let scope = address.execution_scope();
     let binding = crate::turn_control_binding_id_for_scope("s7c-close-law", &scope)
         .expect("bind closure scope");
     store
-        .validate_turn_cancellation_binding(&id, &lease.fence(), &binding, &scope)
+        .validate_turn_cancellation_binding(id, &lease.fence(), &binding, &scope)
         .await
         .expect("validate closure binding");
     let key = |suffix: &str, wait| crate::AwaitEventKey {
@@ -388,6 +385,22 @@ pub async fn a_refused_deletion_closes_nothing(
         .authorize_turn_cancel_closure(&lease.fence(), &authorization)
         .await
         .expect("pin the session");
+}
+
+/// L-D2: a pending turn-cancel closure pins the session, so deletion refuses
+/// before the close transaction or scope owner runs.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_refused_deletion_closes_nothing(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn StoreSet>,
+    _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
+) {
+    let (id, store) = session(&stores, prefix, "refused-close").await;
+    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
     let factory = stores.session_store_factory();
     let sink = CloseSink::new(Arc::clone(&factory), 0);
     let admin = administration(host, &stores, sink.clone());
@@ -882,4 +895,57 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
             RootTerminalCause::SessionDeleted { intent: open.id }
         );
     }
+}
+
+/// L-D10 (FIG-3873 S3): a turn that pinned its cancel closure after the
+/// deletion asked its refusals, and before its close committed, has its
+/// final commit cut short by the close. The deletion retried after that
+/// close replays its recorded step and asks no refusal: it answers the
+/// recorded close, and the pin is the physical delete's to retire (L-D11).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_deletion_retried_after_its_close_is_not_refused_by_a_pin_the_close_superseded(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn StoreSet>,
+    runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
+) {
+    let (id, store) = session(&stores, prefix, "close-superseded-pin").await;
+    let factory = stores.session_store_factory();
+    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
+    // The close committed with the pin in place.
+    let committed = factory
+        .begin_session_close(&id, stores.clock().timestamp_ms())
+        .await
+        .expect("commit the close's store half")
+        .expect("the session exists");
+    let admin = administration(host, &stores, CloseSink::new(Arc::clone(&factory), 0));
+    let retried = close(&admin, &id, runner.as_ref()).await;
+    assert_eq!(
+        retried.id, committed.id,
+        "the retried deletion answers the recorded close"
+    );
+    assert!(
+        matches!(
+            factory
+                .load_intent(committed.id)
+                .await
+                .expect("load the close")
+                .expect("the close is kept")
+                .state,
+            ControlIntentState::Acknowledged { .. }
+        ),
+        "the retried deletion delivered the close's engine half"
+    );
+    assert_eq!(
+        factory
+            .pending_turn_cancel_closure_pins(&id)
+            .await
+            .expect("read the pins")
+            .len(),
+        1,
+        "the superseded pin is left to the physical delete"
+    );
 }

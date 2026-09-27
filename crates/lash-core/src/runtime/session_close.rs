@@ -49,6 +49,18 @@ pub struct SessionCloseServices {
     pub deletes: crate::session_delete::SessionDeleteStores,
 }
 
+/// Whether session `session_id` is already closing: its close committed,
+/// under the `CloseSession` intent its stored drive epoch names.
+async fn session_is_closing(
+    stores: &dyn SessionStoreFactory,
+    session_id: &SessionId,
+) -> Result<bool, StoreError> {
+    match stores.open_existing_store_by_id(session_id).await? {
+        Some(store) => Ok(store.drive_epoch(session_id).await?.closing.is_some()),
+        None => Ok(false),
+    }
+}
+
 /// A session's close, as its deletion saw it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionClosed {
@@ -79,7 +91,8 @@ pub enum SessionCloseError {
 ///
 /// 1. Every refusal first, with nothing closed yet: a pending turn-cancel
 ///    closure pins the session, and so does an effect group that is live or
-///    closing (ADR 0099 §7 / W16).
+///    closing (ADR 0099 §7 / W16). A deletion retried after its close
+///    committed asks none of them: it only replays the step below.
 /// 2. The recorded `BeginSessionClose` step runs the close's store half
 ///    ([`ControlIntentStore::begin_session_close`](crate::store::ControlIntentStore::begin_session_close)):
 ///    every root ends, the session stops accepting and admitting, and the
@@ -113,7 +126,19 @@ pub async fn close_session(
             .into());
         }
     }
-    let pins = stores.pending_turn_cancel_closure_pins(session_id).await?;
+    // The refusals below are asked before anything is closed. A deletion
+    // retried after its close committed is past its point of no return: it
+    // replays the recorded step, and a pin found now is one its close
+    // superseded (a turn whose final commit the close cut short), which the
+    // physical delete retires with the session's storage. Refusing it here
+    // would wedge the deletion for good, and answer a replay differently
+    // from the run that recorded the step.
+    let closed = session_is_closing(stores.as_ref(), session_id).await?;
+    let pins = if closed {
+        Vec::new()
+    } else {
+        stores.pending_turn_cancel_closure_pins(session_id).await?
+    };
     if !pins.is_empty() {
         return Err(StoreError::TurnCancelClosureLifecyclePinned {
             session_id: session_id.clone(),
@@ -124,7 +149,11 @@ pub async fn close_session(
     // ADR 0099 §7 / W16: an accepted or closing effect group keeps its
     // session until it settles. The journal retirement after the close
     // refuses the same pins, but only after the session is closed.
-    if let Some(closing) = administration.effect_host().effect_group_closing() {
+    if let Some(closing) = administration
+        .effect_host()
+        .effect_group_closing()
+        .filter(|_| !closed)
+    {
         let group_pins = closing
             .read_session_pins(session_id)
             .await

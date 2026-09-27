@@ -1,8 +1,9 @@
-//! L-D7 through L-D9: a session's two-phase delete (ADR 0109 §4). The
-//! close's acknowledgement arms the session's `SessionDelete` obligation, the
-//! obligation counts exactly the session's undelivered cleanup, and its
-//! delivery — the physical delete — waits for that cleanup and then deletes
-//! the session.
+//! L-D7 through L-D9 and L-D11: a session's two-phase delete (ADR 0109 §4).
+//! The close's acknowledgement arms the session's `SessionDelete`
+//! obligation, the obligation counts exactly the session's undelivered
+//! cleanup, and its delivery — the physical delete — waits for that cleanup
+//! and then deletes the session, closure pins its close superseded
+//! included.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -11,12 +12,14 @@ use lash_core::drive::relay::{RelayVerdict, deliver_now, relay_due};
 use lash_core::session_delete::SessionDeleteRelay;
 use lash_core::store::session_delete::SessionCleanup;
 use lash_core::store::{
-    ObligationId, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
-    ObligationState, StallReason,
+    ControlIntentState, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
+    ObligationSettlement, ObligationState, StallReason,
 };
 use lash_core::{ScopeId, StoreSet, TurnId};
 
-use super::session_close::{CloseSink, administration, close, session};
+use super::session_close::{
+    CloseSink, administration, close, intent_relay, pin_a_turn_cancel_closure, session,
+};
 
 /// A claim on `id` settled as `settlement`: what a kind's relay does, done by
 /// hand for a ledger whose producer slice is not the law's subject.
@@ -378,5 +381,73 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
             .await
             .expect("read the delete obligation"),
         None
+    );
+}
+
+/// L-D11 (FIG-3873 S3): the physical delete retires the turn-cancel closure
+/// pins of the closing session it deletes. The close ended every root the
+/// session had, so a pin is a turn's whose final commit the close cut short:
+/// no activation of a closing session will drain it, and a delete that
+/// refused it would stay owed for good.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn the_physical_delete_retires_the_closure_pins_its_close_superseded(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn StoreSet>,
+    _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
+) {
+    let factory = stores.session_store_factory();
+    let clock = stores.clock();
+    let (id, store) = session(&stores, prefix, "delete-superseded-pin").await;
+    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
+    let intent = factory
+        .begin_session_close(&id, clock.timestamp_ms())
+        .await
+        .expect("commit the close's store half")
+        .expect("the session exists");
+    // The close's engine half, as its obligation's relay delivers it: its
+    // acknowledgement arms the delete.
+    let delivered = intent_relay(
+        &stores,
+        CloseSink::new(Arc::clone(&factory), 0),
+        Arc::clone(&clock),
+    )
+    .deliver_intent(&intent)
+    .await
+    .expect("deliver the close");
+    assert!(
+        matches!(delivered, ControlIntentState::Acknowledged { .. }),
+        "{delivered:?}"
+    );
+    let delete = stores
+        .session_delete_ledger()
+        .delete_obligation(&id)
+        .await
+        .expect("read the delete obligation")
+        .expect("the acknowledgement armed the delete");
+    let admin = administration(host, &stores, CloseSink::new(Arc::clone(&factory), 0));
+    let verdict = deliver_now(&SessionDeleteRelay::new(admin), &delete.id, clock.as_ref())
+        .await
+        .expect("attempt the delete");
+    assert!(
+        matches!(verdict, RelayVerdict::ClaimLost),
+        "the physical delete removed the row its obligation lived on: {verdict:?}"
+    );
+    assert!(
+        factory
+            .session_was_deleted(&id)
+            .await
+            .expect("read the tombstone")
+    );
+    assert!(
+        factory
+            .pending_turn_cancel_closure_pins(&id)
+            .await
+            .expect("read the pins")
+            .is_empty(),
+        "the pin went with the session's storage"
     );
 }

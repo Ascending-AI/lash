@@ -95,7 +95,6 @@ regressions! {
     s1_queued_command_wedges_the_head_root => "FIG-3873 S1";
     #[ignore = "FIG-3873 S2: a crashed queued-work root replays into a journal mismatch"]
     s2_crashed_queued_work_root_diverges_on_replay => "FIG-3873 S2";
-    #[ignore = "FIG-3873 S3: a session deleted with a root in flight across a crash never finishes deleting"]
     s3_delete_with_an_orphaned_root_stays_due => "FIG-3873 S3";
     s4_interrupted_delete_leaks_the_cancel_gate_wait => "FIG-3873 S4";
     s5_cancelled_root_scope_close_stays_claimed_after_a_kill => "FIG-3873 S5";

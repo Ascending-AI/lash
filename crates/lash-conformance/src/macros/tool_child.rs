@@ -214,9 +214,11 @@ macro_rules! drive_admission_tests {
 /// epoch, its engine half is retained on failure, and its `CloseSession`
 /// intent outlives the session as the tombstone its roots are answered from,
 /// and is the one writer of the session scope's close row (D11); and the
-/// two-phase delete's laws L-D7..L-D9 (ADR 0109 §4): the close's
+/// two-phase delete's laws L-D7..L-D11 (ADR 0109 §4): the close's
 /// acknowledgement arms the `SessionDelete` obligation, which waits on
-/// exactly the session's undelivered cleanup and then deletes it.
+/// exactly the session's undelivered cleanup and then deletes it; a deletion
+/// retried after its close is not refused by a closure pin the close
+/// superseded, and the physical delete retires that pin.
 /// The fixture is the admitted-head one; a tier with a
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) runs the close
 /// inside the engine's `SessionDelete` handler.
@@ -233,6 +235,8 @@ macro_rules! session_close_tests {
             (a_close_acknowledgement_arms_the_session_delete_obligation, "session-delete-arm"),
             (session_delete_counts_only_the_sessions_undelivered_cleanup, "session-delete-cleanup"),
             (the_physical_delete_waits_for_cleanup_then_deletes_the_session, "session-delete-finalizer"),
+            (a_deletion_retried_after_its_close_is_not_refused_by_a_pin_the_close_superseded, "session-close-superseded-pin"),
+            (the_physical_delete_retires_the_closure_pins_its_close_superseded, "session-delete-superseded-pin"),
         ]);
     };
     (@laws $fixture:block; [$(($law:ident, $label:literal)),* $(,)?]) => {

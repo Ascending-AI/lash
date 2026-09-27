@@ -1014,7 +1014,19 @@ pub(crate) async fn delete_session_tx(
     report: &mut lash_core_execution::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
-    crate::turn_cancel_closure::ensure_session_not_pinned_tx(tx, session_id).await?;
+    // A closing session's pins are its ended roots': the close cut their
+    // turns' final commits short and no activation will ever drain them, so
+    // they go with the storage below. Any other pin is a live turn's
+    // closure, and refuses the delete.
+    let closing: Option<Option<i64>> =
+        sqlx::query_scalar(session_sql().meta.select_closing_intent.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    if closing.flatten().is_none() {
+        crate::turn_cancel_closure::ensure_session_not_pinned_tx(tx, session_id).await?;
+    }
     let materialized =
         sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
             .bind(session_id.as_str())

@@ -70,6 +70,14 @@ pub const OPEN: &[Finding] = &[
         steps: 200,
         without: &[],
     },
+];
+
+/// The defects the soak found that `main` has fixed: each replay must pass.
+pub const FIXED: &[Finding] = &[
+    // FIG-3894: a turn whose final commit the close cut short left its
+    // closure pinned, which no activation of a closing session drains, so
+    // the physical delete refused it for good, and a deletion retried after
+    // its close was refused by the same pin.
     Finding {
         id: "FIG-3873 S3",
         summary: "a session deleted while a root is in flight across a deployment \
@@ -81,10 +89,6 @@ pub const OPEN: &[Finding] = &[
         steps: 96,
         without: &["command"],
     },
-];
-
-/// The defects the soak found that `main` has fixed: each replay must pass.
-pub const FIXED: &[Finding] = &[
     // FIG-3895: the generation drain read nothing of a closing session,
     // whose roots' waits stay registered with the engine until the physical
     // delete; and the soak's rolling deploy held the deployment it rolled

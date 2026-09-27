@@ -448,6 +448,16 @@ anything, so a session deleted under that replay would answer
 the verb therefore usually defers to the reconcile tick on an engine whose
 released root is still finishing.
 
+A turn whose final commit the close cuts short may already have pinned its
+cancel closure. Nothing drains that pin: a pin is drained at the session's
+next activation, and a closing session is never activated again. The
+physical delete therefore retires a closing session's pins with its storage,
+and refuses a pin only on a session that is not closing. For the same reason
+the delete's pre-close refusals (a pinned closure, an effect group still
+live) are asked only before the close commits: a deletion retried after it
+replays the recorded close step, and a refusal there would answer the replay
+differently from the run that recorded it.
+
 An input claimed before the close does not finish. The close ends its root
 (`Cancelled`, cause `SessionDeleted`), and the delete retires the claim with
 the session's storage. The only close there is, is a delete. The crash

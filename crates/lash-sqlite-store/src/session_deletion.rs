@@ -38,8 +38,24 @@ pub(super) async fn delete_session_from_catalog(
             lash_core_execution::SessionBlobReclaimReport,
             lash_core_execution::StoreError,
         > = (|| {
-            let pending_count = tx
+            // A closing session's pins are its ended roots': the close cut
+            // their turns' final commits short and no activation will ever
+            // drain them, so they go with the storage below. Any other pin is
+            // a live turn's closure, and refuses the delete.
+            let closing = tx
                 .query_row(
+                    session_sql().meta.select_closing_intent.sql(),
+                    params![session_id.as_str()],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .flatten()
+                .is_some();
+            let pending_count = if closing {
+                0
+            } else {
+                tx.query_row(
                     crate::turn_ingress::turn_ingress_sql()
                         .closures
                         .count_by_session
@@ -47,7 +63,8 @@ pub(super) async fn delete_session_from_catalog(
                     params![session_id.as_str()],
                     |row| row.get::<_, i64>(0),
                 )
-                .map_err(sqlite_error)?;
+                .map_err(sqlite_error)?
+            };
             let pending_count = usize::try_from(pending_count).map_err(|_| {
                 lash_core_execution::StoreError::StoredDataCorrupt {
                     record_kind: "TurnCancelClosureAuthorization",
