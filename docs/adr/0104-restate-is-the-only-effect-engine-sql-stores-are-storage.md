@@ -368,14 +368,12 @@ stand.
 | [0009](0009-deterministic-simulation-harness.md) | lash-sim's SQL worlds and their lease, fencing and reopen contention artifacts |
 | [0012](0012-durable-waits-via-effect-host-engines.md) | the SQL substrates' effect journal and promise rows |
 | [0014](0014-operational-policy-stays-with-the-host.md) | Lease Timings for session-execution, effect-replay and process leases, and failover parity |
-| [0016](0016-process-waits-live-on-the-work-driver-seam.md) | `NativeProcessAwaiter` and in-process process work for store-only deployments |
 | [0019](0019-process-recovery-obeys-declared-disposition.md) | lease-validated completion and recovery after a lapsed process lease (superseded by [ADR 0110](0110-the-engine-owns-process-recovery.md)) |
 | [0025](0025-bounded-journals-are-an-effect-controller-obligation.md) | re-drive against `runtime_effect_replay` on the store tier, and SQL replay-row retirement |
 | [0027](0027-unleased-completion-carries-explicit-authority.md) | completion with and without a Lash process lease |
 | [0029](0029-claims-are-generation-fenced-under-the-session-lease.md) | generation-fenced claims under the session-execution lease |
 | [0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) | the lease generation that authorizes a cancel closure, and lease renewal and takeover around it |
 | [0041](0041-child-turn-and-driver-stack-growth-have-canonical-seams.md) | session-execution leases and claims owned by a child runtime |
-| [0045](0045-services-are-stateless-substrates-own-continuation.md) | *The reference substrate*: lash as the substrate over SQL, with its own redrive and budget |
 | [0049](0049-session-ids-are-used-once.md) | SQL scope retirement of effect, group and promise rows, and the scope fence |
 | [0053](0053-claim-nonces-scope-session-lease-lifecycle.md) | claim nonces of the session-execution lease |
 | [0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) | the SQL tiers' group rows, finalization and drain |

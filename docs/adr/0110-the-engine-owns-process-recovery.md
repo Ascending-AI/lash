@@ -37,8 +37,8 @@ apparatus around it no longer has a caller:
   fresh execution of any started segment as `ResumeRefused { SubstrateLost }`,
   whatever its disposition. Its root start binds attempt 1 and never consults
   the attempt budget.
-- The only reader of `max_attempts` and of the `OwnerBound` rules is the SQL
-  engine's native process worker, which FIG-3668 deletes.
+- The only reader of `max_attempts` and of the `OwnerBound` rules was the SQL
+  engine's native process worker, which FIG-3860 deletes.
 - On the Restate tier, the Abandon Request's reconcile wrote the terminal at
   the next sweep: there is no lash lease to lapse.
 
@@ -168,12 +168,11 @@ The native worker's graceful owner-drain lever (`drain_owner_bound_work`,
 `ProcessDrainReport`) is deleted with `OwnerBound`: no started work is ever
 abandoned by its own host at close.
 
-### 7. The SQL reference substrate until FIG-3668
+### 7. No SQL reference substrate
 
-Until FIG-3668 deletes it, the SQL engine's native process worker recovers
-every process it executes by lease takeover and replay rows, its journal, and
-leaves externally-owned rows to their owner. Its `OwnerBound`, attempt-budget
-and abandon-reconcile paths are deleted now rather than ported.
+The SQL engine's native process worker, with its lease-takeover recovery, is
+deleted (FIG-3860). Restate's process workflow is the only recovery path: a
+started segment resumes by replaying its journal or ends `SubstrateLost`.
 
 ## Consequences
 

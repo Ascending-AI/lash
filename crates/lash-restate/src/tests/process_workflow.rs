@@ -886,13 +886,13 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
-            lash_core_worker::WorkerProcessWork::External(process_work),
+            process_work,
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy()),
     )
-    .expect("valid test native substrate config")
+    .expect("valid test process worker")
 }
 
 /// The `processes` catalogue a fixture that starts a child links against.
@@ -1416,7 +1416,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         "the reopened cancellation target remains registered"
     );
     assert_eq!(
-        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
+        lash_core::NoProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&recover_tool_id)
             .await
             .expect("await recovered terminal process"),

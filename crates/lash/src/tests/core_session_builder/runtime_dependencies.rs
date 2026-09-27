@@ -13,8 +13,7 @@ use lash_sansio::SessionId;
 /// A standard-mode builder over a fresh memory backend with a model and
 /// provider already named.
 async fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
-    peer_coherence_builder_over(memory_backend().await.into())
-        .map_backend(crate::tests::inline_session_work)
+    peer_coherence_builder_over(double_backend().await)
 }
 
 fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
@@ -28,8 +27,7 @@ fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::Lash
 #[tokio::test]
 async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
-        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
-            .map_backend(crate::tests::inline_session_work)
+        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
             .provider(mock_provider())
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner()),
@@ -47,8 +45,7 @@ async fn commit_budget_is_required_for_builder_construction_and_deserialization(
 #[tokio::test]
 async fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
-        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
-            .map_backend(crate::tests::inline_session_work)
+        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
             .provider(mock_provider())
             .model(mock_model_spec())
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
@@ -75,33 +72,32 @@ fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &s
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()> {
-    let artifacts = memory_backend().await;
-    let core_backend = memory_backend().await;
-    // Precondition: two memory backends are two substrates.
+    let artifacts = memory_store_backend().await;
+    let core_backend = memory_store_backend().await;
+    // Precondition: two memory store sets are two substrates.
     assert_ne!(
-        artifacts.identity(),
-        core_backend.identity(),
-        "two memory backends must name two substrates"
+        artifacts.binding_identity(),
+        core_backend.binding_identity(),
+        "two memory store sets must name two substrates"
     );
-    let build = |factory_backend: &lash_sqlite_store::SqliteBackend| {
+    let build = |factory_backend: &lash_core::Backend| {
         LashCore::rlm_builder(
-            core_backend.clone().into(),
+            core_backend.clone(),
             crate::TurnBudget::Unbounded,
-            rlm_factory(&factory_backend.clone().into()),
+            rlm_factory(factory_backend),
         )
         .provider(mock_provider())
         .model(mock_model_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())
     };
 
     // Control: the same factory over the core's own backend builds.
-    let core = build(core_backend.as_ref())?;
+    let core = build(&core_backend)?;
 
     let error = expect_build_error(
-        build(artifacts.as_ref()),
+        build(&artifacts),
         "an RLM factory over another backend must be refused",
     );
     match error {
@@ -111,8 +107,8 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
             backend,
         } => {
             assert_eq!(plugin_id, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
-            assert_eq!(plugin_backend, artifacts.identity());
-            assert_eq!(backend, core_backend.identity());
+            assert_eq!(plugin_backend, artifacts.binding_identity().to_string());
+            assert_eq!(backend, core_backend.binding_identity().to_string());
         }
         other => panic!("expected PluginBackendMismatch, got {other}"),
     }
@@ -122,7 +118,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
     let mut session = core.session("foreign-rlm-plugin");
     session
         .plugin_factories
-        .push(Arc::new(rlm_factory(&artifacts.clone().into())));
+        .push(Arc::new(rlm_factory(&artifacts)));
     let session_error = match session.open().await {
         Ok(_) => panic!("a per-session RLM factory over another backend must be refused"),
         Err(error) => error,
@@ -132,9 +128,9 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
         "expected PluginBackendMismatch, got {session_error}"
     );
     let worker_error = expect_build_error(
-        core.durable_process_worker_config_with_plugins([Arc::new(rlm_factory(
-            &artifacts.clone().into(),
-        )) as Arc<dyn PluginFactory>]),
+        core.durable_process_worker_config_with_plugins([
+            Arc::new(rlm_factory(&artifacts.clone())) as Arc<dyn PluginFactory>,
+        ]),
         "a worker's RLM factory over another backend must be refused",
     );
     assert!(
@@ -151,7 +147,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     const NOW_MS: u64 = 4_200_000;
     let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let core = LashCore::standard_builder(
-        memory_backend_with_clock(clock).await.into(),
+        store_backend_with_clock(clock).await,
         crate::TurnBudget::Unbounded,
     )
     .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
@@ -214,25 +210,16 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
 }
 
 #[tokio::test]
-async fn backend_trigger_store_observes_the_backend_clock_for_inline_and_public_worker_configs()
--> Result<()> {
+async fn backend_trigger_store_observes_the_backend_clock_for_the_worker_config() -> Result<()> {
     const NOW_MS: u64 = 4_200_000;
     let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(
-        memory_backend_with_clock(clock).await.into(),
+    let core = explicit_ephemeral_facets(peer_coherence_builder_over(
+        store_backend_with_clock(clock).await,
     ))
     .build(crate::testing::runtime_lease_owner())?;
 
-    let inline_trigger_store = {
-        let config = core
-            .substrate_slot
-            .process_worker_config()
-            .expect("native worker config must be assembled at build");
-        config.trigger_store()
-    };
     let public_trigger_store = core.durable_process_worker_config()?.trigger_store();
 
-    assert!(Arc::ptr_eq(&inline_trigger_store, &public_trigger_store));
     let receipt = public_trigger_store
         .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
             "fig1882.clock",
@@ -262,18 +249,10 @@ async fn a_file_backend_builds_successfully() -> Result<()> {
 /// catalog, the same one the core opens and creates sessions through.
 #[tokio::test]
 async fn durable_process_worker_config_uses_the_backend_catalog() -> Result<()> {
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder().await)
+    let core = explicit_ephemeral_facets(peer_coherence_builder().await)
         .build(crate::testing::runtime_lease_owner())?;
 
-    let inline_config = core
-        .substrate_slot
-        .process_worker_config()
-        .expect("native process worker config must be assembled at build");
     let public_config = core.durable_process_worker_config()?;
-    assert!(Arc::ptr_eq(
-        &inline_config.session_store_factory(),
-        &core.store_factory
-    ));
     assert!(Arc::ptr_eq(
         &public_config.session_store_factory(),
         &core.store_factory
@@ -354,7 +333,7 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 /// A backend that runs its processes in `NoopProcessWork`, wired over the
 /// backend's own registry.
 async fn backend_with_external_process_work() -> DecoratedBackend {
-    DecoratedBackend::over(memory_backend().await.into()).process_work(|registry| {
+    DecoratedBackend::over(double_backend().await).process_work(|registry| {
         lash_core::ProcessWorkWiring::new(
             lash_core::facade_support::watch_process_registry(registry),
             Arc::new(NoopProcessWork),
@@ -367,43 +346,38 @@ async fn backend_process_work_configures_the_core_registry() -> Result<()> {
     let backend = backend_with_external_process_work().await;
     let driver_registry = lash_core::Backend::from(backend.clone())
         .process_work()
-        .expect("the backend supplies its process work")
         .registry()
         .clone();
-    let core =
-        explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(backend.into()))
-            .map_backend(crate::tests::inline_session_work)
-            .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(peer_coherence_builder_over(backend.into()))
+        .build(crate::testing::runtime_lease_owner())?;
 
     assert!(Arc::ptr_eq(&core.process_registry(), &driver_registry));
     assert!(core.processes().observer().is_ok());
-    assert!(!core.substrate_slot.ports().await.drive_process_on_open);
     Ok(())
 }
 
 #[tokio::test]
-async fn external_process_port_composes_native_queued_port_and_drives_the_command() -> Result<()> {
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(
+async fn external_process_port_composes_the_engine_session_work_and_drives_the_command()
+-> Result<()> {
+    let core = explicit_ephemeral_facets(peer_coherence_builder_over(
         backend_with_external_process_work().await.into(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("external-process-native-queue").open().await?;
+    let session = core.session("external-process-engine-work").open().await?;
     let cursor_before = session
         .observe()
         .current_observation()
         .cursor
         .as_str()
         .to_string();
-    Box::pin(
-        session
-            .admin()
-            .commands()
-            .refresh_tool_catalog("native queue regression guard", "native-queue-refresh"),
-    )
+    Box::pin(session.admin().commands().refresh_tool_catalog(
+        "engine session work regression guard",
+        "engine-work-refresh",
+    ))
     .await?;
-    // The command drains asynchronously: the backend's in-process engine
-    // drives the session and applies it (FIG-3600).
+    // The command drains asynchronously: the backend's engine drives the
+    // session and applies it (FIG-3600).
     let _ = cursor_before;
     let mut settled = false;
     for _ in 0..1_000 {
@@ -413,95 +387,19 @@ async fn external_process_port_composes_native_queued_port_and_drives_the_comman
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    assert!(
-        settled,
-        "the native engine drives the command to its settlement"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn default_process_work_driver_resolves_over_the_backend_registry() -> Result<()> {
-    // Zero-ceremony path: a backend with no process work of its own gets
-    // the default native process work port on first `session().open()`. The
-    // driver's actual lease-protected execution of out-of-turn processes is
-    // covered in lash-core
-    // (`concurrent_workers_run_a_directly_registered_process_exactly_once`).
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder().await)
-        .build(crate::testing::runtime_lease_owner())?;
-    core.session("main").open().await?;
-    assert!(
-        core.substrate_slot.ports().await.drive_process_on_open,
-        "the default native process port must resolve over the backend's registry"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder().await)
-        .build(crate::testing::runtime_lease_owner())?;
-    let worker_hub = core
-        .substrate_slot
-        .native_process_change_hub()
-        .expect("native worker change hub");
-    let ports = core.substrate_slot.ports().await;
-    let wiring_registry = Arc::clone(ports.process.registry());
-    let process_id = wiring_registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
-        .await?
-        .id;
-    // The id is minted at registration, so the worker-side hub is watched
-    // from there, and the next write through the wiring registry must wake it.
-    let mut worker_changes = worker_hub.subscribe(&process_id);
-    wiring_registry
-        .complete_process(
-            &process_id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
-        )
-        .await?;
-
-    tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        worker_changes.changed(),
-    )
-    .await
-    .expect("wiring registry mutation must wake the worker-side hub")
-    .expect("worker-side hub remains live");
+    assert!(settled, "the engine drives the command to its settlement");
     Ok(())
 }
 
 #[tokio::test]
 async fn durable_process_worker_config_uses_the_backend_registry_and_trigger_store() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let core_owner = lash_core::LeaseOwnerIdentity::opaque(
         "durable-worker-facade-owner",
         "durable-worker-facade-boot",
     );
-    let native_substrate = lash_core::NativeSubstrateConfig {
-        worker_sweep: lash_core::WorkerSweepPolicy {
-            intake_page: std::num::NonZeroUsize::new(17).unwrap(),
-            ..lash_core::WorkerSweepPolicy::default()
-        },
-        work_cadence: lash_core::WorkCadencePolicy {
-            delivery_batch: std::num::NonZeroUsize::MIN,
-            ..lash_core::WorkCadencePolicy::default()
-        },
-    };
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(
-        backend.clone().into(),
-    ))
-    .native_substrate_config(native_substrate)
-    .build(core_owner)?;
+    let core = explicit_ephemeral_facets(peer_coherence_builder_over(backend.clone()))
+        .build(core_owner)?;
 
     assert!(core.processes().observer().is_ok());
     let config = core.durable_process_worker_config()?;
@@ -516,21 +414,15 @@ async fn durable_process_worker_config_uses_the_backend_registry_and_trigger_sto
         config.lease_owner.incarnation_id,
         "durable-worker-facade-boot"
     );
-    assert_eq!(
-        config.process_execution_concurrency(),
-        lash_core_worker::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
-    );
-    assert_eq!(config.native_substrate.worker_sweep.intake_page.get(), 17);
-    assert_eq!(config.native_substrate.work_cadence.delivery_batch.get(), 1);
     Ok(())
 }
 
 #[tokio::test]
 async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -648,15 +540,22 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
 async fn fork_observer_selection_is_recoverable_selective_and_wake_independent() -> Result<()> {
     // The fault decorator's read hook injects the transient observer failure
     // below, over the backend's own registry.
-    let sqlite = memory_backend().await;
-    let registry = Arc::new(lash_core::testing::ProcessRegistryFaults::new(
-        lash_core::Backend::from(sqlite.clone()).process_registry(),
-    ));
-    let fault_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
-    let backend = DecoratedBackend::over(sqlite.into()).process_registry(move |_| fault_registry);
-    let factory = lash_core::Backend::from(backend.clone()).session_store_factory();
+    let faults = Arc::new(std::sync::OnceLock::new());
+    let installed = Arc::clone(&faults);
+    let backend = double_backend_over(lash_restate_test::ServerConfig::default(), move |stores| {
+        lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+            .map_process_registry(|inner| {
+                let registry = Arc::new(lash_core::testing::ProcessRegistryFaults::new(inner));
+                let _ = installed.set(Arc::clone(&registry));
+                registry as Arc<dyn lash_core::ProcessRegistry>
+            })
+            .into_store_set()
+    })
+    .await;
+    let registry = Arc::clone(faults.get().expect("the double decorated its registry"));
+    let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
+        backend,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1173,7 +1072,7 @@ async fn duplicate_only_fork_intents_are_canonical(
 
 #[tokio::test]
 async fn duplicate_only_fork_intents_are_canonical_in_memory() -> Result<()> {
-    duplicate_only_fork_intents_are_canonical("memory", memory_backend().await.into()).await
+    duplicate_only_fork_intents_are_canonical("memory", double_backend().await).await
 }
 
 #[tokio::test]
@@ -1194,7 +1093,7 @@ async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
 #[tokio::test]
 async fn session_create_observer_intent_replays_idempotently_on_open() -> Result<()> {
     let session_id = "session-create-observer-recovery";
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let process_id = registry
@@ -1221,7 +1120,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         })
         .await?;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1290,11 +1189,11 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 
 #[tokio::test]
 async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1407,167 +1306,48 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
 }
 
 #[tokio::test]
-async fn builder_rejects_invalid_process_execution_concurrency() {
-    let err = expect_build_error(
-        explicit_ephemeral_facets(peer_coherence_builder().await)
-            .process_execution_concurrency(0)
-            .build(crate::testing::runtime_lease_owner()),
-        "zero process execution concurrency must be rejected",
-    );
-    assert!(matches!(err, EmbedError::ProcessExecutionConcurrency(_)));
-}
-
-#[tokio::test]
-async fn builder_rejects_invalid_queued_work_execution_concurrency() {
-    let err = expect_build_error(
-        explicit_ephemeral_facets(peer_coherence_builder().await)
-            .queued_work_execution_concurrency(0)
-            .build(crate::testing::runtime_lease_owner()),
-        "zero queued-work execution concurrency must be rejected",
-    );
-    assert!(matches!(err, EmbedError::QueuedWorkExecutionConcurrency(_)));
-}
-
-#[tokio::test]
-async fn builder_rejects_incoherent_native_pacing_durations() {
-    type Edit = fn(&mut lash_core::NativeSubstrateConfig);
-    let cases: [(&str, Edit); 13] = [
-        ("worker_sweep.fetch_retry_base", |config| {
-            config.worker_sweep.fetch_retry_base = std::time::Duration::ZERO;
+async fn durable_process_worker_rejects_incoherent_work_cadence() {
+    type Edit = fn(&mut lash_core::WorkCadencePolicy);
+    let cases: [(&str, Edit); 7] = [
+        ("work_cadence.poll_initial", |cadence| {
+            cadence.poll_initial = std::time::Duration::ZERO;
         }),
-        ("work_cadence.retry_initial", |config| {
-            config.work_cadence.retry_initial = std::time::Duration::ZERO;
+        ("work_cadence.poll_max", |cadence| {
+            cadence.poll_max = std::time::Duration::ZERO;
         }),
-        ("work_cadence.retry_max", |config| {
-            config.work_cadence.retry_max = std::time::Duration::ZERO;
+        ("work_cadence.poll_initial", |cadence| {
+            cadence.poll_initial = std::time::Duration::from_secs(2);
         }),
-        ("work_cadence.retry_initial", |config| {
-            config.work_cadence.retry_initial = std::time::Duration::from_secs(2);
+        ("work_cadence.delivery_retry_initial", |cadence| {
+            cadence.delivery_retry_initial = std::time::Duration::ZERO;
         }),
-        ("work_cadence.poll_initial", |config| {
-            config.work_cadence.poll_initial = std::time::Duration::ZERO;
+        ("work_cadence.delivery_retry_initial", |cadence| {
+            cadence.delivery_retry_initial = std::time::Duration::from_micros(500);
         }),
-        ("work_cadence.poll_max", |config| {
-            config.work_cadence.poll_max = std::time::Duration::ZERO;
+        ("work_cadence.delivery_retry_max", |cadence| {
+            cadence.delivery_retry_max = std::time::Duration::ZERO;
         }),
-        ("work_cadence.poll_initial", |config| {
-            config.work_cadence.poll_initial = std::time::Duration::from_secs(2);
-        }),
-        ("work_cadence.slow_wake_threshold", |config| {
-            config.work_cadence.slow_wake_threshold = std::time::Duration::ZERO;
-        }),
-        ("work_cadence.slow_wake_threshold", |config| {
-            config.work_cadence.slow_wake_threshold = std::time::Duration::from_micros(500);
-        }),
-        ("work_cadence.delivery_retry_initial", |config| {
-            config.work_cadence.delivery_retry_initial = std::time::Duration::ZERO;
-        }),
-        ("work_cadence.delivery_retry_initial", |config| {
-            config.work_cadence.delivery_retry_initial = std::time::Duration::from_micros(500);
-        }),
-        ("work_cadence.delivery_retry_max", |config| {
-            config.work_cadence.delivery_retry_max = std::time::Duration::ZERO;
-        }),
-        ("work_cadence.delivery_retry_max", |config| {
-            config.work_cadence.delivery_retry_max = std::time::Duration::from_micros(500);
+        ("work_cadence.delivery_retry_max", |cadence| {
+            cadence.delivery_retry_max = std::time::Duration::from_micros(500);
         }),
     ];
-
-    for (field, edit) in cases {
-        let mut config = lash_core::NativeSubstrateConfig::default();
-        edit(&mut config);
-        let err = expect_build_error(
-            explicit_ephemeral_facets_with_backend_work(peer_coherence_builder().await)
-                .native_substrate_config(config)
-                .build(crate::testing::runtime_lease_owner()),
-            "incoherent native pacing must be rejected",
-        );
-        let EmbedError::NativeSubstrateConfig(source) = err else {
-            panic!("native pacing must use its typed build error, got {err}");
-        };
-        assert!(
-            source.to_string().contains(field),
-            "error must identify {field}: {source}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn durable_process_worker_rejects_incoherent_native_pacing_directly() {
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder().await)
+    let core = explicit_ephemeral_facets(peer_coherence_builder().await)
         .build(crate::testing::runtime_lease_owner())
         .expect("build core with process support");
-    let mut config = core
-        .durable_process_worker_config()
-        .expect("build durable process-worker config");
-    config.native_substrate.worker_sweep.fetch_retry_base = std::time::Duration::ZERO;
 
-    let Err(error) = lash_core_worker::DurableProcessWorker::new(config) else {
-        panic!("direct worker construction must reject zero-delay pacing");
-    };
-    assert!(
-        error.to_string().contains("worker_sweep.fetch_retry_base"),
-        "error must identify the rejected worker pacing field: {error}"
-    );
-}
-
-struct RejectedCadenceRunHandle;
-
-#[async_trait::async_trait]
-impl lash_core::facade_support::QueuedWorkRunHandle for RejectedCadenceRunHandle {
-    async fn run_queued_work(
-        &self,
-        _request: lash_core::facade_support::QueuedWorkRunRequest,
-    ) -> std::result::Result<(), lash_core::facade_support::QueuedWorkRunError> {
-        unreachable!("invalid cadence must be rejected before the driver can run")
-    }
-}
-
-#[test]
-fn explicit_cadence_constructor_rejects_zero_poll_delay_directly() {
-    let work_cadence = lash_core::WorkCadencePolicy {
-        poll_initial: std::time::Duration::ZERO,
-        ..lash_core::WorkCadencePolicy::default()
-    };
-
-    let Err(error) =
-        lash_core::facade_support::native_queued_work_with_execution_concurrency_and_work_cadence(
-            Arc::new(RejectedCadenceRunHandle),
-            1,
-            work_cadence,
-            CancellationToken::new(),
-        )
-    else {
-        panic!("explicit-cadence construction must reject zero-delay polling");
-    };
-    let lash_core::facade_support::NativeQueuedWorkConfigError::NativeSubstrateConfig(source) =
-        error
-    else {
-        panic!("zero-delay polling must preserve its typed pacing cause: {error}");
-    };
-    assert!(
-        source.to_string().contains("work_cadence.poll_initial"),
-        "error must identify the rejected poll field: {source}"
-    );
-}
-
-#[tokio::test]
-async fn builder_allows_harmless_native_pacing_boundaries() {
-    let mut config = lash_core::NativeSubstrateConfig::default();
-    config.worker_sweep.intake_page = std::num::NonZeroUsize::MIN;
-    config.worker_sweep.fetch_attempts = std::num::NonZeroUsize::MIN;
-    config.work_cadence.max_transient_attempts = std::num::NonZeroU32::MIN;
-    config.work_cadence.delivery_batch = std::num::NonZeroUsize::MIN;
-    config.work_cadence.slow_wake_threshold = std::time::Duration::from_millis(1);
-    config.work_cadence.delivery_retry_initial = std::time::Duration::from_secs(2);
-    config.work_cadence.delivery_retry_max = std::time::Duration::from_secs(1);
-
-    explicit_ephemeral_facets_with_backend_work(peer_coherence_builder().await)
-        .native_substrate_config(config)
-        .build(crate::testing::runtime_lease_owner())
-        .expect(
-            "non-zero count minima, a one-millisecond slow-wake threshold, and clamped delivery retry are valid",
+    for (field, edit) in cases {
+        let mut config = core
+            .durable_process_worker_config()
+            .expect("build durable process-worker config");
+        edit(&mut config.work_cadence);
+        let Err(error) = lash_core_worker::DurableProcessWorker::new(config) else {
+            panic!("worker construction must reject incoherent `{field}`");
+        };
+        assert!(
+            error.to_string().contains(field),
+            "error must identify {field}: {error}"
         );
+    }
 }
 
 #[tokio::test]
@@ -1585,10 +1365,10 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         stop_sequences: Vec::new(),
         projection_provenance: Default::default(),
     };
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

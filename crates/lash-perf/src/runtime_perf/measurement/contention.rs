@@ -826,16 +826,32 @@ async fn settle_durable_contention_claim(
     .await
 }
 
+/// A process-local sequence that spreads adjacent retries apart; it affects
+/// pacing only.
+static RETRY_JITTER_SEQUENCE: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0x9e37_79b9_7f4a_7c15);
+
+/// `base` jittered to 80-120%, clamped to `floor..=ceiling`.
+fn bounded_multiplicative_jitter(base: Duration, floor: Duration, ceiling: Duration) -> Duration {
+    let sequence = RETRY_JITTER_SEQUENCE
+        .fetch_add(0x9e37_79b9_7f4a_7c15, std::sync::atomic::Ordering::Relaxed);
+    // SplitMix64 finalization gives adjacent calls unrelated low bits.
+    let mut mixed = sequence;
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed ^= mixed >> 31;
+    let percent = 80 + mixed % 41;
+    let jittered_nanos = base.as_nanos().saturating_mul(u128::from(percent)) / 100;
+    let bounded_nanos = jittered_nanos.clamp(floor.as_nanos(), ceiling.as_nanos());
+    Duration::from_nanos(u64::try_from(bounded_nanos).unwrap_or(u64::MAX))
+}
+
 async fn wait_for_durable_contention_retry(
     counters: &DurableContentionCounters,
     retry_after: &mut Duration,
 ) {
     const RETRY_MAX: Duration = Duration::from_millis(25);
-    let delay = lash_core::facade_support::bounded_multiplicative_jitter(
-        *retry_after,
-        Duration::from_millis(1),
-        RETRY_MAX,
-    );
+    let delay = bounded_multiplicative_jitter(*retry_after, Duration::from_millis(1), RETRY_MAX);
     counters
         .cas_backoff_sleeps
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

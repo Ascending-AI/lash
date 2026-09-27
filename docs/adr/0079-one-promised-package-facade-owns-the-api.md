@@ -93,8 +93,7 @@ Those contracts acquire complete homes by deepening existing facade modules:
 * Conformance suites live under `lash::testing::conformance`. *(Superseded on
   this point on 2026-09-23: the durable-store laws left the facade so the
   80k-line law crate is off `lash-runtime`'s dependency edge. A host depends on
-  `lash-internal-conformance` directly; only the RLM runtime rebuild suite
-  stays in the facade, at `lash::testing::runtime_rebuild_and_worker_recovery`.)*
+  `lash-internal-conformance` directly.)*
 
 There is no new `lash::integrate` namespace. An internal path found to be
 required by one of the four classes is a facade gap to close in the appropriate

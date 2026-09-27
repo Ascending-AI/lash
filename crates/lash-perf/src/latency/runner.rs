@@ -314,7 +314,7 @@ pub(crate) async fn run_case(
                 mode => {
                     let wrapped = LatencySessionWork::wrap(&backend, mode);
                     lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
-                        .with_session_work(Some(wrapped))
+                        .with_session_work(wrapped)
                         .into_backend()
                 }
             };
@@ -458,9 +458,7 @@ fn compat_profile() -> BenchmarkStreamProfile {
 /// the next case's numbers. `session_work_in_flight` reads the server's own
 /// invocation table, so it sees worker-process drives too.
 async fn quiesce_drives(topology: &CaseTopology, spec: &CaseSpec, lane_count: usize) {
-    let Some(work) = topology.core.backend().session_work() else {
-        return;
-    };
+    let work = topology.core.backend().session_work();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let mut in_flight = false;

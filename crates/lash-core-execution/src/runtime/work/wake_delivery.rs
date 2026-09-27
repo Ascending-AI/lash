@@ -111,7 +111,7 @@ impl WakeDeliveryDriver {
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
         work_cadence: WorkCadencePolicy,
-    ) -> Result<Self, crate::NativeSubstrateConfigError> {
+    ) -> Result<Self, crate::WorkCadenceError> {
         work_cadence.validate()?;
         let driver = Self {
             inner: Arc::new(WakeDeliveryDriverInner {

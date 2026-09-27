@@ -74,11 +74,11 @@ impl lash_core::EffectHost for FailOnceRetirementHost {
 #[tokio::test]
 async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identity() -> Result<()> {
     let owner = crate::testing::runtime_lease_owner();
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let source_host = backend.effect_host();
     let source_catalog = backend.session_store_factory();
     let source = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(
@@ -89,7 +89,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     .model(model_spec("resume-model", None, 200_000))
     .build(owner.clone())?;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(
@@ -154,7 +154,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 /// asks the caller to retry the deletion.
 #[tokio::test]
 async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Result<()> {
-    let backend = DecoratedBackend::over(memory_backend().await.into())
+    let backend = DecoratedBackend::over(double_backend().await)
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),
@@ -164,9 +164,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("delete-retry").open().await?);
-    let administration = core.session_administration().await;
-
-    let first = LashCore::delete_session(administration.delete_context("delete-retry")?).await?;
+    let first = delete_bound_session_outcome(&core, "delete-retry").await?;
     let crate::SessionDeletion::Closing(closing) = first else {
         panic!("the failed retirement leaves the session closing, got {first:?}");
     };
@@ -204,12 +202,11 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     );
     drop(reopened);
 
+    let administration = core.session_administration().await;
     let relay = lash_core::session_delete::SessionDeleteRelay::new(administration);
     let pass = lash_core::runtime::drive::relay::relay_due(
         &relay,
-        &lash_core::testing::TestClock::new(
-            lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock) + 2_000,
-        ),
+        &lash_core::testing::TestClock::new(core_now_ms(&core) + 2_000),
         std::num::NonZeroUsize::new(8).expect("non-zero page"),
     )
     .await?;
@@ -229,7 +226,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
 #[tokio::test]
 async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -307,14 +304,14 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let owner = crate::testing::runtime_lease_owner();
     let session_id = "owner-services-preserved";
 
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
 
     let source_registry = backend.process_registry();
-    let receiving_backend = memory_backend().await;
+    let receiving_backend = double_backend().await;
     let receiving_registry = receiving_backend.process_registry();
 
     let source = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(
@@ -325,7 +322,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     .model(model_spec("owner-services-model", None, 200_000))
     .build(owner.clone())?;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
-        receiving_backend.clone().into(),
+        receiving_backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(

@@ -1,21 +1,20 @@
 //! FIG-3575: a turn failure settles by its cause, identically on every host.
 //!
-//! Each law runs the facade over a file-backed SQLite backend — the
-//! journaled `SqliteEffectHost` beside `SqliteSessionStoreFactory` — which is
-//! where the tier-keyed rule was live: a deterministic failure before the
-//! model call aborted instead of being recorded, and an aborted direct turn
-//! kept the claim on its own input.
+//! Each law runs the facade over the Restate double — the engine's own
+//! handler controller beside the SQLite session stores.
 //!
 //! * A deterministic failure is an outcome: a direct turn records it as a
 //!   failed turn.
-//! * A live fault aborts with `Err`. The aborted direct turn's error carries
-//!   its acceptance receipt: the host withdraws the input by it, or redrives
-//!   the same turn id, which replays the journal and commits once. A crashed
-//!   turn's input is reclaimed by the next lease generation.
+//! * A replay refusal parks the direct turn until its input is withdrawn.
+//! * An accepted input is withdrawable by its send receipt before it drives.
 //! * Cancellation keeps settling `Stopped { Cancelled }`.
+//!
+//! A live fault is the engine's to retry (FIG-3897): the Restate engine
+//! reruns the root under its own attempt, so the host-side redrive-by-turn-id
+//! laws the store-journal host had are the engine's retry laws in
+//! `lash-restate`.
 
 use super::*;
-use lash_core::runtime::effect::effect_replay_driver::EffectJournalFaultPoint;
 
 const STRANDED_WORDS: &str = "words of the turn that aborted";
 
@@ -40,31 +39,15 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingBeforeLlmCall {
     }
 }
 
+/// The Restate double a law's cores run over, held by the test.
 struct SqliteBackend {
-    _directory: tempfile::TempDir,
-    backend: Arc<lash_sqlite_store::SqliteBackend>,
+    backend: lash_core::Backend,
 }
 
 impl SqliteBackend {
     async fn open() -> Self {
-        Self::open_on(Arc::new(lash_core::facade_support::SystemClock)).await
-    }
-
-    /// The backend with every lease and record timestamp read from `clock`.
-    async fn open_on(clock: Arc<dyn lash_core::Clock>) -> Self {
-        let directory = tempfile::tempdir().expect("temporary durable backend");
-        let backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-                directory.path(),
-                lash_sqlite_store::SqliteBackendOptions::default(),
-                clock,
-            )
-            .await
-            .expect("file-backed SQLite backend"),
-        );
         Self {
-            _directory: directory,
-            backend,
+            backend: double_backend().await,
         }
     }
 
@@ -83,7 +66,7 @@ impl SqliteBackend {
         plugins: Vec<Arc<dyn PluginFactory>>,
     ) -> LashCore {
         let builder =
-            LashCore::standard_builder(self.backend.clone().into(), crate::TurnBudget::Unbounded);
+            LashCore::standard_builder(self.backend.clone(), crate::TurnBudget::Unbounded);
         let builder = match protocol {
             Some(protocol) => builder.protocol_plugin(
                 lash_core::testing::test_standard_protocol_factory_with_runtime_state(
@@ -99,7 +82,7 @@ impl SqliteBackend {
             .provider(provider)
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())
-            .expect("file-backed SQLite backend")
+            .expect("a core over the Restate double")
     }
 }
 
@@ -120,13 +103,6 @@ fn counting_text_provider(
         })
         .build()
         .into_handle()
-}
-
-/// Replay key of the model call of the session's first turn `turn_id`: turn
-/// index 1, protocol iteration 0, effect 2 (effect 1 is the execution
-/// environment sync).
-fn first_llm_call_key(session_id: &str, turn_id: &str) -> String {
-    format!("{session_id}:{turn_id}:1:0:llm_call:2")
 }
 
 fn assert_recorded_before_llm_failure(report: &TurnReport) {
@@ -259,7 +235,9 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
         );
         assert!(!status.drained());
     }
-    assert_eq!(protocol.calls.load(Ordering::SeqCst), 1);
+    // The engine retries a parked attempt (it ends retryably, keeping its
+    // journal), and each retry meets the same refusal before the model call.
+    assert!(protocol.calls.load(Ordering::SeqCst) >= 1);
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         0,
@@ -288,61 +266,14 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
     Ok(())
 }
 
-/// Aborts `turn_id`'s first model call with a live journal fault, and returns
-/// the error with the id of the one input the aborted turn accepted.
-async fn abort_direct_turn_with_live_fault(
-    backend: &SqliteBackend,
-    session: &crate::LashSession,
-    session_id: &str,
-    turn_id: &str,
-) -> (EmbedError, lash_core::InputId) {
-    let faults = backend.backend.effect_host().effect_journal_faults();
-    faults.fail_next(
-        EffectJournalFaultPoint::Claim,
-        &first_llm_call_key(session_id, turn_id),
-    );
-
-    let error = session
-        .send(TurnInput::text(STRANDED_WORDS))
-        .id(turn_id)
-        .output()
-        .await
-        .expect_err("a live journal fault aborts the direct turn");
-
-    assert!(faults.fired(), "the armed model-call claim fault fired");
-    let EmbedError::Runtime(runtime_error) = &error else {
-        panic!("the abort is the typed runtime error: {error:?}");
-    };
-    assert_eq!(
-        runtime_error.code,
-        lash_core::RuntimeErrorCode::SqliteEffectReplayStore,
-        "the abort carries the journal's own store fault"
-    );
-    let pending = session
-        .durable()
-        .pending_turn_inputs()
-        .await
-        .expect("read pending inputs");
-    assert_eq!(
-        pending.len(),
-        1,
-        "the aborted turn's input is still accepted"
-    );
-    let input_id = pending[0].input.input_id.clone();
-    (error, input_id)
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     const SESSION: &str = "direct-live-fault";
     let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    // The inline session-work double drives a send inside the task that
-    // waits on it: nothing claims the input until a waiter runs, so the
-    // withdraw below is never a claim race.
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.backend.clone().into(),
+        backend.backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(counting_text_provider(
@@ -350,9 +281,13 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
         Arc::clone(&requests),
     ))
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).open().await?;
+    // The engine drives a send as soon as it is accepted. Hold the session's
+    // drive so nothing claims the input before the withdraw below: the
+    // withdraw is never a claim race.
+    let double = held_double(&core).expect("the core runs on its held double");
+    let hold = double.hold_session_drive(&SessionId::from(SESSION)).await;
 
     let handle = session
         .send(TurnInput::text(STRANDED_WORDS))
@@ -373,6 +308,7 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
     assert!(outcome.output.is_none());
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    drop(hold);
 
     let next = session
         .send(TurnInput::text("the next turn"))
@@ -386,208 +322,6 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
         "the next turn does not contain the withdrawn input: {}",
         seen[0]
     );
-    Ok(())
-}
-
-/// The session drive retries a live journal fault under the send's stable
-/// root id. A retry of that id observes the same acceptance and turn.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> {
-    const SESSION: &str = "direct-live-fault-redrive";
-    let backend = SqliteBackend::open().await;
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = backend.core(
-        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
-        None,
-    );
-    let session = core.session(SESSION).open().await?;
-
-    let faults = backend.backend.effect_host().effect_journal_faults();
-    faults.fail_next(
-        EffectJournalFaultPoint::Claim,
-        &first_llm_call_key(SESSION, "redriven-turn"),
-    );
-    let handle = session
-        .send(TurnInput::text(STRANDED_WORDS))
-        .id("redriven-turn")
-        .await?;
-    let receipt = handle.receipt().clone();
-    let error = handle
-        .output()
-        .await
-        .expect_err("the live journal fault stops this drive attempt");
-    assert!(faults.fired(), "the first model-call claim failed once");
-    assert!(matches!(
-        error,
-        EmbedError::Runtime(ref runtime)
-            if runtime.code == lash_core::RuntimeErrorCode::SqliteEffectReplayStore
-    ));
-    assert_eq!(
-        session.durable().pending_turn_inputs().await?[0].status,
-        lash_core::PendingTurnInputReadStatus::Pending,
-    );
-    let retry = session
-        .send(TurnInput::text(STRANDED_WORDS))
-        .id("redriven-turn")
-        .await?;
-    assert_eq!(retry.input_id(), &receipt.input_id);
-    let redriven = retry.output().await?;
-    assert!(redriven.is_success(), "{:?}", redriven.result.outcome);
-    assert_eq!(
-        redriven.result.acceptance.as_ref(),
-        Some(&receipt),
-        "the redrive re-derives the aborted turn's own acceptance"
-    );
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
-    let settled_retry = session
-        .send(TurnInput::text(STRANDED_WORDS))
-        .id("redriven-turn")
-        .await?;
-    assert_eq!(settled_retry.input_id(), &receipt.input_id);
-    assert_eq!(
-        settled_retry.outcome().await?.status,
-        crate::TurnStatus::Answered
-    );
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        requests.lock_recover()[0].matches(STRANDED_WORDS).count(),
-        1,
-        "the redriven turn carries its input exactly once"
-    );
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    Ok(())
-}
-
-/// FIG-3600: an aborted turn's input stays accepted, and the session's next
-/// drive admits it first, under the aborted turn's own root. The later direct
-/// turn therefore runs after the aborted one is redriven, each root driving
-/// only its own input: neither folds the other in.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_new_direct_turn_runs_after_the_aborted_turn_is_redriven() -> Result<()> {
-    const SESSION: &str = "direct-live-fault-next-turn";
-    let backend = SqliteBackend::open().await;
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = backend.core(
-        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
-        None,
-    );
-    let session = core.session(SESSION).open().await?;
-
-    let _ = abort_direct_turn_with_live_fault(&backend, &session, SESSION, "bound-turn").await;
-
-    let next = session
-        .send(TurnInput::text("the next turn"))
-        .id("next-turn")
-        .output()
-        .await?;
-    assert!(next.is_success(), "{:?}", next.result.outcome);
-    let seen = requests.lock_recover().clone();
-    assert_eq!(
-        seen.len(),
-        2,
-        "the aborted root, then the new one: {seen:?}"
-    );
-    assert_eq!(
-        seen[0].matches(STRANDED_WORDS).count(),
-        1,
-        "the aborted turn is redriven with its own input once: {}",
-        seen[0]
-    );
-    assert!(
-        !seen[0].contains("the next turn"),
-        "the redriven turn does not fold in the later input: {}",
-        seen[0]
-    );
-    assert!(
-        seen[1].ends_with("the next turn") && seen[1].matches(STRANDED_WORDS).count() == 1,
-        "the later turn drives only its own input, over the redriven turn's history: {}",
-        seen[1]
-    );
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    Ok(())
-}
-
-/// Crash recovery: a direct turn whose worker dies mid-turn never reaches
-/// its abort path. Once its lease generation lapses, the next generation
-/// reclaims the input under the ADR 0029 fence and answers it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> Result<()> {
-    const SESSION: &str = "direct-crash-reclaim";
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
-    let backend = SqliteBackend::open_on(Arc::clone(&clock) as Arc<dyn lash_core::Clock>).await;
-    let (entered_tx, entered_rx) = oneshot::channel::<()>();
-    let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
-    let requests = Arc::new(StdMutex::new(Vec::new()));
-    let provider = crate::testing::TestProvider::builder()
-        .kind("embed-test")
-        .complete({
-            let requests = Arc::clone(&requests);
-            move |request| {
-                let entered_tx = Arc::clone(&entered_tx);
-                let requests = Arc::clone(&requests);
-                async move {
-                    let first_call = entered_tx.lock_recover().take();
-                    if let Some(tx) = first_call {
-                        let _ = tx.send(());
-                        // The worker dies here: the call never returns and the
-                        // turn's future is dropped, so no abort path runs.
-                        std::future::pending::<()>().await;
-                    }
-                    requests.lock_recover().push(request_text(&request));
-                    Ok(text_response("answered"))
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    let core = backend.core(provider, None);
-    let session = core.session(SESSION).open().await?;
-    let crashed = tokio::spawn({
-        let session = session.clone();
-        async move {
-            session
-                .send(TurnInput::text(STRANDED_WORDS))
-                .id("crashed-turn")
-                .output()
-                .await
-        }
-    });
-    entered_rx
-        .await
-        .expect("the crashed turn reached its model call");
-    crashed.abort();
-    assert!(crashed.await.is_err_and(|error| error.is_cancelled()));
-
-    // The crashed worker never renews its lease, so its generation lapses at
-    // the TTL. The lapse, not the dropped guard's best-effort background
-    // release, is what makes the next turn a new generation: until that
-    // release lands, this runtime's executor would re-enter its own live
-    // lease, which keeps the generation and with it the crashed claim.
-    clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
-    let next = session
-        .send(TurnInput::text("the next turn"))
-        .id("next-generation-turn")
-        .output()
-        .await?;
-    assert!(next.is_success(), "{:?}", next.result.outcome);
-    // The next drive admits the crashed turn's input first, under its own
-    // root, and answers it once; the next turn then runs alone (FIG-3600).
-    let seen = requests.lock_recover().clone();
-    assert_eq!(seen.len(), 2, "{seen:?}");
-    assert_eq!(
-        seen[0].matches(STRANDED_WORDS).count(),
-        1,
-        "the next generation reclaims the crashed turn's input and answers it once: {}",
-        seen[0]
-    );
-    assert!(
-        seen[1].ends_with("the next turn") && seen[1].matches(STRANDED_WORDS).count() == 1,
-        "the next turn drives only its own input: {}",
-        seen[1]
-    );
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
     Ok(())
 }
 

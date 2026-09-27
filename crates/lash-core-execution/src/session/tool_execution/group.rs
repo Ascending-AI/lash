@@ -554,12 +554,6 @@ impl RuntimeExecutionContext<'_> {
                     // opener's outcome and accounting commit (§6, §7, §13).
                     // The cursor starts after the prefix just incorporated.
                     self.retain_outstanding_group(cursor);
-                    // A child that parked this run's execution slot
-                    // (`release_process_execution_permit_while`) is no longer
-                    // awaited: the run continues, so it re-takes its slot here
-                    // exactly as the batch-effect path does after a cancel
-                    // grace drops a child future mid-wait.
-                    crate::runtime::ensure_process_execution_permit().await;
                     return Ok(ToolChildGroupSettled {
                         settled,
                         settlement_positions,

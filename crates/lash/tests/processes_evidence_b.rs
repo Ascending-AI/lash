@@ -269,8 +269,6 @@ fn processes_area_witnesses_b() {
     variant_witness(|value: &lash::runtime::ProcessEffectOutcome| {
         matches!(value, lash::runtime::ProcessEffectOutcome::Transfer)
     });
-    // W0401: lash::runtime::QueuedWorkExecutionConcurrencyError [struct]
-    type_witness::<lash::runtime::QueuedWorkExecutionConcurrencyError>();
     // W0402: lash::runtime::RuntimeEffectCommand::Process::command [field]
     field_witness(|value: &lash::runtime::RuntimeEffectCommand| {
         if let lash::runtime::RuntimeEffectCommand::Process { command, .. } = value {
@@ -947,8 +945,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::process::ProcessTerminalSemantics| {
         let _ = &value.status;
     });
-    // W0639: lash::process::ProcessExecutionConcurrencyError [struct]
-    type_witness::<lash::process::ProcessExecutionConcurrencyError>();
     // W0640: lash::persistence::QueuedCheckpointTurnInput [struct]
     type_witness::<lash::persistence::QueuedCheckpointTurnInput>();
     // W0641: lash::persistence::QueuedCheckpointTurnInput::messages [field]

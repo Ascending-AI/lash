@@ -1800,7 +1800,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         core.durable_process_worker_config()
             .expect("build process worker config"),
     )
-    .expect("valid test native substrate config");
+    .expect("valid test process worker");
     let process_observer = core
         .processes()
         .observer()

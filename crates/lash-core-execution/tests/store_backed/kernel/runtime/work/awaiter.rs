@@ -6,8 +6,8 @@ mod tests {
 
     use crate::PluginError;
     use crate::runtime::ProcessRegistryFaults;
-    use crate::runtime::native_substrate::*;
     use crate::runtime::process::*;
+    use crate::runtime::work::*;
     use crate::support::prelude::*;
     use crate::{
         ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef, ProcessInput,
@@ -101,7 +101,7 @@ mod tests {
             poll_max: Duration::from_secs(3),
             ..WorkCadencePolicy::default()
         };
-        let awaiter = NativeProcessAwaiter::for_registry(Arc::new(faults.clone()))
+        let awaiter = ProcessRegistryAwaiter::for_registry(Arc::new(faults.clone()))
             .with_work_cadence(work_cadence);
         let process_id = registered.id.clone();
         let waiter = crate::task::spawn(async move { awaiter.await_terminal(&process_id).await });
@@ -225,7 +225,7 @@ mod tests {
             .await
             .expect("append");
 
-        let event = NativeProcessAwaiter::new(Arc::clone(&registry), hub)
+        let event = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub)
             .await_event(&proc_record.id, "process.cancel_requested", 0)
             .await
             .expect("await event");
@@ -235,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn await_terminal_unknown_process_errors() {
         let registry = memory_registry().await;
-        let err = NativeProcessAwaiter::for_registry(registry)
+        let err = ProcessRegistryAwaiter::for_registry(registry)
             .await_terminal(&crate::ProcessId::fixture("missing"))
             .await
             .expect_err("unknown process should error");
@@ -254,7 +254,7 @@ mod tests {
         registry.set_process_read_error(Some(PluginError::Session(
             "process store read failed".to_string(),
         )));
-        let err = NativeProcessAwaiter::for_registry(registry)
+        let err = ProcessRegistryAwaiter::for_registry(registry)
             .await_terminal(&crate::ProcessId::fixture("unreadable"))
             .await
             .expect_err("store read failure should surface");
@@ -290,7 +290,7 @@ mod tests {
 
         let output = tokio::time::timeout(
             Duration::from_secs(1),
-            NativeProcessAwaiter::for_registry(registry).await_terminal(&proc_record.id),
+            ProcessRegistryAwaiter::for_registry(registry).await_terminal(&proc_record.id),
         )
         .await
         .expect("polling await timeout")
@@ -306,7 +306,7 @@ mod tests {
             .register_process(registration())
             .await
             .expect("register");
-        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+        let awaiter = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub);
         let process_id = proc_record.id.clone();
         let waiter = crate::task::spawn(async move { awaiter.await_terminal(&process_id).await });
         registry
@@ -621,7 +621,7 @@ mod tests {
     async fn native_awaiter_returns_an_already_terminal_process() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
-        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+        let awaiter = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub);
         let proc_record = registry
             .register_process(registration())
             .await
@@ -647,7 +647,7 @@ mod tests {
     async fn native_awaiter_refuses_await_on_caller_departed_row() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
-        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+        let awaiter = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub);
         let proc_record = registry
             .register_process(registration())
             .await
@@ -678,7 +678,7 @@ mod tests {
         let (registry, hub) = watched_parts(watch_process_registry(
             Arc::clone(&raw) as Arc<dyn ProcessRegistry>
         ));
-        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+        let awaiter = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub);
 
         let proc_departed_record = registry
             .register_process(registration())
@@ -725,7 +725,7 @@ mod tests {
         let barrier = Arc::new(tokio::sync::Barrier::new(WAITERS + 1));
         let mut waiters = Vec::with_capacity(WAITERS);
         for _ in 0..WAITERS {
-            let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub.clone());
+            let awaiter = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub.clone());
             let barrier = Arc::clone(&barrier);
             let process_id = proc_record.id.clone();
             waiters.push(crate::task::spawn(async move {

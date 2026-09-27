@@ -59,24 +59,23 @@ pub trait EffectEngine: Send + Sync {
     /// engine would name the wrong build on a generation-routed lane.
     fn build_generation(&self) -> &BuildGeneration;
 
-    /// The engine that executes the store set's background processes, when
-    /// the engine runs them itself. `None` means the runtime's in-process
-    /// worker drives the store set's registry: the interim in-process
-    /// engine, until FIG-3668 deletes it.
+    /// The engine that executes the store set's background processes:
+    /// Restate's process workflow, or a wiring over
+    /// [`NoProcessWork`](crate::NoProcessWork) for an engine that runs none.
     ///
     /// Required, with no default: a wrapper that forgot to forward it would
-    /// silently hand an engine-driven registry to the in-process worker too.
-    fn process_work(&self) -> Option<ProcessWorkWiring>;
+    /// answer for an engine that is not the one running the processes.
+    fn process_work(&self) -> ProcessWorkWiring;
 
-    /// The engine that runs the store set's session drives (FIG-3600), when
-    /// the engine supplies one of its own (Restate's session driver). `None`
-    /// means the runtime drives sessions in process: the SQLite engine, until
-    /// FIG-3668 deletes it, and with it this `Option`.
+    /// The engine that runs the store set's session drives (FIG-3600):
+    /// Restate's session driver, or [`NoSessionWork`](crate::NoSessionWork)
+    /// for an engine that drives no sessions. Nothing drives a session in
+    /// process (ADR 0104).
     ///
     /// Required, with no default, for the same reason as
-    /// [`Self::process_work`]: a forgotten forward would drive one store
-    /// set's sessions in process as well.
-    fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>>;
+    /// [`Self::process_work`]: a wrapper that forgot to forward it would
+    /// answer for an engine that is not the one running the sessions.
+    fn session_work(&self) -> Arc<dyn SessionWorkEngine>;
 }
 
 /// The one value a runtime takes every port from: one effect engine, and
@@ -139,13 +138,10 @@ impl Backend {
     }
 
     /// The durable registry of this backend's background processes: the one
-    /// the engine's process work is wired over when the engine runs them, so
-    /// the runtime and the engine see one registry.
+    /// the engine's process work is wired over, so the runtime and the engine
+    /// see one registry.
     pub fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
-        match self.engine.process_work() {
-            Some(wiring) => Arc::clone(wiring.registry()),
-            None => self.stores().process_registry(),
-        }
+        Arc::clone(self.engine.process_work().registry())
     }
 
     /// The durable trigger subscriptions and occurrences.
@@ -204,12 +200,12 @@ impl Backend {
     }
 
     /// See [`EffectEngine::process_work`].
-    pub fn process_work(&self) -> Option<ProcessWorkWiring> {
+    pub fn process_work(&self) -> ProcessWorkWiring {
         self.engine.process_work()
     }
 
     /// See [`EffectEngine::session_work`].
-    pub fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>> {
+    pub fn session_work(&self) -> Arc<dyn SessionWorkEngine> {
         self.engine.session_work()
     }
 }

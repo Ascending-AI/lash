@@ -308,7 +308,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
             crate::CommitBudgetLimit::Unbounded,
@@ -357,7 +357,7 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
@@ -398,7 +398,7 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
 
 async fn core_with_commit_budget(commit_budget: crate::CommitBudget) -> Result<LashCore> {
     explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
         commit_budget,
     )
     .provider(mock_provider())
@@ -600,15 +600,11 @@ async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<(
 /// builder still refuses at `build()` is a missing runtime setting.
 #[tokio::test]
 async fn typed_core_builders_require_explicit_runtime_settings() {
-    let err = match LashCore::standard_builder(
-        memory_backend().await.into(),
-        crate::TurnBudget::Unbounded,
-    )
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .map_backend(crate::tests::inline_session_work)
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
+    let err = match LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("the standard preset must not default a commit budget"),
         Err(err) => err,
@@ -619,7 +615,7 @@ async fn typed_core_builders_require_explicit_runtime_settings() {
 #[tokio::test]
 async fn generic_lash_core_builder_requires_protocol_plugin() {
     let err = match explicit_ephemeral_facets(LashCore::builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -637,7 +633,7 @@ async fn generic_lash_core_builder_requires_protocol_plugin() {
 async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(recording_prompt_provider(Arc::clone(&seen)))
@@ -698,7 +694,7 @@ async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result
 async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(recording_prompt_provider(Arc::clone(&seen)))
@@ -728,7 +724,7 @@ async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
 async fn provider_overrides_apply_at_core_and_session_scopes_and_a_config_route_must_be_served()
 -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider("core-provider", "core-model", "core"))
@@ -775,7 +771,7 @@ async fn provider_overrides_apply_at_core_and_session_scopes_and_a_config_route_
 async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(recording_text_provider(
@@ -852,9 +848,9 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
         "lashlang_abilities": { "sleep": true }
     }))
     .expect("rlm config");
-    let backend = memory_backend().await;
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, &backend.clone().into());
-    let core = LashCore::rlm_builder(backend.into(), crate::TurnBudget::Unbounded, factory)
+    let backend = double_backend().await;
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, &backend.clone());
+    let core = LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(mock_model_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
@@ -1056,16 +1052,15 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // the caller builds. The plugin host carries the core tool plugin plus any
     // extra tool plugins; the request's execution env plugin options configure
     // them (here `compile-extra-tool` resolves to `lookup`).
-    let backend = memory_backend().await;
-    let artifact_store =
-        lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.clone().into());
+    let backend = double_backend().await;
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.clone());
     let factory = Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        &backend.clone().into(),
+        &backend.clone(),
     ));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn PluginFactory>,
@@ -1406,7 +1401,7 @@ async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
 #[tokio::test]
 async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1462,7 +1457,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
 #[tokio::test]
 async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1505,7 +1500,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
 #[tokio::test]
 async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1731,26 +1726,40 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
     let session = core.session("refresh-provider-mismatch").open().await?;
 
     store.set_head_provider_id("other-provider");
-    let error = session
-        .send(TurnInput::text("runs against the adopted head provider"))
-        .output()
-        .await
-        .expect_err("the adopted head names a provider this host has not registered");
-    match &error {
-        crate::EmbedError::Runtime(runtime_error) => {
-            assert_eq!(
-                runtime_error.code,
-                lash_core::RuntimeErrorCode::ProviderBindingUnavailable,
-                "the refusal is the typed, retryable provider-binding error"
-            );
-            assert!(
-                runtime_error.message.contains("other-provider"),
-                "the typed refusal names the adopted provider id: {}",
-                runtime_error.message
-            );
+    let waiter = tokio::spawn({
+        let session = session.clone();
+        async move {
+            session
+                .send(TurnInput::text("runs against the adopted head provider"))
+                .output()
+                .await
         }
-        other => panic!("expected a typed provider-resolution refusal, got: {other:?}"),
-    }
+    });
+    // The refusal is the typed, retryable provider-binding error: the engine
+    // retries the drive, and each attempt fails naming the adopted provider
+    // this host has not registered.
+    let double = held_double(&core).expect("the core runs on its held double");
+    let (_, failure) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            if let Some(failure) = double
+                .server()
+                .invocations()
+                .into_iter()
+                .filter_map(|invocation| invocation.last_failure)
+                .find(|(_, message)| message.contains("other-provider"))
+            {
+                break failure;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the drive's attempt fails on the adopted head's provider");
+    waiter.abort();
+    assert!(
+        failure.contains("ProviderBindingUnavailable") && failure.contains("retryable"),
+        "the refusal is the typed provider-binding error: {failure}"
+    );
     Ok(())
 }
 
@@ -1783,7 +1792,7 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
 #[tokio::test]
 async fn core_delete_session_removes_factory_backed_session_state() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1901,7 +1910,7 @@ impl lash_core::EffectHost for RetirementRecordingHost {
 async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
     let retirements = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = Arc::clone(&retirements);
-    let backend = DecoratedBackend::over(memory_backend().await.into()).effect_host(move |inner| {
+    let backend = DecoratedBackend::over(double_backend().await).effect_host(move |inner| {
         Arc::new(RetirementRecordingHost {
             inner,
             retirements: recorded,
@@ -1929,10 +1938,10 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
 
 #[tokio::test]
 async fn public_session_state_appends_preserve_concurrent_retirement_refusals() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
+        backend,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2252,7 +2261,7 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let builder_model = model_spec("builder-model", None, 77_777);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2348,7 +2357,7 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
 #[tokio::test]
 async fn core_store_factory_is_used_for_sessions_created_from_a_running_session() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

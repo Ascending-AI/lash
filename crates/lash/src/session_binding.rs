@@ -16,7 +16,7 @@ pub(crate) struct BoundSession {
     store: Arc<dyn RuntimePersistence>,
     effect_host: Arc<dyn EffectHost>,
     process: ProcessWorkWiring,
-    work: crate::core::HeldWork,
+    work: Arc<crate::core::ResolvedQueuedWork>,
     /// The owner core's open sessions: the core whose driver serves `work`
     /// runs a drive on the runtime registered here.
     residents: Arc<crate::core::residents::ResidentSessions>,
@@ -40,7 +40,7 @@ impl BoundSession {
         store: Arc<dyn RuntimePersistence>,
         env: &RuntimeEnvironment,
         process: ProcessWorkWiring,
-        work: crate::core::HeldWork,
+        work: Arc<crate::core::ResolvedQueuedWork>,
         residents: Arc<crate::core::residents::ResidentSessions>,
         catalog: Arc<dyn SessionStoreFactory>,
     ) -> Self {
@@ -93,7 +93,7 @@ impl BoundSession {
     /// The owner-issued queued-work port. The binding-derived Durable Session
     /// wakes this port, never a core-level override.
     pub(crate) fn queued(&self) -> Arc<dyn SessionWorkEngine> {
-        self.work.engine() as Arc<dyn SessionWorkEngine>
+        Arc::clone(&self.work) as Arc<dyn SessionWorkEngine>
     }
 
     /// The ingress relay an acceptance through this binding delivers with
@@ -109,16 +109,15 @@ impl BoundSession {
 
     /// The same port as [`queued`](Self::queued), with how a send waits on
     /// its drive.
-    pub(crate) fn work(&self) -> crate::core::HeldWork {
-        self.work.clone()
+    pub(crate) fn work(&self) -> Arc<crate::core::ResolvedQueuedWork> {
+        Arc::clone(&self.work)
     }
 
     /// Record `handle` as this session's open runtime with the owner core,
     /// whose driver then runs the session's drives on it (FIG-3600 S5b). A
     /// resumed session keeps its owner, so a resume registers here too.
     pub(crate) fn register_resident(&self, handle: &lash_core::facade_support::RuntimeHandle) {
-        self.residents
-            .register(&self.session_id, handle, self.effect_host());
+        self.residents.register(&self.session_id, handle);
     }
 
     /// Withdraw `handle` from the owner core's open sessions and let a drive

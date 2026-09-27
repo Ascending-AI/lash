@@ -74,14 +74,13 @@ async fn seed_session_with_a_persisted_tool(
     session_id: &SessionId,
 ) -> Result<Arc<dyn SessionStoreFactory>> {
     let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
-    let granting_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core.session(session_id.clone()).open().await?;
     granted
@@ -124,7 +123,6 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let opened = grantless_core.session(session_id.clone()).open().await?;
 
@@ -164,7 +162,6 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
         counters: Arc::clone(&counters),
     }))
     .tool_source_policy(lash_core::ToolSourcePolicy::Require)
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match strict_core.session(session_id.clone()).open().await {
@@ -204,7 +201,6 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let reopened = tolerant_core.session(session_id.clone()).open().await?;
     Box::pin(reopened.close()).await?;
@@ -226,7 +222,6 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match tolerant_core
@@ -259,54 +254,49 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     Ok(())
 }
 
-/// The queued-work driver rebuilds a session runtime per batch. Under Require,
-/// a rebuild that lost a catalog member is a **terminal** failure, not a
-/// transient one the driver would retry forever.
+/// The engine's drive rebuilds a session runtime per admission. Under
+/// Require, a rebuild that lost a catalog member refuses the drive, typed and
+/// naming the lost member.
 #[tokio::test]
-async fn require_makes_a_queued_work_rebuild_a_terminal_failure() -> Result<()> {
-    use crate::core::queued_work::native_queued_work_handle_for_tests;
-    use crate::runtime::{QueuedWorkRunErrorClass, QueuedWorkRunRequest};
-    use lash_core::facade_support::QueuedWorkRunHandle as _;
-
-    // The native queued-work handle is the driver this law exercises: its
-    // substrate is a later FIG-3668 step's deletion, so this one stays on the
-    // SQLite engine until then (B3).
+async fn require_refuses_a_drive_rebuild_that_lost_a_tool_source() -> Result<()> {
     let session_id = SessionId::from("fig-3367-queued");
-    let backend: lash_core::Backend = memory_backend().await.into();
-    let factory = seed_session_with_a_persisted_tool(&backend, &session_id).await?;
-
+    let seeding = restate_double(SEED).await;
+    seed_session_with_a_persisted_tool(&seeding.lash_backend(), &session_id).await?;
+    // The strict build is a new deployment over the same stores: its engine
+    // drives with the strict core's driver.
+    let strict = redeploy(seeding, SEED + 1).await;
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        strict.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
     .tool_source_policy(lash_core::ToolSourcePolicy::Require)
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
-    // The driver the core would run for this session.
-    let handle = native_queued_work_handle_for_tests(&strict_core, Arc::clone(&factory));
-
-    let error = match handle
-        .run_queued_work(QueuedWorkRunRequest {
-            session_id: Some(session_id.clone()),
-            reason: "fig-3367-queued-rebuild".to_string(),
-            trace_idle: false,
-        })
-        .await
-    {
-        Ok(progress) => panic!("the rebuild must fail under Require, got {progress:?}"),
+    let handle = strict_core
+        .session(session_id.clone())
+        .durable()
+        .await?
+        .send(TurnInput::text("drive the strict rebuild"))
+        .await?;
+    let error = match handle.output().await {
+        Ok(report) => panic!("the rebuild must fail under Require, got {report:?}"),
         Err(error) => error,
     };
-    assert_eq!(
-        error.class,
-        QueuedWorkRunErrorClass::Terminal,
-        "a lost tool source is not something a retry fixes: {error}"
+    // The drive's refusal reaches the sender typed and naming the lost
+    // tool. (The engine classifies it by its runtime code, which is
+    // `plugin_session_manager` today: making a lost source terminal on the
+    // engine's drive is FIG-3860's B6 follow-up.)
+    assert!(
+        error
+            .to_string()
+            .contains("requires every persisted tool source"),
+        "the drive refuses the rebuild on the lost tool source: {error}"
     );
     assert!(
         error.to_string().contains("tool:app_lookup"),
-        "the terminal failure names the lost tool: {error}"
+        "the refusal names the lost tool: {error}"
     );
     Ok(())
 }

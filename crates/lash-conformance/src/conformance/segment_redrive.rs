@@ -656,7 +656,7 @@ async fn segment_body(
                     scenario.start_envelope(),
                     RuntimeEffectLocalExecutor::processes(
                         Arc::clone(&registry),
-                        Arc::new(crate::NativeProcessWork::for_registry(registry)),
+                        Arc::new(crate::NoProcessWork::for_registry(registry)),
                     )
                     .with_process_env_store(Arc::clone(&scenario.env_store)),
                 )

@@ -1047,21 +1047,16 @@ impl RuntimeSessionServices {
         let turn = match scoped_effect_controller.into_static() {
             Ok(scoped_effect_controller) => {
                 // Canonical recursion-growth seam: every shareable child turn
-                // gets a fresh Tokio task stack here. Concurrency is bounded
-                // upstream by the process worker's execution slots — one
-                // process run owns at most one child turn — so no admission
-                // registry or limit lives at this layer.
-                let task = crate::task::spawn(
-                    crate::runtime::process_permit::inherit_process_execution_permit(
-                        run_initialized_session_turn(
-                            child.clone(),
-                            input,
-                            cancel,
-                            scoped_effect_controller,
-                            sink.clone(),
-                        ),
-                    ),
-                );
+                // gets a fresh Tokio task stack here. One process run owns at
+                // most one child turn, so no admission registry or limit lives
+                // at this layer.
+                let task = crate::task::spawn(run_initialized_session_turn(
+                    child.clone(),
+                    input,
+                    cancel,
+                    scoped_effect_controller,
+                    sink.clone(),
+                ));
                 let mut abort_on_drop = AbortTaskOnDrop::new(task.abort_handle());
                 let joined = task.await;
                 abort_on_drop.disarm();

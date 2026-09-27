@@ -176,9 +176,7 @@ pub async fn open_dispatch_handler(
 /// with a worker installed.
 pub fn install_process_worker(double: &lash_restate_test::RestateTestBackend) {
     let backend = double.lash_backend();
-    let process_work = backend
-        .process_work()
-        .expect("the Restate engine supplies process work");
+    let process_work = backend.process_work();
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
             Vec::new(),
@@ -187,7 +185,7 @@ pub fn install_process_worker(double: &lash_restate_test::RestateTestBackend) {
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
-            lash_core_worker::WorkerProcessWork::External(process_work),
+            process_work,
             std::sync::Arc::new(crate::NoSessionWork::new()),
             crate::testing::runtime_lease_owner(),
         ),

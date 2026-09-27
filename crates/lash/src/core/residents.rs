@@ -22,17 +22,14 @@ use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use tokio::sync::watch;
 
-use crate::support::EffectHost;
-
 /// How long a close or park waits for drives running on the session's
 /// runtime before it reports the runtime still in use.
 const RELEASE_GRACE: Duration = Duration::from_secs(5);
 
-/// An open session's runtime, held weakly, the effect host it runs on, and
-/// how many drives borrow it now.
+/// An open session's runtime, held weakly, and how many drives borrow it
+/// now.
 struct Resident {
     runtime: WeakRuntimeHandle,
-    effect_host: Arc<dyn EffectHost>,
     borrows: Arc<watch::Sender<usize>>,
 }
 
@@ -41,24 +38,19 @@ pub(crate) struct ResidentSessions {
     entries: Mutex<HashMap<SessionId, Resident>>,
 }
 
-/// A drive's hold on an open session's runtime: the runtime, its effect
-/// host, and the borrow the session's close waits out.
+/// A drive's hold on an open session's runtime: the runtime and the borrow
+/// the session's close waits out.
 ///
 /// Fields drop in declaration order: the runtime is released before the
 /// count, so a close woken by the count finds no hold left.
 pub(crate) struct ResidentBorrow {
     runtime: RuntimeHandle,
-    effect_host: Arc<dyn EffectHost>,
     _count: BorrowCount,
 }
 
 impl ResidentBorrow {
     pub(crate) fn runtime(&self) -> &RuntimeHandle {
         &self.runtime
-    }
-
-    pub(crate) fn effect_host(&self) -> &Arc<dyn EffectHost> {
-        &self.effect_host
     }
 }
 
@@ -75,19 +67,13 @@ impl Drop for BorrowCount {
 impl ResidentSessions {
     /// Record `handle` as `session`'s open runtime in this process. The most
     /// recent open of a session is the one a drive runs on.
-    pub(crate) fn register(
-        &self,
-        session: &SessionId,
-        handle: &RuntimeHandle,
-        effect_host: Arc<dyn EffectHost>,
-    ) {
+    pub(crate) fn register(&self, session: &SessionId, handle: &RuntimeHandle) {
         let mut entries = self.entries.lock_recover();
         entries.retain(|_, resident| resident.runtime.is_alive());
         entries.insert(
             session.clone(),
             Resident {
                 runtime: handle.downgrade(),
-                effect_host,
                 borrows: Arc::new(watch::Sender::new(0)),
             },
         );
@@ -101,7 +87,6 @@ impl ResidentSessions {
         resident.borrows.send_modify(|borrows| *borrows += 1);
         Some(ResidentBorrow {
             runtime,
-            effect_host: Arc::clone(&resident.effect_host),
             _count: BorrowCount(Arc::clone(&resident.borrows)),
         })
     }

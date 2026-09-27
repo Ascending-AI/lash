@@ -514,43 +514,11 @@ fn scope_close_pass(report: &lash_core::engine::ReconcileTick) -> lash_core::eng
         .unwrap_or_default()
 }
 
-/// One pass of the process worker over the law's stores: it delivers the
-/// cancel each close row owes the processes living `Until` the closed scope
-/// (ADR 0108 §5).
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: the sweep over the law's stores builds and runs"
-)]
-async fn recovery_sweep(
-    stores: &Arc<dyn crate::StoreSet>,
-    effect_host: &Arc<dyn crate::EffectHost>,
-) {
-    let registry = stores.process_registry();
-    let watched = crate::facade_support::watch_process_registry(Arc::clone(&registry));
-    let host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
-    let worker = lash_core_worker::DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(crate::facade_support::PluginHost::new(
-                crate::testing::test_standard_protocol_factories(),
-            )),
-            host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoSessionWork::new()),
-            crate::testing::runtime_lease_owner(),
-        ),
-    )
-    .expect("build the recovery sweep worker");
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("the recovery sweep runs");
-    // The worker's pass re-derives and arms the missing ledger rows; the
-    // obligation pass is what delivers them — the same `relay_due` the
-    // deployment's reconcile tick runs (ADR 0109).
+/// One recovery pass over the law's stores: the parent-end obligation
+/// pass delivers the cancel each close row owes the processes living `Until`
+/// the closed scope (ADR 0108 §5) — the same `relay_due` the deployment's
+/// reconcile tick runs (ADR 0109).
+async fn recovery_sweep(stores: &Arc<dyn crate::StoreSet>) {
     let pass = crate::deliver_due_parent_end_obligations(stores).await;
     assert_eq!(
         pass.stalled, 0,
@@ -741,7 +709,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         closes.closes()
     );
 
-    recovery_sweep(&stores, &effect_host).await;
+    recovery_sweep(&stores).await;
     assert!(
         root_close_row(&registry, &parts.session_id, &root)
             .await
@@ -798,7 +766,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         0,
         "the due pass found no close to deliver"
     );
-    recovery_sweep(&stores, &effect_host).await;
+    recovery_sweep(&stores).await;
     assert_eq!(
         terminal(&parts, &parked).await,
         None,

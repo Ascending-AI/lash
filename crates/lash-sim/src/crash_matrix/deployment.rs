@@ -306,13 +306,6 @@ impl DriverProxy {
 
 #[async_trait::async_trait]
 impl SessionDriver for DriverProxy {
-    async fn drive(
-        &self,
-        request: lash_core::engine::DriveRequest,
-    ) -> Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
-        self.live().await.drive(request).await
-    }
-
     async fn admit(
         &self,
         controller: lash_core::ScopedEffectController<'_>,

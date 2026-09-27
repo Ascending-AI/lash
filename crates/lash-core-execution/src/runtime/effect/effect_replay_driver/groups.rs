@@ -754,60 +754,55 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 _ => None,
             };
             let tool_child = matches!(child.command, RuntimeEffectCommand::ToolInvocation { .. });
-            // The child inherits its opener's process execution permit, as a
-            // batch leaf did, so a nested process await releases and
-            // reacquires the slot the worker granted this run.
-            crate::task::spawn(
-                lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
-                    // The result is discarded here on purpose: a child's outcome is
-                    // reported to its caller through the journal, by rank, and this
-                    // task's return value has no other reader. A failure is already
-                    // journaled as that child's terminal.
-                    //
-                    // The one exception is a tool child that refused where it
-                    // parks its opener: it records nothing (FIG-3725), so the
-                    // opener's rank wait is told here instead.
-                    let result = Box::pin(driver.execute_effect_cancellable(
-                        &scope,
-                        child,
-                        executor,
-                        Some(&cancel),
-                        None,
-                    ))
-                    .await;
-                    if let Err(error) = result
-                        && tool_child
-                        && !error.journaled
-                        && error.turn_failure_cause() == crate::TurnFailureCause::Parked
-                    {
-                        state
-                            .state
-                            .lock_recover()
-                            .refused
-                            .insert(replay_key.clone(), error);
-                    }
-                    // Released here, after the execution returned, however far
-                    // it got: a child the close cancelled while parked, and
-                    // one it cancelled before it ever claimed — whose
-                    // execution replays the recorded cancel terminal and
-                    // never parks — both leave a wait nothing else resolves
-                    // (FIG-3567). The token fires only on a `Cancel` close; a
-                    // wait that already holds its terminal (the child
-                    // resolved and committed first) refuses the release, so
-                    // this never overwrites a real outcome.
-                    if let Some(key) = &wait_key
-                        && cancel.is_cancelled()
-                    {
-                        let _ = driver
-                            .await_events
-                            .resolve(key, crate::Resolution::Cancelled)
-                            .await;
-                    }
-                    driver
-                        .group_child_finished(&group_key, &replay_key, &state)
+            crate::task::spawn(async move {
+                // The result is discarded here on purpose: a child's outcome is
+                // reported to its caller through the journal, by rank, and this
+                // task's return value has no other reader. A failure is already
+                // journaled as that child's terminal.
+                //
+                // The one exception is a tool child that refused where it
+                // parks its opener: it records nothing (FIG-3725), so the
+                // opener's rank wait is told here instead.
+                let result = Box::pin(driver.execute_effect_cancellable(
+                    &scope,
+                    child,
+                    executor,
+                    Some(&cancel),
+                    None,
+                ))
+                .await;
+                if let Err(error) = result
+                    && tool_child
+                    && !error.journaled
+                    && error.turn_failure_cause() == crate::TurnFailureCause::Parked
+                {
+                    state
+                        .state
+                        .lock_recover()
+                        .refused
+                        .insert(replay_key.clone(), error);
+                }
+                // Released here, after the execution returned, however far
+                // it got: a child the close cancelled while parked, and
+                // one it cancelled before it ever claimed — whose
+                // execution replays the recorded cancel terminal and
+                // never parks — both leave a wait nothing else resolves
+                // (FIG-3567). The token fires only on a `Cancel` close; a
+                // wait that already holds its terminal (the child
+                // resolved and committed first) refuses the release, so
+                // this never overwrites a real outcome.
+                if let Some(key) = &wait_key
+                    && cancel.is_cancelled()
+                {
+                    let _ = driver
+                        .await_events
+                        .resolve(key, crate::Resolution::Cancelled)
                         .await;
-                }),
-            );
+                }
+                driver
+                    .group_child_finished(&group_key, &replay_key, &state)
+                    .await;
+            });
         }
     }
 

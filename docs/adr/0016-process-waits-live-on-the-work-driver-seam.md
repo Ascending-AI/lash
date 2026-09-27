@@ -13,13 +13,13 @@ polling fallback and no optional attach. `ProcessAwaiter` is now
 gone: the Restate substrate implements `await_process_terminal` itself. The
 decision (waits live above storage) is unchanged.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: `NativeProcessAwaiter` and in-process process
-work for store-only deployments; the decision that waits live on the work-driver
-seam stays. Those passages stay as written until the PR that deletes the code
-(FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
+Amended 2026-09-27 (FIG-3860,
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
+the in-process process work is deleted. Restate's process work is the only
+`ProcessWorkSubstrate` that runs processes; a backend that runs none wires
+`NoProcessWork`. `NativeProcessAwaiter` is now `ProcessRegistryAwaiter`, the
+engine-neutral registry waiter. The decision (waits live above storage) is
+unchanged.
 
 ## Decision
 
@@ -34,10 +34,11 @@ Process waits live above storage:
 - `ProcessWorkSubstrate` is the process execution and coordination seam.
   Process commands route every terminal wait through its
   `await_process_terminal`.
-- `NativeProcessAwaiter` is the native substrate's waiter for local and
-  store-only deployments: it performs point reads (`get_process`, `event_page`) and uses a
-  `ProcessChangeHub` when the registry is wrapped in-process, with bounded
-  exponential backoff when another process may be mutating the store.
+- `ProcessRegistryAwaiter` is the engine-neutral registry waiter: it performs
+  point reads (`get_process`, `event_page`) and uses a `ProcessChangeHub` when
+  the registry is wrapped in-process, with bounded exponential backoff when
+  another process may be mutating the store. `NoProcessWork`, the port of a
+  backend that runs no processes, answers terminal waits through it.
 - An external execution backend owns a terminal await by implementing
   `await_process_terminal`. The Restate substrate uses synchronous ingress to
   `LashProcessWorkflow/{process_id}/await_terminal`, so the durable workflow

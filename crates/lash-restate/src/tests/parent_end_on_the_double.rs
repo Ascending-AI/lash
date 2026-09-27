@@ -179,11 +179,7 @@ impl World {
             .with_plugin_factories(lash_core::testing::test_standard_protocol_factories())
             .with_store(Arc::clone(&self.store))
             .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
-            .with_process_work(
-                self.backend
-                    .process_work()
-                    .expect("a Restate backend has process work"),
-            )
+            .with_process_work(self.backend.process_work())
             .build(),
         )
         .await
@@ -285,12 +281,7 @@ impl World {
     fn law_sink(&self) -> lash_core::RegistryScopeClose {
         lash_core::RegistryScopeClose::with_delivery(
             Arc::clone(&self.registry),
-            Arc::clone(
-                self.backend
-                    .process_work()
-                    .expect("a Restate backend has process work")
-                    .port(),
-            ),
+            Arc::clone(self.backend.process_work().port()),
             self.backend.clock(),
         )
     }
@@ -744,10 +735,7 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
         "nothing applied the plan yet"
     );
 
-    let wiring = world
-        .backend
-        .process_work()
-        .expect("a Restate backend has process work");
+    let wiring = world.backend.process_work();
     let sessions = world.backend.session_store_factory();
     let clock = world.backend.clock();
     let work = lash_core::NoSessionWork::new();

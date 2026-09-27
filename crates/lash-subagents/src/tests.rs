@@ -1130,9 +1130,7 @@ async fn run_seed_probe_inner(
     // directly. The engine's own process-work wiring is the runtime's port and
     // the worker's nested port alike, so the nested case (`handle = start
     // spawn_child` then `await handle`) reaches a serving worker too.
-    let process_wiring = backend
-        .process_work()
-        .expect("the Restate engine supplies process work");
+    let process_wiring = backend.process_work();
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
@@ -1149,7 +1147,7 @@ async fn run_seed_probe_inner(
                     lash_core::ProcessEngineRegistration::accepting(process_engine),
                 )
             },
-            lash_core_worker::WorkerProcessWork::External(process_wiring.clone()),
+            process_wiring.clone(),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

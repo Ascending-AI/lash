@@ -438,38 +438,6 @@ impl From<RootRun> for RootReport {
     }
 }
 
-/// [`drive_session_with`], also answering each root's [`RootReport`].
-#[doc(hidden)]
-pub async fn drive_session_reporting(
-    runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
-    request: &DriveRequest,
-    sinks: DriveSinks<'_>,
-) -> Result<(DriveOutcome, Vec<RootReport>), DriveAbort> {
-    let run = Box::pin(runtime.drive_until(
-        controller,
-        request,
-        &sinks,
-        None,
-        DriveLimits {
-            follow_on: FollowOnRecovery::Recover,
-            max_roots: Some(crate::engine::MAX_ROOTS_PER_DRIVE),
-        },
-        |_| false,
-    ))
-    .await?;
-    if run.budget_exhausted {
-        runtime.host.queued_work().schedule_drive(
-            &request.session,
-            crate::engine::drive_continuation_request(request),
-        );
-    }
-    Ok((
-        run.outcome,
-        run.runs.into_iter().map(RootReport::from).collect(),
-    ))
-}
-
 /// [`run_admitted_root_with`], answering the root's [`RootReport`].
 #[doc(hidden)]
 pub async fn run_admitted_root_reporting(

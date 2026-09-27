@@ -11,7 +11,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
     >::new());
     let armed = Arc::clone(&catalog);
     let backend =
-        DecoratedBackend::over(memory_backend().await.into()).session_store_factory(move |inner| {
+        DecoratedBackend::over(double_backend().await).session_store_factory(move |inner| {
             let recording = Arc::new(
                 lash_core::testing::runtime_helpers::RecordingSessionStoreFactory::over(inner),
             );
@@ -82,7 +82,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
     // The relay retries the obligation after its backoff, never before.
     let administration = core.session_administration().await;
     let relay = lash_core::session_delete::SessionDeleteRelay::new(administration);
-    let now = lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock);
+    let now = core_now_ms(&core);
     let page = std::num::NonZeroUsize::new(8).expect("non-zero page");
     let early = lash_core::runtime::drive::relay::relay_due(
         &relay,

@@ -31,9 +31,12 @@ impl LawBackend {
         stores: Arc<dyn crate::StoreSet>,
         effect_host: Arc<dyn crate::EffectHost>,
     ) -> Self {
+        let process_work =
+            crate::ProcessWorkWiring::without_process_work(stores.process_registry());
         Self::over(&crate::Backend::new(Arc::new(HostOverStores {
             stores,
             effect_host,
+            process_work,
         })))
     }
 
@@ -81,11 +84,12 @@ impl LawBackend {
     }
 }
 
-/// An effect host over one store set, running no process or queued work of
+/// An effect host over one store set, running no process or session work of
 /// its own.
 struct HostOverStores {
     stores: Arc<dyn crate::StoreSet>,
     effect_host: Arc<dyn crate::EffectHost>,
+    process_work: crate::ProcessWorkWiring,
 }
 
 impl crate::EffectEngine for HostOverStores {
@@ -104,12 +108,12 @@ impl crate::EffectEngine for HostOverStores {
         GENERATION.get_or_init(|| BuildGeneration::for_test("host-over-stores"))
     }
 
-    fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
-        None
+    fn process_work(&self) -> crate::ProcessWorkWiring {
+        self.process_work.clone()
     }
 
-    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
-        Some(Arc::new(crate::NoSessionWork::new()))
+    fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
+        Arc::new(crate::NoSessionWork::new())
     }
 }
 
@@ -138,18 +142,13 @@ pub(crate) async fn law_session_store(
 
 /// A backend over `stores` whose effects journal on `effect_host`, for an
 /// embedder whose substrate is storage only: the law's runtime reaches every
-/// storage port of `stores`, drives its own queued work in process, and runs
-/// its effects on the host the embedder supplies.
+/// storage port of `stores`, drives no session work, and runs its effects on
+/// the host the embedder supplies.
 pub fn backend_over(
     stores: Arc<dyn crate::StoreSet>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) -> crate::Backend {
-    LawBackend {
-        layered: LawBackend::over_stores(stores, effect_host)
-            .layered
-            .with_session_work(None),
-    }
-    .into_backend()
+    LawBackend::over_stores(stores, effect_host).into_backend()
 }
 
 /// [`backend_over`] with the recording double as its effect host: for a
@@ -216,12 +215,16 @@ impl crate::EffectEngine for StoreLawBackend {
         GENERATION.get_or_init(|| BuildGeneration::for_test("store-law-backend"))
     }
 
-    fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
-        None
+    /// A store law's runtime runs no processes, and its registry is refused
+    /// like every port that would name a second substrate.
+    fn process_work(&self) -> crate::ProcessWorkWiring {
+        crate::ProcessWorkWiring::without_process_work(crate::StoreSet::process_registry(
+            self.stores.as_ref(),
+        ))
     }
 
-    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
-        Some(Arc::new(crate::NoSessionWork::new()))
+    fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
+        Arc::new(crate::NoSessionWork::new())
     }
 }
 

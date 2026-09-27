@@ -42,9 +42,6 @@ fn redrive_unsettled() -> lash_core::RuntimeError {
 }
 #[async_trait::async_trait]
 impl SessionDriver for Driver {
-    async fn drive(&self, _: DriveRequest) -> Result<DriveOutcome, DriveAbort> {
-        panic!("split handlers")
-    }
     async fn admit(
         &self,
         _: lash_core::ScopedEffectController<'_>,
@@ -1222,9 +1219,6 @@ impl SessionDriver for TickingDriver {
     ) -> Result<ReconcileCursor, lash_core::StoreError> {
         self.ticks.fetch_add(1, Ordering::SeqCst);
         Ok(cursor.clone())
-    }
-    async fn drive(&self, _: DriveRequest) -> Result<DriveOutcome, DriveAbort> {
-        panic!("the recovery interval never drives")
     }
     async fn admit(
         &self,

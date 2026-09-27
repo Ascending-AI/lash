@@ -11,7 +11,7 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .build()
         .into_handle();
     let double = restate_double(SEED).await;
-    let core = backend_work_facets_with_budget(
+    let core = explicit_ephemeral_facets_with_budget(
         LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,

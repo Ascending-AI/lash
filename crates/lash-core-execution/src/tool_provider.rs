@@ -1067,7 +1067,7 @@ impl<'run> ToolContext<'run> {
             None => self.enclosing_process = Some(process_id.clone()),
         }
         let watched = crate::facade_support::watch_process_registry(registry);
-        let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+        let port = Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
             watched.registry(),
         )));
         let process_work = crate::ProcessWorkWiring::new(watched, port);

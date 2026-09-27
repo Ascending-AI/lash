@@ -49,7 +49,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
-            lash_core_worker::WorkerProcessWork::External(process_work),
+            process_work,
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

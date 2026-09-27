@@ -85,14 +85,8 @@ pub enum EmbedError {
         /// Session identifier requested by the builder.
         requested: SessionId,
     },
-    #[error("invalid process execution configuration: {0}")]
-    ProcessExecutionConcurrency(#[from] lash_core_worker::ProcessExecutionConcurrencyError),
-    #[error("invalid queued-work execution configuration: {0}")]
-    QueuedWorkExecutionConcurrency(
-        #[from] lash_core::facade_support::QueuedWorkExecutionConcurrencyError,
-    ),
-    #[error("invalid native substrate configuration: {0}")]
-    NativeSubstrateConfig(#[from] lash_core::NativeSubstrateConfigError),
+    #[error("invalid work cadence: {0}")]
+    WorkCadence(#[from] lash_core::WorkCadenceError),
     #[error("failed to delete process state for session `{session_id}`: {message}")]
     /// Process-state deletion failed for the identified session.
     SessionDeleteProcess {
@@ -292,9 +286,7 @@ impl EmbedError {
             | Self::SessionDeleteStorage { .. }
             | Self::Store(_)
             | Self::StoreSessionMismatch { .. }
-            | Self::ProcessExecutionConcurrency(_)
-            | Self::QueuedWorkExecutionConcurrency(_)
-            | Self::NativeSubstrateConfig(_)
+            | Self::WorkCadence(_)
             | Self::SessionDeleteProcess { .. }
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
@@ -347,8 +339,6 @@ impl EmbedError {
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::StoreSessionMismatch { .. }
-            | Self::ProcessExecutionConcurrency(_)
-            | Self::QueuedWorkExecutionConcurrency(_)
             | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. } => true,
             Self::Send(error) => matches!(**error, SendError::LiveTurnContext { .. }),
@@ -369,7 +359,7 @@ impl EmbedError {
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
             | Self::Control(_)
-            | Self::NativeSubstrateConfig(_)
+            | Self::WorkCadence(_)
             | Self::Session(_) => false,
         }
     }

@@ -301,16 +301,15 @@ impl AgentScenarioSetup {
             Arc::clone(&response_substitutions),
         );
         let observed_writes = checkpoint_writes.clone();
-        let backend = DecoratedBackend::over(memory_backend().await.into()).session_store_factory(
-            move |inner| {
+        let backend =
+            DecoratedBackend::over(double_backend().await).session_store_factory(move |inner| {
                 Arc::new(
                     lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                         inner,
                         observed_writes,
                     ),
                 )
-            },
-        );
+            });
         let factory =
             rlm_factory(&backend.clone().into())
                 .with_lashlang_execution_sink(
@@ -352,6 +351,7 @@ impl AgentScenarioSetup {
             builder = builder.turn_budget(lash_core::TurnBudget::bounded(max_turns));
         }
         let core = builder.build(crate::testing::runtime_lease_owner())?;
+        serve_processes(&core);
         let process_registry = core.process_registry();
         Ok(AgentScenarioRuntime {
             core,
@@ -867,7 +867,7 @@ impl AgentSessionTurnProcessScenario {
             .processes()
             .start(
                 self.start_request(),
-                runtime_operation_scope(&runtime.core, "agent-scenario-session-turn-start"),
+                runtime_operation_scope(&runtime.core, "agent-scenario-session-turn-start").await,
             )
             .await?;
         // The registrar minted the id; the start answers it (ADR 0107).
@@ -921,7 +921,7 @@ impl AgentSessionTurnProcessScenario {
         process_id: &ProcessId,
     ) -> Result<()> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = runtime.process_registry.clone();
-        let await_output = lash_core::NativeProcessWork::for_registry(registry)
+        let await_output = lash_core::NoProcessWork::for_registry(registry)
             .await_terminal(process_id)
             .await?;
         let output = await_output.into_tool_output();

@@ -5,21 +5,28 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
+/// A session-work engine that records the sessions it was asked to drive.
 #[derive(Default)]
 struct RecordingWakeTurnHandle {
-    runs: tokio::sync::Mutex<Vec<crate::QueuedWorkRunRequest>>,
+    drives: std::sync::Mutex<Vec<SessionId>>,
+    driver: std::sync::OnceLock<Arc<dyn crate::SessionDriver>>,
     notify: tokio::sync::Notify,
 }
 
-#[async_trait::async_trait]
-impl crate::QueuedWorkRunHandle for RecordingWakeTurnHandle {
-    async fn run_queued_work(
-        &self,
-        request: crate::QueuedWorkRunRequest,
-    ) -> Result<(), crate::QueuedWorkRunError> {
-        self.runs.lock().await.push(request);
+impl crate::SessionWorkEngine for RecordingWakeTurnHandle {
+    fn schedule_drive(&self, session: &SessionId, _request: crate::engine::DriveRequestId) {
+        self.drives
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(session.clone());
         self.notify.notify_one();
-        Ok(())
+    }
+
+    fn install_session_driver(
+        &self,
+        driver: Arc<dyn crate::SessionDriver>,
+    ) -> Arc<dyn crate::SessionDriver> {
+        Arc::clone(self.driver.get_or_init(|| driver))
     }
 }
 
@@ -28,31 +35,33 @@ impl RecordingWakeTurnHandle {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn wait_for_process_wake(&self, session_id: &SessionId, prior_runs: usize) {
+    async fn wait_for_process_wake(&self, session_id: &SessionId, prior_drives: usize) {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                // A wake asks the engine to drive its session (FIG-3600); the
-                // run names the session, and the ask's request id is the
-                // wake's batch, not a reason label.
+                // A wake asks the engine to drive its session (FIG-3600).
+                let notified = self.notify.notified();
                 if self
-                    .runs
+                    .drives
                     .lock()
-                    .await
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .iter()
-                    .skip(prior_runs)
-                    .any(|run| run.session_id.as_deref() == Some(session_id))
+                    .skip(prior_drives)
+                    .any(|session| session == session_id)
                 {
                     return;
                 }
-                self.notify.notified().await;
+                notified.await;
             }
         })
         .await
-        .expect("process wake must fire the queued-work turn driver");
+        .expect("process wake must ask the engine to drive its session");
     }
 
-    async fn len(&self) -> usize {
-        self.runs.lock().await.len()
+    fn len(&self) -> usize {
+        self.drives
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 }
 
@@ -1529,14 +1538,11 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
     }));
 
     let turn_handle = Arc::new(RecordingWakeTurnHandle::default());
-    let prior_runs = turn_handle.len().await;
-    let queued_work = crate::NativeQueuedWork::new(
-        Arc::clone(&turn_handle) as Arc<dyn crate::QueuedWorkRunHandle>
-    );
+    let prior_runs = turn_handle.len();
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         factory,
-        Arc::new(queued_work.clone()),
+        Arc::clone(&turn_handle) as Arc<dyn crate::SessionWorkEngine>,
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )

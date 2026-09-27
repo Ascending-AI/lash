@@ -10,9 +10,9 @@ use super::*;
 /// the state directly, reclaiming those rows while live work survives.
 #[tokio::test]
 async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone().into())?;
+    let core = process_test_core(backend.clone())?;
 
     let mut registered = Vec::new();
     for _ in 0..2 {

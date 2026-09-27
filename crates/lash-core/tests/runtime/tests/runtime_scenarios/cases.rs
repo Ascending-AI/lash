@@ -562,12 +562,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 ),
-                lash_core_worker::WorkerProcessWork::External(
-                    backend
-                        .process_work()
-                        .expect("the Restate engine supplies process work")
-                        .clone(),
-                ),
+                backend.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )

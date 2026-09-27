@@ -126,6 +126,8 @@ pub struct SqliteBackend {
     stores: Arc<SqliteStoreSet>,
     effect_host: Arc<SqliteEffectHost>,
     options: SqliteBackendOptions,
+    /// The SQLite effect host runs no processes: its registry, watched once.
+    process_work: lash_core_execution::ProcessWorkWiring,
 }
 
 /// Every persistence port of one SQLite substrate without an effect host:
@@ -292,10 +294,13 @@ impl SqliteBackend {
                 .target()
                 .clone(),
         );
+        let process_work =
+            lash_core_execution::ProcessWorkWiring::without_process_work(stores.process_registry());
         Ok(Self {
             stores: Arc::new(stores),
             effect_host,
             options,
+            process_work,
         })
     }
 
@@ -655,13 +660,15 @@ impl lash_core_execution::EffectEngine for SqliteBackend {
         })
     }
 
-    /// The runtime's in-process worker drives this backend's registry.
-    fn process_work(&self) -> Option<lash_core_execution::ProcessWorkWiring> {
-        None
+    /// The SQLite effect host runs no processes.
+    fn process_work(&self) -> lash_core_execution::ProcessWorkWiring {
+        self.process_work.clone()
     }
 
-    fn session_work(&self) -> Option<Arc<dyn lash_core_execution::SessionWorkEngine>> {
-        None
+    /// The SQLite effect host drives no sessions: nothing drives a session
+    /// in process (ADR 0104).
+    fn session_work(&self) -> Arc<dyn lash_core_execution::SessionWorkEngine> {
+        Arc::new(lash_core_execution::NoSessionWork::new())
     }
 }
 

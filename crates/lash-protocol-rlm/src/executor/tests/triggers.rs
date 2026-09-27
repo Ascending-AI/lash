@@ -432,22 +432,6 @@ impl lash_core::testing::EffectLayer for TriggerEffectCapture {
 }
 
 impl TriggerEffectCapture {
-    /// A fresh memory backend with this capture layered over its effect
-    /// host.
-    async fn backend(&self) -> lash_core::Backend {
-        let layer: Arc<dyn lash_core::testing::EffectLayer> = Arc::new(self.clone());
-        lash_core::testing::runtime_helpers::LayeredBackend::over(
-            Arc::new(
-                lash_sqlite_store::SqliteBackend::memory()
-                    .await
-                    .expect("open a memory backend"),
-            )
-            .into(),
-        )
-        .map_effect_host(|host| Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer)))
-        .into_backend()
-    }
-
     /// The registration drafts the runtime sent, in order.
     fn register_drafts(&self) -> Vec<lash_core::TriggerSubscriptionDraft> {
         self.envelopes
@@ -1057,6 +1041,175 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
     });
 }
 
+/// The trigger store a process body's trigger effects execute against,
+/// recording each command it runs: the effect's id (the operation id the
+/// trigger executor passes) and the command's verb. The engine journals the
+/// effect in the process segment's own invocation, so the store the worker's
+/// runtime executes it on is where the effect is observable.
+struct RecordingTriggerStore {
+    inner: Arc<dyn lash_core::TriggerStore>,
+    commands: Arc<std::sync::Mutex<Vec<(String, &'static str)>>>,
+}
+
+fn trigger_verb(command: &lash_core::TriggerCommand) -> &'static str {
+    match command {
+        lash_core::TriggerCommand::Register { .. } => "register",
+        lash_core::TriggerCommand::List { .. } => "list",
+        lash_core::TriggerCommand::Update { .. } => "update",
+        lash_core::TriggerCommand::Enable { .. } => "enable",
+        lash_core::TriggerCommand::Disable { .. } => "disable",
+        lash_core::TriggerCommand::Delete { .. } => "delete",
+        lash_core::TriggerCommand::Revive { .. } => "revive",
+        lash_core::TriggerCommand::Prune { .. } => "prune",
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::TriggerStore for RecordingTriggerStore {
+    async fn execute_command(
+        &self,
+        operation_id: &str,
+        command: lash_core::TriggerCommand,
+    ) -> Result<lash_core::TriggerEffectResult, lash_core::PluginError> {
+        self.commands
+            .lock_recover()
+            .push((operation_id.to_string(), trigger_verb(&command)));
+        self.inner.execute_command(operation_id, command).await
+    }
+
+    async fn list_subscriptions(
+        &self,
+        filter: lash_core::TriggerSubscriptionFilter,
+    ) -> Result<Vec<lash_core::TriggerSubscriptionRecord>, lash_core::PluginError> {
+        self.inner.list_subscriptions(filter).await
+    }
+
+    async fn delete_session_subscriptions(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<usize, lash_core::PluginError> {
+        self.inner.delete_session_subscriptions(session_id).await
+    }
+
+    async fn ingest_occurrence(
+        &self,
+        request: lash_core::TriggerOccurrenceRequest,
+    ) -> Result<lash_core::TriggerIngressReceipt, lash_core::PluginError> {
+        self.inner.ingest_occurrence(request).await
+    }
+
+    async fn list_occurrences(
+        &self,
+        filter: lash_core::TriggerOccurrenceFilter,
+    ) -> Result<Vec<lash_core::TriggerOccurrenceRecord>, lash_core::PluginError> {
+        self.inner.list_occurrences(filter).await
+    }
+
+    async fn list_deliveries_by_occurrence_id(
+        &self,
+        occurrence_id: &str,
+    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+        self.inner
+            .list_deliveries_by_occurrence_id(occurrence_id)
+            .await
+    }
+
+    async fn list_deliveries_by_subscription_id(
+        &self,
+        subscription_id: &str,
+    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+        self.inner
+            .list_deliveries_by_subscription_id(subscription_id)
+            .await
+    }
+
+    async fn list_deliveries_by_process_id(
+        &self,
+        process_id: &lash_core::ProcessId,
+    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+        self.inner.list_deliveries_by_process_id(process_id).await
+    }
+
+    async fn list_deliveries(
+        &self,
+    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+        self.inner.list_deliveries().await
+    }
+
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &lash_core::ProcessId,
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner
+            .bind_delivery_process(occurrence_id, subscription_id, process_id)
+            .await
+    }
+
+    async fn list_delivery_process_ids(
+        &self,
+    ) -> Result<Vec<lash_core::ProcessId>, lash_core::PluginError> {
+        self.inner.list_delivery_process_ids().await
+    }
+
+    async fn list_delivery_retention_candidates(
+        &self,
+    ) -> Result<Vec<lash_core::TriggerDeliveryRetentionCandidate>, lash_core::PluginError> {
+        self.inner.list_delivery_retention_candidates().await
+    }
+
+    async fn list_session_owner_ids_for_retention(
+        &self,
+    ) -> Result<Vec<SessionId>, lash_core::PluginError> {
+        self.inner.list_session_owner_ids_for_retention().await
+    }
+
+    async fn reconcile_trigger_retention(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+        deleted_session_ids: &[SessionId],
+    ) -> Result<lash_core::TriggerRetentionReconciliationReport, lash_core::PluginError> {
+        self.inner
+            .reconcile_trigger_retention(candidates, deleted_session_ids)
+            .await
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+    ) -> Result<usize, lash_core::PluginError> {
+        self.inner
+            .delete_delivery_retention_candidates(candidates)
+            .await
+    }
+
+    async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> lash_core::TriggerOccurrenceReclamationResult {
+        self.inner
+            .reclaim_trigger_occurrences(cutoff_epoch_ms)
+            .await
+    }
+
+    async fn prune_mutation_receipts(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, lash_core::PluginError> {
+        self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
+    }
+
+    async fn prune_non_fired_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, lash_core::PluginError> {
+        self.inner
+            .prune_non_fired_occurrences(cutoff_epoch_ms)
+            .await
+    }
+}
+
 struct TriggerProcessResult {
     terminal: lash_core::ProcessAwaitOutput,
     trigger_effects: Vec<(String, &'static str)>,
@@ -1083,13 +1236,20 @@ async fn execute_trigger_process_with_originator(
 ) -> TriggerProcessResult {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
-    let capture = TriggerEffectCapture::default();
-    let backend = capture.backend().await;
-    let registry = backend.process_registry();
-    let registry_dyn = Arc::clone(&registry);
-    let trigger_store = backend.trigger_store();
-    let process_env_store = backend.process_env_store();
+    // The cell runs on a memory backend's effect host; its recorded start
+    // lands in the double's process table, whose workflow runs the body on a
+    // worker whose trigger store records every command the body runs.
+    let backend = memory_backend().await;
     let effect_host = backend.effect_host();
+    let table = crate::testing::DoubleProcesses::new(0x7219_0001).await;
+    let registry = table.registry();
+    let trigger_store = table.backend().trigger_store();
+    let process_env_store = table.env_store();
+    let commands = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recording: Arc<dyn lash_core::TriggerStore> = Arc::new(RecordingTriggerStore {
+        inner: Arc::clone(&trigger_store),
+        commands: Arc::clone(&commands),
+    });
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -1104,7 +1264,9 @@ async fn execute_trigger_process_with_originator(
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        backend.clone(),
+        lash_core::testing::runtime_helpers::LayeredBackend::over(table.backend().clone())
+            .map_trigger_store(move |_| recording)
+            .into_backend(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -1116,20 +1278,11 @@ async fn execute_trigger_process_with_originator(
             ),
         ),
     );
-    let watched = lash_core::facade_support::watch_process_registry(registry_dyn.clone());
-    let worker = lash_core_worker::DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::new(
-                lash_core::testing::test_code_protocol_factories(),
-            )),
-            runtime_host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(session_policy.clone()),
-    )
-    .expect("valid trigger process worker");
+    table.install_worker(
+        lash_core::testing::test_code_protocol_factories(),
+        runtime_host,
+        session_policy.clone(),
+    );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
@@ -1176,10 +1329,7 @@ async fn execute_trigger_process_with_originator(
         "process start must finish"
     );
 
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("drive trigger process");
+    table.admit_pending().await;
     let records = registry
         .list_observed_by(
             &SessionId::from("test-session"),
@@ -1200,12 +1350,11 @@ async fn execute_trigger_process_with_originator(
         })
     );
     let terminal = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        lash_core::NativeProcessWork::for_registry(registry_dyn).await_terminal(&record.id),
+        std::time::Duration::from_secs(30),
+        table.await_terminal(&record.id),
     )
     .await
-    .expect("trigger process reaches terminal state")
-    .expect("await trigger process");
+    .expect("trigger process reaches terminal state");
     assert_eq!(
         matches!(
             terminal,
@@ -1226,7 +1375,7 @@ async fn execute_trigger_process_with_originator(
     };
     TriggerProcessResult {
         terminal,
-        trigger_effects: capture.trigger_effects(),
+        trigger_effects: commands.lock_recover().clone(),
         subscriptions,
     }
 }

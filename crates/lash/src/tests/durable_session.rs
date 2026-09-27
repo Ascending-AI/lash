@@ -220,7 +220,6 @@ fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())
 }
 
@@ -392,7 +391,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     // Checkpointed: a committed turn behind it. The send needs the engine's
     // queued-work port, so this leg runs on a second core whose driver is
     // dropped before the pending reads below.
-    let drive_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let drive_core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
@@ -435,24 +434,19 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
 #[tokio::test]
 async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed_ids() -> Result<()>
 {
-    // A named file and the "absent id creates no store" bound are
-    // sqlite-store-level semantics: the double's store set exposes no file
-    // level to reopen. The sqlite backend survives as storage-only, so this
-    // law stays here.
-    let dir = tempfile::tempdir().expect("temp dir");
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions.db"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let factory = backend.session_store_factory();
+    // The "absent id creates no store" bound is the SQLite session
+    // factory's, read here through the double's SQLite store set.
+    let backend = double_backend().await;
+    let factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     let absent = core.session("sqlite-absent").durable().await?;
@@ -519,21 +513,22 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
 #[tokio::test]
 async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session() -> Result<()>
 {
-    // The enqueue must publish `Enqueued` yet stay pending for the cancel:
-    // on the double the engine claims admitted input on its own schedule, so
-    // the cancel would race the claim. The inline engine only drives when a
-    // caller waits, so the law stays on SQLite until the facade has an
-    // enqueue-without-drive path again (B4/B5).
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
+    // The enqueue must publish `Enqueued` yet stay pending for the cancel:
+    // the engine claims admitted input on its own schedule, so the session's
+    // drive is held while the input is queued and cancelled.
+    let _hold = held_double(&core)
+        .expect("the core runs on its held double")
+        .hold_session_drive(&SessionId::from("durable-observation"))
+        .await;
 
     // A handle acquired from the core, not from the open session.
     let durable = core.session("durable-observation").durable().await?;
@@ -575,13 +570,12 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
 #[tokio::test]
 async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-no-runtime");
     // Create the session, then release every runtime: nothing is live.
@@ -621,23 +615,23 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
 
 #[tokio::test]
 async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> Result<()> {
-    // The "both inputs still pending beside a live writer" read is only
-    // quiescent where no queued-work driver can claim the rows: the Restate
-    // engine's driver claims them on its own schedule, while the inline
-    // engine only drives what a caller waits on. It stays on SQLite until
-    // the claim path it observes is gone (B5).
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-beside-writer");
     let writer = core.session(session_id.clone()).open().await?;
 
     let recorded_parent_before = writer.parent_session_id().map(ToString::to_string);
+    // The engine drives an accepted input on its own schedule; hold the
+    // session's drive so the read below sees both writes still pending.
+    let hold = held_double(&core)
+        .expect("the core runs on its held double")
+        .hold_session_drive(&session_id)
+        .await;
     let first = core.session(session_id.clone()).durable().await?;
     let second = core.session(session_id.clone()).durable().await?;
 
@@ -667,6 +661,7 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
 
     // The writer keeps committing turns on its own lease throughout, and the
     // durable handles keep answering across the commit.
+    drop(hold);
     writer
         .send(TurnInput::text("writer keeps its lease"))
         .output()
@@ -722,7 +717,6 @@ async fn abandoning_a_claim_a_caller_does_not_hold_moves_nothing() -> Result<()>
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-claim-token");
     let session = core.session(session_id.clone()).open().await?;
@@ -945,14 +939,13 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     // Its send needs the engine's queued-work port; the pending enqueue that
     // follows must stay pending, so it goes through the grantless core — the
     // only core left without a driver once this one is dropped.
-    let granting_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core.session(session_id.clone()).open().await?;
     assert!(
@@ -1002,7 +995,6 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     // Precondition: on this core, `open()` really does orphan the tool. A
@@ -1270,7 +1262,6 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     // The session genuinely exists: this open created it.
@@ -1341,21 +1332,21 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         })
         .build()
         .into_handle();
-    // The pending-then-held sequence this law observes needs a claim that
-    // starts only when `attach` drives: the Restate engine's driver claims
-    // the enqueued row on its own, so the pre-claim read races it, while the
-    // inline engine leaves `attach` nothing to drive. It stays on
-    // SQLite until the claim path it watches is gone (B5).
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-held-input");
     let session = core.session(session_id.clone()).open().await?;
+    // The engine claims an accepted row on its own schedule: hold the
+    // session's drive so the pre-claim read sees the row pending.
+    let hold = held_double(&core)
+        .expect("the core runs on its held double")
+        .hold_session_drive(&session_id)
+        .await;
     let accepted = session
         .durable()
         .send(TurnInput::text("claimed by the drain"))
@@ -1375,6 +1366,7 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         ),
         "before the drain claims it, the row reads as pending"
     );
+    drop(hold);
 
     let drain = tokio::spawn({
         let session = session.clone();
@@ -1430,7 +1422,6 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     // Building the core itself materialises its plugin host once; that is the
@@ -1481,7 +1472,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     // The session a host creates this way is an ordinary session: opening it
     // runs the input that was waiting. The store-seeded row was never
     // scheduled, so a second core supplies the drive that reconciles it.
-    let drive_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let drive_core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
@@ -1523,7 +1514,6 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("create-parent").create().await?);
 
@@ -1587,7 +1577,6 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("create-deleted").create().await?);
     lash_core::SessionStoreFactory::delete_session(
@@ -1626,7 +1615,6 @@ async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> 
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, "fig3544-enqueue-conflict").await?;
     let durable = core.session("fig3544-enqueue-conflict").durable().await?;

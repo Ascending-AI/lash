@@ -87,12 +87,19 @@ const ECHO_CELL: &str = r#"
 "#;
 
 async fn run_echo_cell(context: lash_core::RuntimeExecutionContext<'_>) -> lash_core::ExecResponse {
+    run_cell(context, ECHO_CELL).await
+}
+
+async fn run_cell(
+    context: lash_core::RuntimeExecutionContext<'_>,
+    code: &str,
+) -> lash_core::ExecResponse {
     crate::executor::execute_code_with_channel_and_bounds(
         &mut crate::executor::RlmExecutionState::for_engine("typescript"),
         context,
         lash_core::ExecRequest {
             language: "typescript".to_string(),
-            code: ECHO_CELL.to_string(),
+            code: code.to_string(),
         },
         super::memory_artifact_store().await,
         lash_lashlang_runtime::LashlangSurface::default(),
@@ -229,6 +236,88 @@ async fn a_layer_over_the_doubles_lent_ports_sees_the_cells_seam() {
         seam.groups.load(std::sync::atomic::Ordering::SeqCst) > 0,
         "the layer sees the aggregate's group"
     );
+}
+
+/// Fails every group settlement read with a store I/O error, where a real
+/// one lands.
+struct FailingSettlementReads;
+
+#[async_trait::async_trait]
+impl lash_core::testing::EffectLayer for FailingSettlementReads {
+    async fn await_next_settlement(
+        &self,
+        _inner: &dyn lash_core::RuntimeEffectController,
+        _handle: &mut lash_core::EffectGroupHandle,
+        _cancel: lash_core::TurnCancelWait,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::RuntimeStore,
+            "settlement read failed: disk I/O error",
+        ))
+    }
+}
+
+/// ADR 0099 §10 L3: an aggregate's infrastructure failure travels on the
+/// host-control channel, never as a leaf rejection (FIG-3397). The
+/// controller the handler lent fails every settlement read on store I/O; a
+/// `try`/`catch` around each aggregate never runs, so no cell commits a
+/// fallback a redrive — which reads the same settlement successfully — would
+/// answer differently. (Moved from the facade's aggregate oracle: a facade
+/// turn's handler controller takes no layer.)
+#[tokio::test(flavor = "multi_thread")]
+async fn a_settlement_store_failure_is_not_caught_by_the_cell() {
+    for aggregate in [
+        "Promise.any",
+        "Promise.race",
+        "Promise.all",
+        "Promise.allSettled",
+    ] {
+        let double = super::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(super::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            super::double_ports_over_layer(
+                &double,
+                &handler,
+                std::sync::Arc::new(FailingSettlementReads),
+            ),
+            std::sync::Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        let response = run_cell(
+            context,
+            &format!(
+                r#"try {{
+  await {aggregate}([echo.say({{ text: "a" }}), echo.say({{ text: "b" }})]);
+  finish("resolved");
+}} catch (error) {{
+  finish("caught");
+}}"#
+            ),
+        )
+        .await;
+        assert_ne!(
+            response.terminal_finish,
+            Some(serde_json::json!("caught")),
+            "{aggregate}: the cell's catch saw a host-control failure"
+        );
+        assert_ne!(
+            response.terminal_finish,
+            Some(serde_json::json!("resolved")),
+            "{aggregate}: the aggregate cannot resolve without a settlement"
+        );
+        assert!(
+            response.error.as_ref().is_some_and(|failure| {
+                failure.kind == lash_core::CellFailureKind::Host
+                    && failure.message.contains("disk I/O error")
+            }),
+            "{aggregate}: the cell fails on the host failure itself: {:?}",
+            response.error
+        );
+        handler.close().await.expect("close the cell's handler");
+    }
 }
 
 /// A context that claims a scope other than the one its lent controller

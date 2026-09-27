@@ -28,6 +28,7 @@ finish({
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
             ))
             .build(crate::testing::runtime_lease_owner())?;
+        serve_processes(&core);
         let session = core.session("stack-budget-rlm-lashlang").open().await?;
         let events = RecordingEvents::default();
 

@@ -173,7 +173,8 @@ pub trait SessionControlEngine: Send + Sync {
 }
 
 /// The control engine of an engine that holds no executions across calls
-/// (the interim native engine): there is nothing to release.
+/// (a store-only backend's `NoSessionWork`, or a test double): there is
+/// nothing to release.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoEngineControl;
 

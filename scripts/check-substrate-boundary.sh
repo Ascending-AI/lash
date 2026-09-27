@@ -30,14 +30,16 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 clock_forbidden='tokio::time::(sleep|sleep_until|interval)|tokio::task::yield_now|use[[:space:]]+tokio::time::\{[^}]*(sleep|sleep_until|interval)'
-containment_forbidden='(^|[^[:alnum:]_])(NativeQueuedWork|NoQueuedWork|NativeProcessWork|NativeProcessAwaiter|NativeSubstrateSetup|NativeSubstrateSlot|WakeDeliveryDriver)([^[:alnum:]_]|$)'
+containment_forbidden='(^|[^[:alnum:]_])(NoQueuedWork|WakeDeliveryDriver)([^[:alnum:]_]|$)'
 fallback_forbidden='ProcessAwaiter::polling|Option[[:space:]]*<[[:space:]]*Arc[[:space:]]*<[[:space:]]*dyn[[:space:]]+(QueuedWorkSubstrate|ProcessWorkSubstrate)[[:space:]]*>[[:space:]]*>|Option[[:space:]]*<[[:space:]]*(ProcessWorkDriver|QueuedWorkDriver)[[:space:]]*>'
 capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys|turn_control_participation|runtime_effect_failure_disposition|effect_journaling|turn_control_authority_owner'
 capability_forbidden="fn[[:space:]]+(${capability_names})([^[:alnum:]_]|$)|\.(${capability_names})[[:space:]]*\(|(^|[^[:alnum:]_])(${capability_names})[[:space:]]*:"
 # Every effect host journals (FIG-3585): the in-process native tier, its
 # journaling fact, store-delegated turn control and in-memory persistence are
-# deleted, and none of their types may come back under any shape.
-retired_type_names='EffectJournaling|TurnControlAuthorityOwner|NativeEffectHost|NativeRuntimeEffectController|NativeEffectGroups|NativeAwaitEventAuthority|AwaitEventRegistry|StoreTurnCancellationAuthority|InMemorySessionStore|InMemorySessionStoreFactory|TestLocalProcessRegistry'
+# deleted, and none of their types may come back under any shape. Restate is
+# the only engine (ADR 0104): the in-process session and process work, its
+# substrate config and the worker's self-driven sweep are deleted too.
+retired_type_names='EffectJournaling|TurnControlAuthorityOwner|NativeEffectHost|NativeRuntimeEffectController|NativeEffectGroups|NativeAwaitEventAuthority|AwaitEventRegistry|StoreTurnCancellationAuthority|InMemorySessionStore|InMemorySessionStoreFactory|TestLocalProcessRegistry|NativeQueuedWork|NativeQueuedWorkRunHandle|InlineSessionWork|NativeProcessWork|NativeProcessAwaiter|NativeSubstrateSetup|NativeSubstrateSlot|NativeSubstrateConfig|WorkerProcessWork|WorkerSweepPolicy'
 retired_type_forbidden="(^|[^[:alnum:]_])(${retired_type_names})([^[:alnum:]_]|$)"
 test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)'
 containment_test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)|_tests\.rs$'
@@ -185,17 +187,14 @@ while IFS=: read -r file line source; do
     continue
   fi
   case "$file" in
-    crates/lash-core/src/runtime/native_substrate/* | \
-      crates/lash-core/src/lib.rs | \
+    crates/lash-core/src/lib.rs | \
       crates/lash-core/src/runtime/mod.rs | \
       crates/lash-core/src/runtime/builder.rs | \
       crates/lash-core/src/runtime/environment.rs | \
       crates/lash-core/src/runtime/host.rs | \
-      crates/lash-core/src/runtime/process_worker/mod.rs | \
       crates/lash-core/src/tool_provider.rs | \
       crates/lash-core/src/tool_provider/process_events.rs | \
       crates/lash/src/core.rs | \
-      crates/lash/src/core/queued_work.rs | \
       crates/lash/src/core/work_drivers.rs | \
       crates/lash/src/lib.rs | \
       crates/lash/src/support.rs | \

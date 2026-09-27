@@ -46,7 +46,7 @@ async fn registry_result(
             .await
             .unwrap();
     }
-    let output = lash_core::NativeProcessWork::for_registry(registry)
+    let output = lash_core::NoProcessWork::for_registry(registry)
         .await_terminal(&process_id)
         .await
         .unwrap();

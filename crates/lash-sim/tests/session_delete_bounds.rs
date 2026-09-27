@@ -40,6 +40,8 @@ const EPOCH_MS: u64 = 1_700_000_000_000;
 const STALL_BOUND_MS: u64 = 107 * 60_000 + 3_000;
 
 struct Deployment {
+    /// The engine the roots run on; its server's virtual time is the clock.
+    double: lash_restate_test::RestateTestBackend,
     clock: Arc<TestClock>,
     backend: Backend,
     core: LashCore,
@@ -52,17 +54,29 @@ struct Deployment {
     reason = "test fixture: a deployment that fails to build aborts the law"
 )]
 async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
-    let clock = Arc::new(TestClock::new(EPOCH_MS));
-    let sqlite = lash_sqlite_store::SqliteBackend::memory_with_clock(clock.clone())
-        .await
-        .expect("open a memory backend");
-    let backend = Backend::from(sqlite);
     // The law's root's first parent-end record is refused once, so its
     // close step's immediate delivery fails and its scope close stays owed.
+    // The refusal is layered under the engine, so the engine's own close
+    // step meets it.
     let root_scope = lash_core::ScopeId::turn(session, root);
-    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
-        .map_process_registry(|registry| lash_core::fail_parent_end_once(registry, root_scope))
-        .into_backend();
+    let double = lash_restate_test::backend_with(
+        0x5e55_de1e,
+        lash_restate_test::ServerConfig {
+            start_time_ms: EPOCH_MS,
+            ..lash_restate_test::ServerConfig::default()
+        },
+        move |stores| {
+            lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_process_registry(|registry| {
+                    lash_core::fail_parent_end_once(registry, root_scope)
+                })
+                .into_store_set()
+        },
+    )
+    .await
+    .expect("start the Restate double");
+    let clock = double.test_clock();
+    let backend = double.lash_backend();
     let scripts = (0..turns)
         .map(|_| {
             lash_sim::runtime_providers::runtime_script_for_text(
@@ -91,6 +105,7 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
         ))
         .expect("build the core");
     Deployment {
+        double,
         clock,
         backend,
         core,
@@ -98,9 +113,63 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
     }
 }
 
+/// A deletion's handler execution: the deployment's administration over the
+/// controller a `SessionDelete` handler lent, as the engine's delete
+/// workflow runs it.
+struct HandlerExecution<'a> {
+    administration: lash_core::SessionAdministration,
+    scoped: lash_core::ScopedEffectController<'a>,
+}
+
+impl lash_core::SessionDeleteExecution for HandlerExecution<'_> {
+    fn administration(&self) -> &lash_core::SessionAdministration {
+        &self.administration
+    }
+
+    fn scoped<'run>(
+        &'run self,
+        _: lash_core::AdmittedScope,
+    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        Ok(self.scoped.clone())
+    }
+}
+
 impl Deployment {
     fn now(&self) -> u64 {
         self.clock.timestamp_ms()
+    }
+
+    /// Run `attempt` over `session`'s delete context inside one
+    /// `SessionDelete` handler on the deployment's engine.
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: a handler that cannot open or close aborts the law"
+    )]
+    async fn in_delete_handler<T>(
+        &self,
+        session: &str,
+        attempt: impl AsyncFnOnce(lash_core::SessionDeleteContext<'_>) -> T,
+    ) -> T {
+        let handler = self
+            .double
+            .open_handler(lash_core::AdmittedScope::session_delete(SessionId::from(
+                session,
+            )))
+            .await
+            .expect("open the delete handler");
+        let outcome = {
+            let execution = HandlerExecution {
+                administration: self.core.session_administration().await,
+                scoped: handler.scoped(),
+            };
+            attempt(
+                lash_core::SessionDeleteContext::from_execution(&execution, session)
+                    .expect("delete context"),
+            )
+            .await
+        };
+        handler.close().await.expect("close the delete handler");
+        outcome
     }
 
     /// Run root `root` of `session` to its end: its terminal transaction
@@ -164,11 +233,13 @@ impl Deployment {
     async fn tick(&self, relay: &SessionDeleteRelay) -> RelayPass {
         let n = self.ticks.get();
         self.ticks.set(n + 1);
-        self.clock.advance(if n.is_multiple_of(2) {
-            T_MAX_MS
-        } else {
-            T_MIN_MS
-        });
+        self.double
+            .server()
+            .advance(std::time::Duration::from_millis(if n.is_multiple_of(2) {
+                T_MAX_MS
+            } else {
+                T_MIN_MS
+            }));
         relay_due(relay, self.clock.as_ref(), NonZeroUsize::MIN)
             .await
             .expect("relay pass")
@@ -208,15 +279,12 @@ async fn a_held_delete_retries_within_its_windows_and_stalls_by_its_bound() {
     let scope_close = deployment.ended_root(SESSION, "held-root").await;
     let policy = RelayPolicy::default();
 
-    let administration = deployment.core.session_administration().await;
     let first_attempt = deployment.now();
-    let deletion = LashCore::delete_session(
-        administration
-            .delete_context(SESSION)
-            .expect("delete context"),
-    )
-    .await
-    .expect("delete");
+    let deletion = deployment
+        .in_delete_handler(SESSION, async |context| {
+            LashCore::delete_session(context).await.expect("delete")
+        })
+        .await;
     let lash::SessionDeletion::Closing(closing) = deletion else {
         panic!("the undelivered scope close holds the delete, got {deletion:?}");
     };
@@ -308,15 +376,14 @@ async fn a_delete_whose_verb_died_is_claimed_within_one_tick() {
     deployment
         .deliver(ObligationKind::ScopeClose, &scope_close)
         .await;
-    let administration = deployment.core.session_administration().await;
-    lash_core::session_close::close_session(
-        &administration
-            .delete_context(SESSION)
-            .expect("delete context"),
-    )
-    .await
-    .expect("close")
-    .expect("the session exists");
+    deployment
+        .in_delete_handler(SESSION, async |context| {
+            lash_core::session_close::close_session(&context)
+                .await
+                .expect("close")
+                .expect("the session exists")
+        })
+        .await;
     let due_at = deployment.now();
     let (_, state) = deployment
         .delete_obligation(SESSION)
@@ -341,15 +408,14 @@ async fn a_lapsed_claim_is_retaken_within_its_bound() {
     deployment
         .deliver(ObligationKind::ScopeClose, &scope_close)
         .await;
-    let administration = deployment.core.session_administration().await;
-    lash_core::session_close::close_session(
-        &administration
-            .delete_context(SESSION)
-            .expect("delete context"),
-    )
-    .await
-    .expect("close")
-    .expect("the session exists");
+    deployment
+        .in_delete_handler(SESSION, async |context| {
+            lash_core::session_close::close_session(&context)
+                .await
+                .expect("close")
+                .expect("the session exists")
+        })
+        .await;
     let (delete, _) = deployment
         .delete_obligation(SESSION)
         .await

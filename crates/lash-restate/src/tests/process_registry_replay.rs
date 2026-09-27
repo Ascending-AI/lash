@@ -1731,7 +1731,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         1,
         "only the true terminal is process-visible"
     );
-    let awaited = lash_core::NativeProcessWork::for_registry(registry)
+    let awaited = lash_core::NoProcessWork::for_registry(registry)
         .await_terminal(&process_id)
         .await
         .expect("await true terminal");
@@ -1965,8 +1965,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             )
             .await
             .expect("write root terminal");
-        let attach_after_retention =
-            lash_core::NativeProcessWork::for_registry(Arc::clone(&registry));
+        let attach_after_retention = lash_core::NoProcessWork::for_registry(Arc::clone(&registry));
         assert_eq!(
             attach_after_retention
                 .await_terminal(&process_id)

@@ -63,9 +63,7 @@ fn layered(engine: Backend, work: &Arc<CrashSessionWork>, faults: &Arc<HostFault
     let factory_faults = Arc::clone(faults);
     let port_faults = Arc::clone(faults);
     lash_core::testing::runtime_helpers::LayeredBackend::over(engine)
-        .with_session_work(Some(
-            Arc::clone(work) as Arc<dyn lash_core::SessionWorkEngine>
-        ))
+        .with_session_work(Arc::clone(work) as Arc<dyn lash_core::SessionWorkEngine>)
         .map_session_store_factory(move |factory| {
             Arc::new(CrashSessionFactory::new(factory, factory_faults))
         })

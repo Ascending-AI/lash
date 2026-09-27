@@ -364,12 +364,12 @@ impl lash_core::EffectEngine for RestateEngine {
         self.build_generation()
     }
 
-    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
-        Some(self.process.process_work())
+    fn process_work(&self) -> lash_core::ProcessWorkWiring {
+        self.process.process_work()
     }
 
-    fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>> {
-        Some(Arc::clone(&self.session_work) as Arc<dyn SessionWorkEngine>)
+    fn session_work(&self) -> Arc<dyn SessionWorkEngine> {
+        Arc::clone(&self.session_work) as Arc<dyn SessionWorkEngine>
     }
 }
 

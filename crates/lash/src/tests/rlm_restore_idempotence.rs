@@ -226,7 +226,7 @@ async fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> P
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
-            &crate::tests::memory_backend().await.clone().into(),
+            &crate::tests::double_backend().await.clone(),
         )
         .with_process_lifecycle(false),
     )];
@@ -1130,7 +1130,7 @@ async fn storeless_runtime(
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
-            &crate::tests::memory_backend().await.clone().into(),
+            &crate::tests::double_backend().await.clone(),
         )
         .with_process_lifecycle(false),
     )];

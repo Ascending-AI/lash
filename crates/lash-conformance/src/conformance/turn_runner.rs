@@ -292,16 +292,15 @@ pub trait ConformanceTurnRunner: Send + Sync {
     }
 
     /// The process-work wiring for a runtime whose process segments run on
-    /// `worker`. In process the runtime's own port drives the worker; a tier
-    /// that runs segments elsewhere (Restate's process workflow) serves them
-    /// with `worker` there and hands back a port that only observes.
+    /// `worker`: the tier's engine (Restate's process workflow) serves them
+    /// with `worker` and hands back a port that only observes `watched`. A
+    /// runner that cannot run process segments says so by panicking.
     fn process_work(
         &self,
-        watched: crate::WatchedRegistry,
-        worker: lash_core_worker::DurableProcessWorker,
+        _watched: crate::WatchedRegistry,
+        _worker: lash_core_worker::DurableProcessWorker,
     ) -> crate::ProcessWorkWiring {
-        let port = Arc::new(crate::NativeProcessWork::new(&watched, worker));
-        crate::ProcessWorkWiring::new(watched, port)
+        panic!("this tier's turn runner cannot run process segments");
     }
 }
 

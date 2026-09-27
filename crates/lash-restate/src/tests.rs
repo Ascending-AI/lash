@@ -228,7 +228,7 @@ use endpoint_protocol::{
 fn registry_local_executor(
     registry: Arc<dyn ProcessRegistry>,
 ) -> RuntimeEffectLocalExecutor<'static> {
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+    let process_work = Arc::new(lash_core::NoProcessWork::for_registry(Arc::clone(
         &registry,
     )));
     RuntimeEffectLocalExecutor::processes(registry, process_work)
@@ -384,7 +384,7 @@ fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::Pro
     let registry = Arc::clone(watched.registry());
     lash_core::ProcessWorkWiring::new(
         watched,
-        Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+        Arc::new(lash_core::NoProcessWork::for_registry(registry)),
     )
 }
 

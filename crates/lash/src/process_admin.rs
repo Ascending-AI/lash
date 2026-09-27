@@ -758,28 +758,14 @@ impl Processes {
                 .store_factory
                 .retire_turn_cancel_closure_scope(&process_scope)
                 .await?;
-            // The process journal and the worker's trigger-delivery reconcile
-            // scope for the same process: that runtime operation exists only
-            // to admit this process, so nothing can replay it once the row is
-            // gone (FIG-2500). Both retirements also retire the scopes'
-            // await-event promises and leave the scope fence (FIG-2499). The
+            // The process journal: nothing can replay it once the row is
+            // gone (FIG-2500). The retirement also retires the scope's
+            // await-event promises and leaves the scope fence (FIG-2499). The
             // registry's verdict is the unreachability proof, so the
             // owner-terminal gate applies and in-flight rows go with the rest.
-            // The reconcile scope is addressed by the start key, since the
-            // delivery's start had no id yet (ADR 0107).
-            let start_key = registry
-                .get_process(&process_id)
-                .await?
-                .and_then(|record| record.start_key);
-            let reconcile_scope = start_key
-                .as_ref()
-                .map(lash_core::facade_support::trigger_delivery_reconcile_scope);
-            let retirements = [
-                lash_core::EffectJournalRetirement::for_scope(&process_scope),
-                reconcile_scope
-                    .as_ref()
-                    .and_then(lash_core::EffectJournalRetirement::for_scope),
-            ];
+            let retirements = [lash_core::EffectJournalRetirement::for_scope(
+                &process_scope,
+            )];
             for retirement in retirements.into_iter().flatten() {
                 if let Err(err) = self
                     .core

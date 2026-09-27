@@ -116,10 +116,10 @@ single-row write transaction about 6 µs.
 
 There is no "native" effect host. The zero-infra entry point is
 `lash::sqlite::SqliteBackend::memory()`, beside `open(root)` and
-`memory_with_clock(..)`. The in-process worker drivers (`NativeSubstrateConfig`,
-`NativeQueuedWork`, `NativeProcessWork`, `with_native_queued_work`) are not
-effect hosts; they drive queued and process work in process over whichever
-backend is configured, and they keep their names. The cutover happens once,
+`memory_with_clock(..)`. The in-process worker drivers that once drove queued
+and process work over a memory backend are deleted (FIG-3860): Restate is the
+only engine (ADR 0104), and a memory backend is storage whose session and
+process work are `NoSessionWork` and `NoProcessWork`. The cutover happens once,
 with no aliases, forwarding constructors, dual paths or legacy mode.
 
 ### The `Backend` trait

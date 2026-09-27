@@ -18,9 +18,9 @@ doctest = false
 
 [features]
 default = []
-otel-trace = ["lash-core/otel-trace", "lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace", "lash-core-execution/otel-trace"]
-perf-witness = ["lash-core/perf-witness", "lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness", "lash-core-execution/perf-witness"]
-testing = ["lash-core/testing", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-execution/testing"]
+otel-trace = ["lash-core/otel-trace", "lash-core-ids/otel-trace", "lash-core-execution/otel-trace"]
+perf-witness = ["lash-core/perf-witness", "lash-core-ids/perf-witness", "lash-core-execution/perf-witness"]
+testing = ["lash-core/testing", "lash-core-ids/testing", "lash-core-execution/testing"]
 
 [lints]
 workspace = true
@@ -28,38 +28,6 @@ workspace = true
 [dependencies]
 lash-core = { workspace = true }
 lash-core-ids = { workspace = true }
-lash-core-llm = { workspace = true }
-lash-core-store = { workspace = true }
-lash-core-effect = { workspace = true }
 lash-core-execution = { workspace = true }
-lash-sansio = { workspace = true, features = ["schema-validation"] }
-lash-trace = { workspace = true }
-tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }
-serde_json = { workspace = true }
-async-trait = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
-thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
-futures-util = { workspace = true }
-
-[dev-dependencies]
-# Kernel tests whose effects need an engine run on the Restate server double
-# (FIG-3668, D1 PR-S2). A dev-dependency cycle where the double links this
-# crate: only types from below the cycle cross it.
-lash-restate-test = { workspace = true }
-lash-core = { workspace = true, features = ["testing"] }
-# The worker's tests run over a SQLite memory backend (ADR 0102); the store
-# depends on lash-core-execution, not on this crate.
-lash-sqlite-store = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
-
-[package.metadata.cargo-shear]
-ignored-paths = ["src/runtime/native_substrate/worklist.rs"]
-
-# FIG-1161: the shared coalescing protocol exposes loom-instrumented types
-# under `--cfg loom`; this crate implements `CoalescingSchedulerHandle`, so it
-# needs loom in scope to typecheck in that configuration. A normal build never
-# resolves this dependency.
-[target.'cfg(loom)'.dependencies]
-loom = { workspace = true }

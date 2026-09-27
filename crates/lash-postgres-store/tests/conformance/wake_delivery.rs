@@ -51,7 +51,7 @@ lash_conformance::wake_delivery_crash_tests!({
             )
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     ) as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
-    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
+    let process_work = Arc::new(lash_core_execution::NoProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
@@ -76,7 +76,7 @@ lash_conformance::wake_delivery_ordering_tests!({
     };
     reset(storage.pool()).await;
     let registry = Arc::new(storage.process_registry());
-    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
+    let process_work = Arc::new(lash_core_execution::NoProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (

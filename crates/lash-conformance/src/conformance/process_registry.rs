@@ -1797,7 +1797,7 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         pruned_at_ms >= prune_cutoff,
         "tombstones must be stamped with prune time, not the retention cutoff"
     );
-    let await_output = crate::NativeProcessWork::for_registry(Arc::clone(&registry))
+    let await_output = crate::NoProcessWork::for_registry(Arc::clone(&registry))
         .await_terminal(&process_id)
         .await
         .expect("await must render a retained tombstone as a typed outcome");

@@ -350,7 +350,6 @@ pub mod facade_support {
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::refuse_unhonored_group_membership;
     pub use crate::runtime::registry_transitions;
-    pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
@@ -365,7 +364,6 @@ pub mod facade_support {
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
     pub use crate::runtime::watch_process_registry_with_sink;
-    pub use crate::runtime::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
@@ -756,22 +754,21 @@ pub use runtime::{
     EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
     ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
     GroupDrainReport, GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen,
-    GroupSettlement, GroupWakePolicy, HandleId, IndependentEffectWork, InlineSessionWork,
-    InputItem, InvalidStartKey, LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy,
-    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy, NativeProcessWork,
-    NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork, OpenerFinalizationSteps,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndApplication,
-    ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
-    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
-    ProcessDriveStep, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    GroupSettlement, GroupWakePolicy, HandleId, IndependentEffectWork, InputItem, InvalidStartKey,
+    LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy, LlmRequestSpec,
+    LlmStreamRecord, LocalTurnStop, LoserPolicy, NoProcessWork, NoSessionWork,
+    OpenerFinalizationSteps, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
+    ParentEndApplication, ParentEndPlan, PendingTurnInput, PendingTurnInputBatch,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
+    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
+    ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectOutcome, ProcessEngine,
+    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
@@ -825,11 +822,11 @@ pub use runtime::{
     UnsettledEffectGroup, UsageDispositionError, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    WatchedRegistry, WeakProcessEngineRegistry, WorkCadencePolicy, WorkerSlotKind,
-    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy, admit_session_state_generation,
-    apply_parent_end_plan, effect_groups_unsupported, end_parent_scope, end_session_roots,
-    ensure_process_lease_schema_version, lifetime, mint_process_id, parent_end_delivery_key,
-    parent_end_requester, park_turn_of_refused_group_child, park_turn_refused_by_generation,
+    WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
+    admit_session_state_generation, apply_parent_end_plan, effect_groups_unsupported,
+    end_parent_scope, end_session_roots, ensure_process_lease_schema_version, lifetime,
+    mint_process_id, parent_end_delivery_key, parent_end_requester,
+    park_turn_of_refused_group_child, park_turn_refused_by_generation,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

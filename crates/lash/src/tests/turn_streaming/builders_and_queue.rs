@@ -2,11 +2,13 @@ use super::*;
 
 const SEED: u64 = 0xb1_1d45;
 
+/// A plain send runs its effects on the engine's own host with no effects
+/// named by the caller: the model call is journaled under the send's turn.
 #[tokio::test]
-pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effects() -> Result<()> {
-    let recorder = EffectRecorder::default();
+pub(super) async fn turn_run_uses_the_engine_host_without_explicit_effects() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        recorder.backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -14,40 +16,35 @@ pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effect
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("configured-effect-host").open().await?;
 
-    let output = session.send(TurnInput::text("inline")).output().await?;
+    let output = session
+        .send(TurnInput::text("inline"))
+        .id("inline-turn")
+        .output()
+        .await?;
 
     assert_eq!(output.assistant_message(), Some("echo: inline"));
-    let invocations = recorder.invocations();
+    let llm_calls = journaled_llm_call_keys(&double);
     assert!(
-        invocations
+        llm_calls
             .iter()
-            .any(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
+            .any(|key| key.contains("configured-effect-host:inline-turn:")),
+        "the model call is journaled under the send's turn: {llm_calls:?}"
     );
-    // Every effect but the drive's admission names its turn: admission runs
-    // before a root exists, and names the session alone (FIG-3600).
-    assert!(invocations.iter().all(|record| {
-        record.kind == lash_core::RuntimeEffectKind::AdmitDrive
-            || record
-                .turn_id
-                .as_deref()
-                .is_some_and(|turn_id| !turn_id.trim().is_empty())
-    }));
     Ok(())
 }
 
+/// Every plain turn entry point — output into a sink, output, the event
+/// stream, and a later send — drives its own root, and the engine journals
+/// each root's model call under that root's turn and no other.
 #[tokio::test]
-pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Result<()> {
-    let recorder = EffectRecorder::default();
-    let core = LashCore::standard_builder(
-        recorder.backend().await.into(),
-        crate::TurnBudget::Unbounded,
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .map_backend(crate::tests::inline_session_work)
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> Result<()> {
+    let double = restate_double(SEED).await;
+    let core = LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-default-effect-host").open().await?;
     let events = RecordingEvents::default();
 
@@ -78,53 +75,36 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
         .await?;
 
     assert_eq!(run.assistant_message(), Some("echo: run"));
-    let scopes = recorder.scopes();
-    assert_eq!(scopes.len(), 8, "one drive and turn scope per send");
-    let mut drive_ids = BTreeSet::new();
-    for (pair, turn_id) in scopes.as_chunks::<2>().0.iter().zip([
+    let llm_calls = journaled_llm_call_keys(&double);
+    let turns = [
         "durable-stream-to",
         "durable-run",
         "durable-stream",
         "durable-queue-drain",
-    ]) {
-        let lash_core::ExecutionScope::QueueDrain {
-            session_id,
-            drain_id,
-        } = &pair[0]
-        else {
-            panic!("admission must use the session drive scope: {:?}", pair[0]);
-        };
-        assert_eq!(session_id.as_str(), "durable-default-effect-host");
-        assert!(drain_id.starts_with("drive:ingress:ti:"), "{drain_id}");
-        assert!(drive_ids.insert(drain_id), "each send has its own drive");
+    ];
+    for turn_id in turns {
         assert_eq!(
-            pair[1],
-            lash_core::ExecutionScope::turn("durable-default-effect-host", turn_id),
+            llm_calls
+                .iter()
+                .filter(|key| key.contains(&format!("durable-default-effect-host:{turn_id}:")))
+                .count(),
+            1,
+            "`{turn_id}` journals its one model call under its own turn: {llm_calls:?}"
         );
     }
-    let effect_turn_ids = recorder
-        .invocations()
-        .into_iter()
-        .filter(|invocation| invocation.kind == lash_core::RuntimeEffectKind::LlmCall)
-        .filter_map(|invocation| invocation.turn_id)
-        .collect::<BTreeSet<_>>();
     assert_eq!(
-        effect_turn_ids,
-        BTreeSet::from([
-            TurnId::from("durable-stream-to"),
-            TurnId::from("durable-run"),
-            TurnId::from("durable-stream"),
-            TurnId::from("durable-queue-drain"),
-        ])
+        llm_calls.len(),
+        turns.len(),
+        "no model call is journaled outside the four roots: {llm_calls:?}"
     );
     Ok(())
 }
 
 #[tokio::test]
 pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
-    let recorder = EffectRecorder::default();
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        recorder.backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -138,17 +118,12 @@ pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<
         .output()
         .await?;
 
-    let llm_invocation = recorder
-        .invocations()
-        .into_iter()
-        .find(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
-        .expect("llm effect");
-    assert_eq!(llm_invocation.turn_id.as_deref(), Some("stable-turn"));
+    let llm_calls = journaled_llm_call_keys(&double);
     assert!(
-        llm_invocation
-            .replay_key
-            .as_deref()
-            .is_some_and(|key| key.contains("stable-turn"))
+        llm_calls
+            .iter()
+            .any(|key| key.contains("stable-turn-id:stable-turn:")),
+        "the turn id names the model call's execution scope and replay key: {llm_calls:?}"
     );
     Ok(())
 }
@@ -164,13 +139,12 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         .build()
         .into_handle();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-started-cancel-target").open().await?;
     let expected_turn_id = "turn-started-cancel-target-id";
@@ -220,13 +194,12 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
 pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
 -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("idle-input-application").open().await?;
     let cursor = session.observe().current_remote_observation().cursor;
@@ -303,7 +276,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
 #[tokio::test]
 pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
@@ -317,7 +290,6 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
             },
         ),
     ))
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-input-application-gap").open().await?;
     let stale_cursor = session.observe().current_remote_observation().cursor;
@@ -366,8 +338,8 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
 /// A core whose engine drives its sends in the background, answering every
 /// model call with `answer`.
 async fn answering_core(answer: &'static str) -> Result<LashCore> {
-    explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        memory_backend().await.into(),
+    explicit_ephemeral_facets(LashCore::standard_builder(
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(

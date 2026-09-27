@@ -89,7 +89,7 @@ mod attach_terminal_tests {
         fn arm_executor(&self) -> crate::RuntimeEffectLocalExecutor<'static> {
             crate::RuntimeEffectLocalExecutor::processes(
                 Arc::clone(&self.registry),
-                Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
                     &self.registry,
                 ))),
             )
@@ -422,9 +422,7 @@ mod tests {
         let executor = || {
             crate::RuntimeEffectLocalExecutor::processes(
                 Arc::clone(&registry),
-                Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-                    &registry,
-                ))),
+                Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
             )
             .with_process_env_store(Arc::clone(&env_store))
         };
@@ -595,9 +593,7 @@ mod tests {
         );
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
-            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-                &registry,
-            ))),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         )
         .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
 
@@ -717,9 +713,7 @@ mod tests {
         );
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
-            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-                &registry,
-            ))),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         )
         .with_process_env_store(Arc::clone(&env_store));
         let returned = started_record(
@@ -906,9 +900,7 @@ mod tests {
         let bytes = env_spec.to_store_bytes().expect("encode environment");
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
-            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-                &registry,
-            ))),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         )
         .with_process_env_store(Arc::clone(&env_store));
 
@@ -1022,9 +1014,7 @@ mod tests {
                 ),
                 crate::RuntimeEffectLocalExecutor::processes(
                     Arc::clone(&registry),
-                    Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-                        &registry,
-                    ))),
+                    Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
                 )
                 .with_process_effect_controller(Arc::clone(&controller)),
             )

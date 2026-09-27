@@ -115,7 +115,7 @@ fn persisted_tool_state_at_generation(
 #[tokio::test]
 async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
@@ -347,9 +347,10 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             .build()
             .into_handle();
         let double = restate_double(SEED).await;
-        let standard_core = explicit_ephemeral_facets_with_backend_work(
-            LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded),
-        )
+        let standard_core = explicit_ephemeral_facets(LashCore::standard_builder(
+            double.lash_backend(),
+            crate::TurnBudget::Unbounded,
+        ))
         .provider(standard_provider)
         .model(mock_model_spec())
         .tools(Arc::new(LongTextTools))

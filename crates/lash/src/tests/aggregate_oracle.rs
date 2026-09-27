@@ -65,10 +65,10 @@ const UNREGISTERED_EVENT: &str = "aggregate.oracle.unregistered";
 /// A journaled store tier one oracle case runs against.
 ///
 /// The cases never name the backend; they take a fresh backend from this
-/// for each run and hand it to the builder. A SQLite memory backend is the
-/// floor: it journals every checkpoint and effect through the same SQLite
-/// stores a file backend runs, without paying a file sync per effect across
-/// the long race loops.
+/// for each run and hand it to the builder. The Restate double over SQLite
+/// memory stores is the floor: it journals every checkpoint and effect
+/// through the same SQLite stores a file backend runs, without paying a file
+/// sync per effect across the long race loops.
 struct JournaledTier {
     /// Names the tier in assertion messages, so a shared case body says which
     /// registration failed.
@@ -81,13 +81,9 @@ impl JournaledTier {
     }
 
     /// A fresh backend for one run: its own sessions and its own process
-    /// registry.
-    async fn backend(&self) -> Arc<lash_sqlite_store::SqliteBackend> {
-        Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("open the aggregate-oracle backend"),
-        )
+    /// registry, driven by a fresh Restate double over SQLite stores.
+    async fn backend(&self) -> lash_core::Backend {
+        double_backend().await
     }
 }
 
@@ -120,6 +116,9 @@ struct OracleTheatre {
     started: StdMutex<Vec<String>>,
     /// Every `oracle.step` id, in the order the runtime completed its call.
     settled: StdMutex<Vec<String>>,
+    /// Every `oracle.step` id whose recorded result is a cancel decision
+    /// rather than the leaf's own settlement.
+    cancel_decided: StdMutex<Vec<String>>,
     /// Completed tool calls of any tool, which the shape cases count.
     completed_calls: AtomicUsize,
     keys: StdMutex<HashMap<String, lash_core::AwaitEventKey>>,
@@ -240,6 +239,10 @@ impl OracleTheatre {
     fn settled(&self) -> Vec<String> {
         self.settled.lock_recover().clone()
     }
+
+    fn cancel_decided(&self) -> Vec<String> {
+        self.cancel_decided.lock_recover().clone()
+    }
 }
 
 /// The turn's activity sink: it counts completed tool calls, which the group
@@ -271,6 +274,12 @@ fn oracle_presentation_step(
                     .and_then(serde_json::Value::as_str)
             {
                 theatre.settled.lock_recover().push(id.to_string());
+                if input.previous.parts.iter().any(|part| {
+                    matches!(part, lash_sansio::ModelToolReturnPart::Text { text }
+                        if text.starts_with("[Tool execution cancelled]"))
+                }) {
+                    theatre.cancel_decided.lock_recover().push(id.to_string());
+                }
                 theatre.raise(&format!("settled:{id}"));
             }
             let previous = input.previous;
@@ -607,12 +616,13 @@ async fn drive_cells(
     register_intent_target(registry.as_ref(), session_id, &theatre).await;
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let core = oracle_core(
-        backend.into(),
+        backend,
         session_id,
         cells,
         Arc::clone(&theatre),
         Arc::clone(&requests),
     )?;
+    serve_processes(&core);
     let session = core.session(session_id).open().await?;
     let streamed = Arc::clone(&theatre);
     let turn = tokio::spawn(async move {
@@ -870,6 +880,10 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
         )
         .await?;
 
+        // Both leaves are dispatched before either settles: a group child is
+        // dispatched on its own, so the held leaf is waited into its attempt
+        // rather than raced against the turn's end.
+        driven.theatre.await_started(second).await;
         driven
             .theatre
             .settle_deferred(&driven.core, first, OracleTheatre::rejection(first))
@@ -1222,12 +1236,6 @@ async fn an_aggregate_leafs_declared_intent_is_realized(tier: &JournaledTier) ->
     Ok(())
 }
 
-/// §10 L3: an aggregate's infrastructure failure is the host-control channel.
-#[path = "aggregate_oracle/host_control.rs"]
-mod host_control;
-/// §9: completed groups retire under a live opener.
-#[path = "aggregate_oracle/opener_bound.rs"]
-mod opener_bound;
 /// `Promise.race` and `Promise.any` on the product path (FIG-3397).
 #[path = "aggregate_oracle/race_any.rs"]
 mod race_any;

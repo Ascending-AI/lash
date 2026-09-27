@@ -8,7 +8,7 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
     ))

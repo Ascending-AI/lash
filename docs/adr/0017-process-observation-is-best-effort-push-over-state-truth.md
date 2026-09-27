@@ -28,10 +28,10 @@ Two consequences are load-bearing:
   verbs, and terminal completion, so projections never silently miss a
   transition. This ADR originally excluded terminal events from the sink.)*
   Terminal *observation* still rides
-  `ProcessWorkSubstrate::await_process_terminal` (ADR 0016), implemented by
-  `NativeProcessWork`, which reads the durable terminal state — engine-native (Restate
-  ingress attach) where available, the in-process change hub plus backoff point
-  reads otherwise. The sink stays best-effort freshness: hosts must not wait on
+  `ProcessWorkSubstrate::await_process_terminal` (ADR 0016), which reads the
+  durable terminal state — Restate ingress attach on the engine, the in-process
+  change hub plus backoff point reads (`NoProcessWork`) on a backend that runs
+  no processes. The sink stays best-effort freshness: hosts must not wait on
   it for completion, and a terminal seen on the sink is a hint, not delivery.
 - **Emission cannot fail or slow-fail the write.** `emit` returns `()`, so a
   sink can never fail an append; the durable write has already committed when
@@ -40,10 +40,10 @@ Two consequences are load-bearing:
   channel or background task.
 
 The sink is installed once, at the point the decorator is wrapped —
-`watch_process_registry_with_sink`, threaded through the three wrap funnels:
-`NativeProcessWork` (bare callers), `RestateProcessDeployment::new_with_sink`
-(durable hosts), and `LashCoreBuilder::process_event_sink` (the facade's inline
-registry path). Stores stay pure state: nothing sink-related touches the
+`watch_process_registry_with_sink`, threaded through the engine's wrap funnel,
+`RestateProcessDeployment::new_with_sink`, which a host reaches through
+`RestateEngine::with_process_event_sink`. Bare callers wrap a registry with
+`watch_process_registry_with_sink` themselves. Stores stay pure state: nothing sink-related touches the
 `ProcessRegistry` implementations or the store crates.
 
 Retention is an explicit host lever, not an automatic policy.

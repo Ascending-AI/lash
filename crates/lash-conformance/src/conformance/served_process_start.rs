@@ -178,7 +178,10 @@ impl SpawnWorld {
             lash_core_worker::DurableProcessWorkerConfig::new(
                 Arc::new(crate::facade_support::PluginHost::new(worker_factories)),
                 host.clone(),
-                lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
+                crate::ProcessWorkWiring::new(
+                    watched.clone(),
+                    Arc::new(crate::NoProcessWork::new(&watched)),
+                ),
                 Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
             ),

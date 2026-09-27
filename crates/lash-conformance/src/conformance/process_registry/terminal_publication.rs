@@ -82,7 +82,7 @@ pub(super) async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn
         "a replayed terminal keeps the one obligation its first commit armed"
     );
 
-    // The leased completion a native worker writes arms the same obligation.
+    // A leased completion arms the same obligation.
     let leased = registry
         .register_process(registration())
         .await

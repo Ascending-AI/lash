@@ -362,10 +362,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 plugins.push(marker);
             }
         })
-        // The backend's process work already carries this sink for
-        // appended events; the core needs it too, because the durable process
-        // worker it configures reports its faults there and nowhere else.
-        .process_event_sink(Arc::clone(&process_event_sink))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "agent-workbench",
             process_incarnation_id(),

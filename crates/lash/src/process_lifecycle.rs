@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use lash_core::facade_support::{ProcessEventSink, ProcessWorkerFault, RuntimeHandle};
+use lash_core::facade_support::{ProcessEventSink, RuntimeHandle};
 use lash_core::{
     LiveReplayEventDraft, LiveReplayStore, ProcessEvent, ProcessRegistry,
     SessionObservationEventPayload, SessionProcessEventKind,
@@ -40,24 +40,18 @@ pub(crate) struct ProcessLifecycleFeed {
     store: Arc<dyn LiveReplayStore>,
     /// Durable commits reach the process observation hub as `Committed` items.
     observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
-    host_sink: Option<Arc<dyn ProcessEventSink>>,
-    forward_host_events: bool,
 }
 
 impl ProcessLifecycleFeed {
     pub(crate) fn new(
         store: Arc<dyn LiveReplayStore>,
         observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
-        host_sink: Option<Arc<dyn ProcessEventSink>>,
-        forward_host_events: bool,
     ) -> Self {
         Self {
             registry: OnceLock::new(),
             routes: Mutex::new(HashMap::new()),
             store,
             observation_hub,
-            host_sink,
-            forward_host_events,
         }
     }
 
@@ -153,17 +147,6 @@ impl ProcessEventSink for ProcessLifecycleFeed {
                 Err(error) => tracing::warn!(process_id = %event.process_id, %error,
                     "could not route process lifecycle observation"),
             }
-        }
-        if self.forward_host_events
-            && let Some(host_sink) = &self.host_sink
-        {
-            host_sink.emit(event).await;
-        }
-    }
-
-    async fn emit_worker_fault(&self, fault: &ProcessWorkerFault) {
-        if let Some(host_sink) = &self.host_sink {
-            host_sink.emit_worker_fault(fault).await;
         }
     }
 }

@@ -240,7 +240,7 @@ impl EffectBackedProcessService {
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
         let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
-            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
                 &self.registry,
             ))),
         );

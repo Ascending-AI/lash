@@ -1312,12 +1312,10 @@ impl RuntimeExecutionContext<'_> {
         let process_scope = self
             .process_scope(parent_invocation)
             .with_turn_cancellation(&self.turn_cancel_wait(cancellation));
-        crate::runtime::release_process_execution_permit_while(
-            self.dispatch
-                .processes
-                .await_process_ref(process_id, process_scope),
-        )
-        .await
+        self.dispatch
+            .processes
+            .await_process_ref(process_id, process_scope)
+            .await
     }
 
     /// Executes one tool call a replayed language program issued as a command

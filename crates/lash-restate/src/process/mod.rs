@@ -558,7 +558,7 @@ impl RestateProcessIngressRunner {
     }
 
     /// Push one worker fault to the host-facing sink, or to `tracing` when this
-    /// handle has none — the same floor the native worker keeps.
+    /// handle has none, so a fault is never silent.
     async fn emit_worker_fault(
         &self,
         process_id: &ProcessId,
@@ -737,7 +737,7 @@ impl RestateProcessIngressRunner {
                 // Externally-owned rows are never submitted to ingress (ADR
                 // 0110): Lash does not execute them on any tier, and their
                 // external owner closes them. The pass reports each as
-                // deferred, as the native worker does.
+                // deferred.
                 if record.input.is_externally_owned() {
                     report.deferred.push(ProcessAdmissionDeferred {
                         process_id: record.id.clone(),
@@ -812,6 +812,17 @@ impl RestateProcessIngressRunner {
         if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
             return Ok(ProcessTerminalWait::Terminal(output.clone()));
         }
+        // FIG-1383: a row whose caller departed before any outcome has no
+        // actor left to end it, and lash never invents its outcome, so a
+        // wait on it is refused rather than parked.
+        if record
+            .as_ref()
+            .is_some_and(|record| record.status == ProcessStatus::CallerDeparted)
+        {
+            return Err(PluginError::ProcessCallerDeparted {
+                process_id: process_id.clone(),
+            });
+        }
         let outcome = self
             .ingress
             .call_workflow_json::<_, ProcessAwaitOutput>(
@@ -871,10 +882,7 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
         &self,
         process_id: &ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
-        lash_core::facade_support::release_process_execution_permit_while(
-            self.await_terminal_wait(process_id),
-        )
-        .await
+        self.await_terminal_wait(process_id).await
     }
 
     /// A one-way send to the process's `cancel` handler under

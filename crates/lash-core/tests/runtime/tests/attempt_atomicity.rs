@@ -237,12 +237,7 @@ async fn fixtures() -> Fixtures {
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 ),
-                lash_core_worker::WorkerProcessWork::External(
-                    backend_handle
-                        .process_work()
-                        .expect("the Restate engine supplies process work")
-                        .clone(),
-                ),
+                backend_handle.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
@@ -766,7 +761,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
             ),
             lash_core::RuntimeEffectLocalExecutor::processes(
                 Arc::clone(&fixtures.registry),
-                Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+                Arc::new(lash_core::NoProcessWork::for_registry(Arc::clone(
                     &fixtures.registry,
                 ))),
             ),
@@ -824,7 +819,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                     ),
                     lash_core::RuntimeEffectLocalExecutor::processes(
                         Arc::clone(&registry),
-                        Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+                        Arc::new(lash_core::NoProcessWork::for_registry(registry)),
                     ),
                 )
                 .await?;
@@ -1103,7 +1098,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             ),
             lash_core::RuntimeEffectLocalExecutor::processes(
                 registry.clone(),
-                Arc::new(lash_core::NativeProcessWork::for_registry(registry.clone())),
+                Arc::new(lash_core::NoProcessWork::for_registry(registry.clone())),
             ),
         )
         .await
@@ -1129,7 +1124,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             ),
             lash_core::RuntimeEffectLocalExecutor::processes(
                 registry.clone(),
-                Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+                Arc::new(lash_core::NoProcessWork::for_registry(registry)),
             ),
         )
         .await

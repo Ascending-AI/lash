@@ -94,7 +94,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -223,7 +223,7 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -275,7 +275,7 @@ async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reason
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -330,7 +330,7 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -375,7 +375,7 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -606,7 +606,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         const MARKER: &str = "retry observer single-copy marker";
         let transport_calls = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(StdMutex::new(Vec::new()));
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
             .provider(output_then_failing_rlm_prose_provider(
                 Arc::clone(&transport_calls),
                 Arc::clone(&requests),
@@ -739,7 +739,7 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
     run_async_test_on_stack_budget("rlm-natural-prose-single-copy-test", || async {
         const MARKER: &str = "natural completion single-copy marker";
         let requests = Arc::new(StdMutex::new(Vec::new()));
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
             .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
@@ -896,7 +896,7 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
 pub(super) async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_replay()
 -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(retrying_visible_stream_provider())
@@ -1120,7 +1120,7 @@ pub(super) async fn session_observation_remote_subscription_replays_dto_events()
 #[tokio::test]
 pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1168,7 +1168,7 @@ pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() 
 pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observation_cursor()
 -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1210,7 +1210,7 @@ pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observati
 pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Result<()>
 {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1411,7 +1411,7 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
 pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<()> {
     let replay_store = Arc::new(FailingAppendReplayStore::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1468,7 +1468,7 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
 pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_without_another_commit()
 -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1514,7 +1514,7 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
     ] {
         let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
-            memory_backend().await.into(),
+            double_backend().await,
             crate::TurnBudget::Unbounded,
         ))
         .provider(mock_provider())
@@ -1621,7 +1621,7 @@ pub(super) async fn incarnation_change_invalidates_cursor() {
 pub(super) async fn notification_observes_installed_projection() -> Result<()> {
     let replay_store = Arc::new(PausedCommitReplayStore::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2018,9 +2018,9 @@ pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identit
 #[tokio::test]
 pub(super) async fn gap_replacement_then_continuation_after_unavailable_history() -> Result<()> {
     let session_id = "recoverable-chat-restart-cursor";
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2030,7 +2030,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
     drop(bootstrap_core);
 
     let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2061,7 +2061,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
     drop(first_core);
 
     let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2144,7 +2144,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
 #[tokio::test]
 pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2207,7 +2207,7 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
 #[tokio::test]
 pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2308,7 +2308,7 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)

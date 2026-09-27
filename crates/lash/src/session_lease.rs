@@ -196,12 +196,14 @@ mod tests {
             Arc::new(lash_core::testing::TestClock::new(STORE_NOW_MS));
         let host_clock: Arc<dyn lash_core::Clock> =
             Arc::new(lash_core::testing::TestClock::new(host_now_ms));
-        let backend = crate::tests::DecoratedBackend::over(
-            crate::tests::memory_backend_with_clock(store_clock)
+        let stores = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory_with_clock(store_clock)
                 .await
-                .into(),
-        )
-        .runtime_clock(host_clock);
+                .expect("open a SQLite memory store set"),
+        );
+        let backend =
+            crate::tests::DecoratedBackend::over(lash_conformance::recording_backend_over(stores))
+                .runtime_clock(host_clock);
         let factory = lash_core::Backend::from(backend.clone()).session_store_factory();
         let request = lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
@@ -223,7 +225,6 @@ mod tests {
             )
             .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-            .map_backend(crate::tests::inline_session_work)
             .build(crate::testing::runtime_lease_owner())
             .expect("build clock-domain fixture core");
         ClockDomainFixture { core, store }

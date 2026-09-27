@@ -44,7 +44,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
     let _ = run_recovered_segment(worker_b, &registry_b, &snapshot_ok, snapshot_registration).await;
 
     assert_eq!(
-        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
+        lash_core::NoProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&snapshot_ok)
             .await
             .expect("await recovered snapshot-backed process"),
@@ -251,7 +251,7 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
             "process_host_environment_incompatible",
         ),
     ] {
-        let await_output = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
+        let await_output = lash_core::NoProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&process_id)
             .await
             .unwrap_or_else(|error| panic!("await terminal {process_id}: {error}"));
@@ -793,7 +793,7 @@ pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal(
     let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
     let _ = run_recovered_segment(worker, &registry, &typescript_worker, registration).await;
     assert_eq!(
-        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
+        lash_core::NoProcessWork::for_registry(Arc::clone(&registry))
             .await_terminal(&typescript_worker)
             .await
             .expect("await TypeScript process"),
@@ -910,7 +910,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         run_recovered_segment(worker_b, &registry_b, &trigger_notify, trigger_registration).await;
 
     assert_eq!(
-        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
+        lash_core::NoProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&trigger_notify)
             .await
             .expect("await recovered trigger-started process"),
@@ -933,7 +933,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     // Idempotent by process_id: the stored terminal is what a later await
     // reads, however often it is asked.
     assert_eq!(
-        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
+        lash_core::NoProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&trigger_notify)
             .await
             .expect("await after idempotent re-sweep"),
@@ -1237,11 +1237,11 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
     let worker = DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::empty()),
         memory_host_config().await,
-        lash_core_worker::WorkerProcessWork::External(process_work),
+        process_work,
         Arc::new(lash_core::NoSessionWork::new()),
         lash_core::testing::runtime_lease_owner(),
     ))
-    .expect("valid test native substrate config");
+    .expect("valid test process worker");
     let service = deployment
         .workflow(
             worker.into(),

@@ -590,12 +590,11 @@ mod tests {
             )
             .await
             .expect("prune transcript process");
-        let output = lash_core::NativeProcessWork::for_registry(
-            registry as Arc<dyn lash_core::ProcessRegistry>,
-        )
-        .await_terminal(&process_id)
-        .await
-        .expect("await pruned process");
+        let output =
+            lash_core::NoProcessWork::for_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
+                .await_terminal(&process_id)
+                .await
+                .expect("await pruned process");
         assert!(matches!(
             output,
             ProcessAwaitOutput::NoLongerRetained { .. }

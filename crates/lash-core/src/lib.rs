@@ -143,7 +143,6 @@ pub mod facade_support {
     ) -> lash_trace::TraceContext {
         crate::trace::trace_context_for_effect_invocation(context, invocation)
     }
-    pub use crate::runtime::bounded_multiplicative_jitter;
     pub use crate::runtime::run_head_advancing_commit_attempt;
     pub use crate::runtime::turn_loop::{
         EmptyQueuedDrainReason, QueuedTurnDrain, SelectedQueuedWorkBatchSatisfaction,
@@ -277,7 +276,6 @@ pub mod facade_support {
     pub use crate::runtime::AssembledTurn;
     pub use crate::runtime::AssistantOutput;
     pub use crate::runtime::CanonicalRuntimeEffectEnvelope;
-    pub use crate::runtime::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY;
     pub use crate::runtime::DirectCompletionClient;
     pub use crate::runtime::EmbeddedRuntimeHost;
     pub use crate::runtime::EventSink;
@@ -285,7 +283,6 @@ pub mod facade_support {
     pub use crate::runtime::InMemoryLiveReplayStoreConfig;
     pub use crate::runtime::LashRuntime;
     pub use crate::runtime::LiveReplayGap;
-    pub use crate::runtime::NativeQueuedWorkConfigError;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
@@ -321,16 +318,7 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkClaimPolicy;
-    pub use crate::runtime::QueuedWorkExecutionConcurrencyError;
     pub use crate::runtime::QueuedWorkKind;
-    pub use crate::runtime::QueuedWorkRunError;
-    pub use crate::runtime::QueuedWorkRunHandle;
-    pub use crate::runtime::QueuedWorkRunProgress;
-    pub use crate::runtime::QueuedWorkRunRequest;
-    pub use crate::runtime::QueuedWorkSlowWake;
-    pub use crate::runtime::QueuedWorkWakeContended;
-    pub use crate::runtime::QueuedWorkWakeFailure;
-    pub use crate::runtime::QueuedWorkWakeOutcome;
     pub use crate::runtime::ReconciledUsageAttempt;
     pub use crate::runtime::RuntimeAwaitEventOptions;
     pub use crate::runtime::RuntimeEffectReplayTrace;
@@ -401,8 +389,6 @@ pub mod facade_support {
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::refuse_unhonored_group_membership;
     pub use crate::runtime::registry_transitions;
-    pub use crate::runtime::release_process_execution_permit_while;
-    pub use crate::runtime::trigger_delivery_reconcile_scope;
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
@@ -425,7 +411,6 @@ pub mod facade_support {
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
     pub use crate::runtime::watch_process_registry_with_sink;
-    pub use crate::runtime::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
@@ -524,38 +509,6 @@ pub mod facade_support {
     pub use lash_trace::parse_jsonl_records;
     pub use schemars::JsonSchema;
 
-    /// Cancelling `shutdown` stops the engine: no drive starts and a drive
-    /// in flight is dropped.
-    pub fn native_queued_work_with_execution_concurrency_and_work_cadence(
-        run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
-        concurrency: usize,
-        work_cadence: crate::runtime::WorkCadencePolicy,
-        shutdown: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeQueuedWorkConfigError> {
-        crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
-            run_handle,
-            concurrency,
-            work_cadence,
-            shutdown,
-        )
-    }
-
-    /// `shutdown` as for
-    /// [`native_queued_work_with_execution_concurrency_and_work_cadence`].
-    pub fn native_queued_work_with_worker_slot_supplier_and_work_cadence(
-        run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
-        supplier: std::sync::Arc<dyn crate::runtime::WorkerSlotSupplier>,
-        work_cadence: crate::runtime::WorkCadencePolicy,
-        shutdown: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeSubstrateConfigError> {
-        crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
-            run_handle,
-            supplier,
-            work_cadence,
-            shutdown,
-        )
-    }
-
     pub fn wake_delivery_driver_with_work_cadence(
         registry: std::sync::Arc<dyn crate::runtime::ProcessRegistry>,
         session_store_factory: std::sync::Arc<dyn crate::runtime::SessionStoreFactory>,
@@ -563,8 +516,7 @@ pub mod facade_support {
         clock: std::sync::Arc<dyn crate::runtime::Clock>,
         delivery_policy: crate::runtime::DeliveryPolicy,
         work_cadence: crate::runtime::WorkCadencePolicy,
-    ) -> Result<crate::runtime::WakeDeliveryDriver, crate::runtime::NativeSubstrateConfigError>
-    {
+    ) -> Result<crate::runtime::WakeDeliveryDriver, crate::runtime::WorkCadenceError> {
         crate::runtime::WakeDeliveryDriver::with_work_cadence(
             registry,
             session_store_factory,
@@ -752,13 +704,12 @@ pub use runtime::{
     EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupDrainReport,
     GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement,
-    GroupWakePolicy, HandleId, IndependentEffectWork, InlineSessionWork, InputItem,
-    InvalidStartKey, LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy,
-    LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LlmStreamRecord, LocalTurnStop, LoserPolicy, NativeProcessWork, NativeQueuedWork,
-    NativeQueuedWorkConfigError, NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork,
-    OpenerFinalizationSteps, PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    GroupWakePolicy, HandleId, IndependentEffectWork, InputItem, InvalidStartKey,
+    LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord,
+    LocalTurnStop, LoserPolicy, NoProcessWork, NoSessionWork, OpenerFinalizationSteps,
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
     PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, PendingTurnInput,
     PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
@@ -786,8 +737,8 @@ pub use runtime::{
     ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver, ProcessProvenance,
     ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
     ProcessRegistrationDisposition, ProcessRegistrationOutcome, ProcessRegistrationProbe,
-    ProcessRegistry, ProcessRegistryBinding, ProcessResumeRefusal, ProcessRetention,
-    ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
+    ProcessRegistry, ProcessRegistryAwaiter, ProcessRegistryBinding, ProcessResumeRefusal,
+    ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
     ProcessSessionDeleteReport, ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration,
     ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest,
     ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication,
@@ -831,9 +782,8 @@ pub use runtime::{
     TurnInputStateKind, UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError,
     WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, WorkCadencePolicy,
-    WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
-    admit_session_state_generation, artifact_destination_owner_retired_error,
+    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
+    WorkCadencePolicy, admit_session_state_generation, artifact_destination_owner_retired_error,
     artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
     effect_groups_unsupported, ensure_process_lease_schema_version, lifetime, mint_process_id,
     park_turn_of_refused_group_child, park_turn_refused_by_generation, tool_failure_code,
@@ -918,17 +868,8 @@ pub use tool_provider::{
 #[doc(hidden)]
 pub mod core_internal {
     pub use crate::runtime::RuntimeSessionServices;
-    pub use crate::runtime::process_permit::{
-        DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ensure_process_execution_permit,
-        inherit_process_execution_permit, scope_process_execution_permit,
-        scope_queued_work_execution_permit,
-    };
     pub use lash_core_execution::core_internal::{
         attach_process_invocation_correlation, clear_process_invocation_correlation,
-    };
-    pub use lash_core_ids::worker_capacity::{
-        DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
-        WorkerSlotSupplier,
     };
 }
 

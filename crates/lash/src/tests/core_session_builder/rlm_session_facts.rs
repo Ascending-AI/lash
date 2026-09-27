@@ -91,7 +91,7 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder().await)
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(provider)
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -161,7 +161,7 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)
@@ -291,7 +291,7 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
     // first session's commit actually wrote.
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
-    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(provider)
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;

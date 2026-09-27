@@ -18,9 +18,7 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the registration helpers around them in this target are test code too"
 )]
 
-use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::EffectHost;
 
@@ -75,128 +73,20 @@ fn process_bridge_factories(
     ]
 }
 
-fn sync_await<T, F>(future: F) -> T
-where
-    T: Send + 'static,
-    F: Future<Output = T> + Send + 'static,
-{
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(future)
-    })
-    .join()
-    .expect("runtime thread")
-}
-
-mod sqlite_memory {
-    use super::*;
-
-    lash_conformance::tool_batch_parallelism_tests!({
-        let backend = lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open the memory tool-batch parallelism backend");
-        let host = backend.effect_host() as Arc<dyn EffectHost>;
-        let process_factories = process_bridge_factories(&backend.clone().into());
-        let law_stores: Arc<dyn lash_core::StoreSet> = Arc::new(backend.stores().clone());
-        (
-            backend,
-            "sqlite-memory",
-            Arc::clone(&host),
-            law_stores,
-            vec![
-                // The process bridge's aggregate runs on the native process
-                // substrate (`WorkerProcessWork::SelfNative`), which B3
-                // removes; the cell bridge's producer runs on the Restate
-                // server double in `restate_double` below.
-                // Each scenario opens its own session, so it also opens its
-                // own registry, on a memory backend of its own.
-                lash_conformance::lashlang_process_aggregate_producer(
-                    process_factories,
-                    Arc::new(|| {
-                        sync_await(async {
-                            lash_sqlite_store::SqliteBackend::memory()
-                                .await
-                                .expect("open the tool-batch process registry backend")
-                                .process_registry()
-                        }) as Arc<dyn lash_core::ProcessRegistry>
-                    }),
-                ),
-            ],
-            lash_conformance::HostTurnRunner::shared(host),
-        )
-    });
-}
-
-mod sqlite {
-    use super::*;
-
-    lash_conformance::tool_batch_parallelism_tests!({
-        let dir = tempfile::tempdir().expect("tempdir");
-        let host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(
-                &dir.path().join("rlm-tool-batch-parallelism.db"),
-            )
-            .await
-            .expect("open the SQLite tool-batch parallelism effect host"),
-        ) as Arc<dyn EffectHost>;
-        // Each scenario opens its own session, so it also opens its own
-        // registry: a durable registry carried across scenarios would let one
-        // scenario's rows decide the next one's admission.
-        let registry_root = dir.path().to_path_buf();
-        let opened = Arc::new(AtomicUsize::new(0));
-        // The law's host is a bare effect host with no backend; the RLM
-        // factories keep their artifacts in a memory backend of their own.
-        let artifacts = lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open the artifact backend");
-        (
-            dir,
-            "sqlite",
-            Arc::clone(&host),
-            // The law's runtime takes its storage from the artifact backend's
-            // store set.
-            Arc::new(artifacts.stores().clone()) as Arc<dyn lash_core::StoreSet>,
-            vec![
-                // The process bridge's aggregate runs on the native process
-                // substrate (`WorkerProcessWork::SelfNative`), which B3
-                // removes; the cell bridge's producer runs on the Restate
-                // server double in `restate_double` below.
-                lash_conformance::lashlang_process_aggregate_producer(
-                    process_bridge_factories(&artifacts.clone().into()),
-                    Arc::new(move || {
-                        let ordinal = opened.fetch_add(1, Ordering::SeqCst);
-                        let path = registry_root.join(format!("processes-{ordinal}.db"));
-                        let sessions = registry_root.join(format!("sessions-{ordinal}"));
-                        Arc::new(sync_await(async move {
-                            lash_sqlite_store::SqliteProcessRegistry::open(&path, sessions)
-                                .await
-                                .expect("open the SQLite tool-batch process registry")
-                        })) as Arc<dyn lash_core::ProcessRegistry>
-                    }),
-                ),
-            ],
-            lash_conformance::HostTurnRunner::shared(host),
-        )
-    });
-}
-
-/// The cell bridge's producer on the Restate server double: the scenario's
-/// turn runs inside a live `LashTestHandlerHost` handler, where its tool
-/// batch's leaves are group children on the invocation's journal. The
-/// process bridge's producer stays on the SQLite mounts: the law drives its
-/// aggregate on the native process substrate (`WorkerProcessWork::SelfNative`),
-/// a subject B3 removes rather than the double serves.
+/// Both producers on the Restate server double: the scenario's turn runs
+/// inside a live `LashTestHandlerHost` handler, where its tool batch's
+/// leaves are group children on the invocation's journal, and the process
+/// bridge's aggregate runs as a segment of the double's process workflow,
+/// served by the worker the law builds.
 mod restate_double {
     use super::*;
 
     /// The tier's [`lash_conformance::ConformanceTurnRunner`]:
     /// `run_in_handler` lends the attempt the scoped controller the
     /// invocation's journal owns — the double's answer to the in-process
-    /// `HostTurnRunner`. The suite asks for `run_turn` alone; the crash,
-    /// cut and process-segment routes keep the trait's panicking defaults.
+    /// `HostTurnRunner`. The suite asks for `run_turn` and `process_work`;
+    /// the crash, cut and segment-recovery routes keep the trait's panicking
+    /// defaults.
     struct DoubleTurnRunner {
         backend: lash_restate_test::RestateTestBackend,
     }
@@ -247,6 +137,19 @@ mod restate_double {
                 .await
                 .expect("the double crashes and redrives the scenario's turn");
         }
+
+        /// Process segments run in the double's process workflow: the
+        /// worker is installed there, and the runtime's own port only
+        /// observes the registry that workflow writes terminals into.
+        fn process_work(
+            &self,
+            watched: lash_core::WatchedRegistry,
+            worker: lash_core_worker::DurableProcessWorker,
+        ) -> lash_core::ProcessWorkWiring {
+            self.backend.install_process_worker(worker);
+            let port = Arc::new(lash_core::NoProcessWork::new(&watched));
+            lash_core::ProcessWorkWiring::new(watched, port)
+        }
     }
 
     lash_conformance::tool_batch_parallelism_tests!({
@@ -263,12 +166,26 @@ mod restate_double {
         // entry — one parallel model response dispatched as one effect
         // group — is the coverage this tier can carry.
         producer.reaches_relay = false;
+        // The process bridge's aggregate runs in a segment of the double's
+        // process workflow, over the engine's own registry: the registry the
+        // workflow writes the process's terminal into.
+        let engine_stores = Arc::clone(double.engine_stores());
+        let mut in_process = lash_conformance::lashlang_process_aggregate_producer(
+            process_bridge_factories(&backend),
+            Arc::new(move || engine_stores.process_registry()),
+        );
+        // A relay's nested batch rides its child's invocation journal, which
+        // Restate replays serially (FIG-3671), inside a process as in a turn.
+        in_process.reaches_relay = false;
+        // The handler already lends the turn the controller a Restate host
+        // hands it; the task proxy models that shape for in-process tiers.
+        in_process.through_task_proxy = false;
         (
             double.clone(),
             "restate-double",
             host,
             Arc::clone(double.engine_stores()),
-            vec![producer],
+            vec![producer, in_process],
             Arc::new(DoubleTurnRunner { backend: double })
                 as Arc<dyn lash_conformance::ConformanceTurnRunner>,
         )

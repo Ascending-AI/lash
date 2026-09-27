@@ -22,32 +22,6 @@ pub(crate) fn fresh_turn_id() -> TurnId {
     )
 }
 
-/// Drive `request` on `runtime`'s session to a stop through the session drive
-/// (FIG-3600), recording every turn activity on the session's observation.
-pub(crate) async fn drive_session_observed(
-    runtime: &RuntimeHandle,
-    binding: &lash_core::StoreBindingId,
-    controller: &ScopedEffectController<'_>,
-    request: &lash_core::engine::DriveRequest,
-) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
-    let writer_handle = runtime.writer();
-    let mut writer = writer_handle.lock().await;
-    let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
-    let sinks = lash_core::drive::DriveSinks {
-        events: &lash_core::runtime::NoopEventSink,
-        turn_events: &observation_sink,
-        local_stop: LocalTurnStop::default(),
-    };
-    let outcome =
-        lash_core::drive::drive_session_reporting(&mut writer, controller, request, sinks).await;
-    runtime.publish_from(&writer);
-    let (outcome, roots) = outcome?;
-    for root in roots {
-        crate::send::deposit_settled_root(binding, &request.session, root);
-    }
-    Ok(outcome)
-}
-
 /// One recorded admission of `request` on `runtime`'s session (FIG-3600).
 pub(crate) async fn admit_drive_observed(
     runtime: &RuntimeHandle,

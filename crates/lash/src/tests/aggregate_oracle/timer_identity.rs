@@ -7,8 +7,10 @@
 //! reopen the first — answering at once from its recorded settlement when the
 //! durations match, or failing the reopen fence when they do not.
 //!
-//! "Waits" is asserted as a lower bound on the turn's wall time, which a timer
-//! can only ever lengthen: no ordering is inferred from it.
+//! "Waits" is asserted as a lower bound on the time the turn took on the
+//! engine's clock — the double's virtual clock, which a timer moves by its
+//! full duration and which otherwise flows at wall speed — so a timer can
+//! only ever lengthen it: no ordering is inferred from it.
 
 use super::*;
 
@@ -21,9 +23,11 @@ async fn elapsed_turn(
     session_id: &str,
     cells: Vec<String>,
 ) -> Result<(OracleRun, std::time::Duration)> {
-    let started = std::time::Instant::now();
     let run = run_cells(tier, session_id, cells).await?;
-    Ok((run, started.elapsed()))
+    let double = latest_double().expect("the run built its double on this thread");
+    let now_ms = lash_core::ClockWallTime::timestamp_ms(double.test_clock().as_ref());
+    let elapsed_ms = now_ms.saturating_sub(double.server().config().start_time_ms);
+    Ok((run, std::time::Duration::from_millis(elapsed_ms)))
 }
 
 /// Two awaited timer aggregates at two sites of one cell, with equal and with

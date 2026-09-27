@@ -151,8 +151,7 @@ pub use lash_core::{
     facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
     facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
     facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
-    facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
-    facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
+    facade_support::TurnWorkDriver,
 };
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// effect host from: one [`EffectEngine`] over one [`StoreSet`] (ADR 0104).
@@ -830,7 +829,7 @@ pub mod process {
     pub use lash_core::{
         AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArtifactOwner,
         CausalRef, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime, LifetimeDecision,
-        LifetimePolicy, NativeProcessWork, PROCESS_EFFECT_OCCURRENCE_CAP,
+        LifetimePolicy, NoProcessWork, PROCESS_EFFECT_OCCURRENCE_CAP,
         PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
         PROCESS_EVENT_VOCABULARY_VERSION, ProcessArtifactCleanupAck, ProcessAwaitOutput,
         ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
@@ -887,7 +886,6 @@ pub mod process {
         WakeDeliveryConfig, facade_support::WakeDeliveryDriveReport,
         facade_support::WakeDeliveryDriver, facade_support::process_wake_source_key,
     };
-    pub use lash_core_worker::ProcessExecutionConcurrencyError;
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageExecutionMapError,
@@ -918,9 +916,7 @@ pub mod durability {
         facade_support::LeaseTimingsError, facade_support::RuntimeEnvironment,
         facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
     };
-    pub use lash_core_worker::{
-        DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork,
-    };
+    pub use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
 }
 
 /// Runtime events, errors, and execution controls.
@@ -945,16 +941,12 @@ pub mod runtime {
     pub use lash_core::runtime::{
         AdmittedScope, ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents,
         AssistantStreamHookState, AwaitEventResolver, CheckpointClaimSet, CompletionKeyPreparation,
-        DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient, EffectAddress,
-        EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        GroupExecutors, GroupSettlement, GroupWakePolicy, InlineSessionWork, LashRuntime,
-        LlmRequestSpec, LlmStreamRecord, LoserPolicy, NativeQueuedWork, NativeSubstrateConfig,
-        NativeSubstrateConfigError, NoSessionWork, NoopEventSink, NoopTurnActivitySink,
-        ProcessCommand, ProcessEffectOutcome, QueuedLaneAcquisition, QueuedLaneAttempt,
-        QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkExecutionConcurrencyError,
-        QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress,
-        QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkWakeContended, QueuedWorkWakeFailure,
-        QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
+        DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
+        EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
+        GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord, LoserPolicy, NoSessionWork,
+        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
+        QueuedLaneProbe, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
         RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
@@ -963,7 +955,7 @@ pub mod runtime {
         RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
         RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
         ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelWait,
-        TurnContext, TurnControlBinding, WorkCadencePolicy, WorkerSweepPolicy,
+        TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
         effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used

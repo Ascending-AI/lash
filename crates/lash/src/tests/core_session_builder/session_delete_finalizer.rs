@@ -24,17 +24,33 @@ fn now_ms() -> u64 {
 /// its scope close: the root's terminal transaction armed it (ADR 0109 §3)
 /// and the close step's immediate delivery failed — the registry refused the
 /// root's parent-end record once — so the obligation is due for a retry.
+///
+/// The core runs on a Restate double whose virtual clock starts at the wall
+/// clock, so the relay passes below, timed off the wall clock, see the
+/// obligations the double's stores scheduled.
 async fn closing_fixture() -> Result<(LashCore, lash_core::store::ObligationId)> {
-    closing_fixture_over(memory_backend().await).await
+    closing_fixture_under(lash_restate_test::TimeMode::auto()).await
 }
 
-async fn closing_fixture_over(
-    backend: Arc<lash_sqlite_store::SqliteBackend>,
+async fn closing_fixture_under(
+    time: lash_restate_test::TimeMode,
 ) -> Result<(LashCore, lash_core::store::ObligationId)> {
     let root_scope = lash_core::ScopeId::turn(SESSION, ROOT);
-    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend.into())
-        .map_process_registry(|registry| lash_core::fail_parent_end_once(registry, root_scope))
-        .into_backend();
+    let backend = double_backend_over(
+        lash_restate_test::ServerConfig {
+            start_time_ms: now_ms(),
+            time,
+            ..lash_restate_test::ServerConfig::default()
+        },
+        move |stores| {
+            lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_process_registry(|registry| {
+                    lash_core::fail_parent_end_once(registry, root_scope)
+                })
+                .into_store_set()
+        },
+    )
+    .await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
@@ -229,20 +245,14 @@ async fn a_stalled_delete_is_surfaced_until_rearmed() -> Result<()> {
 /// delivered, with no call from the host.
 #[tokio::test]
 async fn the_reconcile_tick_finishes_a_held_delete() -> Result<()> {
-    use lash_core::SessionDriver as _;
-
-    let clock = Arc::new(lash_core::testing::TestClock::new(now_ms()));
-    let (core, scope_close) =
-        closing_fixture_over(memory_backend_with_clock(clock.clone()).await).await?;
+    let (core, scope_close) = closing_fixture_under(lash_restate_test::TimeMode::Manual).await?;
+    let double = held_double(&core).expect("the fixture runs on a held double");
     assert!(matches!(
         delete_bound_session_outcome(&core, SESSION).await?,
         crate::SessionDeletion::Closing(_)
     ));
     deliver_by_hand(&core, ObligationKind::ScopeClose, &scope_close).await;
-    let driver = crate::core::queued_work::native_queued_work_handle_for_tests(
-        &core,
-        Arc::clone(&core.store_factory),
-    );
+    let driver = Arc::clone(&core._session_driver);
     driver
         .reconcile(&lash_core::engine::ReconcileCursor::default(), page())
         .await?;
@@ -250,7 +260,9 @@ async fn the_reconcile_tick_finishes_a_held_delete() -> Result<()> {
         !was_deleted(&core).await?,
         "a tick before the retry's backoff leaves the delete due"
     );
-    clock.advance(2_000);
+    double
+        .server()
+        .advance(std::time::Duration::from_millis(2_000));
     driver
         .reconcile(&lash_core::engine::ReconcileCursor::default(), page())
         .await?;

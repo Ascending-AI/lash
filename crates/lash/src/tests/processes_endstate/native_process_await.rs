@@ -1,17 +1,23 @@
 use super::*;
 
-/// native-substrate end to end across the process wait, observation, and retention
+/// End to end across the process wait, observation, and retention
 /// interfaces: a host starts a process, holds `ProcessWorkSubstrate::await_process_terminal`
 /// (through `core.processes().await_output`), signals it to completion, and
 /// observes its intermediate events through a wired `ProcessEventSink` — then
 /// prunes the terminal registry rows while the host's projected copies survive.
 #[tokio::test]
 async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
-    let backend = memory_backend().await;
-    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
+    let backend = double_backend().await;
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
+    // The sink rides the backend's watched registry, the one the engine's
+    // process workflow writes through.
     let sink = CollectingProcessEventSink::default();
-    let core = process_test_core_with_sink(backend.clone().into(), Arc::new(sink.clone()))?;
+    let _sink_registration = backend
+        .process_work()
+        .watched()
+        .add_event_sink(Arc::new(sink.clone()));
+    let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {
@@ -28,7 +34,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
         .processes()
         .start(
             process.start_request(process_id),
-            runtime_operation_scope(&core, "e2e-start"),
+            runtime_operation_scope(&core, "e2e-start").await,
         )
         .await?
         .process_id;
@@ -48,7 +54,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
             "ready",
             "e2e-signal-1",
             signal_request(&process_id, "ready", "e2e-signal-1", payload.clone()),
-            runtime_operation_scope(&core, "e2e-signal"),
+            runtime_operation_scope(&core, "e2e-signal").await,
         )
         .await?;
 

@@ -6,55 +6,6 @@
 use super::*;
 use lash_sansio::SessionId;
 
-/// Fails the `fail_on_llm_call`-th LLM effect of the session before it reaches
-/// the journal — a cold restart mid-turn — and counts the LLM effects the
-/// memory backend answered, live or from its journal.
-struct ProjectionRedriveLayer {
-    llm_effects: AtomicUsize,
-    answered_llm_effects: AtomicUsize,
-    fail_on_llm_call: usize,
-}
-
-impl ProjectionRedriveLayer {
-    fn failing_on_llm_call(ordinal: usize) -> Self {
-        Self {
-            llm_effects: AtomicUsize::new(0),
-            answered_llm_effects: AtomicUsize::new(0),
-            fail_on_llm_call: ordinal,
-        }
-    }
-}
-
-#[async_trait]
-impl lash_core::testing::EffectLayer for ProjectionRedriveLayer {
-    async fn execute_effect(
-        &self,
-        inner: &dyn lash_core::RuntimeEffectController,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
-    {
-        if !matches!(
-            &envelope.command,
-            lash_core::RuntimeEffectCommand::LlmCall { .. }
-        ) {
-            return inner.execute_effect(envelope, local_executor).await;
-        }
-        if self.llm_effects.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_on_llm_call {
-            return Err(lash_core::RuntimeEffectControllerError::foreign(
-                "test_projection_cold_restart",
-                // A crash is a live fault: the drive aborts and the redrive
-                // replays the journal.
-                lash_core::TurnFailureCause::LiveFault,
-                "injected cold restart after the first mid-turn completion",
-            ));
-        }
-        let outcome = inner.execute_effect(envelope, local_executor).await?;
-        self.answered_llm_effects.fetch_add(1, Ordering::SeqCst);
-        Ok(outcome)
-    }
-}
-
 fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::Text {
@@ -175,7 +126,6 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
     scope_kind: RepeatedAdminCompactionScope,
     expected_summaries: &[&str],
 ) -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = match scope_kind {
         RepeatedAdminCompactionScope::ParentTurn => "standard-compaction-repeat-parent-turn",
         RepeatedAdminCompactionScope::RuntimeOperation => {
@@ -191,14 +141,9 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
             .iter()
             .map(|summary| response_with_usage(summary, 1)),
     );
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let effect_host = backend.effect_host();
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(responses))
@@ -228,9 +173,12 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
             ))
         }
     };
-    let shared_scope = effect_host
-        .scoped_static(lash_core::AdmittedScope::new(execution_scope))?
-        .expect("SQLite host supplies the repeated admin scope");
+    let shared_scope_handler = held_double(&core)
+        .expect("the core runs on its held double")
+        .open_handler(lash_core::AdmittedScope::new(execution_scope))
+        .await
+        .expect("open the admin handler");
+    let shared_scope = shared_scope_handler.scoped();
 
     for expected_summary in expected_summaries {
         let usage_before = session.usage_report().usage.usage.output_tokens;
@@ -281,208 +229,23 @@ async fn repeated_admin_compaction_with_runtime_scope_distinguishes_changed_snap
 }
 
 #[tokio::test]
-async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_redrive()
--> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "standard-compaction-projection-redrive";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
-    let provider_requests = Arc::new(StdMutex::new(Vec::<String>::new()));
-    let provider_call = Arc::new(AtomicUsize::new(0));
-    let checkpointed_projection_bases = Arc::new(StdMutex::new(Vec::new()));
-    let checkpoint_probe = Arc::new(crate::plugins::StaticPluginFactory::new(
-        "standard-compaction-checkpoint-probe",
-        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new({
-            let checkpointed_projection_bases = Arc::clone(&checkpointed_projection_bases);
-            move |context| {
-                let checkpointed_projection_bases = Arc::clone(&checkpointed_projection_bases);
-                Box::pin(async move {
-                    if context.checkpoint == lash_core::CheckpointKind::AfterWork {
-                        checkpointed_projection_bases
-                            .lock_recover()
-                            .push(context.state.last_prompt_usage().cloned());
-                    }
-                    Ok(Vec::new())
-                })
-            }
-        })),
-    ));
-    let provider = crate::testing::TestProvider::builder()
-        .kind("standard-compaction-projection-redrive-test")
-        .complete({
-            let provider_requests = Arc::clone(&provider_requests);
-            let provider_call = Arc::clone(&provider_call);
-            move |request| {
-                let provider_requests = Arc::clone(&provider_requests);
-                let provider_call = Arc::clone(&provider_call);
-                async move {
-                    provider_requests.lock_recover().push(
-                        serde_json::to_string(&request.messages).expect("serialize messages"),
-                    );
-                    let ordinal = provider_call.fetch_add(1, Ordering::SeqCst);
-                    Ok(match ordinal {
-                        0 => response_with_usage("prime response", 30_000),
-                        1 => LlmResponse {
-                            parts: vec![LlmOutputPart::ToolCall {
-                                call_id: "projection-redrive-call".to_string(),
-                                tool_name: "app_lookup".to_string(),
-                                input_json: "{}".to_string(),
-                                replay: None,
-                            }],
-                            usage: lash_core::llm::types::LlmUsage {
-                                input_tokens: 1,
-                                output_tokens: 1,
-                                ..Default::default()
-                            },
-                            response_metadata: Default::default(),
-                            ..LlmResponse::default()
-                        },
-                        2 => response_with_usage("redriven response", 2),
-                        3 => response_with_usage("fresh response", 3),
-                        other => panic!("unexpected provider call {other}"),
-                    })
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    let layer = Arc::new(ProjectionRedriveLayer::failing_on_llm_call(3));
-    let layered = Arc::clone(&layer) as Arc<dyn lash_core::testing::EffectLayer>;
-    let backend: lash_core::Backend = DecoratedBackend::over(backend.into())
-        .effect_host(move |inner| {
-            Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layered))
-        })
-        .into();
-
-    let build_core = |_store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>| {
-        explicit_ephemeral_facets(LashCore::standard_builder(
-            backend.clone(),
-            crate::TurnBudget::Unbounded,
-        ))
-        .provider(provider.clone())
-        .model(model_spec(
-            "standard-compaction-redrive-model",
-            None,
-            40_000,
-        ))
-        .tools(Arc::new(AppTools))
-        .plugin(Arc::new(
-            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-        ))
-        .plugin(checkpoint_probe.clone())
-        .build(crate::testing::runtime_lease_owner())
-    };
-
-    let core = build_core(store_factory.clone())?;
-    let session = core.session(session_id).open().await?;
-    session
-        .send(TurnInput::text("prime request"))
-        .id("projection-prime")
-        .output()
-        .await?;
-
-    let interrupted = session
-        .send(TurnInput::text("threshold request"))
-        .id("projection-redrive")
-        .output()
-        .await;
-    assert!(
-        interrupted.is_err(),
-        "the first drive must stop after persisting its changed mid-turn usage"
-    );
-    assert!(
-        !provider_requests.lock_recover()[1].contains("prime request"),
-        "the original threshold drive must prune the prior turn"
-    );
-    drop(session);
-    drop(core);
-
-    // The cold restart reopens the same durable session over the same
-    // backend journal: the redrive replays what the first drive recorded.
-    let reopened_core = build_core(store_factory.clone())?;
-    let reopened = reopened_core.session(session_id).open().await?;
-    let restored_projection_basis = reopened.read_view().last_prompt_usage().cloned();
-    reopened
-        .send(TurnInput::text("threshold request"))
-        .id("projection-redrive")
-        .output()
-        .await?;
-    assert!(
-        !provider_requests.lock_recover()[2].contains("prime request"),
-        "the cold redrive must reconstruct the same provider-visible history window"
-    );
-
-    assert_eq!(
-        restored_projection_basis
-            .as_ref()
-            .map(|usage| usage.total()),
-        Some(30_001),
-        "cold reopen must restore the last completed turn's projection basis"
-    );
-    assert_eq!(
-        checkpointed_projection_bases
-            .lock_recover()
-            .iter()
-            .map(|usage| usage.as_ref().map(|usage| usage.total()))
-            .collect::<Vec<_>>(),
-        vec![Some(30_001)],
-        "the durable AfterWork checkpoint must keep the pinned basis after a low-usage \
-         provider call, and the redrive replays that journaled checkpoint rather than \
-         running it again"
-    );
-    assert_eq!(
-        layer.answered_llm_effects.load(Ordering::SeqCst) - provider_call.load(Ordering::SeqCst),
-        1,
-        "the cold drive must replay the already-journaled provider call"
-    );
-
-    reopened
-        .send(TurnInput::text("fresh request"))
-        .id("projection-fresh")
-        .output()
-        .await?;
-
-    let requests = provider_requests.lock_recover();
-    assert_eq!(requests.len(), 4, "replay must not re-buy the first call");
-    assert!(
-        !requests[1].contains("prime request"),
-        "the threshold turn must prune using its high prior-turn usage"
-    );
-    assert!(
-        !requests[2].contains("prime request"),
-        "every provider call in the redriven turn must keep the pinned projection"
-    );
-    assert!(
-        requests[3].contains("prime request"),
-        "a fresh turn must use the latest completed turn's low usage"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unblocks_compaction()
 -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-durable-parent";
     let trace_path = dir.path().join("trace.jsonl");
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let provider = standard_compaction_provider(vec![
         response_with_usage("first response", 20_000),
         response_with_usage("threshold response", 1),
         response_with_usage("durable summary", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -537,7 +300,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     assert!(
         Box::pin(session.admin().state().compact_context(
             Some("retain the durable ancestry result".to_string()),
-            runtime_operation_scope(&core, "standard-compaction-explicit-compaction"),
+            runtime_operation_scope(&core, "standard-compaction-explicit-compaction").await,
         ))
         .await?,
         "standard-compaction compaction should open a summary frame after the threshold turn commits"
@@ -596,7 +359,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     drop(session);
     drop(core);
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![response_with_usage(
@@ -631,16 +394,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
 #[tokio::test]
 async fn compaction_accepts_parent_turn_authority() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-turn-parent";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let effect_host = backend.effect_host();
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -665,12 +422,15 @@ async fn compaction_accepts_parent_turn_authority() -> Result<()> {
         .id("standard-compaction-parent-two")
         .output()
         .await?;
-    let parent_scope = effect_host
-        .scoped_static(lash_core::AdmittedScope::turn(
+    let parent_scope_handler = held_double(&core)
+        .expect("the core runs on its held double")
+        .open_handler(lash_core::AdmittedScope::turn(
             session_id,
             "standard-compaction-parent-two",
-        ))?
-        .expect("SQLite host supplies an owned parent Turn scope");
+        ))
+        .await
+        .expect("open the admin handler");
+    let parent_scope = parent_scope_handler.scoped();
 
     assert!(
         Box::pin(
@@ -693,16 +453,10 @@ async fn compaction_accepts_parent_turn_authority() -> Result<()> {
 
 #[tokio::test]
 async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_parents() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-repeated-shared-scope";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let effect_host = backend.effect_host();
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -719,11 +473,14 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
     ))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
-    let shared_scope = effect_host
-        .scoped_static(lash_core::AdmittedScope::runtime_operation(
+    let shared_scope_handler = held_double(&core)
+        .expect("the core runs on its held double")
+        .open_handler(lash_core::AdmittedScope::runtime_operation(
             "standard-compaction-repeated-compaction",
-        ))?
-        .expect("SQLite host supplies an owned shared scope");
+        ))
+        .await
+        .expect("open the admin handler");
+    let shared_scope = shared_scope_handler.scoped();
 
     for (turn_id, text) in [
         ("standard-compaction-repeat-one", "first request"),
@@ -779,14 +536,13 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-attachment-prune";
     let trace_path = dir.path().join("trace.jsonl");
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -871,14 +627,12 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
 #[tokio::test]
 async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> Result<()> {
     const THRESHOLD_TURNS: usize = 3;
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-plugin-message-ids";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let next_injection = Arc::new(AtomicUsize::new(0));
     let injection_hook = {
         let next_injection = Arc::clone(&next_injection);
@@ -906,7 +660,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         .map(|ordinal| response_with_usage(&format!("response {ordinal}"), 20_000))
         .collect();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(responses))
@@ -954,14 +708,12 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
 #[tokio::test]
 async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durable_leaf()
 -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-continue-as-parent";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let provider = standard_compaction_provider(vec![
         response_with_usage(&typescript_block(r#"finish("primed");"#), 20_000),
         response_with_usage(
@@ -972,7 +724,7 @@ async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durabl
         ),
         response_with_usage(&typescript_block(r#"finish("continued");"#), 1),
     ]);
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(provider)
         .model(model_spec("standard-compaction-rlm-model", None, 40_000))
         .plugin(Arc::new(
@@ -1063,14 +815,12 @@ fn synthetic_replacement_ids(persisted_ids: &[String]) -> std::collections::Hash
 
 #[tokio::test]
 async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "after-turn-enqueue-resident";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let plugin = crate::plugins::StaticPluginFactory::new(
         "after-turn-injection",
         lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
@@ -1089,7 +839,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -1167,14 +917,12 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
 
 #[tokio::test]
 async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "mid-turn-graph-append";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let appended = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_appended = Arc::clone(&appended);
     let completions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1226,7 +974,7 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -1304,14 +1052,12 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
 /// appended nodes land in one commit, in that order, on one chain.
 #[tokio::test]
 async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "same-turn-graph-append";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let draft_node_ids = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let hook_draft_node_ids = Arc::clone(&draft_node_ids);
     let visible_in_turn = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1363,7 +1109,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -1464,14 +1210,12 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
 /// and becomes durable ancestry for every later turn.
 #[tokio::test]
 async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "after-turn-enqueue-single-reply";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
     let plugin = crate::plugins::StaticPluginFactory::new(
         "after-turn-injection",
         lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
@@ -1490,7 +1234,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![response_with_usage(
@@ -1720,15 +1464,11 @@ impl lash_core::AttachmentRootSet for FailArmedCommitFactory {
 #[tokio::test]
 async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_on_retry()
 -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-commit-failure";
-    let sqlite = lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-        .await
-        .expect("open the SQLite backend");
-    let effect_host = sqlite.effect_host();
+    let sqlite = double_backend().await;
     let commit_failure = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let armed = Arc::clone(&commit_failure);
-    let backend = DecoratedBackend::over(Arc::new(sqlite).into())
+    let backend = DecoratedBackend::over(sqlite)
         .session_store_factory(move |inner| Arc::new(FailArmedCommitFactory { inner, armed }));
     let (provider, provider_calls) = standard_compaction_provider_counted(vec![
         response_with_usage("first response", 1),
@@ -1759,11 +1499,14 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
         .id("standard-compaction-commit-failure-two")
         .output()
         .await?;
-    let shared_scope = effect_host
-        .scoped_static(lash_core::AdmittedScope::runtime_operation(
+    let shared_scope_handler = held_double(&core)
+        .expect("the core runs on its held double")
+        .open_handler(lash_core::AdmittedScope::runtime_operation(
             "standard-compaction-commit-failure:admin",
-        ))?
-        .expect("SQLite host supplies the admin scope");
+        ))
+        .await
+        .expect("open the admin handler");
+    let shared_scope = shared_scope_handler.scoped();
     let usage_before = session.usage_report().usage.usage.output_tokens;
     let message_count_before = session.read_view().messages().len();
 

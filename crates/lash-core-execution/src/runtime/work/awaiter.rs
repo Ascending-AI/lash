@@ -6,19 +6,20 @@ use crate::{PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRegistry, Work
 
 use super::super::process::ProcessChangeHub;
 
-/// Native waiter for process terminal state and events (ADR 0016).
+/// Waits on a process registry for a process's terminal state and events
+/// (ADR 0016).
 ///
 /// It performs narrow point reads (`get_process`, `event_page`) and wakes
 /// promptly from the composition-owned change hub. Callers still bound every
 /// wait with their cancellation select or [`tokio::time::timeout`].
 #[derive(Clone)]
-pub struct NativeProcessAwaiter {
+pub struct ProcessRegistryAwaiter {
     registry: Arc<dyn ProcessRegistry>,
     hub: Option<ProcessChangeHub>,
     work_cadence: WorkCadencePolicy,
 }
 
-impl NativeProcessAwaiter {
+impl ProcessRegistryAwaiter {
     pub fn new(registry: Arc<dyn ProcessRegistry>, hub: ProcessChangeHub) -> Self {
         Self {
             registry,
@@ -39,7 +40,8 @@ impl NativeProcessAwaiter {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
+    /// An awaiter over `registry` with no change hub: it polls on the default
+    /// cadence.
     pub fn for_registry(registry: Arc<dyn ProcessRegistry>) -> Self {
         Self {
             registry,
@@ -60,10 +62,8 @@ impl NativeProcessAwaiter {
         if let Some(output) = self.try_terminal(process_id).await? {
             return Ok(output);
         }
-        lash_core_ids::execution_permit::release_process_execution_permit_while(
-            self.wait_for(process_id, || self.try_terminal(process_id)),
-        )
-        .await
+        self.wait_for(process_id, || self.try_terminal(process_id))
+            .await
     }
 
     pub async fn await_event(
@@ -78,11 +78,9 @@ impl NativeProcessAwaiter {
         {
             return Ok(event);
         }
-        lash_core_ids::execution_permit::release_process_execution_permit_while(
-            self.wait_for(process_id, || {
-                self.read_event(process_id, event_type, after_sequence)
-            }),
-        )
+        self.wait_for(process_id, || {
+            self.read_event(process_id, event_type, after_sequence)
+        })
         .await
     }
 

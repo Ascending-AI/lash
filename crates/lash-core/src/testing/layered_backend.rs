@@ -41,8 +41,8 @@ pub struct LayeredBackend {
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
-    process_work: Option<ProcessWorkWiring>,
-    session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
+    process_work: ProcessWorkWiring,
+    session_work: Arc<dyn crate::SessionWorkEngine>,
 }
 
 impl LayeredBackend {
@@ -102,14 +102,15 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
     ) -> Self {
         assert!(
-            self.process_work.is_none(),
+            !self.process_work.runs_processes(),
             "map_process_registry cannot decorate this backend's process \
-             registry: its engine runs its own processes, so the backend \
-             answers with the process-work wiring's registry and the layer \
-             would be dropped — decorate the store set before the engine is \
-             built, or use wire_process_work"
+             registry: its engine runs its own processes over the registry it \
+             was built with, so the layer would not reach them — decorate the \
+             store set before the engine is built, or use wire_process_work"
         );
         self.process_registry = layer(self.process_registry);
+        self.process_work =
+            ProcessWorkWiring::without_process_work(Arc::clone(&self.process_registry));
         self
     }
 
@@ -166,27 +167,25 @@ impl LayeredBackend {
     ) -> Self {
         let wiring = wire(Arc::clone(&self.process_registry));
         self.process_registry = Arc::clone(wiring.registry());
-        self.process_work = Some(wiring);
+        self.process_work = wiring;
         self
     }
 
     /// Replace the process-work port with `layer` over it, keeping its
-    /// watched registry. A backend without process work stays without.
+    /// watched registry.
     pub fn map_process_work_port(
         mut self,
         layer: impl FnOnce(Arc<dyn crate::ProcessWorkSubstrate>) -> Arc<dyn crate::ProcessWorkSubstrate>,
     ) -> Self {
-        self.process_work = self.process_work.map(|wiring| {
-            ProcessWorkWiring::new(wiring.watched().clone(), layer(Arc::clone(wiring.port())))
-        });
+        self.process_work = ProcessWorkWiring::new(
+            self.process_work.watched().clone(),
+            layer(Arc::clone(self.process_work.port())),
+        );
         self
     }
 
     /// Drive the backend's sessions on `session_work` (`None`: in process).
-    pub fn with_session_work(
-        mut self,
-        session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
-    ) -> Self {
+    pub fn with_session_work(mut self, session_work: Arc<dyn crate::SessionWorkEngine>) -> Self {
         self.session_work = session_work;
         self
     }
@@ -338,8 +337,8 @@ struct LayeredEngine {
     stores: Arc<LayeredStoreSet>,
     effect_host: Arc<dyn EffectHost>,
     build_generation: BuildGeneration,
-    process_work: Option<ProcessWorkWiring>,
-    session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
+    process_work: ProcessWorkWiring,
+    session_work: Arc<dyn crate::SessionWorkEngine>,
 }
 
 impl EffectEngine for LayeredEngine {
@@ -357,12 +356,12 @@ impl EffectEngine for LayeredEngine {
         &self.build_generation
     }
 
-    fn process_work(&self) -> Option<ProcessWorkWiring> {
+    fn process_work(&self) -> ProcessWorkWiring {
         self.process_work.clone()
     }
 
-    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
-        self.session_work.clone()
+    fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
+        Arc::clone(&self.session_work)
     }
 }
 
@@ -461,7 +460,7 @@ mod tests {
             .wire_process_work(crate::testing::process_work_wiring_for_registry)
             .into_backend();
         assert!(
-            engine_driven.process_work().is_some(),
+            engine_driven.process_work().runs_processes(),
             "the fixture's engine runs its own processes"
         );
         let _ = LayeredBackend::over(engine_driven).map_process_registry(|registry| registry);

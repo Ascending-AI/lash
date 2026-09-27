@@ -410,10 +410,13 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             .expect("open the engine's store"),
     ));
     let sink = Arc::new(RecordingSink::default());
+    // The cell runs on a memory backend's effect host; its recorded starts
+    // land in the double's process table, whose workflow runs the bodies.
     let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let process_env_store = backend.process_env_store();
     let effect_host = backend.effect_host();
+    let table = crate::testing::DoubleProcesses::new(SEED ^ 0x9e37).await;
+    let registry = table.registry();
+    let process_env_store = table.env_store();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
@@ -436,36 +439,28 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        backend.clone(),
+        table.backend().clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_engine_registration(
         lash_lashlang_runtime::lashlang_process_engine_registration(traced_engine()),
     );
-    let registry_dyn = Arc::clone(&registry);
-    let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let worker = lash_core_worker::DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            // The worker serves the shipped process-control tools, so a process
-            // body emits and starts the literal nested in it.
-            Arc::new(lash_core::facade_support::PluginHost::new({
-                let mut factories = lash_core::testing::test_code_protocol_factories();
-                factories.push(Arc::new(
-                    lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                        lash_core::lifetime::session_or_starter,
-                    ),
-                ));
-                factories
-            })),
-            runtime_host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(session_policy.clone()),
-    )
-    .expect("valid test native substrate config");
+    // The worker serves the shipped process-control tools, so a process
+    // body emits and starts the literal nested in it.
+    table.install_worker(
+        {
+            let mut factories = lash_core::testing::test_code_protocol_factories();
+            factories.push(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                ),
+            ));
+            factories
+        },
+        runtime_host,
+        session_policy.clone(),
+    );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
@@ -507,13 +502,9 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
     assert!(response.error.is_none(), "{:?}", response.error);
     // Drive every started process to its end: the worker, then the literal
     // nested in it that the worker starts.
-    let registry_dyn = Arc::clone(&registry);
     let mut finished = BTreeSet::new();
     for _ in 0..4 {
-        let _admitted = worker
-            .drive_pending_processes()
-            .await
-            .expect("drive the started processes");
+        table.admit_pending().await;
         let listed = registry
             .list_processes(&lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
@@ -524,13 +515,11 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         for record in listed {
             if finished.insert(record.id.clone()) {
                 tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_dyn))
-                        .await_terminal(&record.id),
+                    std::time::Duration::from_secs(30),
+                    table.await_terminal(&record.id),
                 )
                 .await
-                .unwrap_or_else(|_| panic!("process `{}` reaches its end", record.id))
-                .expect("await the process");
+                .unwrap_or_else(|_| panic!("process `{}` reaches its end", record.id));
             }
         }
     }

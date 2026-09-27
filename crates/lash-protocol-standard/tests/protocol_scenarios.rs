@@ -949,9 +949,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     // The cancel intent executes inside the engine's process workflow, which
     // reaches the deployment's process-worker slot: install a durable worker
     // over this backend so the cancellation has a serving worker.
-    let process_wiring = backend
-        .process_work()
-        .expect("the Restate engine supplies process work");
+    let process_wiring = backend.process_work();
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
             factories.clone(),
@@ -960,7 +958,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),
-            lash_core_worker::WorkerProcessWork::External(process_wiring.clone()),
+            process_wiring.clone(),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

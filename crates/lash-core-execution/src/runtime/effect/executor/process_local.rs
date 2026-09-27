@@ -83,10 +83,9 @@ impl ProcessLocalExecution {
                 let disposition = started.disposition;
                 let record = started.record;
                 // The poke is advisory. Registration already committed the
-                // durable row, and the row is the work queue: the native
-                // worker's idle dispatcher rescans pending rows on the
-                // worker-sweep cadence (`WorkerSweepPolicy::rescan_interval`),
-                // so the row runs whether or not this nudge lands. Turning a
+                // durable row, and the row is the work queue: the engine's
+                // next admission pass submits every pending row, so the row
+                // runs whether or not this nudge lands. Turning a
                 // failed nudge into a start error would tell the caller the
                 // child does not exist while it is queued to run, and the
                 // retry that follows does the work twice.

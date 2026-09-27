@@ -90,12 +90,3 @@ pub use lash_core::testing::checkpoint_observer;
 /// scenarios: session-store requests, lease claims, commit helpers, and the
 /// completion-deferral authorization seam.
 pub use lash_core::testing::store_fixtures;
-
-/// Runtime rebuild certification: the cold-rebuild and worker-recovery suite a
-/// host runs against its durable backend. The durable-store laws are not
-/// re-exported here; a host certifies its stores through
-/// `lash-internal-conformance` directly.
-#[cfg(feature = "rlm")]
-mod rebuild;
-#[cfg(feature = "rlm")]
-pub use rebuild::runtime_rebuild_and_worker_recovery;

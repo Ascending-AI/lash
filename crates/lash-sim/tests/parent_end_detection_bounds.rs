@@ -25,8 +25,8 @@ use lash_core::store::{
 };
 use lash_core::testing::TestClock;
 use lash_core::{
-    Ancestry, CancelRequest, ClockWallTime, Lifetime, LifetimeDecision, NativeProcessWork,
-    PluginError, ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    Ancestry, CancelRequest, ClockWallTime, Lifetime, LifetimeDecision, NoProcessWork, PluginError,
+    ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     ProcessTerminalWait, ProcessWorkSubstrate, ScopeGrant, ScopeId, SessionScope,
 };
 
@@ -35,14 +35,14 @@ use lash_core::{
 /// engine cannot make yet, on a port that otherwise behaves like the
 /// native one (whose delivery is the registry write the apply performs).
 struct ScriptedPort {
-    inner: NativeProcessWork,
+    inner: NoProcessWork,
     errors: Mutex<VecDeque<PluginError>>,
 }
 
 impl ScriptedPort {
     fn new(registry: Arc<dyn ProcessRegistry>) -> Self {
         Self {
-            inner: NativeProcessWork::for_registry(registry),
+            inner: NoProcessWork::for_registry(registry),
             errors: Mutex::new(VecDeque::new()),
         }
     }

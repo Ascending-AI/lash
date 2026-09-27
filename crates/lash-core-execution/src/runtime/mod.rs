@@ -6,8 +6,8 @@ pub mod effect;
 pub mod host;
 #[cfg(feature = "testing")]
 pub use lash_core_store::input_normalization as io;
-pub mod native_substrate;
 pub mod process;
+pub mod work;
 #[cfg(feature = "testing")]
 pub use lash_core_effect::session_execution_lease;
 pub(crate) use lash_core_store::queued_drain_policy;
@@ -24,7 +24,6 @@ pub use turn_failure_evidence::{
     TurnFailureSettlement,
 };
 pub mod turn_queue;
-use lash_core_ids::worker_capacity;
 #[cfg(feature = "testing")]
 pub use lash_core_store::usage;
 #[cfg(not(feature = "testing"))]
@@ -89,15 +88,6 @@ pub use effect::{
 pub use host::{
     EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
     RuntimeHostConfig, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
-};
-pub use lash_core_ids::execution_permit::{
-    ensure_process_execution_permit, release_process_execution_permit_while,
-};
-pub use native_substrate::{
-    InlineSessionWork, NativeProcessAdmissionDriver, NativeProcessWork, NativeSubstrateConfig,
-    NativeSubstrateConfigError, NoSessionWork, ProcessTerminalWait, ProcessWorkSubstrate,
-    ProcessWorkWiring, SessionDriver, SessionWorkEngine, WakeDeliveryDriveReport,
-    WakeDeliveryDriver, WorkCadencePolicy, WorkerSweepPolicy,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
@@ -209,7 +199,11 @@ pub use usage::{
     UsageReconciliationReport, UsageReportRow, UsageTotals, diff_token_ledger, diff_usage_reports,
     outstanding_unreported_attempts,
 };
-pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
+pub use work::{
+    NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
+    ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine,
+    WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadenceError, WorkCadencePolicy,
+};
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no
 // runtime machinery, so they live one layer down in `lash-core-llm` where the

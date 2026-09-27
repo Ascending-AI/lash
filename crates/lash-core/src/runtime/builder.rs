@@ -40,7 +40,7 @@ enum ProcessWorkBinding {
 
 /// Cold builder-only bindings live off the async build frame. Keeping this
 /// optional host wiring together avoids growing every `build` caller's future
-/// as new native drivers are added.
+/// as new work bindings are added.
 struct EmbeddedRuntimeDriverBindings {
     process: ProcessWorkBinding,
     queued: Arc<dyn crate::SessionWorkEngine>,

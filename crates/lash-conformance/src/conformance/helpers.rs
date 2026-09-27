@@ -226,9 +226,7 @@ pub(crate) async fn deliver_due_parent_end_obligations(
     let relay = lash_core::runtime::drive::ParentEndRelay::new(
         stores.obligation_ledger(crate::store::ObligationKind::ParentEnd),
         Arc::clone(&registry),
-        Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-            &registry,
-        ))),
+        Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         Arc::clone(&clock),
     );
     lash_core::runtime::drive::relay::relay_due(

@@ -180,7 +180,7 @@ impl DoubleProcessHarness {
             lash_core_worker::DurableProcessWorkerConfig::new(
                 Arc::new(lash_core::facade_support::PluginHost::new(factories)),
                 runtime_host,
-                lash_core_worker::WorkerProcessWork::External(self.wiring.clone()),
+                self.wiring.clone(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
@@ -222,7 +222,7 @@ impl DoubleProcessHarness {
         &self,
         process_id: &lash_core::ProcessId,
     ) -> lash_core::ProcessAwaitOutput {
-        lash_core::NativeProcessWork::for_registry(self.registry())
+        lash_core::NoProcessWork::for_registry(self.registry())
             .await_terminal(process_id)
             .await
             .expect("the harness process reaches a terminal record")
@@ -247,9 +247,7 @@ pub(crate) async fn double_process_harness() -> DoubleProcessHarness {
     )
     .await
     .expect("the harness execution env publishes");
-    let wiring = backend
-        .process_work()
-        .expect("the double wires process work");
+    let wiring = backend.process_work();
     DoubleProcessHarness {
         double,
         backend,

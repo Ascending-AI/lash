@@ -881,7 +881,7 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
         worker: lash_core_worker::DurableProcessWorker,
     ) -> lash_core::ProcessWorkWiring {
         self.process_runner.install(worker);
-        let port = std::sync::Arc::new(lash_core::NativeProcessWork::for_registry(
+        let port = std::sync::Arc::new(lash_core::NoProcessWork::for_registry(
             std::sync::Arc::clone(watched.registry()),
         ));
         lash_core::ProcessWorkWiring::new(watched, port)

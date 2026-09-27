@@ -51,9 +51,7 @@ impl LatencySessionWork {
         backend: &lash::Backend,
         mode: AwaitDriveMode,
     ) -> Arc<dyn lash_core::SessionWorkEngine> {
-        let inner = backend
-            .session_work()
-            .unwrap_or_else(|| Arc::new(lash_core::NoSessionWork::new()));
+        let inner = backend.session_work();
         Arc::new(Self { inner, mode })
     }
 }

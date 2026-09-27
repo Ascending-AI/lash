@@ -945,11 +945,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.clone()),
                     _ => None,
                 };
-                let task = crate::task::spawn(
-                    lash_core_ids::execution_permit::inherit_process_execution_permit(
-                        runner.execute(envelope),
-                    ),
-                );
+                let task = crate::task::spawn(runner.execute(envelope));
                 let mut abort = AbortEffectTaskOnDrop::new(task.abort_handle());
                 let result = match task.await {
                     Ok(result) => result,

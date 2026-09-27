@@ -180,12 +180,6 @@ fn runtime_error(message: impl Into<String>) -> lash_core::RuntimeError {
 
 #[async_trait::async_trait]
 impl SessionDriver for RollDriver {
-    async fn drive(&self, _request: DriveRequest) -> Result<DriveOutcome, DriveAbort> {
-        Err(DriveAbort::Refused(runtime_error(
-            "the roll's drive runs only split across the engine's handlers",
-        )))
-    }
-
     async fn admit(
         &self,
         controller: ScopedEffectController<'_>,

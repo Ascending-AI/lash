@@ -72,7 +72,7 @@ pub fn process_work_wiring_for_registry(
     registry: Arc<dyn crate::ProcessRegistry>,
 ) -> crate::ProcessWorkWiring {
     let watched = crate::facade_support::watch_process_registry(registry);
-    let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+    let port = Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
         watched.registry(),
     )));
     crate::ProcessWorkWiring::new(watched, port)
@@ -739,12 +739,7 @@ pub async fn execute_effect_locally(
                 let result = execution.execute(*command).await?;
                 return Ok(crate::RuntimeEffectOutcome::Process { result });
             }
-            let joined = crate::task::spawn(
-                lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
-                    execution.execute(*command).await
-                }),
-            )
-            .await;
+            let joined = crate::task::spawn(async move { execution.execute(*command).await }).await;
             let result = match joined {
                 Ok(result) => result?,
                 Err(error) => {
@@ -1580,7 +1575,7 @@ impl EffectBackedProcessService {
         .map_err(crate::RuntimeEffectControllerError::from)?;
         let local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
-            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
                 &self.registry,
             ))),
         )
@@ -2277,7 +2272,7 @@ impl crate::ProcessService for MockSessionManager {
         process_id: &ProcessId,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
-        crate::NativeProcessWork::for_registry(Arc::clone(self.registry()?))
+        crate::NoProcessWork::for_registry(Arc::clone(self.registry()?))
             .await_terminal(process_id)
             .await
     }

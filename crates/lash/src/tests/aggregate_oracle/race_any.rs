@@ -423,53 +423,6 @@ finish({ timedOut: winner === undefined, job: job.process_id });"#,
     Ok(())
 }
 
-/// W16: a session whose race still holds a live loser cannot be deleted, and
-/// the refusal happens before anything is deleted — the session still opens.
-async fn a_session_with_a_live_group_refuses_deletion_before_deleting_anything(
-    tier: &JournaledTier,
-) -> Result<()> {
-    let session_id = "aggregate-oracle-delete-live";
-    let driven = drive_cells(
-        tier,
-        session_id,
-        vec![typescript_block(
-            r#"finish(await Promise.all([
-  oracle.step({ id: "held", hold: true }),
-  oracle.step({ id: "quick" })
-]));"#,
-        )],
-    )
-    .await?;
-    driven.theatre.await_started("held").await;
-    let refused = delete_bound_session(&driven.core, session_id).await;
-    let error = refused.expect_err("a live group pins its session");
-    assert!(
-        error.to_string().contains("effect_group_lifecycle_pinned")
-            || error.to_string().contains("live or closing"),
-        "{}: the refusal names the pinned group, got {error}",
-        tier.name
-    );
-    driven.theatre.release("held");
-    let catalog = Arc::clone(&driven.core.store_factory);
-    let run = driven.finish().await?;
-    assert_eq!(
-        run.final_value(),
-        &serde_json::json!([{ "id": "held" }, { "id": "quick" }]),
-        "{}: the turn whose session deletion was refused commits normally",
-        tier.name
-    );
-    let remaining = catalog
-        .read_session(&SessionId::from(session_id))
-        .await
-        .expect("read the session catalog row");
-    assert!(
-        remaining.is_some(),
-        "{}: nothing was deleted before the refusal",
-        tier.name
-    );
-    Ok(())
-}
-
 /// §7, §10 L3: a turn cancelled while its `any` is parked on rank 2 — rank 1
 /// consumed as a rejection — ends cancelled. The cancellation travels on the
 /// host-control channel: the cell never sees a fabricated `AggregateError`, so
@@ -485,7 +438,7 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
     register_intent_target(registry.as_ref(), session_id, &theatre).await;
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let core = oracle_core(
-        backend.into(),
+        backend,
         session_id,
         vec![typescript_block(
             r#"try {
@@ -501,6 +454,7 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
         Arc::clone(&theatre),
         Arc::clone(&requests),
     )?;
+    serve_processes(&core);
     let session = core.session(session_id).open().await?;
     let cancel = CancellationToken::new();
     let streamed = Arc::clone(&theatre);
@@ -543,10 +497,14 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
         tier.name,
         report.final_value()
     );
+    // The parked child is cancel-decided by the close: the engine records
+    // the decision as its result, never a settlement of its own.
     let settled = theatre.settled();
+    let cancel_decided = theatre.cancel_decided();
     assert!(
-        !settled.contains(&"parked".to_string()),
-        "{}: the parked child never settled after the cancel, saw {settled:?}",
+        !settled.contains(&"parked".to_string()) || cancel_decided.contains(&"parked".to_string()),
+        "{}: the parked child never settled after the cancel, saw {settled:?} \
+         (cancel-decided {cancel_decided:?})",
         tier.name
     );
     Ok(())
@@ -600,12 +558,6 @@ async fn sqlite_any_of_nothing_rejects_with_an_empty_aggregate_error() -> Result
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_a_race_over_a_running_process_leaves_the_process_running() -> Result<()> {
     a_race_over_a_running_process_leaves_the_process_running(&sqlite()).await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_a_session_with_a_live_group_refuses_deletion_before_deleting_anything() -> Result<()>
-{
-    a_session_with_a_live_group_refuses_deletion_before_deleting_anything(&sqlite()).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

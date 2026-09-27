@@ -397,10 +397,7 @@ impl SessionBuilder {
                 Arc::clone(&resolved.store),
                 &env,
                 ports.process.clone(),
-                crate::core::HeldWork::new(
-                    Arc::clone(&ports.queued),
-                    Arc::clone(&self.core.drive_lifetime),
-                ),
+                Arc::clone(&ports.queued),
                 Arc::clone(&self.core.residents),
                 resolved.catalog,
             )
@@ -432,11 +429,6 @@ impl SessionBuilder {
             lash_core::facade_support::settle_reopen_seeded_config(&mut runtime, persisted_config)
                 .await?;
         }
-        drive_process_on_open(
-            ports.drive_process_on_open,
-            binding.process().port().as_ref(),
-        )
-        .await?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.core.live_replay_store),
@@ -452,7 +444,6 @@ impl SessionBuilder {
             _process_lifecycle_route: process_lifecycle_route,
             binding,
             parent_session_id: recorded_parent_session_id,
-            process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
         })
     }
 
@@ -506,16 +497,6 @@ pub(crate) async fn recorded_parent_session_id(
                 .parent_session_id()
                 .map(|parent_session_id| SessionId::from(parent_session_id.to_string()))
         }))
-}
-
-async fn drive_process_on_open(
-    enabled: bool,
-    process_work: &dyn lash_core::ProcessWorkSubstrate,
-) -> std::result::Result<(), lash_core::PluginError> {
-    if enabled {
-        let _ = process_work.admit_pending_processes("session_open").await?;
-    }
-    Ok(())
 }
 
 pub(crate) async fn load_state_from_store(
@@ -655,7 +636,6 @@ pub struct LashSession {
     pub(crate) _process_lifecycle_route: Arc<crate::process_lifecycle::ProcessLifecycleRoute>,
     pub(crate) binding: Arc<BoundSession>,
     pub(crate) parent_session_id: Option<SessionId>,
-    pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
 }
 
 /// Lightweight, consuming handle returned by [`LashSession::park`].
@@ -1043,20 +1023,9 @@ impl LashSession {
     ) {
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let changed = runtime.set_turn_phase_probe_if_changed(Arc::clone(&probe));
+        let changed = runtime.set_turn_phase_probe_if_changed(probe);
         if changed {
             self.runtime.publish_resident_from(&runtime);
-        }
-        if let Some(slot) = &self.process_phase_probe_slot {
-            let observation = self.runtime.observe();
-            slot.set_for_session(observation.session_id(), Arc::clone(&probe));
-            if let Some(current_frame) = observation.current_frame_node_id.as_ref() {
-                let scope = lash_core::SessionScope::for_agent_frame(
-                    observation.session_id(),
-                    current_frame.clone(),
-                );
-                slot.set_for_scope(&scope, probe);
-            }
         }
     }
 }
@@ -1407,64 +1376,6 @@ fn live_replay_error(err: lash_core::LiveReplayStoreError) -> EmbedError {
 #[cfg(test)]
 mod reconcile_tests {
     use super::*;
-
-    struct CountingProcessWork(std::sync::atomic::AtomicUsize);
-
-    #[async_trait::async_trait]
-    impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
-        async fn admit_pending_processes(
-            &self,
-            reason: &str,
-        ) -> std::result::Result<
-            lash_core::facade_support::ProcessAdmissionReport,
-            lash_core::PluginError,
-        > {
-            assert_eq!(reason, "session_open");
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(lash_core::facade_support::ProcessAdmissionReport::default())
-        }
-
-        async fn await_process_terminal(
-            &self,
-            process_id: &lash_core::ProcessId,
-        ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-            panic!("unexpected terminal wait for {process_id}")
-        }
-
-        async fn deliver_cancel(
-            &self,
-            _process_id: &lash_core::ProcessId,
-            _request: &lash_core::CancelRequest,
-            _key: &str,
-        ) -> std::result::Result<(), lash_core::PluginError> {
-            Ok(())
-        }
-
-        async fn publish_process_terminal(
-            &self,
-            process_id: &lash_core::ProcessId,
-            output: &lash_core::ProcessAwaitOutput,
-            key: &str,
-        ) -> std::result::Result<(), lash_core::PluginError> {
-            let _ = (process_id, output, key);
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn drive_process_on_open_only_admits_for_the_native_policy() {
-        let process_work = CountingProcessWork(std::sync::atomic::AtomicUsize::new(0));
-
-        drive_process_on_open(false, &process_work)
-            .await
-            .expect("external process ports are not driven implicitly");
-        assert_eq!(process_work.0.load(std::sync::atomic::Ordering::SeqCst), 0);
-
-        drive_process_on_open(true, &process_work)
-            .await
-            .expect("native process ports are driven on session open");
-        assert_eq!(process_work.0.load(std::sync::atomic::Ordering::SeqCst), 1);
-    }
 
     fn model(id: &str) -> lash_core::ModelSpec {
         lash_core::ModelSpec::builder(id)

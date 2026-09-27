@@ -5,7 +5,7 @@ const SEED: u64 = 0x5c_f102;
 #[tokio::test]
 async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
@@ -53,7 +53,7 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
 #[tokio::test]
 async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
@@ -107,7 +107,7 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
     ))

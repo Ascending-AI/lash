@@ -33,7 +33,7 @@ use lash_core::{InputId, LiveReplayStore, SessionId, TurnId};
 use lash_sansio::sync::MutexExt;
 use tokio::sync::mpsc;
 
-use crate::core::HeldWork;
+use crate::core::ResolvedQueuedWork;
 use crate::durable_session::DurableSession;
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::{
@@ -69,7 +69,7 @@ pub(crate) struct SendParts {
     pub(crate) session_id: SessionId,
     pub(crate) store: Arc<dyn RuntimePersistence>,
     pub(crate) ops: DurableSessionOps,
-    pub(crate) work: HeldWork,
+    pub(crate) work: Arc<ResolvedQueuedWork>,
     pub(crate) effect_host: Arc<dyn EffectHost>,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     /// The resolver a spec's provider route is judged against before the

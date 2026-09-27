@@ -2,14 +2,13 @@ use crate::ProcessId;
 use crate::ProcessStatus;
 
 /// Report from one admission pass of
-/// [`DurableProcessWorker::drive_pending_processes`](crate::runtime::DurableProcessWorker::drive_pending_processes).
+/// [`ProcessWorkSubstrate::admit_pending_processes`](crate::runtime::ProcessWorkSubstrate::admit_pending_processes).
 ///
-/// A drive **admits** rows to this worker's execution scheduler; it does not
-/// wait for them. Admission is not completion: an admitted row's claim, read,
-/// terminal write, or lease release can still fail after this report is
-/// returned, and those faults are reported on the unconditional
-/// [`ProcessEventSink`](crate::runtime::ProcessEventSink) fault surface
-/// ([`ProcessWorkerFault`]), never as a completed clean drive.
+/// A pass **admits** rows to the engine; it does not wait for them.
+/// Admission is not completion: an admitted row's run can still fail after
+/// this report is returned, and those faults are reported on the
+/// unconditional [`ProcessEventSink`](crate::runtime::ProcessEventSink) fault
+/// surface ([`ProcessWorkerFault`]), never as a completed clean pass.
 #[must_use = "an admission report names what this call did and did not admit"]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProcessAdmissionReport {
@@ -235,10 +234,9 @@ pub enum ProcessRecoveryOperation {
 impl ProcessRecoveryOperation {
     /// Stable snake_case label for this operation.
     ///
-    /// The one spelling used in structured records, so a fault logged by the
-    /// native worker and one logged by an out-of-crate tier (the Restate
-    /// ingress sweep) carry the same `operation` value rather than two
-    /// dialects of the same vocabulary.
+    /// The one spelling used in structured records, so every tier that logs a
+    /// fault (the Restate ingress sweep among them) carries the same
+    /// `operation` value rather than a dialect of the same vocabulary.
     pub fn label(self) -> &'static str {
         match self {
             Self::ClaimLease => "claim_lease",

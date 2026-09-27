@@ -49,11 +49,11 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "crash-reopen-runtime-rebuild",
         kind: DurableFaultKind::CrashReopen,
-        contract: "Cold runtime/session rebuild and worker recovery preserve durable graph and process state.",
+        contract: "A deployment that dies mid journal step and comes up fresh recovers its process to one terminal, with no input lost or driven twice.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-runtime",
-            test_target: None,
-            filter: "runtime_rebuild_and_worker_recovery_with_durable_stores",
+            package: "lash-sim",
+            test_target: Some("crash_point_matrix"),
+            filter: "process_terminal_mid_journal_step",
             required_env: None,
         }),
     },
@@ -148,21 +148,18 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         id: "trigger-delivery-reserve-start-crash-window",
         kind: DurableFaultKind::TriggerDeliveryRecovery,
         contract: "A trigger delivery reserved before a crash but missing its process row is reconciled into exactly one deterministic process start.",
-        evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core-worker",
-            test_target: None,
-            filter: "sweep_reconciles_reserved_trigger_delivery_without_process",
-            required_env: None,
-        }),
+        evidence: FaultEvidence::Blocked {
+            rationale: "The native worker sweep that reconciled a reserved delivery into its process start was deleted with the native engine; the Restate engine's reconcile of an unbound delivery is FIG-3860's B6 follow-up, and the store still offers such a delivery to recovery (process_trigger_retention).",
+        },
     },
     DurableFaultMatrixRow {
         id: "trigger-delivery-prune-orphan-retention",
         kind: DurableFaultKind::TriggerDeliveryRecovery,
         contract: "Retention prunes trigger delivery rows with their terminal process rows so recovery does not resurrect completed trigger work.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core-worker",
-            test_target: None,
-            filter: "sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process",
+            package: "lash-internal-sqlite-store",
+            test_target: Some("conformance"),
+            filter: "process_trigger_retention",
             required_env: None,
         }),
     },

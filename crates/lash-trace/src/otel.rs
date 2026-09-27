@@ -24,7 +24,7 @@ mod metrics;
 use language_execution::language_execution_attributes;
 pub use metrics::{
     GenerationDrainMetrics, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
-    ToolIntentMetrics, WorkerCapacityMetrics,
+    ToolIntentMetrics,
 };
 
 const INSTRUMENTATION_NAME: &str = "lash-trace";

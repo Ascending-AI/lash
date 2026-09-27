@@ -280,7 +280,7 @@ impl DecoratedBackend {
             layered: lash_core::testing::runtime_helpers::LayeredBackend::over(
                 engine.restate.lash_backend(),
             )
-            .with_session_work(Some(engine.restate.explicit_reconcile_session_work())),
+            .with_session_work(engine.restate.explicit_reconcile_session_work()),
         }
     }
 

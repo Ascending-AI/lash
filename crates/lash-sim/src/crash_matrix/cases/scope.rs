@@ -173,10 +173,7 @@ pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<St
 /// The scope-close sink a producer closes a host-owned scope through: the
 /// registry's, delivering over the deployment's process-work port.
 fn producer_sink(world: &CrashWorld) -> Result<lash_core::RegistryScopeClose, String> {
-    let port = world
-        .backend()
-        .process_work()
-        .ok_or_else(|| "the backend has no process work".to_owned())?;
+    let port = world.backend().process_work();
     Ok(lash_core::RegistryScopeClose::with_delivery(
         world.backend().process_registry(),
         Arc::clone(port.port()),

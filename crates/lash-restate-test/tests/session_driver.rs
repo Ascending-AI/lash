@@ -193,12 +193,6 @@ fn runtime_error(message: impl Into<String>) -> RuntimeError {
 
 #[async_trait::async_trait]
 impl SessionDriver for ScriptedDriver {
-    async fn drive(&self, _request: DriveRequest) -> Result<DriveOutcome, DriveAbort> {
-        Err(DriveAbort::Refused(runtime_error(
-            "the scripted drive runs only split across the engine's handlers",
-        )))
-    }
-
     async fn admit(
         &self,
         controller: ScopedEffectController<'_>,

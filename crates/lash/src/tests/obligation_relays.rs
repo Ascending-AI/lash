@@ -86,12 +86,12 @@ impl ObligationLedger for DuePasses {
     }
 }
 
-/// A fresh SQLite memory backend whose obligation ledgers record the due
+/// A fresh Restate double backend whose obligation ledgers record the due
 /// passes run over them.
 async fn recorded_backend() -> (lash_core::Backend, Passes) {
     let passes = Passes::default();
     let recorded = Arc::clone(&passes);
-    let backend = crate::testing::LayeredBackend::over(memory_backend().await.into())
+    let backend = crate::testing::LayeredBackend::over(double_backend().await)
         .map_obligation_ledgers(move |_kind, inner| {
             Arc::new(DuePasses {
                 inner,

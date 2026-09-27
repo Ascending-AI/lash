@@ -30,7 +30,6 @@ pub use lash_core_execution::runtime::effect;
 pub(crate) use lash_core_execution::runtime::effect;
 mod claim_settlement;
 #[doc(hidden)]
-pub mod coalescing_scheduler;
 mod command_settlement;
 mod environment;
 mod error;
@@ -50,19 +49,11 @@ use claim_settlement::TurnClaimSettlement;
 pub mod logical_turn;
 #[cfg(not(feature = "testing"))]
 mod logical_turn;
-pub(crate) mod native_substrate;
 mod observation;
 use lash_core_execution::runtime::process;
 #[cfg(test)]
 mod plugin_namespace_tests;
-#[doc(hidden)]
-pub mod process_permit;
 use lash_core_store::queued_drain_policy;
-pub use native_substrate::bounded_multiplicative_jitter;
-pub(crate) use process_permit::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
-pub use process_permit::{
-    release_process_execution_permit_while, trigger_delivery_reconcile_scope,
-};
 mod root_start;
 pub mod scenario_contracts;
 mod session_administration;
@@ -132,7 +123,6 @@ pub(crate) mod turn_loop;
 pub use lash_core_execution::runtime::turn_queue;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_execution::runtime::turn_queue;
-use lash_core_ids::worker_capacity;
 #[cfg(feature = "testing")]
 pub use lash_core_store::usage;
 #[cfg(not(feature = "testing"))]
@@ -251,21 +241,11 @@ pub use host::{
 use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
 pub use lash_core_execution::runtime::EffectOpenerError;
-#[cfg(any(test, feature = "testing"))]
-pub use native_substrate::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
-pub use native_substrate::{
-    DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QueuedWorkExecutionConcurrencyError,
-    QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress,
-    QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkWakeContended, QueuedWorkWakeFailure,
-    QueuedWorkWakeOutcome,
+pub use lash_core_execution::runtime::work::{
+    NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
+    ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine,
+    WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadenceError, WorkCadencePolicy,
 };
-pub use native_substrate::{
-    InlineSessionWork, NativeProcessAdmissionDriver, NativeProcessWork, NativeQueuedWork,
-    NativeQueuedWorkConfigError, NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork,
-    ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine,
-    WorkCadencePolicy, WorkerSweepPolicy,
-};
-pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
@@ -402,7 +382,6 @@ pub use usage::{
     outstanding_unreported_attempts,
 };
 use usage::{merge_ledger_entry_saturating, nonzero_usage};
-pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no
 // runtime machinery, so they live one layer down in `lash-core-llm` where the

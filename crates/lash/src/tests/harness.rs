@@ -25,25 +25,93 @@ pub(crate) fn mock_model_spec() -> lash_core::ModelSpec {
     model_spec("mock-model", None, 200_000)
 }
 
-/// A fresh SQLite memory backend: the zero-infra substrate every facade
-/// test runs on unless it names another (ADR 0102).
-pub(crate) async fn memory_backend() -> Arc<lash_sqlite_store::SqliteBackend> {
-    Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a SQLite memory backend"),
-    )
+std::thread_local! {
+    /// The Restate doubles the running test built through [`double_backend`].
+    /// A core over `double.lash_backend()` does not hold its double
+    /// (FIG-3723), and each test runs on its own thread, so this holds every
+    /// double exactly as long as the test that built it.
+    static TEST_DOUBLES: std::cell::RefCell<Vec<lash_restate_test::RestateTestBackend>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// A fresh SQLite memory backend on `clock`.
-pub(crate) async fn memory_backend_with_clock(
-    clock: Arc<dyn lash_core::Clock>,
-) -> Arc<lash_sqlite_store::SqliteBackend> {
-    Arc::new(
-        lash_sqlite_store::SqliteBackend::memory_with_clock(clock)
-            .await
-            .expect("open a SQLite memory backend"),
+/// The seed of the doubles [`double_backend`] builds.
+const DOUBLE_SEED: u64 = 0x1a5b_d0b1;
+
+/// The backend every facade test runs on unless it names another: Restate's
+/// engine on a fresh server double, held for the rest of the running test.
+/// A test that reaches the double itself (a drive hold, its store set, its
+/// clock) builds one with [`restate_double`] and keeps it.
+pub(crate) async fn double_backend() -> lash_core::Backend {
+    let double = restate_double(DOUBLE_SEED).await;
+    let backend = double.lash_backend();
+    TEST_DOUBLES.with(|held| held.borrow_mut().push(double));
+    backend
+}
+
+/// [`double_backend`] over a decorated store set: `decorate` wraps the
+/// double's stores before its engine is built, so the engine and every
+/// service it binds run over the decoration (a layer added to the backend
+/// afterwards would not reach the engine's own processes).
+pub(crate) async fn double_backend_over(
+    config: lash_restate_test::ServerConfig,
+    decorate: impl FnOnce(Arc<dyn lash_core::StoreSet>) -> Arc<dyn lash_core::StoreSet>,
+) -> lash_core::Backend {
+    let double = lash_restate_test::backend_with(DOUBLE_SEED, config, decorate)
+        .await
+        .expect("build the Restate double over decorated stores");
+    let backend = double.lash_backend();
+    TEST_DOUBLES.with(|held| held.borrow_mut().push(double));
+    backend
+}
+
+/// Wall time on `core`'s clock: its held double's virtual clock, or the
+/// system clock for a core no held double serves. A relay pass a test times
+/// by hand reads the same clock the stores scheduled against.
+pub(crate) fn core_now_ms(core: &crate::LashCore) -> u64 {
+    match held_double(core) {
+        Some(double) => lash_core::ClockWallTime::timestamp_ms(double.test_clock().as_ref()),
+        None => lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock),
+    }
+}
+
+/// The double [`double_backend`] built last on this test's thread.
+pub(crate) fn latest_double() -> Option<lash_restate_test::RestateTestBackend> {
+    TEST_DOUBLES.with(|held| held.borrow().last().cloned())
+}
+
+/// The held double `core` runs over, if [`double_backend`] built it.
+pub(crate) fn held_double(core: &crate::LashCore) -> Option<lash_restate_test::RestateTestBackend> {
+    let binding = core.backend.binding_identity();
+    TEST_DOUBLES.with(|held| {
+        held.borrow()
+            .iter()
+            .rev()
+            .find(|double| double.lash_backend().binding_identity() == binding)
+            .cloned()
+    })
+}
+
+/// Serve process segments on the held double `core` runs over, with `core`'s
+/// own worker: the double's process workflow runs a segment only once a
+/// worker is installed, as a deployment's endpoint does. A core over a
+/// backend no held double serves is left alone.
+pub(crate) fn serve_processes(core: &crate::LashCore) {
+    if let Some(double) = held_double(core) {
+        serve_processes_on(&double, core);
+    }
+}
+
+/// Serve process segments on `double` with `core`'s own worker.
+pub(crate) fn serve_processes_on(
+    double: &lash_restate_test::RestateTestBackend,
+    core: &crate::LashCore,
+) {
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        core.durable_process_worker_config()
+            .expect("the core's process-worker config"),
     )
+    .expect("the core's process worker");
+    double.install_process_worker(worker);
 }
 
 /// The Restate double a facade test runs on (FIG-3600 S5c): lash-restate's
@@ -57,6 +125,25 @@ pub(crate) async fn restate_double(seed: u64) -> lash_restate_test::RestateTestB
     lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate double")
+}
+
+/// A new deployment over `double`'s stores after `double` is gone: a restart
+/// whose engine runs the driver of the first core built over it. One engine
+/// serves one core's driver, so a law about another build's drive redeploys
+/// rather than building a second core over the same engine.
+pub(crate) async fn redeploy(
+    double: lash_restate_test::RestateTestBackend,
+    seed: u64,
+) -> lash_restate_test::RestateTestBackend {
+    let stores = Arc::clone(double.engine_stores());
+    drop(double);
+    lash_restate_test::backend_with(
+        seed,
+        lash_restate_test::ServerConfig::default(),
+        move |_| stores,
+    )
+    .await
+    .expect("redeploy the Restate double over the same stores")
 }
 
 /// Under the Restate double a session's writer claim frees when the engine
@@ -107,34 +194,40 @@ pub(crate) async fn memory_store_backend() -> lash_core::Backend {
     lash_conformance::recording_backend_over(stores)
 }
 
-/// A raw read of `backend`'s durable-core catalog: inspection of rows no
-/// API reports, taken at a quiescent point of the test.
-fn core_rows<T>(
-    backend: &lash_sqlite_store::SqliteBackend,
-    sql: &str,
-    map: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
-) -> Vec<T> {
+/// A backend over a fresh SQLite memory store set stamping from `clock`,
+/// whose effect host only records and which drives no session work: for a
+/// test that reads what the stores stamp.
+pub(crate) async fn store_backend_with_clock(
+    clock: Arc<dyn lash_core::Clock>,
+) -> lash_core::Backend {
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
+            .await
+            .expect("open a SQLite memory store set"),
+    );
+    lash_conformance::recording_backend_over(stores)
+}
+
+/// Every turn input `double`'s durable-core catalog retains, with its
+/// lifecycle state: inspection of rows no API reports, taken at a quiescent
+/// point of the test.
+pub(crate) fn turn_input_states(
+    double: &lash_restate_test::RestateTestBackend,
+) -> Vec<(String, String)> {
     let connection = rusqlite::Connection::open(
-        backend.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+        double
+            .stores()
+            .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
     )
     .expect("open the durable-core catalog");
-    let mut statement = connection.prepare(sql).expect("prepare the catalog read");
+    let mut statement = connection
+        .prepare("SELECT input_id, state FROM pending_turn_inputs ORDER BY enqueue_seq")
+        .expect("prepare the catalog read");
     statement
-        .query_map([], map)
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .expect("read the catalog")
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("decode the catalog rows")
-}
-
-/// Every turn input the catalog retains, with its lifecycle state.
-pub(crate) fn sqlite_turn_input_states(
-    backend: &lash_sqlite_store::SqliteBackend,
-) -> Vec<(String, String)> {
-    core_rows(
-        backend,
-        "SELECT input_id, state FROM pending_turn_inputs ORDER BY enqueue_seq",
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )
 }
 
 /// One backend with some of its ports decorated by a test that observes
@@ -150,19 +243,6 @@ impl DecoratedBackend {
     pub(crate) fn over(inner: lash_core::Backend) -> Self {
         Self {
             layered: lash_core::testing::runtime_helpers::LayeredBackend::over(inner),
-        }
-    }
-
-    /// Decorate the inner backend's Lashlang artifact store.
-    #[cfg(feature = "rlm")]
-    pub(crate) fn module_artifacts(
-        self,
-        decorate: impl FnOnce(
-            Arc<dyn lash_core::ModuleArtifactStore>,
-        ) -> Arc<dyn lash_core::ModuleArtifactStore>,
-    ) -> Self {
-        Self {
-            layered: self.layered.map_module_artifacts(decorate),
         }
     }
 
@@ -192,17 +272,6 @@ impl DecoratedBackend {
     ) -> Self {
         Self {
             layered: self.layered.map_effect_host(decorate),
-        }
-    }
-
-    pub(crate) fn process_registry(
-        self,
-        decorate: impl FnOnce(
-            Arc<dyn lash_core::ProcessRegistry>,
-        ) -> Arc<dyn lash_core::ProcessRegistry>,
-    ) -> Self {
-        Self {
-            layered: self.layered.map_process_registry(decorate),
         }
     }
 
@@ -241,49 +310,15 @@ impl From<DecoratedBackend> for lash_core::Backend {
 }
 
 /// The runtime settings every facade test core names: a generous commit
-/// budget, single-row queued-work batching and, on a backend without an
-/// engine of its own, the inline session-work double
-/// ([`inline_session_work`]).
+/// budget and single-row queued-work batching.
 pub(crate) fn explicit_ephemeral_facets(
     builder: crate::core::LashCoreBuilder,
 ) -> crate::core::LashCoreBuilder {
     explicit_ephemeral_facets_with_budget(builder, crate::CommitBudget::bounded(1024 * 1024, 512))
 }
 
+/// [`explicit_ephemeral_facets`] with an explicit commit budget.
 pub(crate) fn explicit_ephemeral_facets_with_budget(
-    builder: crate::core::LashCoreBuilder,
-    commit_budget: crate::CommitBudget,
-) -> crate::core::LashCoreBuilder {
-    backend_work_facets_with_budget(builder, commit_budget).map_backend(inline_session_work)
-}
-
-/// `backend` with the inline session-work double when it has no engine of
-/// its own (D14): the engine drives an accepted input only once a caller
-/// waits on it, and schedules nothing in the background, so a law reads what
-/// is pending before anything runs.
-/// A backend whose engine drives its sessions (the Restate double) keeps it.
-pub(crate) fn inline_session_work(backend: lash_core::Backend) -> lash_core::Backend {
-    if backend.session_work().is_some() {
-        return backend;
-    }
-    let engine: Arc<dyn lash_core::SessionWorkEngine> = Arc::new(
-        lash_core::runtime::InlineSessionWork::new(backend.build_generation().clone()),
-    );
-    lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
-        .with_session_work(Some(engine))
-        .into_backend()
-}
-
-/// The ephemeral facets with the backend's queued-work driver left running,
-/// for tests that drain queued work.
-pub(crate) fn explicit_ephemeral_facets_with_backend_work(
-    builder: crate::core::LashCoreBuilder,
-) -> crate::core::LashCoreBuilder {
-    backend_work_facets_with_budget(builder, crate::CommitBudget::bounded(1024 * 1024, 512))
-}
-
-/// [`explicit_ephemeral_facets_with_backend_work`] with an explicit budget.
-pub(crate) fn backend_work_facets_with_budget(
     builder: crate::core::LashCoreBuilder,
     commit_budget: crate::CommitBudget,
 ) -> crate::core::LashCoreBuilder {

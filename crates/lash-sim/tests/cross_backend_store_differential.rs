@@ -2065,7 +2065,7 @@ fn differential_clock_wall_clock_faces_agree() {
 /// (FIG-3891). With the tick held, the verb's delivery is the only claimer.
 fn held_work_lifecycle_backend(backend: lash::Backend) -> lash::Backend {
     lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
-        .with_session_work(Some(Arc::new(lash_core::NoSessionWork::new())))
+        .with_session_work(Arc::new(lash_core::NoSessionWork::new()))
         .into_backend()
 }
 

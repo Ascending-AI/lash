@@ -691,12 +691,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 ),
-                lash_core_worker::WorkerProcessWork::External(
-                    backend
-                        .process_work()
-                        .expect("the Restate engine supplies process work")
-                        .clone(),
-                ),
+                backend.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )

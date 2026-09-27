@@ -1,16 +1,17 @@
+//! The deployment ports an engine serves work through: session drives
+//! ([`SessionWorkEngine`], [`SessionDriver`]) and durable processes
+//! ([`ProcessWorkSubstrate`], [`ProcessWorkWiring`]), with the engine-neutral
+//! pieces every engine shares: the registry awaiter, the wake-delivery driver
+//! and their pacing.
+
 use std::sync::Arc;
 
 mod awaiter;
-pub use lash_core_effect::queued_lane_wait as lane_wait;
-mod policy;
-mod process_work;
+mod cadence;
 mod wake_delivery;
 
-pub use awaiter::NativeProcessAwaiter;
-pub use policy::{
-    NativeSubstrateConfig, NativeSubstrateConfigError, WorkCadencePolicy, WorkerSweepPolicy,
-};
-pub use process_work::{NativeProcessAdmissionDriver, NativeProcessWork};
+pub use awaiter::ProcessRegistryAwaiter;
+pub use cadence::{WorkCadenceError, WorkCadencePolicy};
 pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
 use super::process::{ProcessAdmissionReport, ProcessRegistry, WatchedRegistry};
@@ -44,8 +45,7 @@ pub trait SessionWorkEngine: Send + Sync {
     /// [`schedule_drive`](Self::schedule_drive) does. A refusal is the
     /// obligation's attempt failing; its relay retries it.
     ///
-    /// The default is an engine that drives in this process: the ask is
-    /// accepted once it is scheduled.
+    /// The default accepts the ask once it is scheduled.
     async fn request_drive(
         &self,
         session: &SessionId,
@@ -118,12 +118,10 @@ fn session_work_unavailable(
 /// The kernel's drive of one session, as the core installs it on its
 /// [`SessionWorkEngine`].
 ///
-/// An engine that drives in process calls [`drive`](Self::drive). An engine
-/// that splits the drive over its own handlers calls
+/// The engine splits the drive over its own handlers: it calls
 /// [`admit`](Self::admit) from its per-session handler and
 /// [`run_root`](Self::run_root) from its per-root handler, each on a
-/// controller over that handler's own journal; the kernel bodies are the
-/// same either way.
+/// controller over that handler's own journal.
 #[async_trait::async_trait]
 pub trait SessionDriver: Send + Sync {
     /// Whether this driver owns the deployment recovery pass.
@@ -141,14 +139,6 @@ pub trait SessionDriver: Send + Sync {
             operation: "SessionDriver::reconcile",
         })
     }
-
-    /// Drive `request` to a stop on the driver's own effect host: admit,
-    /// seal and run roots until admission answers something other than an
-    /// admitted root.
-    async fn drive(
-        &self,
-        request: crate::engine::DriveRequest,
-    ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort>;
 
     /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step
     /// through `controller`, which serves
@@ -194,11 +184,8 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// Deliver `request` to `process`'s live execution under `key`, so the
     /// running segment observes the cancel. `key` is the caller's stable
     /// dedupe identity for this delivery; a retry under the same key must be
-    /// a no-op. Native executions read cancel requests from the registry
-    /// directly, so the native port treats delivery as the registry write
-    /// the caller performs right after and returns `Ok(())`; an engine whose
-    /// executions do not see the registry (Restate) posts the cancel into
-    /// the engine and dedupes on `key`.
+    /// a no-op. The engine posts the cancel into the execution and dedupes
+    /// on `key`.
     async fn deliver_cancel(
         &self,
         process_id: &crate::ProcessId,
@@ -233,11 +220,9 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// 0109 §3). `key` is the obligation's stable dedupe identity; a repeat
     /// must be a no-op, and a terminal already published stays as it was.
     ///
-    /// Native executions' waiters read the registry, so the native port's
-    /// publication is the terminal commit itself and sends nothing; an engine
-    /// whose waiters wait on the engine instead (Restate's in-journal awaits
-    /// on the process's terminal promise) resolves them here. A port that
-    /// wraps another forwards it, or the relay settles publications no
+    /// The engine's waiters wait on the engine (Restate's in-journal awaits
+    /// on the process's terminal promise), so it resolves them here. A port
+    /// that wraps another forwards it, or the relay settles publications no
     /// waiter ever saw.
     async fn publish_process_terminal(
         &self,
@@ -263,7 +248,8 @@ pub enum ProcessTerminalWait {
 pub struct ProcessWorkWiring {
     watched: WatchedRegistry,
     port: Arc<dyn ProcessWorkSubstrate>,
-    event_awaiter: NativeProcessAwaiter,
+    event_awaiter: ProcessRegistryAwaiter,
+    runs_processes: bool,
 }
 
 impl ProcessWorkWiring {
@@ -272,21 +258,37 @@ impl ProcessWorkWiring {
     /// caller that created the port owns the pairing contract.
     pub fn new(watched: WatchedRegistry, port: Arc<dyn ProcessWorkSubstrate>) -> Self {
         let event_awaiter =
-            NativeProcessAwaiter::new(Arc::clone(watched.registry()), watched.hub().clone());
+            ProcessRegistryAwaiter::new(Arc::clone(watched.registry()), watched.hub().clone());
         Self {
             watched,
             port,
             event_awaiter,
+            runs_processes: true,
         }
     }
 
-    /// Use the same [`WorkCadencePolicy`] passed to native process, queued-work,
-    /// and wake-delivery drivers so an externally supplied process port does
-    /// not leave the event awaiter on hidden hardcoded pacing.
+    /// The wiring of an engine that runs no processes over `registry`: its
+    /// port is [`NoProcessWork`].
+    pub fn without_process_work(registry: Arc<dyn ProcessRegistry>) -> Self {
+        let watched = super::process::watch_process_registry(registry);
+        let port = Arc::new(NoProcessWork::new(&watched));
+        Self {
+            runs_processes: false,
+            ..Self::new(watched, port)
+        }
+    }
+
+    /// Whether an engine runs processes through this wiring's port; `false`
+    /// for [`Self::without_process_work`].
+    pub fn runs_processes(&self) -> bool {
+        self.runs_processes
+    }
+
+    /// Pace the event awaiter on `work_cadence`.
     pub fn with_work_cadence(
         mut self,
         work_cadence: WorkCadencePolicy,
-    ) -> Result<Self, NativeSubstrateConfigError> {
+    ) -> Result<Self, WorkCadenceError> {
         work_cadence.validate()?;
         self.event_awaiter = self.event_awaiter.with_work_cadence(work_cadence);
         Ok(self)
@@ -317,8 +319,102 @@ impl ProcessWorkWiring {
         &self.port
     }
 
-    pub fn event_awaiter(&self) -> &NativeProcessAwaiter {
+    pub fn event_awaiter(&self) -> &ProcessRegistryAwaiter {
         &self.event_awaiter
+    }
+}
+
+/// The process port of an engine that runs no processes: it admits nothing,
+/// and a wait on a process reads the registry, so a process some other
+/// deployment runs is still observed to its terminal. A cancel is delivered
+/// by the registry write its caller makes, and a terminal is published by its
+/// commit.
+#[derive(Clone)]
+pub struct NoProcessWork {
+    terminal_awaiter: ProcessRegistryAwaiter,
+}
+
+impl NoProcessWork {
+    /// No process work over `watched`.
+    pub fn new(watched: &WatchedRegistry) -> Self {
+        Self {
+            terminal_awaiter: ProcessRegistryAwaiter::new(
+                Arc::clone(watched.registry()),
+                watched.hub().clone(),
+            ),
+        }
+    }
+
+    /// No process work over an unwatched `registry`: its waits poll.
+    pub fn for_registry(registry: Arc<dyn ProcessRegistry>) -> Self {
+        Self {
+            terminal_awaiter: ProcessRegistryAwaiter::for_registry(registry),
+        }
+    }
+
+    /// Wait for `process_id`'s terminal output in the registry.
+    pub async fn await_terminal(
+        &self,
+        process_id: &crate::ProcessId,
+    ) -> Result<ProcessAwaitOutput, PluginError> {
+        self.terminal_awaiter.await_terminal(process_id).await
+    }
+
+    /// Wait for `process_id`'s first `event_type` event after
+    /// `after_sequence` in the registry.
+    pub async fn await_event(
+        &self,
+        process_id: &crate::ProcessId,
+        event_type: &str,
+        after_sequence: u64,
+    ) -> Result<crate::ProcessEvent, PluginError> {
+        self.terminal_awaiter
+            .await_event(process_id, event_type, after_sequence)
+            .await
+    }
+}
+
+impl std::fmt::Debug for NoProcessWork {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("NoProcessWork")
+    }
+}
+
+#[async_trait::async_trait]
+impl ProcessWorkSubstrate for NoProcessWork {
+    async fn admit_pending_processes(
+        &self,
+        _reason: &str,
+    ) -> Result<ProcessAdmissionReport, PluginError> {
+        Ok(ProcessAdmissionReport::default())
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &crate::ProcessId,
+    ) -> Result<ProcessTerminalWait, PluginError> {
+        self.terminal_awaiter
+            .await_terminal(process_id)
+            .await
+            .map(ProcessTerminalWait::Terminal)
+    }
+
+    async fn deliver_cancel(
+        &self,
+        _process_id: &crate::ProcessId,
+        _request: &crate::CancelRequest,
+        _key: &str,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    async fn publish_process_terminal(
+        &self,
+        _process_id: &crate::ProcessId,
+        _output: &crate::ProcessAwaitOutput,
+        _key: &str,
+    ) -> Result<(), PluginError> {
+        Ok(())
     }
 }
 
@@ -356,223 +452,14 @@ impl SessionWorkEngine for NoSessionWork {
     }
 }
 
-/// The session work of a host that runs every accepted input itself: an ask
-/// schedules nothing, and a caller waiting on a drive runs it in its own task
-/// through the installed driver (FIG-3600 S5b, D1 §2.4).
-///
-/// It stands in for an engine where a host drains queued work by hand and
-/// wants no background drive competing with it; a waiter still gets its
-/// input driven. One drive of a session runs at a time, and a request id is
-/// driven once: a second waiter on it is answered at once and reads the
-/// outcome from the store. Nothing retries a drive a caller's task ran, so a
-/// failed attempt is that caller's answer.
-pub struct InlineSessionWork {
-    /// The generation of the build the waiter's drive runs on.
-    build_generation: crate::engine::BuildGeneration,
-    driver: std::sync::OnceLock<Arc<dyn SessionDriver>>,
-    sessions: std::sync::Mutex<
-        std::collections::HashMap<SessionId, Arc<tokio::sync::Mutex<InlineDrives>>>,
-    >,
-}
-
-/// The request ids an inline engine drove for one session, oldest first.
-#[derive(Default)]
-struct InlineDrives {
-    drove: std::collections::VecDeque<String>,
-}
-
-/// Request ids an inline engine remembers per session.
-const INLINE_DROVE_CAPACITY: usize = 1024;
-
-impl InlineSessionWork {
-    /// Inline session work for a build of `build_generation`: the
-    /// generation the backend the driver runs on carries.
-    pub fn new(build_generation: crate::engine::BuildGeneration) -> Self {
-        Self {
-            build_generation,
-            driver: std::sync::OnceLock::new(),
-            sessions: std::sync::Mutex::default(),
-        }
-    }
-
-    fn session_drives(&self, session: &SessionId) -> Arc<tokio::sync::Mutex<InlineDrives>> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Arc::clone(sessions.entry(session.clone()).or_default())
-    }
-}
-
-impl std::fmt::Debug for InlineSessionWork {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("InlineSessionWork")
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionWorkEngine for InlineSessionWork {
-    fn schedule_drive(&self, session: &SessionId, request: crate::engine::DriveRequestId) {
-        tracing::trace!(
-            session_id = session.as_str(),
-            request = request.as_str(),
-            "session drive not scheduled: a waiter drives it inline"
-        );
-    }
-
-    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        Arc::clone(self.driver.get_or_init(|| driver))
-    }
-
-    async fn await_drive(
-        &self,
-        session: &SessionId,
-        request: &crate::engine::DriveRequestId,
-    ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
-        let Some(driver) = self.driver.get() else {
-            return Err(session_work_unavailable(session, request));
-        };
-        let drives = self.session_drives(session);
-        let mut drives = drives.lock().await;
-        if drives.drove.iter().any(|drove| drove == request.as_str()) {
-            return Ok(crate::engine::DriveOutcome {
-                ran: Vec::new(),
-                stop: crate::engine::DriveStop::Idle,
-            });
-        }
-        let mut drive_request = crate::engine::DriveRequest {
-            session: session.clone(),
-            request: request.clone(),
-            build_generation: self.build_generation.clone(),
-        };
-        let mut ran = Vec::new();
-        let stop = loop {
-            let outcome =
-                driver
-                    .drive(drive_request.clone())
-                    .await
-                    .map_err(|abort| match abort {
-                        crate::engine::DriveAbort::Retry(error) => {
-                            crate::engine::DriveAbort::Refused(error)
-                        }
-                        abort => abort,
-                    })?;
-            let at_limit = matches!(outcome.stop, crate::engine::DriveStop::Yielded { .. })
-                && outcome.ran.len() == crate::engine::MAX_ROOTS_PER_DRIVE;
-            ran.extend(outcome.ran);
-            if !at_limit {
-                break outcome.stop;
-            }
-            drive_request.request = crate::engine::drive_continuation_request(&drive_request);
-        };
-        if drives.drove.len() >= INLINE_DROVE_CAPACITY {
-            drives.drove.pop_front();
-        }
-        drives.drove.push_back(request.as_str().to_owned());
-        Ok(crate::engine::DriveOutcome { ran, stop })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct PagedProbe {
-        calls: std::sync::atomic::AtomicUsize,
-    }
-
-    #[async_trait::async_trait]
-    impl SessionDriver for PagedProbe {
-        async fn drive(
-            &self,
-            request: crate::engine::DriveRequest,
-        ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
-            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if call == 0 {
-                let ran = (0..crate::engine::MAX_ROOTS_PER_DRIVE)
-                    .map(|index| crate::engine::RootOutcome::Committed {
-                        root: crate::TurnId::from(format!("root-{index}")),
-                        outcome: crate::TurnOutcome::Finished(
-                            lash_sansio::TurnFinish::AssistantMessage {
-                                text: "answer".to_string(),
-                            },
-                        ),
-                    })
-                    .collect();
-                return Ok(crate::engine::DriveOutcome {
-                    ran,
-                    stop: crate::engine::DriveStop::Yielded {
-                        root: crate::TurnId::from("root-63"),
-                    },
-                });
-            }
-            assert_eq!(
-                request.request,
-                crate::engine::drive_continuation_request(&crate::engine::DriveRequest {
-                    request: crate::engine::DriveRequestId::new("first"),
-                    ..request.clone()
-                })
-            );
-            Ok(crate::engine::DriveOutcome {
-                ran: vec![crate::engine::RootOutcome::Committed {
-                    root: crate::TurnId::from("last"),
-                    outcome: crate::TurnOutcome::Finished(
-                        lash_sansio::TurnFinish::AssistantMessage {
-                            text: "last answer".to_string(),
-                        },
-                    ),
-                }],
-                stop: crate::engine::DriveStop::Idle,
-            })
-        }
-
-        async fn admit(
-            &self,
-            _controller: crate::ScopedEffectController<'_>,
-            _request: &crate::engine::DriveRequest,
-            _ordinal: u32,
-        ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort> {
-            unreachable!("the probe drives its scripted requests directly")
-        }
-
-        async fn run_root(
-            &self,
-            _controller: crate::ScopedEffectController<'_>,
-            _admitted: crate::engine::Admitted,
-        ) -> Result<crate::engine::RootOutcome, crate::engine::DriveAbort> {
-            unreachable!("the probe drives its scripted requests directly")
-        }
-    }
-
-    #[tokio::test]
-    async fn an_inline_waiter_runs_a_bounded_drive_continuation() {
-        let work = InlineSessionWork::new(crate::engine::BuildGeneration::for_test("t0"));
-        let driver = Arc::new(PagedProbe {
-            calls: std::sync::atomic::AtomicUsize::new(0),
-        });
-        work.install_session_driver(driver.clone());
-        let outcome = work
-            .await_drive(
-                &SessionId::from("bounded-inline"),
-                &crate::engine::DriveRequestId::new("first"),
-            )
-            .await
-            .expect("the inline waiter drives its continuation");
-        assert_eq!(outcome.stop, crate::engine::DriveStop::Idle);
-        assert_eq!(driver.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
-    }
 
     struct Probe;
 
     #[async_trait::async_trait]
     impl SessionDriver for Probe {
-        async fn drive(
-            &self,
-            _request: crate::engine::DriveRequest,
-        ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
-            unreachable!("the probe never drives")
-        }
-
         async fn admit(
             &self,
             _controller: crate::ScopedEffectController<'_>,

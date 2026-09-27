@@ -69,10 +69,6 @@ fn processes_area_witnesses() {
     type_witness::<lash::durability::DurableProcessWorker>();
     // W0014: lash::durability::DurableProcessWorker::config [function]
     let _ = lash::durability::DurableProcessWorker::config;
-    // W0016: lash::durability::DurableProcessWorker::drive_pending_processes [function]
-    let _ = lash::durability::DurableProcessWorker::drive_pending_processes;
-    // W0017: lash::durability::DurableProcessWorker::from_shared_config [function]
-    let _ = lash::durability::DurableProcessWorker::from_shared_config;
     // W0018: lash::durability::DurableProcessWorker::new [function]
     let _ = lash::durability::DurableProcessWorker::new;
     // W0019: lash::durability::DurableProcessWorker::request_process_cancel [function]
@@ -86,7 +82,7 @@ fn processes_area_witnesses() {
     let _: fn(
         Vec<std::sync::Arc<dyn lash::plugins::PluginFactory>>,
         lash::durability::RuntimeHostConfig,
-        lash::durability::WorkerProcessWork,
+        lash::process::ProcessWorkWiring,
         std::sync::Arc<dyn lash::runtime::SessionWorkEngine>,
         lash::persistence::LeaseOwnerIdentity,
     ) -> lash::durability::DurableProcessWorkerConfig =
@@ -103,8 +99,6 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
         let _ = &value.plugin_host;
     });
-    // W0028: lash::durability::DurableProcessWorkerConfig::process_execution_concurrency [function]
-    let _ = lash::durability::DurableProcessWorkerConfig::process_execution_concurrency;
     // W0032: lash::durability::DurableProcessWorkerConfig::runtime_host [field]
     field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
         let _ = &value.runtime_host;
@@ -115,18 +109,8 @@ fn processes_area_witnesses() {
     });
     // W0034: lash::durability::DurableProcessWorkerConfig::session_store_factory [function]
     let _ = lash::durability::DurableProcessWorkerConfig::session_store_factory;
-    // W0035: lash::durability::DurableProcessWorkerConfig::validate_process_execution_concurrency [function]
-    let _ = lash::durability::DurableProcessWorkerConfig::validate_process_execution_concurrency;
-    // W0037: lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency [function]
-    let _ = lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency;
     // W0040: lash::durability::DurableProcessWorkerConfig::with_session_policy [function]
     let _ = lash::durability::DurableProcessWorkerConfig::with_session_policy;
-    // W0047: lash::durability::DurableProcessWorkerConfig::process_event_sink [field]
-    field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
-        let _ = &value.process_event_sink;
-    });
-    // W0048: lash::durability::DurableProcessWorkerConfig::with_process_event_sink [function]
-    let _ = lash::durability::DurableProcessWorkerConfig::with_process_event_sink;
     // W0049: lash::process::ProcessAdmissionReport [struct]
     type_witness::<lash::process::ProcessAdmissionReport>();
     // W0050: lash::process::ProcessAdmissionReport::admitted [field]

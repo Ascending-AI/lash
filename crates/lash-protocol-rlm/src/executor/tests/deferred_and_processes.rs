@@ -2002,7 +2002,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
-        lash_core::NativeProcessWork::for_registry(registry)
+        lash_core::NoProcessWork::for_registry(registry)
             .await_terminal(process_id)
             .await
     }
@@ -2140,10 +2140,13 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_engine() {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let process_env_store = backend.process_env_store();
-    let effect_host = backend.effect_host();
+    // The cell runs in a handler on the double, whose process workflow runs
+    // the started body: the signal crosses the engine's own delivery route
+    // to the waiter the body parks on.
+    let table = crate::testing::DoubleProcesses::new(0x7519_0001).await;
+    let effect_host = table.backend().effect_host();
+    let registry = table.registry();
+    let process_env_store = table.env_store();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -2157,7 +2160,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        backend.clone(),
+        table.backend().clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2169,21 +2172,11 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
             ),
         ),
     );
-    let registry_dyn = Arc::clone(&registry);
-    let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let worker = lash_core_worker::DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::new(
-                lash_core::testing::test_code_protocol_factories(),
-            )),
-            runtime_host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(session_policy.clone()),
-    )
-    .expect("valid test native substrate config");
+    table.install_worker(
+        lash_core::testing::test_code_protocol_factories(),
+        runtime_host,
+        session_policy.clone(),
+    );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
@@ -2191,8 +2184,11 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
+    let handler = table
+        .open_handler(crate::testing::default_cell_scope())
+        .await;
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
+        crate::testing::double_ports(table.double(), &handler),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
@@ -2231,11 +2227,10 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         response.terminal_finish,
         Some(serde_json::json!("signal-sent"))
     );
+    drop(ctx);
+    handler.close().await.expect("close the cell's handler");
 
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("drive signalled TypeScript process");
+    table.admit_pending().await;
     let records = registry
         .list_observed_by(
             &SessionId::from("test-session"),
@@ -2258,14 +2253,13 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         )),
         "the start records the turn that started it"
     );
-    let registry_dyn = Arc::clone(&registry);
     let terminal = match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        lash_core::NativeProcessWork::for_registry(registry_dyn).await_terminal(&record.id),
+        std::time::Duration::from_secs(30),
+        table.await_terminal(&record.id),
     )
     .await
     {
-        Ok(output) => output.expect("await TypeScript signal process"),
+        Ok(output) => output,
         Err(_) => panic!(
             "TypeScript signal process reaches terminal state: {:?}",
             registry.get_process(&record.id).await
@@ -2283,10 +2277,13 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
 pub(super) async fn typescript_restored_process_handle_await_crosses_turn_boundary() {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
+    // The cell runs on a memory backend's effect host; its recorded start
+    // lands in the double's process table, whose workflow runs the body.
     let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let process_env_store = backend.process_env_store();
     let effect_host = backend.effect_host();
+    let table = crate::testing::DoubleProcesses::new(0x7519_0002).await;
+    let registry = table.registry();
+    let process_env_store = table.env_store();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -2300,7 +2297,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        backend.clone(),
+        table.backend().clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2312,21 +2309,11 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
             ),
         ),
     );
-    let registry_dyn = Arc::clone(&registry);
-    let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let worker = lash_core_worker::DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::new(
-                lash_core::testing::test_code_protocol_factories(),
-            )),
-            runtime_host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(session_policy.clone()),
-    )
-    .expect("valid test native substrate config");
+    table.install_worker(
+        lash_core::testing::test_code_protocol_factories(),
+        runtime_host,
+        session_policy.clone(),
+    );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
@@ -2400,7 +2387,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 ),
-                worker.drive_pending_processes()
+                table.admit_pending()
             )
         },
     ))
@@ -2444,34 +2431,6 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
             .expect("TypeScript process handle id test model"),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
-    let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        backend.clone(),
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_process_engine_registration(
-        lash_lashlang_runtime::lashlang_process_engine_registration(
-            lash_lashlang_runtime::LashlangProcessEngine::new(
-                artifact_store.clone(),
-                process_engine_surface(surface.clone()),
-            ),
-        ),
-    );
-    let registry_dyn = Arc::clone(&registry);
-    let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let _worker = lash_core_worker::DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::new(
-                lash_core::testing::test_code_protocol_factories(),
-            )),
-            runtime_host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(session_policy.clone()),
-    )
-    .expect("valid test native substrate config");
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),

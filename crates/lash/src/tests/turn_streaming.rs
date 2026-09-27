@@ -378,98 +378,54 @@ impl lash_core::store::ControlIntentStore for CreateOnlySessionStoreFactory {
     }
 }
 
-#[derive(Clone, Debug)]
-struct DurableEffectInvocation {
-    kind: lash_core::RuntimeEffectKind,
-    execution_scope: lash_core::ExecutionScope,
-    turn_id: Option<TurnId>,
-    replay_key: Option<String>,
-}
-
-/// Records every effect envelope that crosses the effect boundary, and the
-/// outcome of each one that ran.
-#[derive(Clone, Default)]
-struct EffectRecorder {
-    invocations: Arc<StdMutex<Vec<DurableEffectInvocation>>>,
-    persisted_outcomes: Arc<StdMutex<Vec<String>>>,
-}
-
-impl EffectRecorder {
-    fn invocations(&self) -> Vec<DurableEffectInvocation> {
-        self.invocations.lock_recover().clone()
-    }
-
-    #[cfg(feature = "rlm")]
-    fn persisted_outcomes(&self) -> Vec<lash_core::RuntimeEffectOutcome> {
-        self.persisted_outcomes
-            .lock_recover()
-            .iter()
-            .map(|outcome| serde_json::from_str(outcome).expect("deserialize effect outcome"))
-            .collect()
-    }
-
-    fn record_invocation(&self, envelope: &lash_core::RuntimeEffectEnvelope) {
-        self.invocations
-            .lock_recover()
-            .push(DurableEffectInvocation {
-                kind: envelope.command.kind(),
-                execution_scope: envelope.invocation.execution_scope().clone(),
-                turn_id: envelope.invocation.attribution.turn_id.clone(),
-                replay_key: Some(envelope.invocation.replay_key().to_owned()),
-            });
-    }
-
-    fn record_outcome(&self, outcome: &lash_core::RuntimeEffectOutcome) {
-        self.persisted_outcomes
-            .lock_recover()
-            .push(serde_json::to_string(outcome).expect("serialize effect outcome"));
-    }
-
-    /// A fresh SQLite memory backend whose effect host has this recorder
-    /// layered over every controller it lends.
-    async fn backend(&self) -> DecoratedBackend {
-        self.layered_over(memory_backend().await)
-    }
-
-    /// `backend`, with this recorder layered over every controller its
-    /// effect host lends.
-    fn layered_over(&self, backend: Arc<lash_sqlite_store::SqliteBackend>) -> DecoratedBackend {
-        let layer = Arc::new(self.clone());
-        DecoratedBackend::over(backend.into()).effect_host(move |inner| {
-            Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layer))
+/// The replay keys of every effect run `double` journaled, across all its
+/// invocations: the engine journals each effect as a `ctx.run` named
+/// `lash:<replay key>`.
+pub(super) fn journaled_run_keys(double: &lash_restate_test::RestateTestBackend) -> Vec<String> {
+    let server = double.server();
+    server
+        .invocations()
+        .into_iter()
+        .flat_map(|invocation| server.journal(&invocation.id).unwrap_or_default())
+        .filter(|entry| entry.ty == lash_restate_test::protocol::MessageType::RunCommand)
+        .filter_map(|entry| {
+            entry
+                .name
+                .as_deref()
+                .and_then(|name| name.strip_prefix("lash:"))
+                .map(str::to_owned)
         })
-    }
+        .collect()
 }
 
-#[async_trait]
-impl lash_core::testing::EffectLayer for EffectRecorder {
-    async fn execute_effect(
-        &self,
-        inner: &dyn lash_core::RuntimeEffectController,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
-    {
-        self.record_invocation(&envelope);
-        let outcome = inner.execute_effect(envelope, local_executor).await;
-        if let Ok(outcome) = &outcome {
-            self.record_outcome(outcome);
-        }
-        outcome
-    }
+/// The journaled model-call keys among [`journaled_run_keys`].
+pub(super) fn journaled_llm_call_keys(
+    double: &lash_restate_test::RestateTestBackend,
+) -> Vec<String> {
+    journaled_run_keys(double)
+        .into_iter()
+        .filter(|key| key.contains(":llm_call:"))
+        .collect()
 }
 
-impl EffectRecorder {
-    /// The scopes this recorder's effects ran under, in first-seen order.
-    fn scopes(&self) -> Vec<lash_core::ExecutionScope> {
-        let mut scopes = Vec::new();
-        for invocation in self.invocations() {
-            if !scopes.contains(&invocation.execution_scope) {
-                scopes.push(invocation.execution_scope);
-            }
-        }
-        scopes
-    }
+/// Every effect outcome `double`'s engine journaled, in journal order across
+/// its invocations: each effect's `ctx.run` completes with its recorded
+/// envelope and its outcome, a `Result` whose `Ok` is the effect's outcome.
+#[cfg(feature = "rlm")]
+fn journaled_effect_outcomes(
+    double: &lash_restate_test::RestateTestBackend,
+) -> Vec<lash_core::RuntimeEffectOutcome> {
+    let server = double.server();
+    server
+        .invocations()
+        .into_iter()
+        .flat_map(|invocation| server.journal(&invocation.id).unwrap_or_default())
+        .filter_map(|entry| entry.run_completion()?.ok())
+        .filter_map(|value| {
+            let mut record = serde_json::from_slice::<serde_json::Value>(&value).ok()?;
+            serde_json::from_value(record.get_mut("outcome")?.get_mut("Ok")?.take()).ok()
+        })
+        .collect()
 }
 
 #[cfg(feature = "rlm")]
@@ -561,10 +517,6 @@ impl RuntimeBatchTools {
             barrier: Arc::new(tokio::sync::Barrier::new(3)),
             windows: Arc::new(StdMutex::new(Vec::new())),
         }
-    }
-
-    fn windows(&self) -> Vec<(String, std::time::Instant, std::time::Instant)> {
-        self.windows.lock_recover().clone()
     }
 }
 

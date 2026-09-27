@@ -1448,11 +1448,11 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
 
 #[tokio::test]
 async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
     env_store.fail_put.store(true, Ordering::SeqCst);
     let (core, registry, _process) = ingress_core_over(
-        backend.into(),
+        backend,
         None,
         Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
     )
@@ -1626,11 +1626,11 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
 }
 
 async fn ingress_engine_core(
-    backend: Arc<lash_sqlite_store::SqliteBackend>,
+    backend: lash_core::Backend,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1678,7 +1678,7 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
 /// stamp — neither happened while ingress built its Start command unchecked.
 #[tokio::test]
 async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
-    let (core, registry) = ingress_engine_core(memory_backend().await).await?;
+    let (core, registry) = ingress_engine_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
     let unregistered_key = ingress.key("ingress-unregistered-engine", 0);
@@ -1753,7 +1753,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
 #[tokio::test]
 async fn equivalent_recorded_start_has_same_environment_sensitive_identity_across_routes()
 -> Result<()> {
-    let (core, registry) = ingress_engine_core(memory_backend().await).await?;
+    let (core, registry) = ingress_engine_core(memory_store_backend().await).await?;
     let payload = serde_json::json!({"program": "environment-sensitive"});
 
     let ingress = core.tool_intents(

@@ -1123,8 +1123,8 @@ run_state_machine_and_fault_matrix() {
     step "Durable fault matrix metadata"
     run_cargo_tests -p lash-internal-core --locked durable_fault_matrix
     step "Durable process fault-matrix evidence"
-    run_cargo_tests -p lash-runtime --locked --features rlm,testing \
-      runtime_rebuild_and_worker_recovery_with_durable_stores
+    run_cargo_tests -p lash-sim --locked --test crash_point_matrix \
+      process_terminal_mid_journal_step
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       queued_work_claims_supersede_across_session_lease_generations
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
@@ -1157,10 +1157,8 @@ run_state_machine_and_fault_matrix() {
 
   if area_selected trigger; then
     step "Durable trigger fault-matrix evidence"
-    run_cargo_tests -p lash-internal-core-worker --locked \
-      sweep_reconciles_reserved_trigger_delivery_without_process
-    run_cargo_tests -p lash-internal-core-worker --locked \
-      sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process
+    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
+      process_trigger_retention
   fi
 
   if area_selected store; then

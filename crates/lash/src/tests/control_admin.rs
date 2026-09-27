@@ -73,7 +73,7 @@ impl lash_core::facade_support::ProcessToolVisibilityFilter for HideAllProcessTo
 /// A memory backend whose processes run in `NoopProcessWork`, wired over
 /// the backend's own registry: a test worker completes them by hand.
 async fn noop_process_work_backend() -> DecoratedBackend {
-    DecoratedBackend::over(memory_backend().await.into()).process_work(|registry| {
+    DecoratedBackend::over(double_backend().await).process_work(|registry| {
         lash_core::ProcessWorkWiring::new(
             lash_core::facade_support::watch_process_registry(registry),
             Arc::new(NoopProcessWork),
@@ -186,7 +186,7 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
 #[tokio::test]
 async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -223,7 +223,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     // the admitted incarnation (FIG-3394) — past the `large_futures` budget.
     let compacted = Box::pin(session.admin().state().compact_context(
         Some("focus on durable summary".to_string()),
-        runtime_operation_scope(&core, "compact-context-test"),
+        runtime_operation_scope(&core, "compact-context-test").await,
     ))
     .await?;
 
@@ -364,7 +364,7 @@ impl lash_core::facade_support::ContextCompactor for PromptAssertingCompactor {
 #[tokio::test]
 async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result<()> {
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
+        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
             .instructions("core-layer-guidance-marker"),
     )
     .provider(mock_provider())
@@ -402,7 +402,7 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
     assert!(
         Box::pin(session.admin().state().compact_context(
             None,
-            runtime_operation_scope(&core, "compact-prompt-stack-test"),
+            runtime_operation_scope(&core, "compact-prompt-stack-test").await,
         ))
         .await?
     );
@@ -412,12 +412,11 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
 #[tokio::test]
 async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-idempotency").open().await?;
 
@@ -453,12 +452,11 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
 #[tokio::test]
 async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queue-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
@@ -507,12 +505,11 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
 #[tokio::test]
 async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pending-input-facade-cancel").open().await?;
     let cursor = session.observe().current_observation().cursor;
@@ -595,7 +592,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
 async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
@@ -603,20 +600,16 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let registry = core.process_registry();
     let session = core.session("process-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
     // Keyed, so the replay below presents the same start (ADR 0107).
     let request = lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::ToolCall {
-            call: lash_core::PreparedToolCall::from_parts(
-                "observed-process-call",
-                "tool:observed-process",
-                "observed_process",
-                serde_json::Value::Null,
-                None,
-                serde_json::Value::Null,
-            ),
+        // Externally owned: the engine's worker never runs it, so the test
+        // below settles it by hand after the cancel request.
+        lash_core::ProcessInput::External {
+            metadata: serde_json::Value::Null,
         },
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
@@ -625,20 +618,13 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         lash_core::StartKeyOwner::HOST,
         "observed-process",
     )))
-    .with_observers(["process-observation-events".to_string()])
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
-        lash_core::SessionPolicy {
-            model: mock_model_spec(),
-            ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
-        },
-    ));
+    .with_observers(["process-observation-events".to_string()]);
     let started = session
         .admin()
         .processes()
         .start(
             request.clone(),
-            runtime_operation_scope(&core, "process-observation-events-start"),
+            runtime_operation_scope(&core, "process-observation-events-start").await,
         )
         .await?;
     let process_id = started.process_id.clone();
@@ -657,7 +643,8 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             host_scope(
                 &core,
                 lash_core::AdmittedScope::runtime_operation("process-observation-events-replay"),
-            ),
+            )
+            .await,
         )
         .await
         .expect("public session start replay bypasses the retired staging owner");
@@ -668,7 +655,10 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     session
         .admin()
         .processes()
-        .cancel(&process_id, process_scope(&core, &process_id))
+        .cancel(
+            &process_id,
+            runtime_operation_scope(&core, format!("host-process-op:{process_id}")).await,
+        )
         .await?;
     core.env
         .process_registry()
@@ -678,7 +668,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
                 lash_core::ToolCancellation::runtime("cancelled by test worker"),
             )),
-            lash_core::ProcessCompletionAuthority::workflow_key(process_id.as_str()),
+            lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await?;
 
@@ -915,9 +905,9 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         "pressed",
         lash_core::LashSchema::any(),
     );
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -931,7 +921,8 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     let before = session.admin().state().persist_current().await?;
 
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")?;
-    let scoped_effect_controller = lash_core::Backend::from(backend.clone())
+    let scoped_effect_controller = backend
+        .clone()
         .effect_host()
         .scoped_static(lash_core::AdmittedScope::runtime_operation(
             "trigger:button-press-1",
@@ -977,7 +968,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(checkpoint_gated_provider(entered_tx, release_rx))
@@ -1037,13 +1028,14 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .session_spec(session_spec)
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("host-cancel").open().await?;
     let host_process = session
         .admin()
@@ -1055,7 +1047,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
                 lash_core::Lifetime::Detached,
             )
             .with_observers(["host-cancel".to_string()]),
-            runtime_operation_scope(&core, "host-cancel-start"),
+            runtime_operation_scope(&core, "host-cancel-start").await,
         )
         .await?
         .process_id;
@@ -1063,7 +1055,10 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let summary = session
         .admin()
         .processes()
-        .cancel(&host_process, process_scope(&core, &host_process))
+        .cancel(
+            &host_process,
+            runtime_operation_scope(&core, format!("host-process-op:{host_process}")).await,
+        )
         .await?;
 
     assert_eq!(summary.process_id, host_process);
@@ -1095,7 +1090,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .session_spec(session_spec)
@@ -1103,6 +1098,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     .model(mock_model_spec())
     .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("host-filter-bypass").open().await?;
     let mut started = Vec::new();
     for label in ["host-filter-signal", "host-filter-cancel"] {
@@ -1121,7 +1117,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }])
                 .with_observers(["host-filter-bypass".to_string()]),
-                runtime_operation_scope(&core, format!("{label}-start")),
+                runtime_operation_scope(&core, format!("{label}-start")).await,
             )
             .await?
             .process_id;
@@ -1143,7 +1139,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
             "ready",
             "host-filter-signal-id",
             serde_json::json!({"source": "host"}),
-            process_scope(&core, &signalled),
+            runtime_operation_scope(&core, format!("host-process-op:{signalled}")).await,
         )
         .await?;
     assert!(
@@ -1166,7 +1162,10 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     session
         .admin()
         .processes()
-        .cancel(&cancelled, process_scope(&core, &cancelled))
+        .cancel(
+            &cancelled,
+            runtime_operation_scope(&core, format!("host-process-op:{cancelled}")).await,
+        )
         .await?;
     assert!(
         complete_full_page(
@@ -1201,7 +1200,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
 async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
-    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
@@ -1209,6 +1208,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("host-cancel-all").open().await?;
     let mut started = Vec::new();
     for label in ["host-process-a", "host-process-b"] {
@@ -1222,7 +1222,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
                     lash_core::Lifetime::Detached,
                 )
                 .with_observers(["host-cancel-all".to_string()]),
-                runtime_operation_scope(&core, format!("{label}-start")),
+                runtime_operation_scope(&core, format!("{label}-start")).await,
             )
             .await?
             .process_id;
@@ -1233,7 +1233,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let mut summaries = session
         .admin()
         .processes()
-        .cancel_all(runtime_operation_scope(&core, "host-cancel-all"))
+        .cancel_all(runtime_operation_scope(&core, "host-cancel-all").await)
         .await?;
     summaries.sort_by(|left, right| left.process_id.cmp(&right.process_id));
 
@@ -1268,7 +1268,7 @@ async fn observation_updates_after_completed_turn() -> Result<()> {
 #[tokio::test]
 async fn config_and_tool_mutations_publish_observation_immediately() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1309,10 +1309,10 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
 
 #[tokio::test]
 async fn config_admin_sets_persisted_tool_access() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1353,10 +1353,10 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
 #[tokio::test]
 
 async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1394,7 +1394,7 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
 async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> {
     let sqlite_dir = tempfile::tempdir().expect("create managed-create SQLite directory");
     let cases: Vec<(&str, lash_core::Backend)> = vec![
-        ("memory", memory_backend().await.into()),
+        ("memory", double_backend().await),
         (
             "file",
             Arc::new(
@@ -1418,7 +1418,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
             )
         });
         let store_factory = lash_core::Backend::from(backend.clone()).session_store_factory();
-        let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
             backend.into(),
             crate::TurnBudget::Unbounded,
         ))
@@ -1511,12 +1511,11 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
 #[tokio::test]
 async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("direct-turn-acceptance").open().await?;
 

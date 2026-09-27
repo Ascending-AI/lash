@@ -1,36 +1,31 @@
 use crate::support::{
     Arc, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime, LashSession,
-    LiveReplayStore, NativeQueuedWork, NativeSubstrateConfig, NoSessionWork, ParkedSession,
-    PluginFactory, PluginHost, PluginOptions, PluginSpec, PluginStack, ProcessRegistry,
-    PromptLayer, PromptLayerSink, ProviderHandle, Result, RuntimeEnvironment, RuntimeHandle,
-    RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy, SessionSpec,
-    SessionStoreFactory, SessionSummary, SessionWorkEngine, StaticPluginFactory, TerminationPolicy,
-    ToolProvider, WorkerSlotSupplier,
+    LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginOptions, PluginSpec,
+    PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, ProviderHandle, Result,
+    RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter,
+    SessionPolicy, SessionSpec, SessionStoreFactory, SessionSummary, SessionWorkEngine,
+    StaticPluginFactory, TerminationPolicy, ToolProvider,
 };
 use lash_core::Backend;
 use lash_core::facade_support;
-use lash_core_worker::{DurableProcessWorkerConfig, WorkerProcessWork};
+use lash_core_worker::DurableProcessWorkerConfig;
 use lash_sansio::SessionId;
 
 mod advanced_builder;
 mod drain;
-pub(crate) mod queued_work;
 mod recovery;
 pub(crate) mod residents;
 mod runtime_host_config;
+pub(crate) mod session_driver;
 mod session_policy;
 mod tool_child_context;
 mod work_drivers;
-mod worker_capacity;
 
 pub use advanced_builder::AdvancedLashCoreBuilder;
 pub use drain::{DeploymentDrainStatus, GenerationDrainStatus};
-use queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
-pub(crate) use work_drivers::HeldWork;
-use work_drivers::{
-    DriveLifetime, NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup,
-    ProcessWorkSelection, ProcessWorkSource, QueuedPortSetup, WakeDeliveryDriverSetup,
-};
+use session_driver::{CoreSessionDriver, CoreSessionDriverConfig};
+pub(crate) use work_drivers::ResolvedQueuedWork;
+use work_drivers::{CoreWorkSetup, CoreWorkSlot, WakeDeliveryDriverSetup};
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
 pub struct LashCore {
@@ -59,14 +54,8 @@ pub struct LashCore {
     /// Session runtimes still install onto their own clean registries so
     /// session-scoped plugin overlays can contribute additional engines.
     pub(crate) host_process_engines: lash_core::ProcessEngineRegistry,
-    pub(crate) process_execution_concurrency: usize,
-    /// Explicit host supplier; `None` preserves a fresh bound per process worker.
-    pub(crate) worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-    /// Shared across core clones so native substrate ports are constructed at most once.
-    pub(crate) substrate_slot: Arc<NativeSubstrateSlot>,
-    /// Held by every core clone and every session, durable session and send
-    /// handle: its drop stops the core's in-process drives.
-    pub(crate) drive_lifetime: Arc<DriveLifetime>,
+    /// Shared across core clones so the work ports are resolved at most once.
+    pub(crate) substrate_slot: Arc<CoreWorkSlot>,
     /// The session driver this core installed on its backend's session-work
     /// engine (FIG-3600). The engine may hold it weakly, so the core keeps it
     /// for its whole life.
@@ -77,10 +66,6 @@ pub struct LashCore {
     /// This core's seat in the recovery leader election (ADR 0109 §1.6),
     /// shared with its session driver.
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
-    /// Host-facing process event sink, retained so a worker config built from
-    /// this core reports its worker faults to the same sink the registry
-    /// decorator emits events on.
-    pub(crate) process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     pub(crate) tool_intent_submission_gates:
         Arc<crate::tool_intent_ingress::RuntimeSubmissionGates>,
     /// The context a group tool child of this core's sessions runs under when
@@ -101,7 +86,7 @@ pub use lash_core::session_delete::{
 /// so the reconcile tick can deliver session deletes (ADR 0109 §4).
 #[derive(Clone)]
 pub(crate) struct AdministrationSource {
-    slot: std::sync::Weak<NativeSubstrateSlot>,
+    slot: std::sync::Weak<CoreWorkSlot>,
     env: RuntimeEnvironment,
     store_factory: Arc<dyn SessionStoreFactory>,
     host_process_engines: lash_core::ProcessEngineRegistry,
@@ -115,10 +100,7 @@ impl AdministrationSource {
         Some(self.administration_over(&slot).await)
     }
 
-    async fn administration_over(
-        &self,
-        slot: &NativeSubstrateSlot,
-    ) -> lash_core::SessionAdministration {
+    async fn administration_over(&self, slot: &CoreWorkSlot) -> lash_core::SessionAdministration {
         let ports = slot.ports().await;
         let queued = ports.queued_port();
         let resolved_env = self
@@ -156,21 +138,20 @@ impl AdministrationSource {
 }
 
 impl LashCore {
-    /// The core's queued work as a host-held handle carries it: holding it
-    /// keeps the core's in-process drives running.
-    pub(crate) async fn held_work(&self) -> HeldWork {
-        HeldWork::new(
-            Arc::clone(&self.substrate_slot.ports().await.queued),
-            Arc::clone(&self.drive_lifetime),
-        )
+    /// The core's session work as a host-held handle carries it.
+    pub(crate) async fn held_work(&self) -> Arc<ResolvedQueuedWork> {
+        Arc::clone(&self.substrate_slot.ports().await.queued)
     }
 
     /// The ingress relay an acceptance through this core delivers with
     /// (ADR 0109 §3): the backend's ingress ledger asking `work` for drives.
-    pub(crate) fn ingress_relay(&self, work: &HeldWork) -> lash_core::drive::IngressRelay {
+    pub(crate) fn ingress_relay(
+        &self,
+        work: &Arc<ResolvedQueuedWork>,
+    ) -> lash_core::drive::IngressRelay {
         lash_core::drive::IngressRelay::over_backend(
             &self.backend,
-            work.engine(),
+            Arc::clone(work) as Arc<dyn SessionWorkEngine>,
             Arc::clone(&self.env.core.clock),
         )
     }
@@ -529,7 +510,6 @@ impl LashCore {
             _process_lifecycle_route: process_lifecycle_route,
             binding,
             parent_session_id,
-            process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
         })
     }
 
@@ -752,99 +732,19 @@ impl LashCore {
             self.plugin_factories.as_ref(),
             extra_plugin_factories,
         )?;
-        let process_work = self.substrate_slot.configured_worker_process_work();
-        let queued_work: Arc<dyn SessionWorkEngine> = match &self.substrate_slot.setup.queued {
-            QueuedPortSetup::External { port } => Arc::clone(port),
-            // The outer dispatcher owns the native queued-work lane; nested
-            // process runtimes must not start a competing dispatcher.
-            QueuedPortSetup::Native { .. } => Arc::new(NoSessionWork::new()),
-        };
-        worker_config(
-            &plugin_host,
-            &self.env,
+        let runtime_host = plugin_host.install_process_engine_contributions(
+            self.env.core.clone(),
             self.process_lifecycle_available,
-            self.policy.clone(),
-            self.process_execution_concurrency,
-            self.worker_slot_supplier.clone(),
+        )?;
+        Ok(DurableProcessWorkerConfig::new(
+            Arc::new(plugin_host),
+            runtime_host,
+            self.substrate_slot.setup.process.clone(),
+            Arc::clone(&self.substrate_slot.setup.session_work),
             self.session_execution_owner.clone(),
-            process_work,
-            queued_work,
-            self.process_event_sink.clone(),
-            lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
-            self.substrate_slot.setup.config.clone(),
         )
+        .with_session_policy(self.policy.clone()))
     }
-}
-
-#[derive(Clone)]
-struct NativeProcessWorkerSetup {
-    worker_plugin_host: PluginHost,
-    env: RuntimeEnvironment,
-    process_lifecycle_available: bool,
-    policy: SessionPolicy,
-    process_execution_concurrency: usize,
-    worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-    session_execution_owner: lash_core::LeaseOwnerIdentity,
-    process_work: WorkerProcessWork,
-    process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
-    turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
-    native_substrate: NativeSubstrateConfig,
-}
-
-impl NativeProcessWorkerSetup {
-    fn build(&self, queued_work: Arc<dyn SessionWorkEngine>) -> Result<DurableProcessWorkerConfig> {
-        worker_config(
-            &self.worker_plugin_host,
-            &self.env,
-            self.process_lifecycle_available,
-            self.policy.clone(),
-            self.process_execution_concurrency,
-            self.worker_slot_supplier.clone(),
-            self.session_execution_owner.clone(),
-            self.process_work.clone(),
-            queued_work,
-            self.process_event_sink.clone(),
-            self.turn_phase_probe_slot.clone(),
-            self.native_substrate.clone(),
-        )
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn worker_config(
-    worker_plugin_host: &PluginHost,
-    env: &RuntimeEnvironment,
-    process_lifecycle_available: bool,
-    policy: SessionPolicy,
-    process_execution_concurrency: usize,
-    worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-    session_execution_owner: lash_core::LeaseOwnerIdentity,
-    process_work: WorkerProcessWork,
-    queued_work: Arc<dyn SessionWorkEngine>,
-    process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
-    turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
-    native_substrate: NativeSubstrateConfig,
-) -> Result<DurableProcessWorkerConfig> {
-    let runtime_host = worker_plugin_host
-        .install_process_engine_contributions(env.core.clone(), process_lifecycle_available)?;
-    let mut config = DurableProcessWorkerConfig::new(
-        Arc::new(worker_plugin_host.clone()),
-        runtime_host,
-        process_work,
-        queued_work,
-        session_execution_owner,
-    )
-    .with_session_policy(policy)
-    .with_turn_phase_probe_slot(turn_phase_probe_slot)
-    .with_process_execution_concurrency(process_execution_concurrency)?;
-    config.native_substrate = native_substrate;
-    if let Some(worker_slot_supplier) = worker_slot_supplier {
-        config = config.with_worker_slot_supplier(worker_slot_supplier);
-    }
-    if let Some(sink) = process_event_sink {
-        config = config.with_process_event_sink(sink);
-    }
-    Ok(config)
 }
 
 fn default_runtime_stack() -> PluginStack {
@@ -864,7 +764,6 @@ pub struct LashCoreBuilder {
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
-    native_substrate: NativeSubstrateConfig,
     // Core fields applied over the config the backend's ports assemble.
     prompt: Option<PromptLayer>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
@@ -878,15 +777,6 @@ pub struct LashCoreBuilder {
     plugin_host: Option<PluginHost>,
     lease_timings: Option<facade_support::LeaseTimings>,
     recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
-    // Per-worker bound for the default native process executor.
-    process_execution_concurrency: Option<usize>,
-    // Per-driver bound for the default native queued-work executor.
-    queued_work_execution_concurrency: Option<usize>,
-    // Optional host admission controller replacing both fixed worker lanes.
-    worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-    // Optional host-facing best-effort feed of appended process events,
-    // installed on the native process-registry decorator at build time.
-    process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
@@ -904,7 +794,6 @@ impl LashCoreBuilder {
             queued_work_batching: None,
             max_attachment_bytes: None,
             process_wake_delivery_policy: None,
-            native_substrate: NativeSubstrateConfig::default(),
             prompt: None,
             trace_sink: None,
             trace_level: None,
@@ -917,10 +806,6 @@ impl LashCoreBuilder {
             plugin_host: None,
             lease_timings: None,
             recovery_lease: None,
-            process_execution_concurrency: None,
-            queued_work_execution_concurrency: None,
-            worker_slot_supplier: None,
-            process_event_sink: None,
             process_tool_visibility_filter: None,
             live_replay_store: None,
             process_observation_config: Default::default(),
@@ -978,11 +863,6 @@ impl LashCoreBuilder {
 
     pub fn process_wake_delivery_policy(mut self, policy: lash_core::DeliveryPolicy) -> Self {
         self.process_wake_delivery_policy = Some(policy);
-        self
-    }
-
-    pub fn native_substrate_config(mut self, config: NativeSubstrateConfig) -> Self {
-        self.native_substrate = config;
         self
     }
 
@@ -1075,9 +955,8 @@ impl LashCoreBuilder {
     /// claims are not leases and carry no TTL.
     ///
     /// This is the failover-latency vs false-takeover-risk knob.
-    /// Like [`process_execution_concurrency`](Self::process_execution_concurrency) it is an
-    /// operational deployment decision, so it lives on the main builder tier rather than
-    /// behind [`advanced`](Self::advanced).
+    /// It is an operational deployment decision, so it lives on the main
+    /// builder tier rather than behind [`advanced`](Self::advanced).
     /// Effect hosts accept the same type at construction (e.g.
     /// SQLite/Postgres effect-replay options), so a host can share one timing decision across
     /// both boundaries.
@@ -1112,19 +991,6 @@ impl LashCoreBuilder {
         mut self,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
     ) -> Result<LashCore> {
-        let process_execution_concurrency = self
-            .process_execution_concurrency
-            .unwrap_or(lash_core_worker::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
-        DurableProcessWorkerConfig::validate_process_execution_concurrency(
-            process_execution_concurrency,
-        )?;
-        let queued_work_execution_concurrency = self
-            .queued_work_execution_concurrency
-            .unwrap_or(facade_support::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY);
-        NativeQueuedWork::validate_execution_concurrency(queued_work_execution_concurrency)?;
-        self.native_substrate.validate()?;
-        let worker_slot_supplier = self.worker_slot_supplier.clone();
-        let native_substrate = self.native_substrate.clone();
         let protocol_factory = self.protocol_factory.clone();
         if protocol_factory.is_none() && self.plugin_host.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
@@ -1169,30 +1035,18 @@ impl LashCoreBuilder {
                 Arc::clone(&core.clock),
             ))
         });
-        let process_work_selection = match backend.process_work() {
-            Some(wiring) => ProcessWorkSelection::External(wiring),
-            None => ProcessWorkSelection::Native(backend.process_registry()),
-        };
-        let external_process_work =
-            matches!(&process_work_selection, ProcessWorkSelection::External(_));
+        let process_work = backend.process_work();
         let process_lifecycle_feed = Arc::new(crate::process_lifecycle::ProcessLifecycleFeed::new(
             Arc::clone(&live_replay_store),
             Arc::clone(&process_observation_hub),
-            self.process_event_sink.clone(),
-            !external_process_work,
         ));
-        let process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>> =
-            Some(process_lifecycle_feed.clone());
-        let process_work_source =
-            process_work_selection.resolve(Arc::clone(&core.clock), process_event_sink.clone());
-        let process_lifecycle_registration =
-            if let ProcessWorkSource::External(wiring) = &process_work_source {
-                process_event_sink
-                    .clone()
-                    .map(|sink| Arc::new(wiring.watched().add_event_sink(sink)))
-            } else {
-                None
-            };
+        let process_event_sink: Arc<dyn facade_support::ProcessEventSink> =
+            process_lifecycle_feed.clone();
+        let process_lifecycle_registration = Some(Arc::new(
+            process_work
+                .watched()
+                .add_event_sink(Arc::clone(&process_event_sink)),
+        ));
         let plugin_factories = if let Some(plugin_host) = self.plugin_host {
             plugin_host.factories().to_vec()
         } else {
@@ -1229,17 +1083,12 @@ impl LashCoreBuilder {
             .process_engines;
         let tool_registry =
             lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
-        let process_registry = process_work_source.process_registry();
+        let process_registry = Arc::clone(process_work.registry());
         process_lifecycle_feed.bind_registry(Arc::clone(&process_registry));
-        let mut env_builder =
-            RuntimeEnvironment::builder(core).with_plugin_host(Arc::clone(&default_plugin_host));
-        env_builder = match &process_work_source {
-            ProcessWorkSource::Native(_) => {
-                env_builder.with_process_registry(Arc::clone(&process_registry))
-            }
-            ProcessWorkSource::External(wiring) => env_builder.with_process_work(wiring.clone()),
-        };
-        let env = env_builder.build();
+        let env = RuntimeEnvironment::builder(core)
+            .with_plugin_host(Arc::clone(&default_plugin_host))
+            .with_process_work(process_work.clone())
+            .build();
         // Registration owns the scope fence (ADR 0049): the registry lifts the
         // effect host's fence for a re-registered process id inside its own
         // registration write, on every registration path.
@@ -1251,22 +1100,11 @@ impl LashCoreBuilder {
             Arc::clone(&env.core.durability.process_env_store),
             host_process_engines.clone(),
         );
-        let process_port = Self::resolve_process_work(
-            &process_work_source,
-            default_plugin_host.as_ref(),
-            &env,
-            process_lifecycle_available,
-            &policy,
-            process_execution_concurrency,
-            worker_slot_supplier.clone(),
-            session_execution_owner.clone(),
-            process_event_sink.clone(),
-            native_substrate.clone(),
-        )?;
         let residents = Arc::new(residents::ResidentSessions::default());
-        let (queued_port, session_driver, installed_driver) = Self::resolve_queued_work(
+        let session_work = backend.session_work();
+        let (session_driver, installed_driver) = Self::build_session_driver(
+            &session_work,
             Arc::clone(&residents),
-            backend.session_work(),
             session_execution_owner.clone(),
             env.clone(),
             policy.clone(),
@@ -1275,25 +1113,20 @@ impl LashCoreBuilder {
             &store_factory,
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
-            worker_slot_supplier.clone(),
-            queued_work_execution_concurrency,
             self.recovery_lease.unwrap_or_default(),
         );
-        let native_queued = matches!(&queued_port, QueuedPortSetup::Native { .. });
         // The driver's reconcile tick runs every obligation kind's relay
-        // (ADR 0109 §1.4): the substrate resolves a process port from either
-        // setup, and the driver administers through the slot bound below.
+        // (ADR 0109 §1.4): the backend's process wiring always supplies a
+        // process port, and the driver administers through the slot bound
+        // below.
         lash_core::drive::RelaySupply {
-            process_work: match &process_port {
-                ProcessPortSetup::NativeDefault { .. } | ProcessPortSetup::External { .. } => true,
-            },
+            process_work: true,
             session_administration: true,
         }
         .check()?;
-        let substrate = NativeSubstrateSetup {
-            config: native_substrate,
-            process: process_port,
-            queued: queued_port,
+        let substrate = CoreWorkSetup {
+            process: process_work,
+            session_work,
             store_binding: backend.binding_identity(),
             wake: WakeDeliveryDriverSetup {
                 registry: Arc::clone(&process_registry),
@@ -1303,8 +1136,7 @@ impl LashCoreBuilder {
             },
         };
 
-        let drive_lifetime = DriveLifetime::new();
-        let substrate_slot = Arc::new(NativeSubstrateSlot::new(substrate, &drive_lifetime));
+        let substrate_slot = Arc::new(CoreWorkSlot::new(substrate));
         // The driver is built before the slot it reconciles through, so the
         // binding lands here: its recovery pass asks the resolved work port.
         session_driver.bind_substrate_slot(Arc::downgrade(&substrate_slot));
@@ -1316,17 +1148,6 @@ impl LashCoreBuilder {
             store_factory: Arc::clone(&store_factory),
             host_process_engines: host_process_engines.clone(),
         });
-        if native_queued {
-            // The native engine is built with the resolved ports; resolving
-            // them at boot installs the driver so its reconcile tick exists
-            // before the first open and lost asks heal without one.
-            let slot = Arc::clone(&substrate_slot);
-            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                runtime.spawn(async move {
-                    slot.ports().await;
-                });
-            }
-        }
         let plugin_factories = Arc::new(plugin_factories);
         let tool_child_context_source = tool_child_context::CoreToolChildContextSource::install(
             &env,
@@ -1363,75 +1184,21 @@ impl LashCoreBuilder {
             protocol_factory,
             process_lifecycle_available,
             host_process_engines,
-            process_execution_concurrency,
-            worker_slot_supplier,
             substrate_slot,
-            drive_lifetime,
             _session_driver: installed_driver,
             recovery: session_driver.recovery(),
             residents,
-            process_event_sink,
             tool_intent_submission_gates: Default::default(),
             tool_child_context_source,
         })
     }
 
-    /// - the backend supplies its own process work => use it
-    ///   ([`ProcessPortSetup::External`]);
-    /// - otherwise the in-process worker drives the backend's registry,
-    ///   constructed lazily on first open ([`ProcessPortSetup::NativeDefault`]).
-    ///   Its [`DurableProcessWorkerConfig`] is built eagerly so a bad config
-    ///   fails the build.
-    // Mirrors `resolve_queued_work`; inputs are the required driver state.
+    /// The core's session driver (FIG-3600), installed on the backend's
+    /// session-work engine. Returns the driver and the one the engine kept.
     #[allow(clippy::too_many_arguments)]
-    fn resolve_process_work(
-        process_work_source: &ProcessWorkSource,
-        worker_plugin_host: &PluginHost,
-        env: &RuntimeEnvironment,
-        process_lifecycle_available: bool,
-        policy: &SessionPolicy,
-        process_execution_concurrency: usize,
-        worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-        session_execution_owner: lash_core::LeaseOwnerIdentity,
-        process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
-        native_substrate: NativeSubstrateConfig,
-    ) -> Result<ProcessPortSetup> {
-        let watched = match process_work_source {
-            ProcessWorkSource::External(wiring) => {
-                return Ok(ProcessPortSetup::External {
-                    wiring: wiring.clone(),
-                });
-            }
-            ProcessWorkSource::Native(watched) => watched.clone(),
-        };
-        let config = Box::new(NativeProcessWorkerSetup {
-            worker_plugin_host: worker_plugin_host.clone(),
-            env: env.clone(),
-            process_lifecycle_available,
-            policy: policy.clone(),
-            process_execution_concurrency,
-            worker_slot_supplier,
-            session_execution_owner,
-            process_work: WorkerProcessWork::SelfNative(watched.clone()),
-            // Admission-only drive faults otherwise have no path to the host.
-            process_event_sink,
-            turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
-            native_substrate,
-        });
-        // The live native worker is constructed lazily once the outer queued-work dispatcher
-        // exists.
-        config.build(Arc::new(NoSessionWork::new()))?;
-        Ok(ProcessPortSetup::NativeDefault { config, watched })
-    }
-
-    /// The core's session driver and where it runs (FIG-3600): installed on
-    /// the backend's own session-work engine when it has one, else run by the
-    /// in-process engine of the interim SQL backends. Returns the port setup
-    /// and the driver the core keeps.
-    #[allow(clippy::too_many_arguments)]
-    fn resolve_queued_work(
+    fn build_session_driver(
+        session_work: &Arc<dyn SessionWorkEngine>,
         residents: Arc<residents::ResidentSessions>,
-        backend_engine: Option<Arc<dyn lash_core::SessionWorkEngine>>,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
         policy: SessionPolicy,
@@ -1440,82 +1207,28 @@ impl LashCoreBuilder {
         store_factory: &Arc<dyn SessionStoreFactory>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
-        worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-        queued_work_execution_concurrency: usize,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,
-    ) -> (
-        QueuedPortSetup,
-        Arc<NativeQueuedWorkRunHandle>,
-        Arc<dyn lash_core::SessionDriver>,
-    ) {
+    ) -> (Arc<CoreSessionDriver>, Arc<dyn lash_core::SessionDriver>) {
         let owner = session_execution_owner.clone();
         let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
-        let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
-            NativeQueuedWorkRunConfig {
-                recovery,
-                residents,
-                session_execution_owner,
-                env,
-                policy,
-                protocol_factory,
-                plugin_factories,
-                store_factory: Arc::clone(store_factory),
-                live_replay_store,
-                process_lifecycle_available,
-            },
-        )));
-        match backend_engine {
-            Some(port) => {
-                let installed = install_session_driver(&port, driver.clone(), &owner);
-                (QueuedPortSetup::External { port }, driver, installed)
-            }
-            None => (
-                QueuedPortSetup::Native {
-                    driver: Arc::clone(&driver),
-                    slot_supplier: worker_slot_supplier,
-                    execution_concurrency: queued_work_execution_concurrency,
-                },
-                driver.clone(),
-                driver,
-            ),
-        }
-    }
-
-    /// Replace the builder's backend with `layer` over it: a test double's
-    /// session work, or a decorated port.
-    #[cfg(test)]
-    pub(crate) fn map_backend(mut self, layer: impl FnOnce(Backend) -> Backend) -> Self {
-        self.backend = layer(self.backend);
-        self
+        let driver = Arc::new(CoreSessionDriver::new(Arc::new(CoreSessionDriverConfig {
+            recovery,
+            residents,
+            session_execution_owner,
+            env,
+            policy,
+            protocol_factory,
+            plugin_factories,
+            store_factory: Arc::clone(store_factory),
+            live_replay_store,
+            process_lifecycle_available,
+        })));
+        let installed = install_session_driver(session_work, driver.clone(), &owner);
+        (driver, installed)
     }
 
     pub fn advanced(self) -> AdvancedLashCoreBuilder {
         AdvancedLashCoreBuilder { builder: self }
-    }
-
-    /// Each appended process event is pushed to the sink after its durable
-    /// write, in per-process append order. This is freshness, not truth: it
-    /// never buffers or retries, and consumers reconcile from the durable event
-    /// log. Observe completion via the await seam even though the terminal
-    /// append is also emitted. See [`ProcessEventSink`] for the full contract.
-    ///
-    /// Event emission applies to the in-process registry path; a backend
-    /// whose engine runs its own processes installs the sink through its
-    /// own constructor.
-    ///
-    /// Worker faults are not registry events and do not follow that split: the
-    /// durable process worker this core configures reports every
-    /// [`ProcessWorkerFault`](facade_support::ProcessWorkerFault) to the sink
-    /// installed here, whichever process work the backend supplies. A host
-    /// that drives pending processes wants this installed, because the drive
-    /// is an admission call and a fault after admission has no other way home.
-    ///
-    /// [`ProcessWorkerFault`]: facade_support::ProcessWorkerFault
-    ///
-    /// [`ProcessEventSink`]: facade_support::ProcessEventSink
-    pub fn process_event_sink(mut self, sink: Arc<dyn facade_support::ProcessEventSink>) -> Self {
-        self.process_event_sink = Some(sink);
-        self
     }
 
     /// Bounds of the process observation hub: its per-process ring capacity

@@ -892,10 +892,12 @@ async fn run_scenario(
     let producer = producer.clone();
     let plan = plan.clone();
     let stores = Arc::clone(stores);
+    let tier = Arc::clone(runner);
     runner
         .run_turn(
             admitted,
             Arc::new(move |turn_controller| {
+                let tier = Arc::clone(&tier);
                 let session_id = session_id.clone();
                 let effect_host = Arc::clone(&effect_host);
                 let stores = Arc::clone(&stores);
@@ -908,6 +910,7 @@ async fn run_scenario(
                         session_id,
                         effect_host,
                         stores,
+                        Some(&tier),
                         Some(turn_controller),
                         &producer,
                         &plan,
@@ -941,6 +944,7 @@ async fn run_scenario_on_session(
     session_id: lash_sansio::SessionId,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
+    runner: Option<&Arc<dyn crate::ConformanceTurnRunner>>,
     turn_controller: Option<crate::ScopedEffectController<'_>>,
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
@@ -994,7 +998,7 @@ async fn run_scenario_on_session(
         session_id,
         process_registry: producer.process_registry.as_ref().map(|make| make()),
     };
-    drive_turn(&world, producer, plan, turn_controller).await;
+    drive_turn(&world, runner, producer, plan, turn_controller).await;
     ScenarioObservations {
         events: rendezvous.events(),
         peak_in_flight: rendezvous.peak_in_flight(),
@@ -1069,6 +1073,7 @@ pub fn tool_batch_turn_id(session_id: &lash_sansio::SessionId) -> lash_sansio::T
 )]
 async fn drive_turn(
     world: &ScenarioWorld,
+    runner: Option<&Arc<dyn crate::ConformanceTurnRunner>>,
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
     turn_controller: Option<crate::ScopedEffectController<'_>>,
@@ -1130,14 +1135,12 @@ async fn drive_turn(
     };
     // A producer whose batch runs inside a process needs four things this
     // runtime otherwise has no reason to own: the engines its own plugins
-    // contribute, a process registry, process work bound to exactly that
-    // registry, and a worker that drives the registry while the turn is parked
-    // on the process. They are installed here and nowhere else, so a producer
-    // that issues its batch from the turn still gets the plain one-turn
-    // fixture.
+    // contribute, a process registry, and process work bound to exactly that
+    // registry, whose segments the tier's engine serves with a worker built
+    // here. They are installed here and nowhere else, so a producer that
+    // issues its batch from the turn still gets the plain one-turn fixture.
     let plugin_host = crate::facade_support::PluginHost::new(world.factories.clone());
     let mut process_wiring = None;
-    let mut process_worker = None;
     if let Some(registry) = world.process_registry.as_ref() {
         host = plugin_host
             .install_process_engine_contributions(host, true)
@@ -1146,25 +1149,24 @@ async fn drive_turn(
         // must observe the same registry handle, or the turn parks on a change
         // feed nothing publishes to.
         let watched = crate::facade_support::watch_process_registry(Arc::clone(registry));
-        let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-            watched.registry(),
-        )));
-        process_wiring = Some(crate::ProcessWorkWiring::new(watched.clone(), port));
-        process_worker = Some(
-            lash_core_worker::DurableProcessWorker::new(
-                lash_core_worker::DurableProcessWorkerConfig::new(
-                    Arc::new(crate::facade_support::PluginHost::new(
-                        world.factories.clone(),
-                    )),
-                    host.clone(),
-                    lash_core_worker::WorkerProcessWork::SelfNative(watched),
-                    Arc::new(crate::NoSessionWork::new()),
-                    crate::testing::runtime_lease_owner(),
-                )
-                .with_session_policy(policy.clone()),
+        let worker = lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::new(
+                Arc::new(crate::facade_support::PluginHost::new(
+                    world.factories.clone(),
+                )),
+                host.clone(),
+                crate::ProcessWorkWiring::new(
+                    watched.clone(),
+                    Arc::new(crate::NoProcessWork::new(&watched)),
+                ),
+                Arc::new(crate::NoSessionWork::new()),
+                crate::testing::runtime_lease_owner(),
             )
-            .expect("build the tool-batch parallelism process worker"),
-        );
+            .with_session_policy(policy.clone()),
+        )
+        .expect("build the tool-batch parallelism process worker");
+        let runner = runner.expect("a producer that runs in a process is run by the law's tier");
+        process_wiring = Some(runner.process_work(watched, worker));
     }
     let mut builder = crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner());
     if let Some(wiring) = process_wiring {
@@ -1214,19 +1216,6 @@ async fn drive_turn(
     };
     let mut input = crate::TurnInput::text("run the planned batch");
     input.trace_turn_id = Some(turn_id);
-    // The worker is driven for as long as the turn runs. A process registered
-    // mid-turn is admitted on the next sweep; the sweep is what turns
-    // `processes.start` into a running process, and without it the turn parks
-    // forever on a handle nothing will settle.
-    let worker_driver = process_worker.map(|worker| {
-        crate::task::spawn(async move {
-            loop {
-                let _ = worker.drive_pending_processes().await;
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-    });
-
     // The turn is bounded, and this is the law's only clock: the leaves wait
     // on the rendezvous without a wall-clock bound, so this budget bounds a
     // true deadlock and nothing else (FIG-3423). Its expiry is the report a
@@ -1259,9 +1248,6 @@ async fn drive_turn(
         turn.outcome,
         turn.errors,
     );
-    if let Some(driver) = worker_driver {
-        driver.abort();
-    }
     let _ = &world.state;
 }
 
@@ -1344,6 +1330,7 @@ pub async fn measure_tool_batch(
         session_id,
         effect_host,
         stores,
+        None,
         turn_controller,
         producer,
         &plan,

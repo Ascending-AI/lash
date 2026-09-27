@@ -9,11 +9,11 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         let source = format!(
             "const retained = [{{ payload: {retained_payload:?} }}];\nfinish(\"committed\");"
         );
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
             .provider(queued_text_provider(vec![typescript_block(&source)]))
             .model(mock_model_spec())
-            .map_backend(crate::tests::inline_session_work)
             .build(crate::testing::runtime_lease_owner())?;
+        serve_processes(&core);
         let session = core
             .session("rlm-leaf-append-stale-rollback")
             .open()
@@ -151,18 +151,14 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
     session_id: &SessionId,
     abandoned_global_bytes: usize,
 ) -> Result<ColdReopenFrameState> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let sqlite_backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let sqlite_store_factory = sqlite_backend.session_store_factory();
+    const SEED: u64 = 0x0c01_d4e0;
+    let double = restate_double(SEED).await;
+    let sqlite_store_factory = double.stores().session_store_factory();
     let checkpoint_writes =
         lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
     let observed_writes = checkpoint_writes.clone();
     let backend =
-        DecoratedBackend::over(sqlite_backend.into()).session_store_factory(move |inner| {
+        DecoratedBackend::over(double.lash_backend()).session_store_factory(move |inner| {
             Arc::new(
                 lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                     inner,
@@ -183,21 +179,33 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     let (follow_on_started_tx, follow_on_started_rx) = oneshot::channel::<()>();
     let follow_on_started_tx = Arc::new(StdMutex::new(Some(follow_on_started_tx)));
     let provider_calls = Arc::new(AtomicUsize::new(0));
+    let follow_on_requests = Arc::new(StdMutex::new(Vec::<LlmRequest>::new()));
+    let captured_follow_on_requests = Arc::clone(&follow_on_requests);
+    // The first follow-on call is held until its attempt dies; the redriven
+    // attempt's call answers.
     let first_provider = crate::testing::TestProvider::builder()
         .kind("embed-test")
-        .complete(move |_| {
+        .complete(move |request| {
             let source = switch_source.clone();
             let started = Arc::clone(&follow_on_started_tx);
             let calls = Arc::clone(&provider_calls);
+            let captured = Arc::clone(&captured_follow_on_requests);
             async move {
-                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                    return Ok(text_response(&typescript_block(&source)));
+                match calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => return Ok(text_response(&typescript_block(&source))),
+                    1 => {
+                        if let Some(tx) = started.lock_recover().take() {
+                            let _ = tx.send(());
+                        }
+                        std::future::pending::<()>().await;
+                        unreachable!("the held follow-on call dies with its attempt")
+                    }
+                    _ => {}
                 }
-                if let Some(tx) = started.lock_recover().take() {
-                    let _ = tx.send(());
-                }
-                std::future::pending::<()>().await;
-                unreachable!("the held follow-on call is dropped before cold reopen")
+                captured.lock_recover().push(request);
+                Ok(text_response(&typescript_block(
+                    r#"finish("completed after real SQLite cold reopen");"#,
+                )))
             }
         })
         .build()
@@ -210,7 +218,6 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .provider(first_provider)
     .model(mock_model_spec())
     .tools(Arc::new(FrameStateDeferredTools))
-    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
 
@@ -219,50 +226,13 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .send(TurnInput::text("switch away from the abandoned frame"))
         .id(root_id.clone())
         .await?;
-    let drive = tokio::spawn(async move { switched.outcome().await });
     tokio::time::timeout(std::time::Duration::from_secs(5), follow_on_started_rx)
         .await
         .expect("the drive reaches the follow-on provider call")
         .expect("follow-on provider signal");
-    drive.abort();
-    assert!(
-        drive
-            .await
-            .expect_err("the drive task was dropped")
-            .is_cancelled()
-    );
+    drop(switched);
     let switch_turn_index = 1;
-
-    let resident_execution_state = first_session
-        .admin()
-        .state()
-        .snapshot_execution()
-        .await?
-        .expect("resident switched RLM has an execution snapshot");
-
-    drop(first_session);
-    drop(first_core);
-
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            let conn = rusqlite::Connection::open(sqlite_store_factory.catalog_uri())
-                .expect("open SQLite session catalog");
-            let owner = conn
-                .query_row(
-                    "SELECT lease_owner_id FROM session_execution_leases WHERE session_id = ?1",
-                    [session_id.as_str()],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .expect("read session execution lease row");
-            if owner.is_none() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("dropped runtime releases its session lane");
-
+    // The switch commit is the durable head while the follow-on call is held.
     let store_request = lash_core::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -308,24 +278,44 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     drop(store);
     drop(durable);
 
-    let follow_on_requests = Arc::new(StdMutex::new(Vec::<LlmRequest>::new()));
-    let captured_follow_on_requests = Arc::clone(&follow_on_requests);
-    let follow_on_provider = crate::testing::TestProvider::builder()
-        .kind("embed-test")
-        .complete(move |request| {
-            captured_follow_on_requests.lock_recover().push(request);
-            async move {
-                Ok(text_response(&typescript_block(
-                    r#"finish("completed after real SQLite cold reopen");"#,
-                )))
-            }
+    // The attempt dies while the follow-on model call is held; the engine
+    // redrives the root, which replays its journal up to the follow-on call
+    // and answers it.
+    let turn_invocation = double
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|invocation| {
+            invocation.target.starts_with("LashTurn/")
+                && invocation.target.contains(session_id.as_str())
+                && invocation.status == "running"
         })
-        .build()
-        .into_handle();
-    let reopened_core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
-        .provider(follow_on_provider)
+        .expect("the switch root's turn invocation runs");
+    assert!(
+        double.server().crash(&turn_invocation.id),
+        "the held attempt dies"
+    );
+    let redriven = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        first_session.root(root_id.clone()).outcome(),
+    )
+    .await
+    .expect("the redriven root settles")?;
+    assert_eq!(redriven.status, crate::TurnStatus::Answered);
+
+    let resident_execution_state = first_session
+        .admin()
+        .state()
+        .snapshot_execution()
+        .await?
+        .expect("resident switched RLM has an execution snapshot");
+
+    drop(first_session);
+    drop(first_core);
+
+    let reopened_core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
+        .provider(mock_provider())
         .model(mock_model_spec())
-        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     let execution_state = reopened_session
@@ -453,6 +443,7 @@ pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_han
             max_appends: 2,
         }))
         .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session(session_id).open().await?;
 
     let output = session
@@ -479,25 +470,17 @@ pub(super) fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_c
 
 pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commits_inner()
 -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "agent-frame-durable";
     let root_turn_id = "agent-frame-root-turn";
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
-    let controller = EffectRecorder::default();
-    let backend = controller.layered_over(backend);
-    let core = LashCore::standard_builder(backend.into(), crate::TurnBudget::Unbounded)
-        .map_backend(crate::tests::inline_session_work)
+    let double = restate_double(0x0a9e_f5a1).await;
+    let core = LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
         .provider(agent_frame_switch_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AgentFrameSwitchTools))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session(session_id).open().await?;
     let activities = RecordingEvents::default();
     let output = session
@@ -526,36 +509,32 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         vec![root_turn_id, follow_turn_id.as_str()],
         "each physical frame turn must announce its own identity exactly once"
     );
-    let mut llm_turn_ids = controller
-        .invocations()
-        .into_iter()
-        .filter(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
-        .map(|record| record.turn_id.expect("turn-scoped LLM effect"))
-        .collect::<Vec<_>>();
-    llm_turn_ids.sort();
-    llm_turn_ids.dedup();
-    assert_eq!(
-        llm_turn_ids,
-        vec![root_turn_id.to_string(), follow_turn_id.clone().to_string()]
-    );
-    let replay_keys = controller
-        .invocations()
-        .into_iter()
-        .filter_map(|record| record.replay_key)
-        .collect::<Vec<_>>();
+    // Each frame turn journals its model calls under its own turn: the
+    // follow turn's id extends the root's, so a root key is one that names
+    // the root and not the follow turn.
+    let llm_calls = journaled_llm_call_keys(&double);
+    let follow_calls = llm_calls
+        .iter()
+        .filter(|key| key.contains(&format!("{session_id}:{follow_turn_id}:")))
+        .count();
+    let root_calls = llm_calls
+        .iter()
+        .filter(|key| {
+            key.contains(&format!("{session_id}:{root_turn_id}:"))
+                && !key.contains(follow_turn_id.as_str())
+        })
+        .count();
     assert!(
-        replay_keys.iter().any(|key| key.contains(root_turn_id)),
-        "root turn replay keys should include {root_turn_id}: {replay_keys:?}"
-    );
-    assert!(
-        replay_keys
-            .iter()
-            .any(|key| key.contains(follow_turn_id.as_str())),
-        "follow turn replay keys should include {follow_turn_id}: {replay_keys:?}"
+        root_calls > 0 && follow_calls > 0 && root_calls + follow_calls == llm_calls.len(),
+        "every model call is journaled under the root or the follow turn: {llm_calls:?}"
     );
 
-    let conn =
-        rusqlite::Connection::open(store_factory.catalog_uri()).expect("open session sqlite store");
+    let conn = rusqlite::Connection::open(
+        double
+            .stores()
+            .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open session sqlite store");
     let mut stmt = conn
         .prepare(
             "SELECT turn_id FROM runtime_turn_commits
@@ -594,7 +573,7 @@ pub(super) fn processes_lists_started_lashlang_process_until_awaited() -> Result
 pub(super) async fn processes_lists_started_lashlang_process_until_awaited_inner() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
     .provider(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
@@ -616,6 +595,7 @@ finish(value);"#,
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
     ))
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("rlm-process-control-tool").open().await?;
     let turn_session = session.clone();
     let turn = tokio::spawn(async move {
@@ -670,11 +650,11 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
-    let backend = memory_backend().await;
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
-        rlm_factory(&backend.clone().into()).with_lashlang_execution_sink(
+        rlm_factory(&backend.clone()).with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         ),
     ))
@@ -696,6 +676,7 @@ finish(value);"#,
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
     ))
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("rlm-lashlang-graph-store").open().await?;
     let turn_session = session.clone();
     let turn = tokio::spawn(async move {
@@ -765,10 +746,11 @@ finish(value);"#,
 #[cfg(feature = "rlm")]
 #[tokio::test]
 pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
         .provider(queued_text_provider(vec!["done in prose"]))
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("rlm-prose-completion").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -805,12 +787,13 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
 #[cfg(feature = "rlm")]
 #[tokio::test]
 pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
         .provider(queued_text_provider(vec![typescript_block(
             r#"finish("done via finish");"#,
         )]))
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core
         .session("rlm-finish-required-completion")
         .open()
@@ -847,7 +830,7 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
 #[tokio::test]
 pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Result<()>
 {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
         .provider(queued_text_provider(vec![
             typescript_block("this is not valid typescript"),
             typescript_block(r#"finish("recovered");"#),
@@ -855,6 +838,7 @@ pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_to
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("rlm-failed-code-event").open().await?;
     let events = RecordingEvents::default();
 
@@ -940,7 +924,7 @@ pub(super) async fn an_after_step_cancel_stops_at_the_step_boundary() -> Result<
     let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(gated_app_lookup_provider(
@@ -952,6 +936,7 @@ pub(super) async fn an_after_step_cancel_stops_at_the_step_boundary() -> Result<
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("stop-after-step").open().await?;
 
     let handle = session
@@ -1005,7 +990,7 @@ pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() 
     // The response never arrives, so an after-step stop can never land by
     // itself; the host escalates after its own deadline.
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
     .provider(gated_app_lookup_provider(
@@ -1017,6 +1002,7 @@ pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() 
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("escalate-after-step").open().await?;
 
     let handle = session.send(TurnInput::text("hang, then escalate")).await?;
@@ -1079,7 +1065,7 @@ pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() 
 async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Value> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
         .provider(queued_text_provider(vec![format!(
             "<typescript>\n{}\n</typescript>",
             cell.trim()
@@ -1092,6 +1078,7 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
             ),
         ))
         .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
     let session = core.session("rlm-process-definition-filter").open().await?;
     let turn_session = session.clone();
     let turn = tokio::spawn(async move {

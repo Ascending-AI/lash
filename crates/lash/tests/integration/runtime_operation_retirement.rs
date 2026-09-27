@@ -419,11 +419,11 @@ impl lash::EffectEngine for WithHost {
         self.inner.build_generation()
     }
 
-    fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
+    fn process_work(&self) -> lash::process::ProcessWorkWiring {
         self.inner.process_work()
     }
 
-    fn session_work(&self) -> Option<std::sync::Arc<dyn lash::runtime::SessionWorkEngine>> {
+    fn session_work(&self) -> std::sync::Arc<dyn lash::runtime::SessionWorkEngine> {
         self.inner.session_work()
     }
 }

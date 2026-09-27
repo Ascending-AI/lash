@@ -8,14 +8,12 @@ before any effect. The amendment at the end of this ADR is the Restate
 mechanism, and ADR 0110 states it for the effect interface. There is no
 lash-side attempt budget; the engine's retry policy bounds retries.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour in *The reference substrate*, which makes lash
-the substrate over the SQL stores, with its own redrive and worker retry
-budget. *Conformance is the contract* stands, and now binds the one engine and
-any later one. Those passages stay as written until the PR that deletes the
-code (FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
+Amended 2026-09-27 (FIG-3860,
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
+Restate is the only effect engine and the SQL stores are storage only. The
+in-process reference substrate — lash as the substrate over the SQL stores,
+with its own redrive and execution budget — is deleted; *Conformance is the
+contract* stands, and binds the one engine and any later one.
 
 A lash service instance is stateless with respect to correctness. In-memory
 state exists — a turn mid-stream, watch hubs, caches — but none of it may be
@@ -61,16 +59,6 @@ uses the native FIFO. Turn-owned command drains carry the invocation controller;
 standalone command drains select the configured host controller. Storeless
 commits continue to bypass local admission.
 
-## The reference substrate
-
-The in-process `DurableProcessWorker`, the SQLite and Postgres stores, and
-the native drivers together form the reference substrate lash ships so the
-batteries-included path works without an engine. There, lash *is* the
-substrate, so it redrives after restart — and its execution budget (the
-native process execution concurrency bound) is that driver's scheduling
-policy, not a lash-level recovery semantic. Design pressure on the reference
-substrate must not leak into the contracts.
-
 ## Conformance is the contract
 
 A third-party substrate's redrive quality is its implementor's problem. What
@@ -86,8 +74,7 @@ one.
 
 Anything found to keep correctness state only in instance memory across an
 effect boundary is a defect against this document. New coordination features
-land on the engine seam first, with the reference substrate implementing the
-same contract natively. When a bound, a wait, or a redrive path is proposed
+land on the engine seam first. When a bound, a wait, or a redrive path is proposed
 inside lash-core, the first question is whether it belongs to the substrate —
 the answer decided FIG-526, and it will decide the next one.
 

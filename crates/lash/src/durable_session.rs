@@ -56,7 +56,7 @@
 //! configured Live Replay store — in-memory, and therefore process-local, by
 //! default.
 
-use crate::core::HeldWork;
+use crate::core::ResolvedQueuedWork;
 use crate::support::{
     Arc, EffectHost, EmbedError, Result, RuntimePersistence, SessionStoreFactory, TurnInput,
 };
@@ -95,7 +95,7 @@ pub struct DurableSession {
     /// What a [`send`](Self::send) needs beyond the queue: the engine a
     /// handle waits on, the effect host its terminal reads and cancels go
     /// through, and the live replay its events come from.
-    work: HeldWork,
+    work: Arc<ResolvedQueuedWork>,
     effect_host: Arc<dyn EffectHost>,
     live_replay_store: Arc<dyn LiveReplayStore>,
     /// The resolver a [`send`](Self::send) judges a spec's route against
@@ -107,7 +107,7 @@ impl DurableSession {
     pub(crate) fn from_catalog(
         session_id: SessionId,
         catalog: Arc<dyn SessionStoreFactory>,
-        work: HeldWork,
+        work: Arc<ResolvedQueuedWork>,
         ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
@@ -139,7 +139,7 @@ impl DurableSession {
     pub(crate) fn from_binding(
         session_id: SessionId,
         store: Arc<dyn RuntimePersistence>,
-        work: HeldWork,
+        work: Arc<ResolvedQueuedWork>,
         ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,

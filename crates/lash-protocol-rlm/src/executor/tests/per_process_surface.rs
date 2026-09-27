@@ -2,16 +2,14 @@ use std::sync::Arc;
 
 use lash_core::facade_support::{
     PluginHost, PluginSessionContext, PluginSpec, PluginSpecFactory, RuntimeHostConfig,
-    empty_trigger_source_key, watch_process_registry,
+    empty_trigger_source_key,
 };
 use lash_core::{
-    ArtifactOwner, CommitBudget, LashSchema, NativeProcessWork, NoSessionWork, PluginError,
-    PluginOptions, ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessOriginator,
-    QueuedWorkBatchingConfig, SessionPolicy, TriggerCommand, TriggerCommandOutcome,
-    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
-    TurnBudget,
+    ArtifactOwner, CommitBudget, LashSchema, PluginError, PluginOptions, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessOriginator, QueuedWorkBatchingConfig, SessionPolicy,
+    TriggerCommand, TriggerCommandOutcome, TriggerOccurrenceRequest, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft, TurnBudget,
 };
-use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use lash_lashlang_runtime::{
     LashlangProcessEngine, LashlangProcessInput, LashlangSurface, LashlangSurfaceContribution,
     lashlang_process_engine_registration, lashlang_surface_extension,
@@ -107,15 +105,16 @@ const main = async () => "ok";
 
 #[tokio::test]
 async fn trigger_fired_process_runs_under_session_contributed_event_type() {
-    let backend = crate::testing::memory_backend().await;
-    let artifact_store = lashlang::LashlangArtifacts::of_backend(&backend.clone().into());
+    let table = crate::testing::DoubleProcesses::new(0x3344_0001).await;
+    let backend = table.backend().clone();
+    let artifact_store = lashlang::LashlangArtifacts::of_backend(&backend);
     let factory = Arc::new(crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
             .instruction_limit(crate::InstructionBound::instructions(1_000_000))
             .memory_limit(crate::MemoryBound::mebibytes(64))
             .build(),
-        &backend.clone().into(),
+        &backend,
     ));
     let plugin_host = PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn lash_core::facade_support::PluginFactory>,
@@ -175,12 +174,6 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         args: serde_json::Map::new(),
     };
 
-    let backend: lash_core::Backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a memory backend"),
-    )
-    .into();
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
@@ -222,76 +215,70 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         "trigger registration mutates the store"
     );
 
-    let registry = backend.process_registry();
-    let engine = LashlangProcessEngine::new(
-        artifact_store.clone(),
-        LashlangSurface::new(
-            lashlang::LashlangAbilities::default(),
-            lashlang::LashlangLanguageFeatures::default(),
-            lashlang::LashlangHostCatalog::new(),
-        ),
-    );
+    let engine = || {
+        LashlangProcessEngine::new(
+            artifact_store.clone(),
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::new(),
+            ),
+        )
+    };
     let runtime_host = RuntimeHostConfig::new(
         backend.clone(),
         CommitBudget::bounded(1024 * 1024, 512),
         QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine_registration(lashlang_process_engine_registration(engine));
-    let watched = watch_process_registry(Arc::clone(&registry));
-    let worker = DurableProcessWorker::new(
-        DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(vec![
-                Arc::clone(&factory) as Arc<dyn lash_core::facade_support::PluginFactory>,
-                session_surface_factory(),
-            ])),
-            runtime_host,
-            WorkerProcessWork::SelfNative(watched),
-            Arc::new(NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(session_policy()),
+    .with_process_engine_registration(lashlang_process_engine_registration(engine()));
+    table.install_worker(
+        vec![
+            Arc::clone(&factory) as Arc<dyn lash_core::facade_support::PluginFactory>,
+            session_surface_factory(),
+        ],
+        runtime_host,
+        session_policy(),
+    );
+
+    // The occurrence is emitted from a handler, as a deployment's tool
+    // intent emits it: the router reserves the delivery and starts its
+    // process under the handler's controller (ADR 0107).
+    let router = lash_core::facade_support::TriggerRouter::new(
+        Arc::clone(&trigger_store),
+        backend.process_work(),
     )
-    .expect("valid trigger surface worker");
-
-    let ingress = trigger_store
-        .ingest_occurrence(TriggerOccurrenceRequest::new(
-            SOURCE_TYPE,
-            source_key,
-            serde_json::json!({ "colour": "blue" }),
-            "fig3344-trigger-fire",
-        ))
+    .with_process_artifacts(
+        Arc::clone(&env_store),
+        lash_core::ProcessEngineRegistry::new()
+            .with_registration(lashlang_process_engine_registration(engine())),
+    );
+    let handler = table
+        .open_handler(crate::testing::default_cell_scope())
+        .await;
+    let report = router
+        .emit(
+            TriggerOccurrenceRequest::new(
+                SOURCE_TYPE,
+                source_key,
+                serde_json::json!({ "colour": "blue" }),
+                "fig3344-trigger-fire",
+            ),
+            &handler.scoped(),
+        )
         .await
-        .expect("ingest trigger occurrence");
-    let delivery = ingress
-        .reservations
+        .expect("emit the trigger occurrence");
+    handler.close().await.expect("close the emitting handler");
+    let process_id = report
+        .deliveries
         .into_iter()
-        .next()
-        .expect("occurrence reserves one delivery");
-
-    let _report = worker
-        .drive_pending_processes()
-        .await
-        .expect("worker reconciles and drives the trigger delivery");
-    // The worker's reconciliation starts the unbound delivery and binds the
-    // process its start minted (ADR 0107).
-    let process_id = trigger_store
-        .list_deliveries()
-        .await
-        .expect("list trigger deliveries")
-        .into_iter()
-        .find(|reserved| {
-            reserved.occurrence.occurrence_id == delivery.occurrence.occurrence_id
-                && reserved.subscription.subscription_id == delivery.subscription.subscription_id
-        })
-        .and_then(|reserved| reserved.process_id)
-        .expect("the reconciled delivery is bound to the process it started");
+        .find_map(|delivery| delivery.process_id)
+        .expect("the occurrence's delivery started its process");
     let terminal = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&process_id),
+        std::time::Duration::from_secs(30),
+        table.await_terminal(&process_id),
     )
     .await
-    .expect("trigger delivery reaches terminal state")
-    .expect("await trigger delivery");
+    .expect("trigger delivery reaches terminal state");
     assert!(
         matches!(
             terminal,

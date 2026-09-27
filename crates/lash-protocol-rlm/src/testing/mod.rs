@@ -37,6 +37,99 @@ pub(crate) async fn kernel_double(
         .expect("build the Restate server double")
 }
 
+/// A process table the Restate server double serves: the double's registry
+/// and execution-env store, which a cell's recorded starts write, and the
+/// worker the double's process workflow runs their segments on. The double
+/// must outlive every process it admits, so the table owns it.
+pub(crate) struct DoubleProcesses {
+    double: lash_restate_test::RestateTestBackend,
+    backend: lash_core::Backend,
+}
+
+impl DoubleProcesses {
+    /// A fresh double under `seed`.
+    pub(crate) async fn new(seed: u64) -> Self {
+        let double = kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
+        Self { double, backend }
+    }
+
+    /// The double itself, for a cell run in one of its handlers.
+    pub(crate) fn double(&self) -> &lash_restate_test::RestateTestBackend {
+        &self.double
+    }
+
+    /// The double's backend: a worker's runtime host is built over it.
+    pub(crate) fn backend(&self) -> &lash_core::Backend {
+        &self.backend
+    }
+
+    /// The registry a cell's recorded starts register on.
+    pub(crate) fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
+        self.backend.process_registry()
+    }
+
+    /// The store a recorded start publishes its execution env to.
+    pub(crate) fn env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
+        self.backend.process_env_store()
+    }
+
+    /// Serve process segments with a worker over `factories` and
+    /// `runtime_host`, which must be built over [`Self::backend`].
+    pub(crate) fn install_worker(
+        &self,
+        factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+        runtime_host: lash_core::facade_support::RuntimeHostConfig,
+        session_policy: lash_core::SessionPolicy,
+    ) {
+        let worker = lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::new(
+                Arc::new(lash_core::facade_support::PluginHost::new(factories)),
+                runtime_host,
+                self.backend.process_work(),
+                Arc::new(lash_core::NoSessionWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(session_policy),
+        )
+        .expect("valid double process worker");
+        self.double.install_process_worker(worker);
+    }
+
+    /// Open a handler on the double for `admitted`: its controller serves
+    /// effects the way a deployment's turn handler does.
+    pub(crate) async fn open_handler(
+        &self,
+        admitted: lash_core::AdmittedScope,
+    ) -> lash_restate_test::OpenHandler {
+        self.double
+            .open_handler(admitted)
+            .await
+            .expect("open a handler on the double")
+    }
+
+    /// Submit every pending registry row to the double's process workflow.
+    pub(crate) async fn admit_pending(&self) {
+        let _report = self
+            .backend
+            .process_work()
+            .admit_pending_processes("test")
+            .await
+            .expect("admit the pending processes");
+    }
+
+    /// Await `process_id`'s terminal registry record.
+    pub(crate) async fn await_terminal(
+        &self,
+        process_id: &lash_core::ProcessId,
+    ) -> lash_core::ProcessAwaitOutput {
+        lash_core::NoProcessWork::for_registry(self.registry())
+            .await_terminal(process_id)
+            .await
+            .expect("await the process's terminal record")
+    }
+}
+
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.
     static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =

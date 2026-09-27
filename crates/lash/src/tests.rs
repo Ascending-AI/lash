@@ -3,7 +3,7 @@ use crate::admin::SessionConfigPatch;
 use crate::support::SessionSpec;
 use crate::support::SessionWorkEngine;
 use crate::support::{
-    Arc, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory, ProcessRegistry,
+    Arc, CancellationToken, EmbedError, LashCore, PluginFactory, ProcessRegistry,
     PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate, ProviderHandle, Result,
     RunActivityCollector, RuntimeSessionState, SessionError, SessionObservationSubscription,
     SessionResume, SessionStoreFactory, StaticPluginFactory, StdMutex, ToolProvider, TurnActivity,
@@ -689,7 +689,7 @@ struct ReusableStoreFactory {
 pub(crate) async fn backend_with_catalog(
     catalog: Arc<dyn lash_core::SessionStoreFactory>,
 ) -> DecoratedBackend {
-    DecoratedBackend::over(memory_backend().await.into()).session_store_factory(move |_| catalog)
+    DecoratedBackend::over(double_backend().await).session_store_factory(move |_| catalog)
 }
 
 /// A memory backend whose catalog serves `store` for every session id:
@@ -698,7 +698,7 @@ pub(crate) async fn backend_with_catalog(
 pub(crate) async fn backend_serving(
     store: Arc<dyn lash_core::RuntimePersistence>,
 ) -> DecoratedBackend {
-    DecoratedBackend::over(memory_backend().await.into())
+    DecoratedBackend::over(double_backend().await)
         .session_store_factory(move |_| Arc::new(ReusableStoreFactory { store }))
 }
 
@@ -2142,7 +2142,7 @@ fn checkpoint_gated_provider(
 }
 
 pub(crate) async fn standard_core() -> LashCore {
-    standard_core_over(memory_backend().await.into())
+    standard_core_over(double_backend().await)
 }
 
 /// A standard core over `backend`.
@@ -2174,7 +2174,7 @@ fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPl
 /// A [`LashCoreBuilder`] pre-seeded with the default RLM factory.
 #[cfg(feature = "rlm")]
 async fn rlm_core_builder() -> crate::core::LashCoreBuilder {
-    rlm_core_builder_over(memory_backend().await.into())
+    rlm_core_builder_over(double_backend().await)
 }
 
 /// [`rlm_core_builder`] over `backend`: the core and its RLM factory share
@@ -2187,8 +2187,8 @@ fn rlm_core_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBu
 
 mod scope_support;
 use scope_support::{
-    delete_bound_session, delete_bound_session_outcome, host_scope, process_scope,
-    runtime_operation_scope, text_message,
+    delete_bound_session, delete_bound_session_outcome, host_scope, runtime_operation_scope,
+    text_message,
 };
 mod control_admin;
 mod core_session_builder;
@@ -2196,14 +2196,12 @@ mod deployment_and_testing_facade;
 mod durable_session;
 mod harness;
 pub(crate) use harness::{
-    AcceptedSend as _, DecoratedBackend, backend_work_facets_with_budget,
-    explicit_ephemeral_facets, explicit_ephemeral_facets_with_backend_work,
-    explicit_ephemeral_facets_with_budget, inline_session_work, memory_backend,
-    memory_backend_with_clock, memory_store_backend, memory_store_set, mock_model_spec, model_spec,
-    output_into_cancelled_by, restate_double, retry_when_claim_frees,
-    run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_turn_input_states,
+    AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend, double_backend_over,
+    explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, latest_double,
+    memory_store_backend, memory_store_set, mock_model_spec, model_spec, output_into_cancelled_by,
+    redeploy, restate_double, retry_when_claim_frees, run_async_test_on_stack_budget,
+    run_async_test_on_stack_size, serve_processes, store_backend_with_clock, turn_input_states,
 };
-mod aborted_turn_groups;
 mod agent_scenarios;
 #[cfg(feature = "rlm")]
 mod aggregate_await_comprehension;
@@ -2218,12 +2216,6 @@ mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;
 mod queued_run_recovery;
-#[cfg(feature = "rlm")]
-mod race_recovery;
-#[cfg(feature = "rlm")]
-mod rebuild_conformance;
-#[cfg(feature = "rlm")]
-mod replay_park;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
 mod send_handle;

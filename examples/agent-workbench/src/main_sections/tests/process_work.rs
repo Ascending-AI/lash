@@ -1267,20 +1267,20 @@ async fn worker_faults_reach_the_workbench_sink_as_rendered_notices_inner() {
 }
 
 /// The rendering test above hands faults to the sink directly, so it would
-/// still pass if bootstrap stopped installing that sink on the core. The
-/// wiring is the part the ticket is about — the durable process worker the
-/// core configures reports its faults to the sink installed there and
-/// nowhere else — so guard the wiring itself.
+/// still pass if bootstrap stopped installing that sink. The wiring is the
+/// part the ticket is about — the Restate engine's process serving reports
+/// its worker faults to the sink installed on the engine and nowhere else —
+/// so guard the wiring itself.
 #[test]
-fn bootstrap_installs_the_fault_sink_on_the_core() {
+fn bootstrap_installs_the_fault_sink_on_the_engine() {
     const BOOTSTRAP_SOURCE: &str = include_str!("../bootstrap.rs");
     assert!(
         BOOTSTRAP_SOURCE.contains("ChannelProcessEventSink::new("),
         "bootstrap must build the fault-observing process event sink"
     );
     assert!(
-        BOOTSTRAP_SOURCE.contains(".process_event_sink(Arc::clone(&process_event_sink))"),
-        "bootstrap must install the fault-observing sink on the core builder"
+        BOOTSTRAP_SOURCE.contains(".with_process_event_sink(Arc::clone(&process_event_sink))"),
+        "bootstrap must install the fault-observing sink on the Restate engine"
     );
 }
 

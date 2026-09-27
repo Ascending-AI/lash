@@ -527,11 +527,11 @@ finish(await handle);
                 plugin_factories.clone(),
             )),
             host.clone(),
-            lash_core_worker::WorkerProcessWork::External(process_work),
+            process_work,
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ))
-        .expect("valid test native substrate config");
+        .expect("valid test process worker");
     context.install_process_worker(process_worker);
     let signal_wait_controller = Arc::new(RestateRuntimeEffectController::new_for_test(
         Arc::clone(&context),

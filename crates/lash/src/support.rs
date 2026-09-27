@@ -4,19 +4,14 @@ pub(crate) use async_trait::async_trait;
 pub(crate) use lash_core::plugin::StaticPluginFactory;
 pub(crate) use lash_core::runtime::{EffectHost, RuntimeSessionState, ScopedEffectController};
 pub(crate) use lash_core::{
-    LiveReplayStore, MessageRole, NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig,
-    NoSessionWork, ProcessHandleView, ProcessWorkSubstrate, ProcessWorkWiring, SessionListFilter,
+    LiveReplayStore, MessageRole, ProcessHandleView, ProcessWorkWiring, SessionListFilter,
     SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionSummary, SessionWorkEngine,
     facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
     facade_support::PluginHost, facade_support::PluginSpec, facade_support::PluginStack,
-    facade_support::QueuedWorkRunHandle, facade_support::QueuedWorkRunRequest,
     facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
     facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
-    facade_support::SessionSpec, facade_support::WorkerSlotSupplier,
+    facade_support::SessionSpec,
 };
-#[cfg(test)]
-pub(crate) use lash_core_worker::DurableProcessWorkerConfig;
-pub(crate) use lash_core_worker::{DurableProcessWorker, WorkerProcessWork};
 pub(crate) use tokio_util::sync::CancellationToken;
 
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
