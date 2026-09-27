@@ -156,7 +156,7 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
 
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        finish_smoke_stream_with_timeout(&session, handle, Duration::ZERO),
+        finish_smoke_stream_with_timeout(handle, Duration::ZERO),
     )
     .await
     .expect("timeout cleanup remained finite");
