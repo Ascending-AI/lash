@@ -364,7 +364,7 @@ use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_
 pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
     LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
-    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
     TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
     TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,

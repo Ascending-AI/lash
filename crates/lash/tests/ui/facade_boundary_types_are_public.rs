@@ -548,6 +548,7 @@ fn persistence_types_are_nameable(
         completed_queue_claims: Vec::new(),
         completed_turn_input_claims: Vec::new(),
         undelivered_turn_input_claims: Vec::new(),
+        undelivered_queue_claims: Vec::new(),
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,

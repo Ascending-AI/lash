@@ -1,5 +1,5 @@
 //! The commit-transaction helpers that write the session graph's node rows
-//! and release the turn-input claims a cancelled turn withheld.
+//! and release the claims a cancelled turn withheld.
 
 use super::*;
 
@@ -31,6 +31,42 @@ pub(super) fn release_undelivered_turn_input_claims_conn(
         .map_err(sqlite_error)?;
     }
     Ok(())
+}
+
+/// Defer the process wakes a cancelled turn withheld from its terminal
+/// checkpoint (FIG-3543, ADR 0101 §10), inside the commit transaction, and
+/// return the record of each.
+///
+/// A held wake is deferred whatever the cancellation's disposition, which
+/// governs host-authored input only: its claim is released under its own
+/// fence, so the row keeps its `enqueue_seq` and owes its session a drive
+/// again, and its process's redelivery floor is left where it was. A claim
+/// this turn no longer holds matches no row and is left to its new holder.
+pub(super) fn defer_undelivered_queue_claims_conn(
+    tx: &rusqlite::Connection,
+    claims: &[lash_core_execution::runtime::QueuedWorkClaim],
+) -> Result<Vec<lash_core_execution::TurnCancelAffectedWake>, StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let mut deferred = Vec::new();
+    for claim in claims {
+        tx.execute(
+            sql.queued_batches.abandon_claim.sql(),
+            params![
+                claim.session_id.as_str(),
+                claim.claim_id.as_str(),
+                claim.lease_token,
+                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_id(
+                    claim
+                ),
+                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_token(
+                    claim
+                ),
+            ],
+        )
+        .map_err(sqlite_error)?;
+        deferred.extend(lash_core_execution::store_backend_support::deferred_wake_records(claim));
+    }
+    Ok(deferred)
 }
 
 /// The subset of `nodes` whose ids already occupy a `graph_nodes` row.

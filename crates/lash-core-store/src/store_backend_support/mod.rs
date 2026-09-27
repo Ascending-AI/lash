@@ -238,6 +238,32 @@ pub fn terminal_turn_input_states_sql() -> String {
 
 pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
 
+/// The affected-item records of the process wakes a withheld queued-work
+/// claim holds, each deferred (FIG-3543, ADR 0101 §10): one per wake item, in
+/// the claim's batch and item order. A cancel commit writes them after it released the
+/// claim; a claim that holds no wake yields none.
+#[must_use]
+pub fn deferred_wake_records(
+    claim: &crate::QueuedWorkClaim,
+) -> Vec<crate::turn_control_vocabulary::TurnCancelAffectedWake> {
+    claim
+        .batches
+        .iter()
+        .flat_map(|batch| {
+            batch.items.iter().filter_map(|item| match &item.payload {
+                crate::QueuedWorkPayload::ProcessWake { wake } => Some(
+                    crate::turn_control_vocabulary::TurnCancelAffectedWake::deferred(
+                        batch.batch_id.clone(),
+                        item.item_id.clone(),
+                        (**wake).clone(),
+                    ),
+                ),
+                crate::QueuedWorkPayload::SessionCommand { .. } => None,
+            })
+        })
+        .collect()
+}
+
 /// The fence a backend's [`DriveEpochStore::seal_drive_epoch`] returns for
 /// the epoch its compare-and-set raised, or the one a retried seal of the
 /// same admission finds. It is the only constructor of a [`DriveFence`]

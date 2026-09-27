@@ -185,7 +185,7 @@ pub use session_catalog::*;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 pub use turn_control::{
     LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
-    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
     TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
     TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,

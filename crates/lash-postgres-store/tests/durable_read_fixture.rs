@@ -409,7 +409,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     sqlx::raw_sql(
         "DROP TABLE IF EXISTS lash_turn_cancel_closure_authorizations;
          DROP TABLE IF EXISTS lash_turn_cancellation_bindings;
-         DROP TABLE IF EXISTS lash_turn_cancel_retired_scopes;",
+         DROP TABLE IF EXISTS lash_turn_cancel_retired_scopes;
+         DROP TABLE IF EXISTS lash_turn_cancel_affected_inputs;",
     )
     .execute(&pool)
     .await
@@ -418,6 +419,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         "lash_turn_cancellation_bindings",
         "lash_turn_cancel_closure_authorizations",
         "lash_turn_cancel_retired_scopes",
+        "lash_turn_cancel_affected_inputs",
     ] {
         sqlx::raw_sql(schema_table_ddl(table))
             .execute(&pool)

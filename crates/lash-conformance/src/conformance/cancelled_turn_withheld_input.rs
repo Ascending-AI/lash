@@ -1,5 +1,5 @@
-//! A cancelled turn never completes input it withheld from its terminal
-//! checkpoint (FIG-3531).
+//! A cancelled turn never completes work it withheld from its terminal
+//! checkpoint (FIG-3531, FIG-3543).
 //!
 //! Input claimed at `BeforeCompletion` is withheld from that checkpoint's
 //! delivery for a follow-on turn (FIG-3157). An Immediate cancel means that
@@ -8,6 +8,11 @@
 //! as it settles an unclaimed active-turn row: deferred by default, dropped
 //! when the host asks, with the same `TurnCancelAffectedInput` record in
 //! enqueue order, and — when deferred — delivered once by the next turn.
+//!
+//! A process wake withheld the same way is never completed and never dropped
+//! by the cancel: it is deferred whatever the disposition, recorded as a
+//! `TurnCancelAffectedWake`, and delivered once by the next turn (FIG-3543,
+//! ADR 0101 §10).
 //!
 //! The law drives a real runtime turn over the supplied durable store and
 //! reads the outcome back only through surfaces every backend already owes.
@@ -44,6 +49,7 @@ struct StopAfterTerminalClaim {
     effect_host: Arc<dyn crate::EffectHost>,
     armed: Mutex<Option<Stop>>,
     withheld_inputs: Mutex<Vec<crate::InputId>>,
+    withheld_batches: Mutex<Vec<crate::BatchId>>,
 }
 
 #[async_trait::async_trait]
@@ -95,11 +101,28 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        if matches!(checkpoint, crate::CheckpointKind::BeforeCompletion) && !claimed.is_empty() {
+        let claimed_batches = claims
+            .1
+            .as_ref()
+            .map(|claim| {
+                claim
+                    .batches
+                    .iter()
+                    .map(|batch| batch.batch_id.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if matches!(checkpoint, crate::CheckpointKind::BeforeCompletion)
+            && (!claimed.is_empty() || !claimed_batches.is_empty())
+        {
             self.withheld_inputs
                 .lock()
                 .expect("withheld log")
                 .extend(claimed);
+            self.withheld_batches
+                .lock()
+                .expect("withheld log")
+                .extend(claimed_batches);
             let stop = self.armed.lock().expect("stop slot").take();
             match stop {
                 // A token-fired stop reaches the turn's cancellation gate
@@ -385,26 +408,18 @@ async fn withheld_cancel_case(
     );
 }
 
-/// An Immediate cancel that lands after the terminal checkpoint claimed and
-/// withheld inject-now input settles that input through the undelivered
-/// disposition — never as completed — in enqueue order, and records it on the
-/// cancellation exactly as it records an unclaimed row. Covers the default
-/// `Defer` for one and for two inputs, and a host-selected `Drop`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn immediate_cancel_defers_withheld_inject_now_input(
-    prefix: &str,
-    backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
-) {
+async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimePersistence>) -> Harness {
     let effect_host = backend.effect_host();
     let decorated = Arc::new(StopAfterTerminalClaim {
         inner: Arc::clone(&store),
         effect_host: Arc::clone(&effect_host),
         armed: Mutex::new(None),
         withheld_inputs: Mutex::new(Vec::new()),
+        withheld_batches: Mutex::new(Vec::new()),
     });
     let runtime_store: Arc<dyn crate::RuntimePersistence> = decorated.clone();
     let requests = Arc::new(Mutex::new(Vec::<crate::LlmRequest>::new()));
@@ -431,13 +446,26 @@ pub async fn immediate_cancel_defers_withheld_inject_now_input(
         crate::testing::runtime_lease_owner(),
     )
     .await;
-    let mut harness = Harness {
+    Harness {
         store,
         decorated,
         effect_host,
         runtime,
         requests,
-    };
+    }
+}
+
+/// An Immediate cancel that lands after the terminal checkpoint claimed and
+/// withheld inject-now input settles that input through the undelivered
+/// disposition — never as completed — in enqueue order, and records it on the
+/// cancellation exactly as it records an unclaimed row. Covers the default
+/// `Defer` for one and for two inputs, and a host-selected `Drop`.
+pub async fn immediate_cancel_defers_withheld_inject_now_input(
+    prefix: &str,
+    backend: crate::Backend,
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let mut harness = harness(backend, store).await;
 
     withheld_cancel_case(
         &mut harness,
@@ -458,6 +486,226 @@ pub async fn immediate_cancel_defers_withheld_inject_now_input(
         &format!("{prefix}-withheld-drop"),
         crate::TurnCancelDisposition::Drop,
         &["dropped follow-up"],
+    )
+    .await;
+}
+
+/// One process wake for the session, as the process wake sender copies it
+/// into the queue.
+fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWakeDelivery {
+    crate::ProcessWakeDelivery {
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
+        wake_id: format!("{process}-wake-{sequence}"),
+        target_session_id: SessionId::from(SESSION_ID),
+        process_id: crate::ProcessId::fixture(process),
+        sequence,
+        event_type: "process.wake".to_string(),
+        event_invocation: crate::RuntimeInvocation {
+            attribution: crate::RuntimeAttribution::for_session(SESSION_ID),
+            subject: crate::RuntimeSubject::ProcessEvent {
+                process_id: crate::ProcessId::fixture(process),
+                sequence,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
+        input: text.to_string(),
+        created_at_ms: 1,
+    }
+}
+
+/// One cancelled turn whose terminal checkpoint withholds the wake `text`,
+/// stopped with `disposition`, then the next turn.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn withheld_wake_case(
+    harness: &mut Harness,
+    case: &str,
+    disposition: crate::TurnCancelDisposition,
+    sequence: u64,
+    text: &str,
+) {
+    let session_id = SessionId::from(SESSION_ID);
+    let cancelled_turn_id = TurnId::from(format!("{case}-cancelled"));
+    let next_turn_id = TurnId::from(format!("{case}-next"));
+
+    // A wake queued for the session: a direct turn does not absorb it at its
+    // start, so its terminal checkpoint claims and withholds it for a
+    // follow-on turn (FIG-3157).
+    let wake = wake_delivery(&format!("{case}-process"), sequence, text);
+    let batch = harness
+        .store
+        .enqueue_queued_work(crate::runtime::process_wake_batch_draft(wake.clone()))
+        .await
+        .expect("enqueue the wake");
+
+    let local = CancellationToken::new();
+    let stop = match disposition {
+        crate::TurnCancelDisposition::Defer => Stop::Local(local.clone()),
+        crate::TurnCancelDisposition::Drop => Stop::Durable(Box::new(
+            crate::TurnCancelRequest::new(
+                crate::TurnAddress::new(&session_id, &cancelled_turn_id),
+                format!("{case}-stop"),
+                Some("conformance-user".to_string()),
+            )
+            .undelivered(crate::TurnCancelDisposition::Drop)
+            .mode(crate::TurnCancelMode::Immediate),
+        )),
+    };
+    *harness.decorated.armed.lock().expect("stop slot") = Some(stop);
+    harness
+        .decorated
+        .withheld_batches
+        .lock()
+        .expect("withheld log")
+        .clear();
+    let run = harness
+        .run(&cancelled_turn_id, "summarise the repo", local)
+        .await;
+
+    assert_eq!(
+        *harness
+            .decorated
+            .withheld_batches
+            .lock()
+            .expect("withheld log"),
+        vec![batch.batch_id.clone()],
+        "{case}: the terminal checkpoint must claim and withhold the wake"
+    );
+    let outcomes = run
+        .turns
+        .iter()
+        .map(|turn| format!("{:?}", turn.outcome))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        run.turns.len(),
+        1,
+        "{case}: a cancelled turn starts no follow-on for its withheld wake: {outcomes:?}"
+    );
+    let cancelled = run.turns.into_iter().next().expect("the cancelled turn");
+    let evidence = match &cancelled.outcome {
+        crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence }) => evidence.clone(),
+        other => panic!("{case}: expected an Immediate cancel, got {other:?}"),
+    };
+    assert_eq!(evidence.mode, crate::TurnCancelMode::Immediate);
+    assert_eq!(evidence.undelivered, disposition, "{case}");
+    assert_eq!(
+        harness.request_mentions(text),
+        0,
+        "{case}: the cancelled turn's model never saw the wake"
+    );
+
+    // The affected-item record names the wake as deferred, on the turn
+    // result and on the durable cancellation; no host input was affected.
+    let expected = vec![crate::TurnCancelAffectedWake::deferred(
+        batch.batch_id.clone(),
+        batch.items[0].item_id.clone(),
+        wake.clone(),
+    )];
+    assert_eq!(
+        cancelled.turn_cancel_input_outcome.affected_wakes, expected,
+        "{case}: the turn result records the deferred wake"
+    );
+    assert!(
+        cancelled
+            .turn_cancel_input_outcome
+            .affected_inputs
+            .is_empty(),
+        "{case}: no host input was affected"
+    );
+    let record = harness
+        .store
+        .turn_cancel_request(&crate::TurnAddress::new(&session_id, &cancelled_turn_id))
+        .await
+        .expect("read the cancellation record")
+        .expect("the Immediate cancel is durable");
+    assert_eq!(
+        record
+            .outcome
+            .map(|outcome| (outcome.affected_inputs, outcome.affected_wakes)),
+        Some((Vec::new(), expected)),
+        "{case}: the durable cancellation records the deferred wake"
+    );
+
+    // Deferred whatever the host's disposition, which governs host-authored
+    // items only: never completed, never dropped. The row stays queued at
+    // its own position, unclaimed.
+    let queued = harness
+        .store
+        .list_queued_work(&session_id)
+        .await
+        .expect("read queued work after the cancel")
+        .into_iter()
+        .map(|batch| (batch.batch_id, batch.enqueue_seq))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        queued,
+        vec![(batch.batch_id.clone(), batch.enqueue_seq)],
+        "{case}: the withheld wake is deferred at its own position, never settled"
+    );
+
+    // The deferred wake is delivered exactly once by the next run: the next
+    // turn's terminal checkpoint claims it and its follow-on turn drives it.
+    let run = harness
+        .run(&next_turn_id, "carry on", CancellationToken::new())
+        .await;
+    assert!(
+        run.turns
+            .iter()
+            .all(|turn| !matches!(turn.outcome, crate::TurnOutcome::Stopped(_))),
+        "{case}: the next run commits"
+    );
+    assert_eq!(
+        harness.request_mentions(text),
+        1,
+        "{case}: the next run's model sees the deferred wake exactly once"
+    );
+    assert!(
+        harness
+            .store
+            .list_queued_work(&session_id)
+            .await
+            .expect("read queued work after the next run")
+            .is_empty(),
+        "{case}: the delivered wake settles with the turn that rendered it"
+    );
+}
+
+/// An Immediate cancel that lands after the terminal checkpoint claimed and
+/// withheld a process wake never settles that wake as completed and never
+/// drops it: whatever the host's undelivered disposition, a held wake is
+/// deferred — its claim released in the cancel commit, its position kept,
+/// its redelivery floor untouched — recorded on the cancellation, and
+/// delivered exactly once by the next turn (FIG-3543, ADR 0101 §10). Covers
+/// the default `Defer` and a host-selected `Drop`.
+pub async fn immediate_cancel_defers_withheld_process_wakes(
+    prefix: &str,
+    backend: crate::Backend,
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let mut harness = harness(backend, store).await;
+
+    withheld_wake_case(
+        &mut harness,
+        &format!("{prefix}-wake-drop"),
+        crate::TurnCancelDisposition::Drop,
+        1,
+        "the build finished",
+    )
+    .await;
+    withheld_wake_case(
+        &mut harness,
+        &format!("{prefix}-wake-defer"),
+        crate::TurnCancelDisposition::Defer,
+        1,
+        "the deploy finished",
     )
     .await;
 }

@@ -48,6 +48,8 @@ use crate::backend_fixture::{Substrate, TestBackend, TestEngineBackend, sync_awa
 mod attachment_store;
 #[path = "await_event_discovery.rs"]
 mod await_event_discovery;
+#[path = "cancelled_turn_withheld_input.rs"]
+mod cancelled_turn_withheld_input;
 #[path = "claim_atomicity.rs"]
 mod claim_atomicity;
 #[path = "drain_end.rs"]

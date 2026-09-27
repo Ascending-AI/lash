@@ -182,6 +182,16 @@ pub struct RuntimeCommit {
     /// `interrupted_turn_input_turn_id`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub undelivered_turn_input_claims: Vec<crate::turn_input_vocabulary::TurnInputClaim>,
+    /// Queued work — process wakes — the interrupted turn claimed at its
+    /// terminal checkpoint and withheld for a follow-on turn that its
+    /// cancellation means never runs (FIG-3543, ADR 0101 §10). The model never
+    /// saw it, so it is never completed and never dropped: in the same
+    /// transaction the backend releases each claim, which leaves every row at
+    /// its queue position with its redelivery floor untouched, and records
+    /// each wake on the cancellation as deferred. Meaningful only beside
+    /// `interrupted_turn_input_turn_id`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub undelivered_queue_claims: Vec<crate::QueuedWorkClaim>,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
     /// the value the head holds after the write, not a delta. A frame-switch
     /// commit writes it, the follow-on's terminal commit clears or replaces

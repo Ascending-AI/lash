@@ -166,13 +166,14 @@ pub(super) struct LogicalTurnClaims {
     /// delivery. It is never settled as this turn's completed work: it is the
     /// follow-on turn's input, and holding it keeps the session execution
     /// lease live across the commit that ends this turn. A cancelled turn
-    /// starts no follow-on for withheld turn input; its commit settles that
-    /// input through the undelivered disposition instead (FIG-3531).
+    /// starts no follow-on: its commit hands all of it to the cancellation
+    /// instead — input to the undelivered disposition (FIG-3531), wakes to be
+    /// deferred (FIG-3543, ADR 0101 §10).
     pub(super) withheld_terminal_work: Option<WithheldTerminalWork>,
-    /// Withheld turn input a turn that aborted on a cancel hands straight to
-    /// the undelivered disposition, whatever outcome the commit assembles
-    /// (FIG-3531).
-    pub(super) undelivered_turn_inputs: Vec<crate::TurnInputClaim>,
+    /// Withheld work a turn that aborted on a cancel hands straight to the
+    /// cancellation, whatever outcome the commit assembles (FIG-3531,
+    /// FIG-3543).
+    pub(super) undelivered: WithheldTerminalWork,
 }
 
 impl LogicalTurnClaims {
@@ -184,15 +185,12 @@ impl LogicalTurnClaims {
             queued,
             turn_inputs,
             withheld_terminal_work: None,
-            undelivered_turn_inputs: Vec::new(),
+            undelivered: WithheldTerminalWork::default(),
         }
     }
 
-    pub(super) fn with_undelivered_turn_inputs(
-        mut self,
-        undelivered: Vec<crate::TurnInputClaim>,
-    ) -> Self {
-        self.undelivered_turn_inputs = undelivered;
+    pub(super) fn with_undelivered(mut self, undelivered: WithheldTerminalWork) -> Self {
+        self.undelivered = undelivered;
         self
     }
 
@@ -205,25 +203,24 @@ impl LogicalTurnClaims {
     }
 
     /// Whether this turn leaves withheld work for a follow-on turn, given
-    /// whether it committed as cancelled. A cancelled turn settles withheld
-    /// turn input through the undelivered disposition instead of carrying it
-    /// (FIG-3531); withheld queued work is carried either way.
+    /// whether it committed as cancelled. A cancelled turn carries nothing:
+    /// its commit hands the withheld work to the cancellation instead.
     pub(super) fn carries_follow_on_work(&self, cancelled: bool) -> bool {
-        self.withheld_terminal_work
-            .as_ref()
-            .is_some_and(|withheld| {
-                !withheld.queued.is_empty() || (!cancelled && !withheld.turn_inputs.is_empty())
-            })
+        !cancelled
+            && self
+                .withheld_terminal_work
+                .as_ref()
+                .is_some_and(|withheld| !withheld.is_empty())
     }
 
     /// The withheld work the logical run drives in a follow-on turn once this
     /// turn has committed. See [`Self::carries_follow_on_work`].
     pub(super) fn take_follow_on_work(&mut self, cancelled: bool) -> Option<WithheldTerminalWork> {
-        let mut withheld = self.withheld_terminal_work.take()?;
+        let withheld = self.withheld_terminal_work.take()?;
         if cancelled {
-            withheld.turn_inputs.clear();
+            return None;
         }
-        withheld.take_if_any()
+        Some(withheld).filter(|withheld| !withheld.is_empty())
     }
 
     /// `journaled_drive_claims` names the claims of the journaled initial
@@ -254,20 +251,20 @@ impl LogicalTurnClaims {
             .chain(&reacquired.turn_inputs)
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
-        // A cancelled turn never delivers the input it withheld from its
-        // terminal checkpoint: it starts no follow-on for it (FIG-3531).
+        // A cancelled turn never delivers the work it withheld from its
+        // terminal checkpoint: it starts no follow-on for it, and hands it to
+        // the cancellation instead (FIG-3531, FIG-3543).
         let cancelled = matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled { .. }));
-        let withheld_turn_inputs = self
-            .withheld_terminal_work
-            .iter()
-            .filter(|_| cancelled)
-            .flat_map(|withheld| &withheld.turn_inputs);
-        let undelivered_turn_inputs = self
-            .undelivered_turn_inputs
-            .iter()
-            .chain(withheld_turn_inputs)
-            .cloned()
-            .collect();
+        let mut undelivered = WithheldTerminalWork {
+            queued: self.undelivered.queued.clone(),
+            turn_inputs: self.undelivered.turn_inputs.clone(),
+        };
+        if cancelled && let Some(withheld) = &self.withheld_terminal_work {
+            undelivered.queued.extend(withheld.queued.iter().cloned());
+            undelivered
+                .turn_inputs
+                .extend(withheld.turn_inputs.iter().cloned());
+        }
         LogicalTurnCommitEffects {
             claim_settlement: TurnClaimSettlement::new(
                 completed_queue_claims,
@@ -275,7 +272,7 @@ impl LogicalTurnClaims {
                 queue_claim_generations,
                 turn_input_claim_generations,
             )
-            .with_undelivered_turn_inputs(undelivered_turn_inputs)
+            .with_undelivered(undelivered)
             .with_journaled_drive_claims(journaled_drive_claims.clone()),
             pending_follow_on,
         }

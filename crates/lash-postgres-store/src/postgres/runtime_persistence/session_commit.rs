@@ -959,6 +959,17 @@ impl SessionCommitStore for PostgresSessionStore {
                     turn_cancel_input_outcome.affected_inputs.push(affected);
                 }
             }
+            // Withheld wakes are deferred whatever the disposition, which
+            // governs host-authored input only (FIG-3543).
+            for affected in
+                defer_undelivered_queue_claims_tx(&mut tx, &commit.undelivered_queue_claims).await?
+            {
+                if cancellation.is_some() {
+                    append_turn_cancel_wake_tx(&mut tx, &commit.session_id, turn_id, &affected)
+                        .await?;
+                    turn_cancel_input_outcome.affected_wakes.push(affected);
+                }
+            }
         }
         commit_attachment_refs_tx(
             &mut tx,
@@ -1214,6 +1225,44 @@ async fn release_undelivered_turn_input_claims_tx(
             .map_err(store_sqlx_error)?;
     }
     Ok(())
+}
+
+/// Defer the process wakes a cancelled turn withheld from its terminal
+/// checkpoint (FIG-3543, ADR 0101 §10), inside the commit transaction, and
+/// return the record of each.
+///
+/// A held wake is deferred whatever the cancellation's disposition, which
+/// governs host-authored input only: its claim is released under its own
+/// fence, so the row keeps its `enqueue_seq` and owes its session a drive
+/// again, and its process's redelivery floor is left where it was. A claim
+/// this turn no longer holds matches no row and is left to its new holder.
+async fn defer_undelivered_queue_claims_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    claims: &[lash_core_execution::runtime::QueuedWorkClaim],
+) -> Result<Vec<lash_core_execution::TurnCancelAffectedWake>, StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let mut deferred = Vec::new();
+    for claim in claims {
+        sqlx::query(sql.queued_batches.abandon_claim.sql())
+            .bind(claim.session_id.as_str())
+            .bind(&claim.claim_id)
+            .bind(&claim.lease_token)
+            .bind(
+                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_id(
+                    claim,
+                ),
+            )
+            .bind(
+                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_token(
+                    claim,
+                ),
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        deferred.extend(lash_core_execution::store_backend_support::deferred_wake_records(claim));
+    }
+    Ok(deferred)
 }
 
 impl PostgresSessionStore {

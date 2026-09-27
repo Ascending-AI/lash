@@ -647,6 +647,13 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         "ck_turn_cancel_affected_inputs_disposition",
         "disposition IN ('defer', 'drop')",
     )),
+    // A row is a host input or a held process wake (FIG-3543); only a wake
+    // names the queued batch that carries it.
+    postgres_only_constraint(rendered(
+        "lash_turn_cancel_affected_inputs",
+        "ck_turn_cancel_affected_inputs_item_kind",
+        "(item_kind = 'input' AND batch_id IS NULL) OR (item_kind = 'process_wake' AND batch_id IS NOT NULL)",
+    )),
     expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(

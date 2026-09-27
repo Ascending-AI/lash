@@ -58,6 +58,10 @@ pub(super) struct TurnClaimSettlement {
     /// is released for the cancellation's undelivered disposition, never
     /// completed (FIG-3531).
     pub(super) undelivered_turn_inputs: Vec<crate::TurnInputClaim>,
+    /// Process wakes a cancelled turn withheld from its terminal checkpoint.
+    /// They are released and recorded as deferred, never completed and never
+    /// dropped (FIG-3543, ADR 0101 §10).
+    pub(super) undelivered_queue_claims: Vec<crate::QueuedWorkClaim>,
     /// The claims of the journaled initial drive set (ADR 0069 §6). They cede
     /// on supersession whatever generation the turn commits under: a first
     /// execution holds them under its own generation, and a redrive restores
@@ -76,15 +80,19 @@ impl TurnClaimSettlement {
             queued: ClaimSettlement::new(queued, queue_generations),
             turn_inputs: ClaimSettlement::new(turn_inputs, input_generations),
             undelivered_turn_inputs: Vec::new(),
+            undelivered_queue_claims: Vec::new(),
             journaled_drive_claims: BTreeSet::new(),
         }
     }
 
-    pub(super) fn with_undelivered_turn_inputs(
+    /// The withheld work a cancelled turn hands to the cancellation instead of
+    /// completing it: input for the undelivered disposition, wakes to defer.
+    pub(super) fn with_undelivered(
         mut self,
-        undelivered: Vec<crate::TurnInputClaim>,
+        undelivered: crate::runtime::logical_turn::WithheldTerminalWork,
     ) -> Self {
-        self.undelivered_turn_inputs = undelivered;
+        self.undelivered_turn_inputs = undelivered.turn_inputs;
+        self.undelivered_queue_claims = undelivered.queued;
         self
     }
 
@@ -141,6 +149,7 @@ impl TurnClaimSettlement {
                 input_generations,
             ),
             undelivered_turn_inputs: Vec::new(),
+            undelivered_queue_claims: Vec::new(),
             journaled_drive_claims: BTreeSet::new(),
         }
     }

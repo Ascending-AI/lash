@@ -44,7 +44,7 @@
     "reason": "TurnCancelClosureAuthorization is an exact operation record covered by the reject-and-recreate component-87 boundary; it is validated structurally and against indexed session, turn, binding, fence, scope, keys, and intent before use."
   },
   "lash_turn_cancel_affected_inputs.input_json": {
-    "reason": "TurnCancelAffectedInput stores the same TurnInput payload lash_pending_turn_inputs.input_json carries; it inherits that deliberately-excluded verdict.",
+    "reason": "TurnCancelAffectedInput stores the same TurnInput payload lash_pending_turn_inputs.input_json carries, and TurnCancelAffectedWake the same ProcessWakeDelivery lash_queued_work_items.payload_json carries; it inherits those deliberately-excluded verdicts.",
     "verdict": "deliberately-excluded"
   },
   "lash_turn_cancellation_bindings.admitted_scope_json": {

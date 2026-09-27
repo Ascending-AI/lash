@@ -279,6 +279,9 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_affected_inputs (
     input_id TEXT NOT NULL,
     disposition TEXT NOT NULL CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK (disposition IN ('defer', 'drop')),
     input_json TEXT NOT NULL,
+    item_kind TEXT NOT NULL,
+    batch_id TEXT,
+    CONSTRAINT ck_turn_cancel_affected_inputs_item_kind CHECK ((item_kind = 'input' AND batch_id IS NULL) OR (item_kind = 'process_wake' AND batch_id IS NOT NULL)),
     PRIMARY KEY (session_id, turn_id, ordinal),
     UNIQUE (session_id, turn_id, input_id),
     FOREIGN KEY (session_id, turn_id) REFERENCES lash_turn_cancel_requests (session_id, turn_id) ON DELETE CASCADE

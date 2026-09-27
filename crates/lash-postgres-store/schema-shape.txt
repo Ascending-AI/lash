@@ -523,6 +523,84 @@ table lash_runtime_turn_commits
     shape /definitions/AttachmentTypeMetadata/oneOf/tag:type=string:%22image%22/properties/width/type integer|null
     shape /definitions/AttachmentTypeMetadata/oneOf/tag:type=string:%22image%22/required/type field
     shape /definitions/AttachmentTypeMetadata/oneOf/tag:type=string:%22image%22/type object
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/additionalProperties false
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/branch schema
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/address/$ref EffectAddress
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/type/enum-types string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/type/enum-values ["effect"]
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/type/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/required/address field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/required/type field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22effect%22/type object
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/additionalProperties false
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/branch schema
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/process_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/type/enum-types string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/type/enum-values ["process"]
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/type/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/required/process_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/required/type field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process%22/type object
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/additionalProperties false
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/branch schema
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/process_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/sequence/format "uint64"
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/sequence/minimum 0.0
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/sequence/type integer
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/type/enum-types string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/type/enum-values ["process_event"]
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/type/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/required/process_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/required/sequence field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/required/type field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/type object
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/additionalProperties false
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/branch schema
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/node_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/session_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/type/enum-types string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/type/enum-values ["session_node"]
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/type/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/required/node_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/required/session_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/required/type field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/type object
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/additionalProperties false
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/branch schema
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/call_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/session_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/type/enum-types string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/type/enum-values ["tool_call"]
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/type/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/required/call_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/required/session_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/required/type field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/type object
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/additionalProperties false
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/branch schema
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/occurrence_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_id/type null|string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_incarnation/type null|string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/format "uint64"
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/minimum 0.0
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/type integer|null
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-types string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-values ["trigger_occurrence"]
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/required/occurrence_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/required/type field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/type object
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/additionalProperties false
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/branch schema
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/session_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/turn_id/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/type/enum-types string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/type/enum-values ["turn"]
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/type/type string
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/required/session_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/required/turn_id field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/required/type field
+    shape /definitions/CausalRef/oneOf/tag:type=string:%22turn%22/type object
     shape /definitions/ChargeSafetyDenialReason/oneOf/0/branch schema
     shape /definitions/ChargeSafetyDenialReason/oneOf/0/enum-types string
     shape /definitions/ChargeSafetyDenialReason/oneOf/0/enum-values ["guarantee_required"]
@@ -566,6 +644,55 @@ table lash_runtime_turn_commits
     shape /definitions/CheckpointKind/enum-types string
     shape /definitions/CheckpointKind/enum-values ["after_work","before_completion"]
     shape /definitions/CheckpointKind/type string
+    shape /definitions/EffectAddress/properties/execution_scope/$ref ExecutionScope
+    shape /definitions/EffectAddress/properties/replay_key/type string
+    shape /definitions/EffectAddress/required/execution_scope field
+    shape /definitions/EffectAddress/required/replay_key field
+    shape /definitions/EffectAddress/type object
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/branch schema
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/process_id/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/type/enum-types string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/type/enum-values ["process"]
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/type/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/required/process_id field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/required/type field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/type object
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/branch schema
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/drain_id/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/session_id/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/type/enum-types string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/type/enum-values ["queue_drain"]
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/type/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/required/drain_id field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/required/session_id field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/required/type field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/type object
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/branch schema
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/operation_id/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/type/enum-types string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/type/enum-values ["runtime_operation"]
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/type/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/required/operation_id field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/required/type field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/type object
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/branch schema
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/session_id/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/type/enum-types string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/type/enum-values ["session_delete"]
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/type/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/required/session_id field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/required/type field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/type object
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/branch schema
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/session_id/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/turn_id/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/type/enum-types string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/type/enum-values ["turn"]
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/type/type string
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/required/session_id field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/required/turn_id field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/required/type field
+    shape /definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/type object
     shape /definitions/InputItem/oneOf/tag:type=string:%22attachment%22/branch schema
     shape /definitions/InputItem/oneOf/tag:type=string:%22attachment%22/properties/source/$ref AttachmentSource
     shape /definitions/InputItem/oneOf/tag:type=string:%22attachment%22/properties/type/enum-types string
@@ -631,6 +758,37 @@ table lash_runtime_turn_commits
     shape /definitions/PersistedTurnState/properties/turn_index/type integer
     shape /definitions/PersistedTurnState/required/turn_index field
     shape /definitions/PersistedTurnState/type object
+    shape /definitions/ProcessWakeDelivery/properties/authority/allOf/ref=QueuedWorkAuthority/$ref QueuedWorkAuthority
+    shape /definitions/ProcessWakeDelivery/properties/authority/allOf/ref=QueuedWorkAuthority/branch schema
+    shape /definitions/ProcessWakeDelivery/properties/created_at_ms/format "uint64"
+    shape /definitions/ProcessWakeDelivery/properties/created_at_ms/minimum 0.0
+    shape /definitions/ProcessWakeDelivery/properties/created_at_ms/type integer
+    shape /definitions/ProcessWakeDelivery/properties/event_invocation/$ref RuntimeInvocation
+    shape /definitions/ProcessWakeDelivery/properties/event_type/type string
+    shape /definitions/ProcessWakeDelivery/properties/input/type string
+    shape /definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/0/$ref CausalRef
+    shape /definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/0/branch schema
+    shape /definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/1/branch schema
+    shape /definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/1/type null
+    shape /definitions/ProcessWakeDelivery/properties/process_id/type string
+    shape /definitions/ProcessWakeDelivery/properties/sequence/format "uint64"
+    shape /definitions/ProcessWakeDelivery/properties/sequence/minimum 0.0
+    shape /definitions/ProcessWakeDelivery/properties/sequence/type integer
+    shape /definitions/ProcessWakeDelivery/properties/target_session_id/type string
+    shape /definitions/ProcessWakeDelivery/properties/version/format "uint32"
+    shape /definitions/ProcessWakeDelivery/properties/version/minimum 0.0
+    shape /definitions/ProcessWakeDelivery/properties/version/type integer
+    shape /definitions/ProcessWakeDelivery/properties/wake_id/type string
+    shape /definitions/ProcessWakeDelivery/required/created_at_ms field
+    shape /definitions/ProcessWakeDelivery/required/event_invocation field
+    shape /definitions/ProcessWakeDelivery/required/event_type field
+    shape /definitions/ProcessWakeDelivery/required/input field
+    shape /definitions/ProcessWakeDelivery/required/process_id field
+    shape /definitions/ProcessWakeDelivery/required/sequence field
+    shape /definitions/ProcessWakeDelivery/required/target_session_id field
+    shape /definitions/ProcessWakeDelivery/required/version field
+    shape /definitions/ProcessWakeDelivery/required/wake_id field
+    shape /definitions/ProcessWakeDelivery/type object
     shape /definitions/ProtocolPosition/enum-types string
     shape /definitions/ProtocolPosition/enum-values ["no_response","output_started","response_observed","terminal_observed"]
     shape /definitions/ProtocolPosition/type string
@@ -644,11 +802,111 @@ table lash_runtime_turn_commits
     shape /definitions/ProviderFileScope/required/credential_scope field
     shape /definitions/ProviderFileScope/required/provider field
     shape /definitions/ProviderFileScope/type object
+    shape /definitions/QueuedWorkAuthority/additionalProperties false
+    shape /definitions/QueuedWorkAuthority/properties/elevation/type null|string
+    shape /definitions/QueuedWorkAuthority/properties/principal/type null|string
+    shape /definitions/QueuedWorkAuthority/type object
     shape /definitions/RealizedNodeTimestamp/properties/node_id/type string
     shape /definitions/RealizedNodeTimestamp/properties/timestamp/type string
     shape /definitions/RealizedNodeTimestamp/required/node_id field
     shape /definitions/RealizedNodeTimestamp/required/timestamp field
     shape /definitions/RealizedNodeTimestamp/type object
+    shape /definitions/RuntimeAttribution/properties/protocol_iteration/format "uint"
+    shape /definitions/RuntimeAttribution/properties/protocol_iteration/minimum 0.0
+    shape /definitions/RuntimeAttribution/properties/protocol_iteration/type integer|null
+    shape /definitions/RuntimeAttribution/properties/session_id/type null|string
+    shape /definitions/RuntimeAttribution/properties/turn_id/type null|string
+    shape /definitions/RuntimeAttribution/properties/turn_index/format "uint"
+    shape /definitions/RuntimeAttribution/properties/turn_index/minimum 0.0
+    shape /definitions/RuntimeAttribution/properties/turn_index/type integer|null
+    shape /definitions/RuntimeAttribution/type object
+    shape /definitions/RuntimeInvocation/properties/attribution/$ref RuntimeAttribution
+    shape /definitions/RuntimeInvocation/properties/caused_by/anyOf/0/$ref CausalRef
+    shape /definitions/RuntimeInvocation/properties/caused_by/anyOf/0/branch schema
+    shape /definitions/RuntimeInvocation/properties/caused_by/anyOf/1/branch schema
+    shape /definitions/RuntimeInvocation/properties/caused_by/anyOf/1/type null
+    shape /definitions/RuntimeInvocation/properties/replay/anyOf/0/$ref RuntimeReplay
+    shape /definitions/RuntimeInvocation/properties/replay/anyOf/0/branch schema
+    shape /definitions/RuntimeInvocation/properties/replay/anyOf/1/branch schema
+    shape /definitions/RuntimeInvocation/properties/replay/anyOf/1/type null
+    shape /definitions/RuntimeInvocation/properties/subject/$ref RuntimeSubject
+    shape /definitions/RuntimeInvocation/required/attribution field
+    shape /definitions/RuntimeInvocation/required/subject field
+    shape /definitions/RuntimeInvocation/type object
+    shape /definitions/RuntimeReplay/properties/attribution/anyOf/0/$ref RuntimeReplayAttribution
+    shape /definitions/RuntimeReplay/properties/attribution/anyOf/0/branch schema
+    shape /definitions/RuntimeReplay/properties/attribution/anyOf/1/branch schema
+    shape /definitions/RuntimeReplay/properties/attribution/anyOf/1/type null
+    shape /definitions/RuntimeReplay/properties/key/type string
+    shape /definitions/RuntimeReplay/required/key field
+    shape /definitions/RuntimeReplay/type object
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/branch schema
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/identity/$ref ToolIntentIdentity
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/kind/enum-types string
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/kind/enum-values ["tool_intent"]
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/kind/type string
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/required/identity field
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/required/kind field
+    shape /definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/type object
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/branch schema
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/address/$ref EffectAddress
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/effect_id/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/0/$ref RuntimeReplayAttribution
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/0/branch schema
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/1/branch schema
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/1/type null
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/type/enum-types string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/type/enum-values ["effect"]
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/type/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/required/address field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/required/effect_id field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/required/type field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/type object
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/branch schema
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/process_id/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/type/enum-types string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/type/enum-values ["process"]
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/type/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/required/process_id field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/required/type field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/type object
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/branch schema
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/event_type/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/process_id/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/sequence/format "uint64"
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/sequence/minimum 0.0
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/sequence/type integer
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/type/enum-types string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/type/enum-values ["process_event"]
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/type/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/event_type field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/process_id field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/sequence field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/type field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/type object
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/branch schema
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/node_id/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/session_id/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/type/enum-types string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/type/enum-values ["session_node"]
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/type/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/required/node_id field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/required/session_id field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/required/type field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/type object
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/branch schema
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/occurrence_id/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_id/type null|string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_incarnation/type null|string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/format "uint64"
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/minimum 0.0
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/type integer|null
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-types string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-values ["trigger_occurrence"]
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/type string
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/required/occurrence_id field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/required/type field
+    shape /definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/type object
     shape /definitions/RuntimeUsageDeltaIdentity/properties/entry_ordinal/format "uint64"
     shape /definitions/RuntimeUsageDeltaIdentity/properties/entry_ordinal/minimum 0.0
     shape /definitions/RuntimeUsageDeltaIdentity/properties/entry_ordinal/type integer
@@ -687,6 +945,20 @@ table lash_runtime_turn_commits
     shape /definitions/TokenUsage/required/output_tokens field
     shape /definitions/TokenUsage/required/reasoning_output_tokens field
     shape /definitions/TokenUsage/type object
+    shape /definitions/ToolIntentIdentity/properties/execution_scope_id/type string
+    shape /definitions/ToolIntentIdentity/properties/intent_index/format "uint32"
+    shape /definitions/ToolIntentIdentity/properties/intent_index/minimum 0.0
+    shape /definitions/ToolIntentIdentity/properties/intent_index/type integer
+    shape /definitions/ToolIntentIdentity/properties/minting_emission_replay_key/type null|string
+    shape /definitions/ToolIntentIdentity/properties/replay_key/type string
+    shape /definitions/ToolIntentIdentity/properties/session_id/type string
+    shape /definitions/ToolIntentIdentity/properties/tool_call_id/type string
+    shape /definitions/ToolIntentIdentity/required/execution_scope_id field
+    shape /definitions/ToolIntentIdentity/required/intent_index field
+    shape /definitions/ToolIntentIdentity/required/replay_key field
+    shape /definitions/ToolIntentIdentity/required/session_id field
+    shape /definitions/ToolIntentIdentity/required/tool_call_id field
+    shape /definitions/ToolIntentIdentity/type object
     shape /definitions/TurnCancelAffectedInput/properties/disposition/$ref TurnCancelDisposition
     shape /definitions/TurnCancelAffectedInput/properties/input_id/type string
     shape /definitions/TurnCancelAffectedInput/properties/payload/$ref TurnInput
@@ -694,11 +966,22 @@ table lash_runtime_turn_commits
     shape /definitions/TurnCancelAffectedInput/required/input_id field
     shape /definitions/TurnCancelAffectedInput/required/payload field
     shape /definitions/TurnCancelAffectedInput/type object
+    shape /definitions/TurnCancelAffectedWake/properties/batch_id/type string
+    shape /definitions/TurnCancelAffectedWake/properties/disposition/$ref TurnCancelDisposition
+    shape /definitions/TurnCancelAffectedWake/properties/item_id/type string
+    shape /definitions/TurnCancelAffectedWake/properties/wake/$ref ProcessWakeDelivery
+    shape /definitions/TurnCancelAffectedWake/required/batch_id field
+    shape /definitions/TurnCancelAffectedWake/required/disposition field
+    shape /definitions/TurnCancelAffectedWake/required/item_id field
+    shape /definitions/TurnCancelAffectedWake/required/wake field
+    shape /definitions/TurnCancelAffectedWake/type object
     shape /definitions/TurnCancelDisposition/enum-types string
     shape /definitions/TurnCancelDisposition/enum-values ["defer","drop"]
     shape /definitions/TurnCancelDisposition/type string
     shape /definitions/TurnCancelInputOutcome/properties/affected_inputs/items/$ref TurnCancelAffectedInput
     shape /definitions/TurnCancelInputOutcome/properties/affected_inputs/type array
+    shape /definitions/TurnCancelInputOutcome/properties/affected_wakes/items/$ref TurnCancelAffectedWake
+    shape /definitions/TurnCancelInputOutcome/properties/affected_wakes/type array
     shape /definitions/TurnCancelInputOutcome/type object
     shape /definitions/TurnFailureEvidence/properties/billed_usage/allOf/ref=LlmUsage/$ref LlmUsage
     shape /definitions/TurnFailureEvidence/properties/billed_usage/allOf/ref=LlmUsage/branch schema
@@ -821,6 +1104,84 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/AttachmentTypeMetadata/oneOf/tag:type=string:%22image%22/properties/width/type integer|null
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/AttachmentTypeMetadata/oneOf/tag:type=string:%22image%22/required/type field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/AttachmentTypeMetadata/oneOf/tag:type=string:%22image%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/address/$ref EffectAddress
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/type/enum-values ["effect"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/required/address field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22effect%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/process_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/type/enum-values ["process"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/required/process_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/process_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/sequence/format "uint64"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/sequence/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/sequence/type integer
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/type/enum-values ["process_event"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/required/process_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/required/sequence field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22process_event%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/node_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/type/enum-values ["session_node"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/required/node_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22session_node%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/call_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/type/enum-values ["tool_call"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/required/call_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22tool_call%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/occurrence_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_id/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_incarnation/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/format "uint64"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/type integer|null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-values ["trigger_occurrence"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/required/occurrence_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22trigger_occurrence%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/turn_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/type/enum-values ["turn"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/required/turn_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CausalRef/oneOf/tag:type=string:%22turn%22/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ChargeSafetyDenialReason/oneOf/0/branch schema
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ChargeSafetyDenialReason/oneOf/0/enum-types string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ChargeSafetyDenialReason/oneOf/0/enum-values ["guarantee_required"]
@@ -864,6 +1225,55 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CheckpointKind/enum-types string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CheckpointKind/enum-values ["after_work","before_completion"]
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/CheckpointKind/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/EffectAddress/properties/execution_scope/$ref ExecutionScope
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/EffectAddress/properties/replay_key/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/EffectAddress/required/execution_scope field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/EffectAddress/required/replay_key field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/EffectAddress/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/process_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/type/enum-values ["process"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/required/process_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22process%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/drain_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/type/enum-values ["queue_drain"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/required/drain_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22queue_drain%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/operation_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/type/enum-values ["runtime_operation"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/required/operation_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22runtime_operation%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/type/enum-values ["session_delete"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22session_delete%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/turn_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/type/enum-values ["turn"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/required/turn_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ExecutionScope/oneOf/tag:type=string:%22turn%22/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/InputItem/oneOf/tag:type=string:%22attachment%22/branch schema
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/InputItem/oneOf/tag:type=string:%22attachment%22/properties/source/$ref AttachmentSource
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/InputItem/oneOf/tag:type=string:%22attachment%22/properties/type/enum-types string
@@ -929,6 +1339,37 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/PersistedTurnState/properties/turn_index/type integer
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/PersistedTurnState/required/turn_index field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/PersistedTurnState/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/authority/allOf/ref=QueuedWorkAuthority/$ref QueuedWorkAuthority
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/authority/allOf/ref=QueuedWorkAuthority/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/created_at_ms/format "uint64"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/created_at_ms/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/created_at_ms/type integer
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/event_invocation/$ref RuntimeInvocation
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/event_type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/input/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/0/$ref CausalRef
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/0/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/1/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/process_caused_by/anyOf/1/type null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/process_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/sequence/format "uint64"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/sequence/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/sequence/type integer
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/target_session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/version/format "uint32"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/version/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/version/type integer
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/properties/wake_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/created_at_ms field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/event_invocation field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/event_type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/input field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/process_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/sequence field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/target_session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/version field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/required/wake_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProcessWakeDelivery/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProtocolPosition/enum-types string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProtocolPosition/enum-values ["no_response","output_started","response_observed","terminal_observed"]
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProtocolPosition/type string
@@ -942,11 +1383,111 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProviderFileScope/required/credential_scope field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProviderFileScope/required/provider field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ProviderFileScope/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/QueuedWorkAuthority/additionalProperties false
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/QueuedWorkAuthority/properties/elevation/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/QueuedWorkAuthority/properties/principal/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/QueuedWorkAuthority/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RealizedNodeTimestamp/properties/node_id/type string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RealizedNodeTimestamp/properties/timestamp/type string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RealizedNodeTimestamp/required/node_id field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RealizedNodeTimestamp/required/timestamp field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RealizedNodeTimestamp/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/protocol_iteration/format "uint"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/protocol_iteration/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/protocol_iteration/type integer|null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/session_id/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/turn_id/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/turn_index/format "uint"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/turn_index/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/properties/turn_index/type integer|null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeAttribution/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/attribution/$ref RuntimeAttribution
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/caused_by/anyOf/0/$ref CausalRef
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/caused_by/anyOf/0/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/caused_by/anyOf/1/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/caused_by/anyOf/1/type null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/replay/anyOf/0/$ref RuntimeReplay
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/replay/anyOf/0/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/replay/anyOf/1/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/replay/anyOf/1/type null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/properties/subject/$ref RuntimeSubject
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/required/attribution field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/required/subject field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeInvocation/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplay/properties/attribution/anyOf/0/$ref RuntimeReplayAttribution
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplay/properties/attribution/anyOf/0/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplay/properties/attribution/anyOf/1/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplay/properties/attribution/anyOf/1/type null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplay/properties/key/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplay/required/key field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplay/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/identity/$ref ToolIntentIdentity
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/kind/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/kind/enum-values ["tool_intent"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/properties/kind/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/required/identity field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/required/kind field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeReplayAttribution/oneOf/tag:kind=string:%22tool_intent%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/address/$ref EffectAddress
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/effect_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/0/$ref RuntimeReplayAttribution
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/0/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/1/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/replay_attribution/anyOf/1/type null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/type/enum-values ["effect"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/required/address field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/required/effect_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22effect%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/process_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/type/enum-values ["process"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/required/process_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/event_type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/process_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/sequence/format "uint64"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/sequence/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/sequence/type integer
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/type/enum-values ["process_event"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/event_type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/process_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/sequence field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22process_event%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/node_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/type/enum-values ["session_node"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/required/node_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22session_node%22/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/branch schema
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/occurrence_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_id/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_incarnation/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/format "uint64"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/subscription_revision/type integer|null
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/enum-values ["trigger_occurrence"]
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/properties/type/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/required/occurrence_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/required/type field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeSubject/oneOf/tag:type=string:%22trigger_occurrence%22/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeUsageDeltaIdentity/properties/entry_ordinal/format "uint64"
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeUsageDeltaIdentity/properties/entry_ordinal/minimum 0.0
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/RuntimeUsageDeltaIdentity/properties/entry_ordinal/type integer
@@ -985,6 +1526,20 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TokenUsage/required/output_tokens field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TokenUsage/required/reasoning_output_tokens field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TokenUsage/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/execution_scope_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/intent_index/format "uint32"
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/intent_index/minimum 0.0
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/intent_index/type integer
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/minting_emission_replay_key/type null|string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/replay_key/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/session_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/properties/tool_call_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/required/execution_scope_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/required/intent_index field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/required/replay_key field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/required/session_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/required/tool_call_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/ToolIntentIdentity/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedInput/properties/disposition/$ref TurnCancelDisposition
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedInput/properties/input_id/type string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedInput/properties/payload/$ref TurnInput
@@ -992,11 +1547,22 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedInput/required/input_id field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedInput/required/payload field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedInput/type object
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/properties/batch_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/properties/disposition/$ref TurnCancelDisposition
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/properties/item_id/type string
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/properties/wake/$ref ProcessWakeDelivery
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/required/batch_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/required/disposition field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/required/item_id field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/required/wake field
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelAffectedWake/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelDisposition/enum-types string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelDisposition/enum-values ["defer","drop"]
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelDisposition/type string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelInputOutcome/properties/affected_inputs/items/$ref TurnCancelAffectedInput
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelInputOutcome/properties/affected_inputs/type array
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelInputOutcome/properties/affected_wakes/items/$ref TurnCancelAffectedWake
+    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelInputOutcome/properties/affected_wakes/type array
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnCancelInputOutcome/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnFailureEvidence/properties/billed_usage/allOf/ref=LlmUsage/$ref LlmUsage
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnFailureEvidence/properties/billed_usage/allOf/ref=LlmUsage/branch schema
@@ -1265,9 +1831,11 @@ table lash_trigger_subscriptions
   unique (owner_scope, subscription_key)
   primary-key (subscription_id)
 table lash_turn_cancel_affected_inputs
+  column batch_id text nullable
   column disposition text not-null
   column input_id text not-null
   column input_json text not-null
+  column item_kind text not-null
   column ordinal bigint not-null
   column session_id text not-null
   column turn_id text not-null

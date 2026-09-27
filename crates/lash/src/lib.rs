@@ -120,9 +120,10 @@ pub use lash_core::engine::BuildGeneration;
 /// reports, and how this deployment competes for the recovery leader lease.
 pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings};
 pub use lash_core::facade_support::{
-    TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
+    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelRequestRecord,
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::store::{

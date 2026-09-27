@@ -904,7 +904,10 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_affected_inputs (
     input_id text NOT NULL,
     disposition text NOT NULL,
     input_json text NOT NULL,
-    CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK ((disposition = ANY (ARRAY['defer'::text, 'drop'::text])))
+    item_kind text NOT NULL,
+    batch_id text,
+    CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK ((disposition = ANY (ARRAY['defer'::text, 'drop'::text]))),
+    CONSTRAINT ck_turn_cancel_affected_inputs_item_kind CHECK ((((item_kind = 'input'::text) AND (batch_id IS NULL)) OR ((item_kind = 'process_wake'::text) AND (batch_id IS NOT NULL))))
 );
 
 
@@ -1204,7 +1207,7 @@ INSERT INTO lash_durable_read_fixture.lash_node_anchors VALUES ('n_03531bbc4371c
 -- Data for Name: lash_parent_end_plans; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL, 'parent_end:e0e6374eb7cc469a853591694ff3a33c', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL, 'parent_end:71f66533bdd94c42909bbefa6c8393f5', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
 
 
 --

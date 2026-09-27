@@ -471,7 +471,7 @@ async fn load_turn_cancel_request_in_tx(
     let Some(row) = row else {
         return Ok(None);
     };
-    let affected_rows: Vec<(String, String, String)> = sqlx::query_as(
+    let affected_rows: Vec<TurnCancelAffectedRow> = sqlx::query_as(
         crate::turn_ingress::turn_ingress_sql()
             .cancel_affected_inputs_postgres
             .select_by_turn
@@ -497,20 +497,49 @@ pub(super) async fn load_turn_cancel_request_tx(
 /// disposition, mode.
 pub(super) type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, String);
 
+/// One `lash_turn_cancel_affected_inputs` row: item id, payload, disposition,
+/// item kind and — for a held wake — its batch.
+pub(super) type TurnCancelAffectedRow = (String, String, String, String, Option<String>);
+
+const AFFECTED_INPUT_KIND: &str = "input";
+const AFFECTED_WAKE_KIND: &str = "process_wake";
+
 pub(super) fn turn_cancel_record_from_rows(
     session_id: &SessionId,
     turn_id: &TurnId,
     row: TurnCancelRequestRow,
-    affected_rows: Vec<(String, String, String)>,
+    affected_rows: Vec<TurnCancelAffectedRow>,
 ) -> Result<lash_core_execution::TurnCancelRequestRecord, StoreError> {
     let (request_id, origin, reason, disposition, mode) = row;
-    let mut affected_inputs = Vec::with_capacity(affected_rows.len());
-    for (input_id, input_json, applied_disposition) in affected_rows {
-        affected_inputs.push(lash_core_execution::TurnCancelAffectedInput {
-            input_id: input_id.into(),
-            payload: store_decode_json(&input_json, "turn input")?,
-            disposition: turn_cancel_disposition_from_wire(&applied_disposition)?,
-        });
+    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
+    for (item_id, payload_json, applied_disposition, item_kind, batch_id) in affected_rows {
+        let applied_disposition = turn_cancel_disposition_from_wire(&applied_disposition)?;
+        match (item_kind.as_str(), batch_id) {
+            (AFFECTED_INPUT_KIND, None) => {
+                outcome
+                    .affected_inputs
+                    .push(lash_core_execution::TurnCancelAffectedInput {
+                        input_id: item_id.into(),
+                        payload: store_decode_json(&payload_json, "turn input")?,
+                        disposition: applied_disposition,
+                    });
+            }
+            (AFFECTED_WAKE_KIND, Some(batch_id)) => {
+                outcome
+                    .affected_wakes
+                    .push(lash_core_execution::TurnCancelAffectedWake {
+                        batch_id: batch_id.into(),
+                        item_id,
+                        wake: store_decode_json(&payload_json, "process wake")?,
+                        disposition: applied_disposition,
+                    });
+            }
+            (other, _) => {
+                return Err(StoreError::Backend(format!(
+                    "malformed turn cancel affected item of kind `{other}`"
+                )));
+            }
+        }
     }
     Ok(lash_core_execution::TurnCancelRequestRecord {
         request: lash_core_execution::facade_support::TurnCancelRequest {
@@ -521,8 +550,7 @@ pub(super) fn turn_cancel_record_from_rows(
             undelivered: turn_cancel_disposition_from_wire(&disposition)?,
             mode: turn_cancel_mode_from_wire(&mode)?,
         },
-        outcome: (!affected_inputs.is_empty())
-            .then_some(lash_core_execution::TurnCancelInputOutcome { affected_inputs }),
+        outcome: (!outcome.is_empty()).then_some(outcome),
     })
 }
 
@@ -574,20 +602,7 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     turn_id: &TurnId,
     affected: lash_core_execution::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
-    // Lock the request row so concurrent appends serialize on the ordinal
-    // next-val; a missing request leaves no evidence to attach to.
-    let request_exists: Option<i32> = sqlx::query_scalar(
-        crate::turn_ingress::turn_ingress_sql()
-            .cancel_requests_postgres
-            .lock_request
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .bind(turn_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    if request_exists.is_none() {
+    if !lock_turn_cancel_request_tx(tx, session_id, turn_id).await? {
         return Ok(());
     }
     sqlx::query(
@@ -601,10 +616,62 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     .bind(&*affected.input_id)
     .bind(turn_cancel_disposition_wire(affected.disposition))
     .bind(encode_json(&affected.payload)?)
+    .bind(AFFECTED_INPUT_KIND)
+    .bind(None::<&str>)
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
     Ok(())
+}
+
+/// Record one wake a turn cancel deferred on the cancellation (FIG-3543).
+pub(super) async fn append_turn_cancel_wake_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    affected: &lash_core_execution::TurnCancelAffectedWake,
+) -> Result<(), StoreError> {
+    if !lock_turn_cancel_request_tx(tx, session_id, turn_id).await? {
+        return Ok(());
+    }
+    sqlx::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_affected_inputs_postgres
+            .append_at_next_ordinal
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .bind(&affected.item_id)
+    .bind(turn_cancel_disposition_wire(affected.disposition))
+    .bind(encode_json(&affected.wake)?)
+    .bind(AFFECTED_WAKE_KIND)
+    .bind(affected.batch_id.as_str())
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
+/// Lock the cancel-request row so concurrent appends serialize on the
+/// ordinal next-val; `false` when there is no request to attach evidence to.
+async fn lock_turn_cancel_request_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> Result<bool, StoreError> {
+    let request_exists: Option<i32> = sqlx::query_scalar(
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests_postgres
+            .lock_request
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(request_exists.is_some())
 }
 
 pub(super) async fn reconcile_turn_cancel_winner_tx(

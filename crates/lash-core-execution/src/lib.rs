@@ -305,6 +305,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnAddress;
     pub use crate::runtime::TurnAttach;
     pub use crate::runtime::TurnCancelAffectedInput;
+    pub use crate::runtime::TurnCancelAffectedWake;
     pub use crate::runtime::TurnCancelClosureAuthorization;
     pub use crate::runtime::TurnCancelClosureAuthorizationOutcome;
     pub use crate::runtime::TurnCancelClosureProposal;
@@ -811,24 +812,24 @@ pub use runtime::{
     SlotId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreEffectGroupClosing,
     StoreEffectGroupDrain, StoreRealization, TokenLedgerEntry, ToolAttemptLaunch,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
-    TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
-    TurnCancellationAuthority, TurnContext, TurnControlAttachment, TurnControlBinding,
-    TurnControlBindingId, TurnControlBindingIdError, TurnEvent, TurnFailureCause,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
-    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
-    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputSettlementClaim, TurnInputState, UnreportedLedgerAttempt, UnsettledEffectGroup,
-    UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
-    WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
-    admit_session_state_generation, apply_parent_end_plan, effect_groups_unsupported,
-    end_parent_scope, end_session_roots, ensure_process_lease_schema_version, lifetime,
-    mint_process_id, parent_end_delivery_key, parent_end_requester,
-    park_turn_of_refused_group_child, park_turn_refused_by_generation,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
+    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnEvent,
+    TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement,
+    TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
+    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnreportedLedgerAttempt,
+    UnsettledEffectGroup, UsageDispositionError, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WeakProcessEngineRegistry, WorkCadencePolicy, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy, admit_session_state_generation,
+    apply_parent_end_plan, effect_groups_unsupported, end_parent_scope, end_session_roots,
+    ensure_process_lease_schema_version, lifetime, mint_process_id, parent_end_delivery_key,
+    parent_end_requester, park_turn_of_refused_group_child, park_turn_refused_by_generation,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

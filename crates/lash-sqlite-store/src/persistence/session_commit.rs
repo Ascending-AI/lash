@@ -3,7 +3,8 @@ mod graph_nodes;
 use super::*;
 use crate::session_sql::session_sql;
 use graph_nodes::{
-    insert_graph_nodes_conn, occupied_node_ids_conn, release_undelivered_turn_input_claims_conn,
+    defer_undelivered_queue_claims_conn, insert_graph_nodes_conn, occupied_node_ids_conn,
+    release_undelivered_turn_input_claims_conn,
 };
 use lash_core_execution::FleetFormatStore;
 
@@ -1028,6 +1029,17 @@ impl SessionCommitStore for Store {
                             if cancellation.is_some() {
                                 append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
                                 turn_cancel_input_outcome.affected_inputs.push(affected);
+                            }
+                        }
+                        // Withheld wakes are deferred whatever the disposition,
+                        // which governs host-authored input only (FIG-3543).
+                        for affected in defer_undelivered_queue_claims_conn(
+                            tx,
+                            &commit.undelivered_queue_claims,
+                        )? {
+                            if cancellation.is_some() {
+                                append_turn_cancel_wake_conn(tx, &commit.session_id, turn_id, affected.clone())?;
+                                turn_cancel_input_outcome.affected_wakes.push(affected);
                             }
                         }
                     }

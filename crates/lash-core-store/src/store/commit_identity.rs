@@ -1223,6 +1223,10 @@ struct RuntimeCommitIntent<'a> {
     /// disposition (FIG-3531). Absent from every other commit's identity.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     undelivered_turn_inputs: Vec<&'a crate::InputId>,
+    /// Withheld wakes a cancelled turn defers (FIG-3543). Absent from every
+    /// other commit's identity.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    undelivered_queue_batches: Vec<&'a crate::BatchId>,
     /// The follow-on the head owes after this commit (ADR 0101 §3). Absent
     /// from every commit that leaves the head owing nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1282,6 +1286,11 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 .undelivered_turn_input_claims
                 .iter()
                 .flat_map(|claim| claim.inputs.iter().map(|input| &input.input_id))
+                .collect(),
+            undelivered_queue_batches: commit
+                .undelivered_queue_claims
+                .iter()
+                .flat_map(|claim| claim.batches.iter().map(|batch| &batch.batch_id))
                 .collect(),
             pending_follow_on: commit.pending_follow_on.as_ref(),
             interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_ref(),

@@ -906,7 +906,10 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_affected_inputs (
     input_id text NOT NULL,
     disposition text NOT NULL,
     input_json text NOT NULL,
-    CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK ((disposition = ANY (ARRAY['defer'::text, 'drop'::text])))
+    item_kind text NOT NULL,
+    batch_id text,
+    CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK ((disposition = ANY (ARRAY['defer'::text, 'drop'::text]))),
+    CONSTRAINT ck_turn_cancel_affected_inputs_item_kind CHECK ((((item_kind = 'input'::text) AND (batch_id IS NULL)) OR ((item_kind = 'process_wake'::text) AND (batch_id IS NOT NULL))))
 );
 
 

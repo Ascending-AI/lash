@@ -619,6 +619,7 @@ impl RuntimeCommit {
             completed_queue_claims,
             completed_turn_input_claims,
             undelivered_turn_input_claims,
+            undelivered_queue_claims,
             // Carried unchanged from the head; the store refuses a change.
             pending_follow_on: _,
             interrupted_turn_input_turn_id,
@@ -633,6 +634,7 @@ impl RuntimeCommit {
             completed_queue_claims.is_empty()
                 && completed_turn_input_claims.is_empty()
                 && undelivered_turn_input_claims.is_empty()
+                && undelivered_queue_claims.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
                 && interrupted_turn_cancel_intent.is_none()
@@ -821,6 +823,7 @@ impl RuntimeCommit {
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
             undelivered_turn_input_claims: Vec::new(),
+            undelivered_queue_claims: Vec::new(),
             pending_follow_on: state.pending_follow_on.as_deref().cloned(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,

@@ -469,17 +469,34 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json
-         ) VALUES ('session', 'turn', 0, 'input', 'retry', '{}')",
+             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
+         ) VALUES ('session', 'turn', 0, 'input', 'retry', '{}', 'input')",
         "ck_turn_cancel_affected_inputs_disposition",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_turn_cancel_affected_inputs (
+             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
+         ) VALUES ('session', 'turn', 0, 'wake', 'defer', '{}', 'process_wake')",
+        "ck_turn_cancel_affected_inputs_item_kind",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_turn_cancel_affected_inputs (
+             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind,
+             batch_id
+         ) VALUES ('session', 'turn', 0, 'input', 'defer', '{}', 'input', 'batch')",
+        "ck_turn_cancel_affected_inputs_item_kind",
     )
     .await;
     assert_integrity_rejects(
         &mut connection,
         "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json
-         ) VALUES ('session', 'turn', 0, 'input', 'defer', '{}'),
-                  ('session', 'turn', 1, 'input', 'drop', '{}')",
+             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
+         ) VALUES ('session', 'turn', 0, 'input', 'defer', '{}', 'input'),
+                  ('session', 'turn', 1, 'input', 'drop', '{}', 'input')",
         |error| error.kind() == sqlx::error::ErrorKind::UniqueViolation,
         "duplicate affected input id",
     )
@@ -487,8 +504,8 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_integrity_rejects(
         &mut connection,
         "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json
-         ) VALUES ('no-request', 'turn', 0, 'input', 'defer', '{}')",
+             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
+         ) VALUES ('no-request', 'turn', 0, 'input', 'defer', '{}', 'input')",
         |error| error.kind() == sqlx::error::ErrorKind::ForeignKeyViolation,
         "affected evidence without a request",
     )
@@ -496,8 +513,8 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_integrity_rejects(
         &mut connection,
         "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition
-         ) VALUES ('session', 'turn', 0, 'input', 'defer')",
+             session_id, turn_id, ordinal, input_id, disposition, item_kind
+         ) VALUES ('session', 'turn', 0, 'input', 'defer', 'input')",
         |error| error.kind() == sqlx::error::ErrorKind::NotNullViolation,
         "affected evidence without the payload snapshot",
     )

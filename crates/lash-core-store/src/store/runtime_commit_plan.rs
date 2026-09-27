@@ -573,6 +573,14 @@ fn validate_session_execution_lease_plan(commit: &RuntimeCommit) -> Result<(), S
             session_id: commit.session_id.clone(),
         });
     }
+    if (!commit.undelivered_turn_input_claims.is_empty()
+        || !commit.undelivered_queue_claims.is_empty())
+        && commit.interrupted_turn_input_turn_id.is_none()
+    {
+        return Err(StoreError::Backend(
+            "runtime commit undelivered claims require an interrupted turn id".to_string(),
+        ));
+    }
     if commit.interrupted_turn_input_cancellation.is_some()
         && commit.interrupted_turn_input_turn_id.is_none()
     {

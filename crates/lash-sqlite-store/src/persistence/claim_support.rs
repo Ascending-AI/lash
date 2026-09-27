@@ -1023,6 +1023,32 @@ pub(super) fn append_turn_cancel_outcome_conn(
     Ok(())
 }
 
+/// Record one wake a turn cancel deferred on the cancellation (FIG-3543).
+pub(super) fn append_turn_cancel_wake_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    affected: lash_core_execution::TurnCancelAffectedWake,
+) -> Result<(), StoreError> {
+    let Some(mut record) = load_turn_cancel_request_conn(conn, session_id, turn_id)? else {
+        return Ok(());
+    };
+    record
+        .outcome
+        .get_or_insert_default()
+        .affected_wakes
+        .push(affected);
+    conn.execute(
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests_sqlite
+            .update_record
+            .sql(),
+        params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
 pub(super) fn reconcile_turn_cancel_winner_conn(
     conn: &Connection,
     session_id: &SessionId,

@@ -119,8 +119,8 @@ async fn seed_cancelled_inputs(
         };
         sqlx::query(
             "INSERT INTO lash_turn_cancel_affected_inputs (
-                 session_id, turn_id, ordinal, input_id, disposition, input_json
-             ) VALUES ($1, $2, $3, $4, $5, $6)",
+                 session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
+             ) VALUES ($1, $2, $3, $4, $5, $6, 'input')",
         )
         .bind(session_id.as_str())
         .bind(turn_id.as_str())
