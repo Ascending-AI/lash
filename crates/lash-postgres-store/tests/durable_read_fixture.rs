@@ -660,6 +660,9 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     add_prior_fixture_turn_parks(&pool).await;
     // Component 127 (FIG-3540) adds the session ingress, empty in the
     // refusal fixture, and the drive epoch on the session metadata row.
+    // ADR 0109 adds the obligation columns to every ledger; the refusal
+    // fixture's ledgers predate them, so they gain the columns, empty.
+    add_prior_fixture_obligation_columns(&pool).await;
     sqlx::query("DROP TABLE IF EXISTS lash_session_ingress")
         .execute(&pool)
         .await
@@ -830,6 +833,38 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
 }
+
+// Author-time refresh only: the ADR 0109 obligation columns and their CHECK
+// on every ledger the refusal fixture already carries, each empty.
+async fn add_prior_fixture_obligation_columns(pool: &sqlx::PgPool) {
+    for table in [
+        "session_roots",
+        "control_intents",
+        "session_meta",
+        "processes",
+        "parent_end_plans",
+    ] {
+        sqlx::raw_sql(&format!(
+            "ALTER TABLE IF EXISTS lash_{table}
+                 ADD COLUMN IF NOT EXISTS obligation_id TEXT,
+                 ADD COLUMN IF NOT EXISTS obligation_state TEXT,
+                 ADD COLUMN IF NOT EXISTS obligation_attempts INTEGER NOT NULL DEFAULT 0,
+                 ADD COLUMN IF NOT EXISTS obligation_due_at_ms BIGINT,
+                 ADD COLUMN IF NOT EXISTS obligation_claim_token TEXT,
+                 ADD COLUMN IF NOT EXISTS obligation_stall_reason TEXT,
+                 ADD COLUMN IF NOT EXISTS obligation_last_error TEXT,
+                 ADD COLUMN IF NOT EXISTS obligation_settled_at_ms BIGINT,
+                 DROP CONSTRAINT IF EXISTS ck_{table}_obligation,
+                 ADD CONSTRAINT ck_{table}_obligation CHECK ({OBLIGATION_CHECK});"
+        ))
+        .execute(pool)
+        .await
+        .expect("add the ADR 0109 obligation columns to the refusal fixture catalog");
+    }
+}
+
+/// The obligation columns' CHECK, as `schema.sql` states it on every ledger.
+const OBLIGATION_CHECK: &str = "(obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)";
 
 // Author-time refresh only: add the component-120 turn binding pair and its
 // CHECK.

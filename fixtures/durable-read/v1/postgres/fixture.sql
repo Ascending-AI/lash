@@ -132,7 +132,16 @@ CREATE TABLE lash_durable_read_fixture.lash_control_intents (
     attempts bigint NOT NULL,
     created_at_ms bigint NOT NULL,
     engine_ref text,
+    obligation_id text,
+    obligation_state text,
+    obligation_attempts integer DEFAULT 0 NOT NULL,
+    obligation_due_at_ms bigint,
+    obligation_claim_token text,
+    obligation_stall_reason text,
+    obligation_last_error text,
+    obligation_settled_at_ms bigint,
     CONSTRAINT ck_control_intents_kind CHECK ((kind = ANY (ARRAY['redrive'::text, 'cancel'::text, 'fork'::text, 'close_session'::text]))),
+    CONSTRAINT ck_control_intents_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_control_intents_state CHECK ((state = ANY (ARRAY['pending'::text, 'acknowledged'::text, 'superseded'::text, 'failed_retryable'::text, 'failed'::text])))
 );
 
@@ -260,7 +269,16 @@ CREATE TABLE lash_durable_read_fixture.lash_parent_end_plans (
     parent_payload text NOT NULL,
     ended_at_ms bigint NOT NULL,
     settled_at_ms bigint,
-    CONSTRAINT ck_parent_end_plans_kind CHECK ((parent_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'session'::text])))
+    obligation_id text,
+    obligation_state text,
+    obligation_attempts integer DEFAULT 0 NOT NULL,
+    obligation_due_at_ms bigint,
+    obligation_claim_token text,
+    obligation_stall_reason text,
+    obligation_last_error text,
+    obligation_settled_at_ms bigint,
+    CONSTRAINT ck_parent_end_plans_kind CHECK ((parent_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'session'::text]))),
+    CONSTRAINT ck_parent_end_plans_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL))))
 );
 
 
@@ -478,8 +496,17 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     park_build_generation text,
     segment_generation text,
     record_json text NOT NULL,
+    obligation_id text,
+    obligation_state text,
+    obligation_attempts integer DEFAULT 0 NOT NULL,
+    obligation_due_at_ms bigint,
+    obligation_claim_token text,
+    obligation_stall_reason text,
+    obligation_last_error text,
+    obligation_settled_at_ms bigint,
     CONSTRAINT ck_processes_lifetime CHECK ((lifetime = ANY (ARRAY['until'::text, 'detached'::text]))),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((((lifetime = 'detached'::text) AND (lifetime_scope_kind IS NULL) AND (lifetime_scope_id IS NULL)) OR ((lifetime = 'until'::text) AND (lifetime_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'session'::text])) AND (lifetime_scope_id IS NOT NULL)))),
+    CONSTRAINT ck_processes_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_processes_parked CHECK (((parked_since_ms IS NULL) = (parked_reason_code IS NULL))),
     CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
@@ -551,6 +578,20 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_items (
     item_index integer NOT NULL,
     item_id text NOT NULL,
     payload_json text NOT NULL
+);
+
+
+--
+-- Name: lash_recovery_leader; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_recovery_leader (
+    name text NOT NULL,
+    holder_id text NOT NULL,
+    generation_rank bigint NOT NULL,
+    term bigint NOT NULL,
+    elected_at_ms bigint NOT NULL,
+    expires_at_ms bigint NOT NULL
 );
 
 
@@ -642,11 +683,20 @@ CREATE TABLE lash_durable_read_fixture.lash_session_ingress (
     claim_fencing_token bigint DEFAULT 0 NOT NULL,
     claim_drive_epoch bigint,
     claim_turn_id text,
+    obligation_id text,
+    obligation_state text,
+    obligation_attempts integer DEFAULT 0 NOT NULL,
+    obligation_due_at_ms bigint,
+    obligation_claim_token text,
+    obligation_stall_reason text,
+    obligation_last_error text,
+    obligation_settled_at_ms bigint,
     CONSTRAINT ck_session_ingress_claim CHECK ((((state = 'accepted'::text) AND (claim_id IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_admission_id IS NOT NULL) AND (claim_drive_epoch IS NOT NULL)) OR ((state <> 'accepted'::text) AND (claim_id IS NULL) AND (claim_token IS NULL) AND (claim_admission_id IS NULL) AND (claim_drive_epoch IS NULL) AND (claim_turn_id IS NULL)))),
     CONSTRAINT ck_session_ingress_delivery CHECK ((((delivery_scope = 'turn'::text) AND (delivery_turn_id IS NOT NULL) AND (delivery_min_boundary = ANY (ARRAY['after_work'::text, 'before_completion'::text]))) OR ((delivery_scope = ANY (ARRAY['any_boundary'::text, 'next_turn'::text])) AND (delivery_turn_id IS NULL) AND (delivery_min_boundary IS NULL)))),
     CONSTRAINT ck_session_ingress_kind CHECK ((kind = ANY (ARRAY['input'::text, 'process_wake'::text, 'session_command'::text]))),
     CONSTRAINT ck_session_ingress_kind_delivery CHECK (((kind = 'input'::text) OR ((kind = 'process_wake'::text) AND (delivery_scope = 'any_boundary'::text)) OR ((kind = 'session_command'::text) AND (delivery_scope = 'next_turn'::text)))),
     CONSTRAINT ck_session_ingress_lane CHECK ((((kind = 'session_command'::text) AND (lane = 'command'::text)) OR ((kind = ANY (ARRAY['input'::text, 'process_wake'::text])) AND (lane = 'turn'::text)))),
+    CONSTRAINT ck_session_ingress_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_session_ingress_state CHECK ((state = ANY (ARRAY['open'::text, 'accepted'::text, 'completed'::text, 'cancelled'::text]))),
     CONSTRAINT ck_session_ingress_terminal CHECK ((((state = ANY (ARRAY['completed'::text, 'cancelled'::text])) AND (terminal_cause_json IS NOT NULL) AND (terminal_at_ms IS NOT NULL)) OR ((state = ANY (ARRAY['open'::text, 'accepted'::text])) AND (terminal_cause_json IS NULL) AND (terminal_at_ms IS NULL)))),
     CONSTRAINT ck_session_ingress_wake_source CHECK ((((kind = 'process_wake'::text) AND (wake_process_id IS NOT NULL) AND (wake_sequence IS NOT NULL)) OR ((kind <> 'process_wake'::text) AND (wake_process_id IS NULL) AND (wake_sequence IS NULL))))
@@ -695,8 +745,17 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     admission_base_checkpoint_ref text,
     closing_intent bigint,
     owning_process_id text,
+    obligation_id text,
+    obligation_state text,
+    obligation_attempts integer DEFAULT 0 NOT NULL,
+    obligation_due_at_ms bigint,
+    obligation_claim_token text,
+    obligation_stall_reason text,
+    obligation_last_error text,
+    obligation_settled_at_ms bigint,
     CONSTRAINT ck_session_meta_caused_by_family CHECK ((((caused_by_kind IS NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'turn'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_turn_id IS NOT NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'effect_address'::text) AND (caused_by_effect_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'tool_call'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_call_id IS NOT NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'process'::text) AND (caused_by_process_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'process_event'::text) AND (caused_by_process_id IS NOT NULL) AND (caused_by_process_event_sequence IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'trigger_occurrence'::text) AND (caused_by_occurrence_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'session_node'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_node_id IS NOT NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL)) OR ((caused_by_kind IS NOT NULL) AND (NOT (caused_by_kind = ANY (ARRAY['turn'::text, 'effect_address'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text])))))),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK ((caused_by_kind = ANY (ARRAY['turn'::text, 'effect_address'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text]))),
+    CONSTRAINT ck_session_meta_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_session_meta_relation_family CHECK ((((relation_kind = 'root'::text) AND (parent_session_id IS NULL) AND (caused_by_kind IS NULL) AND (source_session_id IS NULL) AND (source_node_id IS NULL)) OR ((relation_kind = 'child'::text) AND (parent_session_id IS NOT NULL) AND (source_session_id IS NULL) AND (source_node_id IS NULL)) OR ((relation_kind = 'fork'::text) AND (parent_session_id IS NULL) AND (caused_by_kind IS NULL) AND (source_session_id IS NOT NULL) AND (source_node_id IS NOT NULL)) OR ((relation_kind IS NOT NULL) AND (NOT (relation_kind = ANY (ARRAY['root'::text, 'child'::text, 'fork'::text])))))),
     CONSTRAINT ck_session_meta_relation_kind CHECK ((relation_kind = ANY (ARRAY['root'::text, 'child'::text, 'fork'::text])))
 );
@@ -736,6 +795,15 @@ CREATE TABLE lash_durable_read_fixture.lash_session_roots (
     terminal_cause_json text,
     terminal_head_revision bigint,
     terminal_at_ms bigint,
+    obligation_id text,
+    obligation_state text,
+    obligation_attempts integer DEFAULT 0 NOT NULL,
+    obligation_due_at_ms bigint,
+    obligation_claim_token text,
+    obligation_stall_reason text,
+    obligation_last_error text,
+    obligation_settled_at_ms bigint,
+    CONSTRAINT ck_session_roots_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_session_roots_terminal CHECK ((((terminal_kind IS NULL) AND (terminal_cause_json IS NULL) AND (terminal_head_revision IS NULL) AND (terminal_at_ms IS NULL)) OR ((terminal_kind = ANY (ARRAY['answered'::text, 'failed'::text, 'cancelled'::text])) AND (terminal_cause_json IS NOT NULL) AND (terminal_at_ms IS NOT NULL))))
 );
 
@@ -1144,7 +1212,7 @@ INSERT INTO lash_durable_read_fixture.lash_node_anchors VALUES ('n_03531bbc4371c
 -- Data for Name: lash_parent_end_plans; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL);
+INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1237,8 +1305,8 @@ INSERT INTO lash_durable_read_fixture.lash_process_wake_deliveries VALUES ('wake
 -- Data for Name: lash_processes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('p_00000000000070008000000000000001', 'process-start-key:v1:host:blake3:31478e59bda91f8d59606543c763719fe0813e431d1bc9e7ba1856a186e31ce4', 'host', NULL, 'durable-read-engine', 'Durable read fixture', 1700000000000, 1700000000000, 4, 5, 'waiting', 'detached', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '{"id":"p_00000000000070008000000000000001","start_key":"process-start-key:v1:host:blake3:31478e59bda91f8d59606543c763719fe0813e431d1bc9e7ba1856a186e31ce4","last_event_sequence":4,"input":{"type":"engine","kind":"durable-read-engine","payload":{"fixture":"process"}},"disposition":"rerunnable","lifetime":{"lifetime":"detached"},"ancestry":[],"identity":{"kind":"durable-read-engine","label":"Durable read fixture","definition":{"engine_kind":"durable-read-engine","definition":{"fixture":"process"},"signature":{"signature":"unknown"}}},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}}],"provenance":{"originator":{"type":"host"}},"env_ref":"process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738","created_at_ms":1700000000000,"updated_at_ms":1700000000000,"wait":{"kind":{"kind":"signal","name":"fixture-ready","event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","ordinal":1},"since_ms":123},"status":"waiting"}');
-INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('p_00000000000070008000000000000002', NULL, 'host', 'durable-read-fixture', 'external', NULL, 1700000000000, 1700000000000, 1, 7, 'running', 'detached', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '{"id":"p_00000000000070008000000000000002","last_event_sequence":1,"input":{"type":"external","metadata":{"fixture":"wake"}},"disposition":"externally_owned","lifetime":{"lifetime":"detached"},"ancestry":[],"identity":{"kind":"external"},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}},{"name":"fixture.wake","payload_schema":{"schema":{}},"semantics":{"wake":{"when":{"present":"/wake_input"},"input":{"pointer":"/wake_input"}}}}],"provenance":{"originator":{"type":"host"}},"created_at_ms":1700000000000,"updated_at_ms":1700000000000,"status":"running"}');
+INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('p_00000000000070008000000000000001', 'process-start-key:v1:host:blake3:31478e59bda91f8d59606543c763719fe0813e431d1bc9e7ba1856a186e31ce4', 'host', NULL, 'durable-read-engine', 'Durable read fixture', 1700000000000, 1700000000000, 4, 5, 'waiting', 'detached', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '{"id":"p_00000000000070008000000000000001","start_key":"process-start-key:v1:host:blake3:31478e59bda91f8d59606543c763719fe0813e431d1bc9e7ba1856a186e31ce4","last_event_sequence":4,"input":{"type":"engine","kind":"durable-read-engine","payload":{"fixture":"process"}},"disposition":"rerunnable","lifetime":{"lifetime":"detached"},"ancestry":[],"identity":{"kind":"durable-read-engine","label":"Durable read fixture","definition":{"engine_kind":"durable-read-engine","definition":{"fixture":"process"},"signature":{"signature":"unknown"}}},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}}],"provenance":{"originator":{"type":"host"}},"env_ref":"process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738","created_at_ms":1700000000000,"updated_at_ms":1700000000000,"wait":{"kind":{"kind":"signal","name":"fixture-ready","event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","ordinal":1},"since_ms":123},"status":"waiting"}', NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('p_00000000000070008000000000000002', NULL, 'host', 'durable-read-fixture', 'external', NULL, 1700000000000, 1700000000000, 1, 7, 'running', 'detached', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '{"id":"p_00000000000070008000000000000002","last_event_sequence":1,"input":{"type":"external","metadata":{"fixture":"wake"}},"disposition":"externally_owned","lifetime":{"lifetime":"detached"},"ancestry":[],"identity":{"kind":"external"},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}},{"name":"fixture.wake","payload_schema":{"schema":{}},"semantics":{"wake":{"when":{"present":"/wake_input"},"input":{"pointer":"/wake_input"}}}}],"provenance":{"originator":{"type":"host"}},"created_at_ms":1700000000000,"updated_at_ms":1700000000000,"status":"running"}', NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1265,6 +1333,12 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:b
 --
 
 INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48', 0, 'qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48:item:0', '{"type":"process_wake","wake":{"version":4,"wake_id":"durable-read-queue-wake","target_session_id":"durable-read-fixture","process_id":"p_69d943393ff87a56a6f44a7f58b2d465","sequence":1,"event_type":"process.wake","event_invocation":{"attribution":{"session_id":"durable-read-fixture"},"subject":{"type":"process_event","process_id":"p_69d943393ff87a56a6f44a7f58b2d465","sequence":1,"event_type":"process.wake"}},"input":"durable read queued task","created_at_ms":1700000000000}}');
+
+
+--
+-- Data for Name: lash_recovery_leader; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
 
 
 --
@@ -1315,7 +1389,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_ingress_sequence VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1782,6 +1856,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_items
 
 
 --
+-- Name: lash_recovery_leader lash_recovery_leader_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_recovery_leader
+    ADD CONSTRAINT lash_recovery_leader_pkey PRIMARY KEY (name);
+
+
+--
 -- Name: lash_release_stamp lash_release_stamp_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2089,6 +2171,27 @@ CREATE INDEX idx_lash_checkpoint_blob_refs_blob_ref ON lash_durable_read_fixture
 
 
 --
+-- Name: idx_lash_control_intents_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_control_intents_obligation_due ON lash_durable_read_fixture.lash_control_intents USING btree (obligation_due_at_ms, obligation_id) WHERE (obligation_state = ANY (ARRAY['due'::text, 'claimed'::text]));
+
+
+--
+-- Name: idx_lash_control_intents_obligation_id; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_control_intents_obligation_id ON lash_durable_read_fixture.lash_control_intents USING btree (obligation_id);
+
+
+--
+-- Name: idx_lash_control_intents_obligation_stalled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_control_intents_obligation_stalled ON lash_durable_read_fixture.lash_control_intents USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
+
+
+--
 -- Name: idx_lash_control_intents_open; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2114,6 +2217,27 @@ CREATE INDEX idx_lash_graph_nodes_parent ON lash_durable_read_fixture.lash_graph
 --
 
 CREATE INDEX idx_lash_node_anchors_checkpoint_ref ON lash_durable_read_fixture.lash_node_anchors USING btree (checkpoint_ref);
+
+
+--
+-- Name: idx_lash_parent_end_plans_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_parent_end_plans_obligation_due ON lash_durable_read_fixture.lash_parent_end_plans USING btree (obligation_due_at_ms, obligation_id) WHERE (obligation_state = ANY (ARRAY['due'::text, 'claimed'::text]));
+
+
+--
+-- Name: idx_lash_parent_end_plans_obligation_id; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_parent_end_plans_obligation_id ON lash_durable_read_fixture.lash_parent_end_plans USING btree (obligation_id);
+
+
+--
+-- Name: idx_lash_parent_end_plans_obligation_stalled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_parent_end_plans_obligation_stalled ON lash_durable_read_fixture.lash_parent_end_plans USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
 
 
 --
@@ -2236,6 +2360,27 @@ CREATE INDEX idx_lash_processes_live_worklist ON lash_durable_read_fixture.lash_
 
 
 --
+-- Name: idx_lash_processes_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_obligation_due ON lash_durable_read_fixture.lash_processes USING btree (obligation_due_at_ms, obligation_id) WHERE (obligation_state = ANY (ARRAY['due'::text, 'claimed'::text]));
+
+
+--
+-- Name: idx_lash_processes_obligation_id; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_processes_obligation_id ON lash_durable_read_fixture.lash_processes USING btree (obligation_id);
+
+
+--
+-- Name: idx_lash_processes_obligation_stalled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_obligation_stalled ON lash_durable_read_fixture.lash_processes USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
+
+
+--
 -- Name: idx_lash_processes_originator; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2334,6 +2479,27 @@ CREATE INDEX idx_lash_session_ingress_claim ON lash_durable_read_fixture.lash_se
 
 
 --
+-- Name: idx_lash_session_ingress_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_ingress_obligation_due ON lash_durable_read_fixture.lash_session_ingress USING btree (obligation_due_at_ms, obligation_id) WHERE (obligation_state = ANY (ARRAY['due'::text, 'claimed'::text]));
+
+
+--
+-- Name: idx_lash_session_ingress_obligation_id; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_session_ingress_obligation_id ON lash_durable_read_fixture.lash_session_ingress USING btree (obligation_id);
+
+
+--
+-- Name: idx_lash_session_ingress_obligation_stalled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_ingress_obligation_stalled ON lash_durable_read_fixture.lash_session_ingress USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
+
+
+--
 -- Name: idx_lash_session_ingress_open; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2348,10 +2514,52 @@ CREATE INDEX idx_lash_session_meta_catalog ON lash_durable_read_fixture.lash_ses
 
 
 --
+-- Name: idx_lash_session_meta_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_meta_obligation_due ON lash_durable_read_fixture.lash_session_meta USING btree (obligation_due_at_ms, obligation_id) WHERE (obligation_state = ANY (ARRAY['due'::text, 'claimed'::text]));
+
+
+--
+-- Name: idx_lash_session_meta_obligation_id; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_session_meta_obligation_id ON lash_durable_read_fixture.lash_session_meta USING btree (obligation_id);
+
+
+--
+-- Name: idx_lash_session_meta_obligation_stalled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_meta_obligation_stalled ON lash_durable_read_fixture.lash_session_meta USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
+
+
+--
 -- Name: idx_lash_session_meta_state_version; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
 CREATE INDEX idx_lash_session_meta_state_version ON lash_durable_read_fixture.lash_session_meta USING btree (session_state_version, session_id);
+
+
+--
+-- Name: idx_lash_session_roots_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_roots_obligation_due ON lash_durable_read_fixture.lash_session_roots USING btree (obligation_due_at_ms, obligation_id) WHERE (obligation_state = ANY (ARRAY['due'::text, 'claimed'::text]));
+
+
+--
+-- Name: idx_lash_session_roots_obligation_id; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_session_roots_obligation_id ON lash_durable_read_fixture.lash_session_roots USING btree (obligation_id);
+
+
+--
+-- Name: idx_lash_session_roots_obligation_stalled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_roots_obligation_stalled ON lash_durable_read_fixture.lash_session_roots USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
 
 
 --

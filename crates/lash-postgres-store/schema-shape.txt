@@ -76,9 +76,18 @@ table lash_control_intents
   column intent_id bigint not-null default
   column kind text not-null
   column kind_json text not-null
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column session_id text not-null
   column state text not-null
   column state_json text not-null
+  unique (obligation_id)
   primary-key (intent_id)
 table lash_deleted_sessions
   column created_at_ms bigint nullable
@@ -130,10 +139,19 @@ table lash_node_anchors
   primary-key (node_id)
 table lash_parent_end_plans
   column ended_at_ms bigint not-null
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column parent_id text not-null
   column parent_kind text not-null
   column parent_payload text not-null
   column settled_at_ms bigint nullable
+  unique (obligation_id)
   primary-key (parent_kind, parent_id)
 table lash_pending_turn_inputs
   column claim_bound_receipt_input_id text nullable
@@ -325,6 +343,14 @@ table lash_processes
   column lifetime text not-null
   column lifetime_scope_id text nullable
   column lifetime_scope_kind text nullable
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column originator_id text not-null
   column park_build_generation text nullable
   column park_executable_generation text nullable
@@ -337,6 +363,7 @@ table lash_processes
   column status text not-null
   column updated_at_ms bigint not-null
   column wake_session_id text nullable
+  unique (obligation_id)
   unique (start_key) where start_key is not null
   primary-key (process_id)
 table lash_queued_run_members
@@ -382,6 +409,14 @@ table lash_queued_work_items
   column payload_json text not-null
   primary-key (batch_id, item_index)
   foreign-key (batch_id) references lash_queued_work_batches (batch_id) on delete cascade
+table lash_recovery_leader
+  column elected_at_ms bigint not-null
+  column expires_at_ms bigint not-null
+  column generation_rank bigint not-null
+  column holder_id text not-null
+  column name text not-null
+  column term bigint not-null
+  primary-key (name)
 table lash_release_stamp
   column release_version text not-null
   column schema_versions text not-null
@@ -1096,6 +1131,14 @@ table lash_session_ingress
   column kind text not-null
   column lane text not-null
   column merge_key text nullable
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column payload_json text not-null
   column session_id text not-null
   column source_key text nullable
@@ -1106,6 +1149,7 @@ table lash_session_ingress
   column wake_process_id text nullable
   column wake_sequence bigint nullable
   unique (item_id)
+  unique (obligation_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
 table lash_session_ingress_sequence
@@ -1132,6 +1176,14 @@ table lash_session_meta
   column drive_epoch bigint not-null default
   column drive_root_start text nullable
   column last_commit_at_ms bigint nullable
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column owning_process_id text nullable
   column parent_session_id text nullable
   column relation_kind text not-null
@@ -1139,6 +1191,7 @@ table lash_session_meta
   column session_state_version integer nullable
   column source_node_id text nullable
   column source_session_id text nullable
+  unique (obligation_id)
   primary-key (session_id)
 table lash_session_meta_pending_observer_intents
   column process_id text not-null
@@ -1154,12 +1207,21 @@ table lash_session_root_inputs
   primary-key (session_id, input_id)
 table lash_session_roots
   column claim_result_json text nullable
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column root text not-null
   column session_id text not-null
   column terminal_at_ms bigint nullable
   column terminal_cause_json text nullable
   column terminal_head_revision bigint nullable
   column terminal_kind text nullable
+  unique (obligation_id)
   primary-key (session_id, root)
 table lash_sessions
   column checkpoint_ref text nullable
