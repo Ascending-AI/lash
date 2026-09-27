@@ -790,7 +790,6 @@ mod claim_authority_tests {
             kind: crate::QueuedWorkKind::Turn,
             authority: crate::QueuedWorkAuthority::new("fig905"),
             merge_key: Some("fig905".to_string()),
-            available_at_ms: 0,
             enqueued_at_ms: 0,
             items: Vec::new(),
         }
@@ -1049,7 +1048,6 @@ mod checkpoint_claim_determinism_tests {
                     kind: crate::QueuedWorkKind::Turn,
                     authority: crate::QueuedWorkAuthority::new("p7"),
                     merge_key: None,
-                    available_at_ms: 0,
                     enqueued_at_ms: 0,
                     items: Vec::new(),
                 }],

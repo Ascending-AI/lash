@@ -192,6 +192,7 @@ macro_rules! runtime_persistence_tests {
             (queued_work_join_groups_by_delivery_policy_and_merge_key, "queued-join"),
             (abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations, "abandoned-predecessor-generation"),
             (queued_work_redrive_preserves_interrupted_batch_composition, "redrive-composition"),
+            (queued_work_redrive_selects_interrupted_claim_identity_over_later_rows, "redrive-claim-gap"),
             (queued_work_redrive_obeys_delivery_boundary_before_identity, "redrive-boundary"),
             (queued_work_redrive_ignores_successor_row_limit, "redrive-row-limit"),
             (queued_work_redrive_ignores_a_changed_drain_policy, "redrive-drain-policy"),
@@ -235,8 +236,6 @@ macro_rules! runtime_persistence_tests {
             (queued_work_claims_supersede_across_session_lease_generations_with_timing, "root"),
             (claim_liveness_for_lease_less_paths_tracks_session_generations, "claim-liveness"),
             (accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed, "fig1511-orphaned-accepted"),
-            (queued_work_names_a_deferred_lane_apart_from_an_exhausted_one, "deferred-versus-exhausted"),
-            (queued_work_redrive_selects_claim_identity_across_ready_gap, "redrive-ready-gap"),
             (turn_input_claims_supersede_across_session_lease_generations_with_timing, "root"),
             ]
             timed_factories [
@@ -2315,28 +2314,6 @@ macro_rules! effect_host_await_event_witness_tests {
             $crate::__effect_host_await_event_witness_register!(
                 $attrs $fixture; $kind $law, $label
             );
-        )*
-    };
-}
-
-/// Register queued-work laws that must run against the backend's own clock.
-/// The fixture supplies a store plus the lease timing that clock implies.
-#[macro_export]
-macro_rules! backend_clock_queued_work_tests {
-    ($fixture:block) => {
-        $crate::backend_clock_queued_work_tests!(@catalogue $fixture; [
-            (queued_work_redrive_selects_claim_identity_across_ready_gap, "backend-clock-redrive-ready-gap"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store, timing) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(store, &timing).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
         )*
     };
 }

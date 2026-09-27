@@ -22,8 +22,6 @@ const REALTIME_SCAFFOLDING_LEASE_TTL_MS: u64 = 500;
 // boundary: controlled-clock backends still prove the 50 ms contract exactly.
 const REALTIME_LEASE_STALL_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(5);
 const REALTIME_LEASE_EXPIRY_POLL: std::time::Duration = std::time::Duration::from_millis(10);
-const REALTIME_DELAYED_QUEUE_ROW_GAP_MS: u64 = 500;
-const REALTIME_DELAYED_QUEUE_ROW_CROSSING_MARGIN_MS: u64 = 50;
 
 /// How runtime-persistence conformance drives session-lease expiry.
 #[derive(Clone)]
@@ -79,36 +77,6 @@ impl RuntimePersistenceLeaseTiming {
                 .await;
             }
             Self::Controlled(advance) => advance(CONTROLLED_LEASE_TTL_MS),
-        }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: each result is established by the setup above"
-    )]
-    fn delayed_queue_row_available_at_ms(&self) -> u64 {
-        match self {
-            Self::Realtime => {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("system clock is after Unix epoch")
-                    .as_millis() as u64
-                    + REALTIME_DELAYED_QUEUE_ROW_GAP_MS
-            }
-            Self::Controlled(_) => 4_102_444_800_000,
-        }
-    }
-
-    async fn cross_delayed_queue_row_boundary(&self) {
-        match self {
-            Self::Realtime => {
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    REALTIME_DELAYED_QUEUE_ROW_GAP_MS
-                        + REALTIME_DELAYED_QUEUE_ROW_CROSSING_MARGIN_MS,
-                ))
-                .await
-            }
-            Self::Controlled(advance) => advance(4_102_444_800_000),
         }
     }
 }
@@ -180,7 +148,7 @@ pub use leases::{
     session_execution_lease_displacement, session_execution_lease_fence_authority,
 };
 pub use queue_redrive::{
-    queued_work_redrive_selects_claim_identity_across_ready_gap,
+    queued_work_redrive_selects_interrupted_claim_identity_over_later_rows,
     same_generation_claim_scans_reach_rows_beyond_the_scan_surplus,
 };
 pub use suite_and_receipts::{

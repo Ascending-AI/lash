@@ -415,7 +415,6 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     work_kind         TEXT NOT NULL,
     authority_json    TEXT NOT NULL,
     merge_key         TEXT,
-    available_at_ms   INTEGER NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
     claim_id          TEXT, -- With claim_token, names a live claim for a nonzero generation.
     claim_token       TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
@@ -444,9 +443,6 @@ CREATE TABLE IF NOT EXISTS wake_redelivery_fences (
     allocation_floor INTEGER NOT NULL,
     PRIMARY KEY (session_id, process_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_queued_work_ready
-    ON queued_work_batches(session_id, available_at_ms, enqueue_seq);
 
 CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
     ON queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);

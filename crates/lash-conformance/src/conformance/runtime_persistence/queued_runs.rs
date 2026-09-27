@@ -524,17 +524,13 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let delayed = store
-        .enqueue_queued_work(
-            checkpoint_claims::queued_draft(
-                &session_id,
-                "not yet available",
-                DeliveryPolicy::EarliestSafeBoundary,
-            )
-            .with_available_at_ms(u64::MAX / 2),
-        )
+    let blocked = store
+        .enqueue_queued_work(checkpoint_claims::queued_session_command_draft(
+            &session_id,
+            "holds the queue head",
+        ))
         .await
-        .expect("enqueue delayed work");
+        .expect("enqueue head-blocking command work");
     let lease =
         claim_session_execution_lease_for_test(&store, &session_id, "refused-selection").await;
     let admission = store
@@ -566,10 +562,10 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
             lash_core::testing::queued_work_claim_policy(64),
         )
         .await
-        .expect("refuse unavailable work");
+        .expect("refuse command-blocked work");
     assert_eq!(
         selection.refusal,
-        Some(crate::QueuedWorkClaimRefusal::NotYetAvailable)
+        Some(crate::QueuedWorkClaimRefusal::CommandAtHead)
     );
     assert!(selection.inputs.is_empty() && selection.queued.is_empty());
     assert_eq!(
@@ -720,9 +716,9 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
         store
             .list_queued_work(&session_id)
             .await
-            .expect("read delayed work")
+            .expect("read unclaimed work")
             .iter()
-            .any(|batch| batch.batch_id == delayed.batch_id)
+            .any(|batch| batch.batch_id == blocked.batch_id)
     );
 
     let selected_session = SessionId::from("queued-run-anonymous-selected-retention");

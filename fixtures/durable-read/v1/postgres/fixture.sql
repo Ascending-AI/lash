@@ -530,7 +530,6 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_batches (
     work_kind text NOT NULL,
     authority_json text NOT NULL,
     merge_key text,
-    available_at_ms bigint NOT NULL,
     enqueued_at_ms bigint NOT NULL,
     claim_id text,
     claim_token text,
@@ -1257,7 +1256,7 @@ INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('p_0000000000007000
 -- Data for Name: lash_queued_work_batches; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48', 'durable-read-fixture', 'process:p_69d943393ff87a56a6f44a7f58b2d465:event:1:wake', 'earliest_safe_boundary', 'turn', '{}', 'lash.process_wake', 0, 1700000000000, NULL, NULL, 0, 0);
+INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48', 'durable-read-fixture', 'process:p_69d943393ff87a56a6f44a7f58b2d465:event:1:wake', 'earliest_safe_boundary', 'turn', '{}', 'lash.process_wake', 1700000000000, NULL, NULL, 0, 0);
 
 
 --
@@ -2303,13 +2302,6 @@ CREATE INDEX idx_lash_processes_wake_session ON lash_durable_read_fixture.lash_p
 --
 
 CREATE INDEX idx_lash_queued_work_claim ON lash_durable_read_fixture.lash_queued_work_batches USING btree (session_id, claim_id, enqueue_seq);
-
-
---
--- Name: idx_lash_queued_work_ready; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_queued_work_ready ON lash_durable_read_fixture.lash_queued_work_batches USING btree (session_id, available_at_ms, enqueue_seq);
 
 
 --

@@ -248,7 +248,6 @@ pub(super) fn cancel_pending_turn_input_row_conn(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn checkpoint_work_pending_sqlite(
     conn: &SqliteConnection,
-    now: u64,
     session_id: &SessionId,
     generation: u64,
     turn_id: &TurnId,
@@ -280,7 +279,6 @@ pub(super) async fn checkpoint_work_pending_sqlite(
                     sql,
                     params![
                         session_id.as_str(),
-                        now as i64,
                         sql_session_lease_generation(generation)?,
                         turn_id.as_str(),
                         max_inputs as i64,
@@ -297,16 +295,14 @@ pub(super) async fn checkpoint_work_pending_sqlite(
     .map_err(sqlite_error)?
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Name the refusal behind an empty candidate scan.
 ///
 /// The candidate query enforces the delivery-boundary rule in SQL, so a scan
 /// that comes back empty tells the shared claim state machine nothing. Asking
-/// it again with the unfiltered ready head keeps the classification in one
-/// place: whatever the head alone is refused for is what this claim is refused
-/// for. With no ready head at all, a lane still holding deferred work is not an
-/// exhausted lane. Both probes run only on a refusal, so a successful claim
-/// pays nothing for them.
+/// it again with the unfiltered head keeps the classification in one place:
+/// whatever the head alone is refused for is what this claim is refused for.
+/// The probe runs only on a refusal, so a successful claim pays nothing for
+/// it.
 pub(super) fn sqlite_refusal_for_empty_scan(
     tx: &Connection,
     session_id: &SessionId,
@@ -318,13 +314,12 @@ pub(super) fn sqlite_refusal_for_empty_scan(
     let sql = crate::turn_ingress::turn_ingress_sql();
     let head_rows = {
         let mut stmt = tx
-            .prepare(sql.queued_batches_sqlite.select_head_candidate.sql())
+            .prepare(sql.queued_batches.select_head_candidate.sql())
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
                 params![
                     session_id.as_str(),
-                    now as i64,
                     sql_session_lease_generation(generation)?
                 ],
                 queued_batch_row_from_sql,
@@ -342,22 +337,8 @@ pub(super) fn sqlite_refusal_for_empty_scan(
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Vec<_>>()
     };
-    let deferred_row_pending = head_candidates.is_empty()
-        && tx
-            .query_row(
-                sql.queued_batches_sqlite.exists_deferred.sql(),
-                params![
-                    session_id.as_str(),
-                    now as i64,
-                    sql_session_lease_generation(generation)?
-                ],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(sqlite_error)?
-            != 0;
     lash_core_execution::store::claim_plan::classify_empty_claim_scan(
         &head_candidates,
-        deferred_row_pending,
         boundary,
         policy,
         now,
@@ -469,7 +450,6 @@ pub(super) fn claim_queued_work_rows_sqlite(
 
 pub(super) fn scan_queued_work_candidates_sqlite(
     tx: &Connection,
-    now: u64,
     session_id: &SessionId,
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
@@ -483,7 +463,6 @@ pub(super) fn scan_queued_work_candidates_sqlite(
             .query_map(
                 params![
                     session_id.as_str(),
-                    now as i64,
                     sql_session_lease_generation(generation)?,
                     claim_scan_limit(max_rows)
                 ],
@@ -527,14 +506,8 @@ pub(super) fn claim_ready_queued_work_sqlite_conn(
         return Ok(TxOutcome::Commit(None));
     }
     let generation = session_execution_lease.fencing_token;
-    let (candidate_rows, candidate_batches, candidates) = scan_queued_work_candidates_sqlite(
-        tx,
-        now,
-        session_id,
-        generation,
-        boundary,
-        policy.max_rows,
-    )?;
+    let (candidate_rows, candidate_batches, candidates) =
+        scan_queued_work_candidates_sqlite(tx, session_id, generation, boundary, policy.max_rows)?;
     let selected_len = match select_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
         TurnWorkClaimPrefix::Selected { len } => len,
         TurnWorkClaimPrefix::Refused { .. } => {

@@ -6,18 +6,15 @@ lash_store_sql::statements! {
     pub(crate) struct TurnIngressPostgresStatements @ "turn_ingress" {
         /// Whether session `?1` has checkpoint work for turn `?3` at generation
         /// `?2`, at the `after_work` checkpoint: an admitted active-turn input
-        /// while `?5` inputs may still be claimed, or a non-command item behind
-        /// the boundary head while `?6` batches may.
+        /// while `?4` inputs may still be claimed, or a non-command item behind
+        /// the boundary head while `?5` batches may.
         ///
-        /// The ready cutoff is `COALESCE(?4, <server clock>)`: the probe runs
-        /// outside a transaction, so it cannot share a sampled
-        /// `transaction_timestamp()` with a sibling statement the way the claim
-        /// path does, and reading the clock separately would cost the hottest
-        /// checkpoint path a round trip. `?4` is NULL in a production build —
-        /// the store's test lease clock is the only thing that ever supplies
-        /// it — so the statement falls through to the server clock it always
-        /// read. The predicate keeps the indexed column on the left, so
-        /// `idx_queued_work_batches_ready` is still seekable.
+        /// One probe, so one statement: the claim it guards takes a write
+        /// transaction, and asking the two halves separately would let a
+        /// checkpoint open a transaction for work that had already gone. The
+        /// boundary head is the same common table expression the candidate
+        /// scan uses, because the probe must agree with the scan it decides
+        /// for.
         checkpoint_work_pending_after_work = "WITH queued_work_unfiltered_head AS (
                  SELECT enqueue_seq AS head_enqueue_seq,
                         batch_id AS head_batch_id,
@@ -25,8 +22,6 @@ lash_store_sql::statements! {
                         claim_id AS head_claim_id
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND work_kind = 'turn'
-                   AND available_at_ms <= COALESCE(
-                        ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                    AND (
                         claim_token IS NULL
                         OR claim_session_lease_generation <> ?2
@@ -44,8 +39,6 @@ lash_store_sql::statements! {
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
                      WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
-                       AND candidate.available_at_ms <= COALESCE(
-                            ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                        AND (
                             candidate.claim_token IS NULL
                             OR candidate.claim_session_lease_generation <> ?2
@@ -67,7 +60,7 @@ lash_store_sql::statements! {
                  WHERE head_delivery_policy = 'earliest_safe_boundary'
              )
              SELECT (
-                ?5 > 0 AND EXISTS (
+                ?4 > 0 AND EXISTS (
                     SELECT 1
                     FROM pending_turn_inputs
                     WHERE session_id = ?1
@@ -80,7 +73,7 @@ lash_store_sql::statements! {
                     LIMIT 1
                 )
              ) OR (
-                ?6 > 0 AND EXISTS (
+                ?5 > 0 AND EXISTS (
                     SELECT 1
                     FROM queued_work_items AS item
                     JOIN queued_work_head_candidate AS head
@@ -100,8 +93,6 @@ lash_store_sql::statements! {
                         claim_id AS head_claim_id
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND work_kind = 'turn'
-                   AND available_at_ms <= COALESCE(
-                        ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                    AND (
                         claim_token IS NULL
                         OR claim_session_lease_generation <> ?2
@@ -119,8 +110,6 @@ lash_store_sql::statements! {
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
                      WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
-                       AND candidate.available_at_ms <= COALESCE(
-                            ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                        AND (
                             candidate.claim_token IS NULL
                             OR candidate.claim_session_lease_generation <> ?2
@@ -142,7 +131,7 @@ lash_store_sql::statements! {
                  WHERE head_delivery_policy = 'earliest_safe_boundary'
              )
              SELECT (
-                ?5 > 0 AND EXISTS (
+                ?4 > 0 AND EXISTS (
                     SELECT 1
                     FROM pending_turn_inputs
                     WHERE session_id = ?1
@@ -155,7 +144,7 @@ lash_store_sql::statements! {
                     LIMIT 1
                 )
              ) OR (
-                ?6 > 0 AND EXISTS (
+                ?5 > 0 AND EXISTS (
                     SELECT 1
                     FROM queued_work_items AS item
                     JOIN queued_work_head_candidate AS head

@@ -329,11 +329,6 @@ fn each_refusal_names_the_scenario_that_produces_it() {
             reason: QueuedWorkClaimRefusal::HeadWithheld
         }
     );
-
-    // `NotYetAvailable` has no scenario here on purpose: only a backend can see
-    // that a lane still holds a row whose availability has not arrived, so the
-    // cross-backend conformance suite pins it
-    // (`queued_work_names_a_deferred_lane_apart_from_an_exhausted_one`).
 }
 
 /// The spellings travel into host logs and metrics labels, and they are the
@@ -343,7 +338,6 @@ fn refusal_spellings_are_stable() {
     let cases = [
         (QueuedWorkClaimRefusal::ZeroLimit, "zero_limit"),
         (QueuedWorkClaimRefusal::Empty, "empty"),
-        (QueuedWorkClaimRefusal::NotYetAvailable, "not_yet_available"),
         (QueuedWorkClaimRefusal::CommandAtHead, "command_at_head"),
         (
             QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
@@ -945,7 +939,6 @@ fn empty_scan_diagnostic_preserves_refusal_and_names_became_selectable() {
     for reason in [
         QueuedWorkClaimRefusal::ZeroLimit,
         QueuedWorkClaimRefusal::Empty,
-        QueuedWorkClaimRefusal::NotYetAvailable,
         QueuedWorkClaimRefusal::CommandAtHead,
         QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
         QueuedWorkClaimRefusal::HeadWithheld,

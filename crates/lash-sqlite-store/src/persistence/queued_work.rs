@@ -120,7 +120,6 @@ impl QueuedWorkStore for Store {
                     let (candidate_rows, candidate_batches, candidates) =
                         scan_queued_work_candidates_sqlite(
                             tx,
-                            now,
                             &session_id,
                             generation,
                             QueuedWorkClaimBoundary::Idle,
@@ -193,7 +192,6 @@ impl QueuedWorkStore for Store {
                     let (candidate_rows, candidate_batches, candidates) =
                         scan_queued_work_candidates_sqlite(
                             tx,
-                            now,
                             &session_id,
                             generation,
                             boundary,
@@ -283,7 +281,6 @@ impl QueuedWorkStore for Store {
         let now = self.clock.timestamp_ms();
         if !checkpoint_work_pending_sqlite(
             &self.conn,
-            now,
             session_id,
             session_execution_lease.fencing_token,
             turn_id,

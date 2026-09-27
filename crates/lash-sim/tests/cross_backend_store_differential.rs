@@ -947,7 +947,6 @@ type QueuedWorkBatchRow = (
     String,
     String,
     Option<String>,
-    i64,
     Option<String>,
     Option<String>,
     i64,
@@ -1377,7 +1376,6 @@ impl BackendRunner {
                         claim_observability_wake(&self.session_id),
                         DeliveryPolicy::AfterCurrentTurnCommit,
                     )
-                    .with_available_at_ms(777)
                     .with_merge_key("cross-backend-claim-observability"),
                 )
                 .await

@@ -15,7 +15,6 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) kind: QueuedWorkKind,
     pub(crate) authority: QueuedWorkAuthority,
     pub(crate) merge_key: Option<String>,
-    available_at_ms: u64,
     enqueued_at_ms: u64,
     pub(crate) claim_fencing_token: u64,
     pub(crate) claim_id: Option<String>,
@@ -68,11 +67,6 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
         kind,
         authority: store_decode_json(&authority_json, "queued work authority")?,
         merge_key: row.get("merge_key"),
-        available_at_ms: u64_from_sql(
-            "QueuedWorkBatch",
-            "available_at_ms",
-            row.get("available_at_ms"),
-        )?,
         enqueued_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "enqueued_at_ms",
@@ -145,7 +139,6 @@ pub(crate) async fn queued_work_batch_from_row(
         kind: row.kind,
         authority: row.authority,
         merge_key: row.merge_key,
-        available_at_ms: row.available_at_ms,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
     };

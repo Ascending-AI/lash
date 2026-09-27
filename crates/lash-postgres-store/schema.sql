@@ -345,7 +345,6 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     work_kind TEXT NOT NULL,
     authority_json TEXT NOT NULL,
     merge_key TEXT,
-    available_at_ms BIGINT NOT NULL,
     enqueued_at_ms BIGINT NOT NULL,
     claim_id TEXT, -- With claim_token, names a live claim for a nonzero generation.
     claim_token TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
@@ -357,8 +356,6 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
-CREATE INDEX IF NOT EXISTS idx_lash_queued_work_ready
-    ON lash_queued_work_batches(session_id, available_at_ms, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_claim
     ON lash_queued_work_batches(session_id, claim_id, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order

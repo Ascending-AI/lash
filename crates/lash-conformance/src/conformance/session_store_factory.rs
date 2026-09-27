@@ -347,7 +347,6 @@ where
 async fn session_store_factory_claimable_queued_work_peek(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
-    const NOW_MS: u64 = 100;
     let request = session_store_request(
         &SessionId::from("claimable-queued-work-peek"),
         "claimable-queued-work-model",
@@ -355,7 +354,7 @@ async fn session_store_factory_claimable_queued_work_peek(
     );
     assert!(
         factory
-            .has_claimable_queued_work(&request, NOW_MS)
+            .has_claimable_queued_work(&request)
             .await
             .expect("peek a missing session")
             == Some(false),
@@ -367,68 +366,43 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("create peek conformance store");
     assert!(
         factory
-            .has_claimable_queued_work(&request, NOW_MS)
+            .has_claimable_queued_work(&request)
             .await
             .expect("peek an empty queue")
             == Some(false),
         "an empty queue must not report claimable queued work"
     );
 
-    store
-        .enqueue_queued_work(
-            crate::QueuedWorkBatchDraft::new(
-                &request.session_id,
-                crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::SessionCommand::RefreshToolCatalog {
-                    reason: "future".to_string(),
-                },
-            )
-            .with_available_at_ms(NOW_MS + 1),
-        )
-        .await
-        .expect("enqueue future queued work");
-    assert!(
-        factory
-            .has_claimable_queued_work(&request, NOW_MS)
-            .await
-            .expect("peek a future-only queue")
-            == Some(false),
-        "future queued work is not yet claimable"
-    );
-
     let ready = store
-        .enqueue_queued_work(
-            crate::QueuedWorkBatchDraft::new(
-                &request.session_id,
-                crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::SessionCommand::RefreshToolCatalog {
-                    reason: "ready".to_string(),
-                },
-            )
-            .with_available_at_ms(NOW_MS),
-        )
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            &request.session_id,
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "ready".to_string(),
+            },
+        ))
         .await
-        .expect("enqueue ready queued work");
+        .expect("enqueue queued work");
     assert!(
         factory
-            .has_claimable_queued_work(&request, NOW_MS)
+            .has_claimable_queued_work(&request)
             .await
-            .expect("peek a ready queue")
+            .expect("peek a populated queue")
             == Some(true),
-        "ready queued work must be visible through the factory peek"
+        "queued work must be visible through the factory peek"
     );
     store
         .cancel_queued_work_batch(&request.session_id, &ready.batch_id)
         .await
-        .expect("cancel ready queued work")
-        .expect("ready batch remains cancellable");
+        .expect("cancel queued work")
+        .expect("batch remains cancellable");
     assert!(
         factory
-            .has_claimable_queued_work(&request, NOW_MS)
+            .has_claimable_queued_work(&request)
             .await
-            .expect("peek after cancelling the only ready batch")
+            .expect("peek after cancelling the only batch")
             == Some(false),
-        "future-only work must remain idle after the ready batch is removed"
+        "the queue must report empty again after its batch is removed"
     );
 
     store
@@ -441,7 +415,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("enqueue claimable next-turn input");
     assert!(
         factory
-            .has_claimable_queued_work(&request, NOW_MS)
+            .has_claimable_queued_work(&request)
             .await
             .expect("peek a claimable next-turn input")
             == Some(true),
@@ -539,7 +513,7 @@ async fn session_store_factory_claimable_queued_work_peek(
     );
     assert!(
         factory
-            .has_claimable_queued_work(&fenced_request, i64::MAX as u64)
+            .has_claimable_queued_work(&fenced_request)
             .await
             .expect("conservatively peek live claims")
             == Some(true),
@@ -552,7 +526,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("expire the first generation deterministically");
     assert!(
         factory
-            .has_claimable_queued_work(&fenced_request, i64::MAX as u64)
+            .has_claimable_queued_work(&fenced_request)
             .await
             .expect("peek expired claims")
             == Some(true),

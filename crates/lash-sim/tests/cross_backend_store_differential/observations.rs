@@ -298,7 +298,6 @@ pub(super) struct QueuedWorkObservation {
     kind: QueuedWorkKind,
     authority: QueuedWorkAuthority,
     merge_key: Option<String>,
-    available_at_ms: u64,
     payloads: Vec<serde_json::Value>,
     claim_id_present: bool,
     claim_token_present: bool,
@@ -336,7 +335,6 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     work_kind,
                     authority_json,
                     merge_key,
-                    available_at_ms,
                     claim_id,
                     claim_token,
                     claim_fencing_token,
@@ -361,7 +359,6 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     authority: serde_json::from_str(&authority_json)
                         .expect("decode queued-work authority"),
                     merge_key,
-                    available_at_ms: available_at_ms as u64,
                     payloads: payloads
                         .into_iter()
                         .map(|(_item_index, payload)| payload)

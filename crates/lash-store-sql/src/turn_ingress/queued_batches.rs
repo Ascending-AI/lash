@@ -9,17 +9,17 @@ pub const TABLE: &str = "queued_work_batches";
 /// each call site `join(", ")`ed into a `format!`; it is one list now, and the
 /// row decoders read by column name so the order is the list's to choose.
 pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+     work_kind, authority_json, merge_key, enqueued_at_ms,
      claim_fencing_token, claim_token, claim_session_lease_generation, claim_id";
 
 /// The columns written after allocation under the session lock.
 pub const INSERT_COLUMNS: &str =
     "enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-     authority_json, merge_key, available_at_ms, enqueued_at_ms";
+     authority_json, merge_key, enqueued_at_ms";
 
 /// The columns written by the PostgreSQL insert.
 pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, batch_id, session_id, source_key,
-     delivery_policy, work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms";
+     delivery_policy, work_kind, authority_json, merge_key, enqueued_at_ms";
 
 /// The facts the settlement verdict
 /// [`require_settleable_queued_work`](lash_core::store_backend_support::require_settleable_queued_work)
@@ -57,7 +57,7 @@ crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
     pub struct QueuedBatchStatements @ "queued_work_batch" {
         select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              WHERE batch_id = ?1";
@@ -68,7 +68,7 @@ crate::statements! {
 
         /// Every batch of session `?1`, in enqueue order.
         list_by_session = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              WHERE session_id = ?1
@@ -80,7 +80,7 @@ crate::statements! {
         /// pins still holds the lease, so this is a join against the lease row
         /// rather than a `claim_token IS NULL` test (ADR 0029).
         list_unclaimed = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              WHERE session_id = ?1
@@ -92,6 +92,34 @@ crate::statements! {
                       AND sel.lease_fencing_token
                           = queued_work_batches.claim_session_lease_generation
                ))
+             ORDER BY enqueue_seq ASC";
+
+        /// Session `?1`'s head for generation `?2`, unfiltered by the
+        /// delivery boundary: what an empty candidate scan is asked about so
+        /// the refusal it reports names the head's own reason.
+        select_head_candidate = "SELECT enqueue_seq, batch_id, session_id, source_key,
+                    delivery_policy, work_kind, authority_json, merge_key,
+                    enqueued_at_ms, claim_fencing_token, claim_token,
+                    claim_session_lease_generation, claim_id
+             FROM queued_work_batches
+             WHERE session_id = ?1
+               AND (
+                    claim_token IS NULL
+                    OR claim_session_lease_generation <> ?2
+               )
+             ORDER BY enqueue_seq ASC
+             LIMIT 1";
+
+        /// Session `?1`'s unclaimed batches for generation `?2` whose
+        /// `enqueue_seq` lies between `?3` and `?4`: the span an exact claim
+        /// must be contiguous over.
+        select_span = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+             FROM queued_work_batches
+             WHERE session_id = ?1
+               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
+               AND enqueue_seq BETWEEN ?3 AND ?4
              ORDER BY enqueue_seq ASC";
 
         /// Claim batch `?2` of session `?1` for claim `?3`, lease token `?4`,

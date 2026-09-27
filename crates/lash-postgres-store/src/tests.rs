@@ -654,9 +654,9 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
          (enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-          authority_json, merge_key, available_at_ms, enqueued_at_ms)
+          authority_json, merge_key, enqueued_at_ms)
          SELECT value, $1 || value::text, $2, $3 || value::text,
-                'earliest_safe_boundary', 'turn', '{}', NULL, 0, 1
+                'earliest_safe_boundary', 'turn', '{}', NULL, 1
          FROM generate_series(1, 10000) AS value",
     )
     .bind(&batch_prefix)

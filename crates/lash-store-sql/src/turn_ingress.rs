@@ -87,10 +87,9 @@ crate::statements! {
              WHERE park_executable_generation IS NOT NULL
              GROUP BY park_executable_generation";
 
-        /// Whether session `?1` has work a runner could pick up at `?2`:
-        /// an unfinished queued run, an available queued batch, or an input
-        /// already deferred to the next turn that no aborted turn is bound to
-        /// (FIG-3589).
+        /// Whether session `?1` has work a runner could pick up: an unfinished
+        /// queued run, a queued batch, or an input already deferred to the
+        /// next turn that no aborted turn is bound to (FIG-3589).
         ///
         /// One question, so one statement: asking it as two would let a
         /// session go from empty to non-empty between them and report a
@@ -102,7 +101,6 @@ crate::statements! {
                 SELECT 1
                 FROM queued_work_batches qwb
                 WHERE qwb.session_id = ?1
-                  AND qwb.available_at_ms <= ?2
              ) OR EXISTS(
                 SELECT 1
                 FROM pending_turn_inputs pti

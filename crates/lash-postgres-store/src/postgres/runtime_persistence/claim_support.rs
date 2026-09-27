@@ -112,7 +112,6 @@ pub(super) enum ClaimTransactionOutcome<T> {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn checkpoint_work_pending_postgres(
     pool: &PgPool,
-    injected_lease_epoch: Option<i64>,
     session_id: &SessionId,
     generation: u64,
     turn_id: &TurnId,
@@ -140,7 +139,6 @@ pub(super) async fn checkpoint_work_pending_postgres(
         .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
         .bind(turn_id.as_str())
-        .bind(injected_lease_epoch)
         .bind(max_inputs as i64)
         .bind(max_batches as i64)
         .fetch_one(&mut *connection)
@@ -148,16 +146,13 @@ pub(super) async fn checkpoint_work_pending_postgres(
         .map_err(store_sqlx_error)
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Name the refusal behind an empty candidate scan.
 ///
 /// The candidate query enforces the delivery-boundary rule in SQL, so a scan
 /// that comes back empty tells the shared claim state machine nothing. Asking
-/// it again with the unfiltered ready head keeps the classification in one
-/// place: whatever the head alone is refused for is what this claim is refused
-/// for. With no ready head at all, a lane still holding deferred work is not an
-/// exhausted lane. Both probes read the same `transaction_timestamp()` cutoff
-/// the candidate query used, and both run only on a refusal.
+/// it again with the unfiltered head keeps the classification in one place:
+/// whatever the head alone is refused for is what this claim is refused for.
+/// The probe runs only on a refusal.
 pub(super) async fn postgres_refusal_for_empty_scan(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
@@ -167,9 +162,8 @@ pub(super) async fn postgres_refusal_for_empty_scan(
 ) -> Result<TurnWorkEmptyScanDiagnostic, StoreError> {
     let now = postgres_transaction_epoch_ms(tx).await?;
     let sql = crate::turn_ingress::turn_ingress_sql();
-    let head_rows = sqlx::query(sql.queued_batches_postgres.select_head_candidate.sql())
+    let head_rows = sqlx::query(sql.queued_batches.select_head_candidate.sql())
         .bind(session_id.as_str())
-        .bind(now as i64)
         .bind(sql_session_lease_generation(generation)?)
         .fetch_all(&mut **tx)
         .await
@@ -182,17 +176,8 @@ pub(super) async fn postgres_refusal_for_empty_scan(
         }
         None => Vec::new(),
     };
-    let deferred_row_pending = head_candidates.is_empty()
-        && sqlx::query_scalar::<_, bool>(sql.queued_batches_postgres.exists_deferred.sql())
-            .bind(session_id.as_str())
-            .bind(now as i64)
-            .bind(sql_session_lease_generation(generation)?)
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
     lash_core_execution::store::claim_plan::classify_empty_claim_scan(
         &head_candidates,
-        deferred_row_pending,
         boundary,
         policy,
         now,
@@ -294,7 +279,6 @@ pub(super) async fn claim_queued_work_rows_postgres(
 
 pub(super) async fn scan_queued_work_candidates_postgres(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    now: u64,
     session_id: &SessionId,
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
@@ -309,7 +293,6 @@ pub(super) async fn scan_queued_work_candidates_postgres(
 > {
     let rows = sqlx::query(postgres_queued_work_claim_candidates_sql(boundary))
         .bind(session_id.as_str())
-        .bind(now as i64)
         .bind(sql_session_lease_generation(generation)?)
         .bind(claim_scan_limit(max_rows))
         .fetch_all(&mut **tx)
@@ -355,15 +338,9 @@ pub(super) async fn claim_ready_queued_work_postgres_tx(
     }
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
-    let (selected_rows, mut selected_batches, candidates) = scan_queued_work_candidates_postgres(
-        tx,
-        now,
-        session_id,
-        generation,
-        boundary,
-        policy.max_rows,
-    )
-    .await?;
+    let (selected_rows, mut selected_batches, candidates) =
+        scan_queued_work_candidates_postgres(tx, session_id, generation, boundary, policy.max_rows)
+            .await?;
     let selected_len = match select_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
         TurnWorkClaimPrefix::Selected { len } => len,
         TurnWorkClaimPrefix::Refused { .. } => {

@@ -108,8 +108,9 @@ pub(crate) async fn ensure_session_not_deleted_tx(
 /// The claim-candidate scan for `boundary`, rendered once at startup.
 ///
 /// The boundary is a closed two-variant choice, so it selects a named statement
-/// rather than splicing a predicate: an optional boundary filter cannot use
-/// `idx_queued_work_batches_ready`, and this query is the claim path's hottest.
+/// rather than splicing a predicate: an optional boundary filter cannot seek
+/// the `(session_id, enqueue_seq)` primary key cleanly, and this query is the
+/// claim path's hottest.
 fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> &'static str {
     let sql = crate::turn_ingress::turn_ingress_sql();
     match boundary {
@@ -187,8 +188,6 @@ async fn enqueue_queued_work_with_outcome_tx(
     batch: &QueuedWorkBatchDraft,
     now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-    let sql_available_at_ms =
-        sql_counter_value("queued_work_available_at_ms", batch.available_at_ms)?;
     let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         if let Some(source_key) = batch.source_key.as_deref() {
             lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
@@ -221,7 +220,6 @@ async fn enqueue_queued_work_with_outcome_tx(
             .bind(batch.kind().as_str())
             .bind(encode_json(&batch.authority)?)
             .bind(&batch.merge_key)
-            .bind(sql_available_at_ms)
             .bind(now as i64)
             .fetch_optional(&mut **tx)
             .await

@@ -58,28 +58,6 @@ where
 )]
 pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::RuntimePersistence>) {
     let too_large = (i64::MAX as u64) + 1;
-    let available_error = store
-        .enqueue_queued_work(
-            queued_draft(&SessionId::from("signed-write-available"), "available")
-                .with_available_at_ms(too_large),
-        )
-        .await
-        .expect_err("unrepresentable available_at_ms must refuse before insert");
-    assert!(matches!(
-        available_error,
-        crate::StoreError::MonotonicCounterOverflow {
-            counter: "queued_work_available_at_ms",
-            current,
-        } if current == too_large
-    ));
-    assert!(
-        store
-            .list_queued_work(&SessionId::from("signed-write-available"))
-            .await
-            .expect("list after refused available_at_ms")
-            .is_empty()
-    );
-
     let lease_owner =
         crate::LeaseOwnerIdentity::opaque("signed-write-lease", "signed-write-lease:incarnation");
     let lease_error = store

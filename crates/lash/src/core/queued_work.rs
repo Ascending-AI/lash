@@ -410,16 +410,13 @@ impl QueuedWorkRunHandle for NativeQueuedWorkRunHandle {
         policy.session_id = Some(session_id.clone());
         self.config
             .store_factory
-            .has_claimable_queued_work(
-                &SessionStoreCreateRequest {
-                    owning_process_id: None,
-                    pending_observer_intents: Vec::new(),
-                    session_id: session_id.clone(),
-                    relation: SessionRelation::default(),
-                    policy,
-                },
-                self.config.env.core.clock.timestamp_ms(),
-            )
+            .has_claimable_queued_work(&SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: session_id.clone(),
+                relation: SessionRelation::default(),
+                policy,
+            })
             .await
             .map_err(|error| {
                 facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(

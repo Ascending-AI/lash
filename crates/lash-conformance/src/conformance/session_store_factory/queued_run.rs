@@ -64,7 +64,7 @@ pub async fn session_store_factory_discovers_empty_pending_queued_run(
     drop(store);
     assert_eq!(
         factory
-            .has_claimable_queued_work(&request, 100)
+            .has_claimable_queued_work(&request)
             .await
             .expect("discover pending admission"),
         Some(true),
@@ -96,7 +96,7 @@ pub async fn session_store_factory_discovers_empty_pending_queued_run(
         .expect("settle frozen empty run");
     assert_eq!(
         factory
-            .has_claimable_queued_work(&request, 100)
+            .has_claimable_queued_work(&request)
             .await
             .expect("discover settled run"),
         Some(false),

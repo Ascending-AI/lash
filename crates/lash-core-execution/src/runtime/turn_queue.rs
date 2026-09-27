@@ -304,7 +304,7 @@ mod typed_payload_tests {
         );
         let expected = serde_json::json!({
             "session_id": "s", "delivery_policy": "earliest_safe_boundary", "kind": "control",
-            "authority": {}, "available_at_ms": 0,
+            "authority": {},
             "payloads": [{"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}}]
         });
         assert_eq!(serde_json::to_value(&draft).unwrap(), expected);
@@ -340,7 +340,6 @@ mod typed_payload_tests {
             authority: &'a QueuedWorkAuthority,
             #[serde(skip_serializing_if = "Option::is_none")]
             merge_key: Option<&'a str>,
-            available_at_ms: u64,
             payloads: Vec<QueuedWorkPayload>,
         }
         let command = SessionCommand::RefreshToolCatalog {
@@ -376,7 +375,6 @@ mod typed_payload_tests {
                 kind,
                 authority: &draft.authority,
                 merge_key: draft.merge_key.as_deref(),
-                available_at_ms: draft.available_at_ms,
                 payloads,
             };
             assert_eq!(

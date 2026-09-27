@@ -1,10 +1,10 @@
 //! Dialect-independent queued-work claim logic shared by durable backends.
 //!
 //! The SQL backends (sqlite, postgres) load candidate batch rows ordered by
-//! `enqueue_seq` and pre-filtered to ready batches that are not held by a
-//! live claim, then apply the same pure state machine: a delivery-policy
-//! boundary gate, compatibility/merge-key prefix grouping, and fencing-token /
-//! lease derivation. That state machine lives here so the backends own only
+//! `enqueue_seq` and pre-filtered to batches that are not held by a live
+//! claim, then apply the same pure state machine: a delivery-policy boundary
+//! gate, compatibility/merge-key prefix grouping, and fencing-token / lease
+//! derivation. That state machine lives here so the backends own only
 //! their SQL reads and writes while the claim contract has a single
 //! implementation, exercised against every backend by the shared
 //! `runtime_persistence` conformance suite.
@@ -86,11 +86,10 @@ impl SelectedQueuedWorkClaimOutcome {
 /// Why a turn-work claim attempt acquired no rows.
 ///
 /// These are the refusal facts the claim state machine already computes while
-/// deciding a wake (see `record_turn_claim_decision`), plus the ones only a
-/// backend can observe: whether the lane still holds deferred work, and whether
-/// a concurrent writer took the selected rows. Every empty automatic drain
-/// carries one, so a host never has to reconstruct the reason from side
-/// evidence.
+/// deciding a wake (see `record_turn_claim_decision`), plus the one only a
+/// backend can observe: whether a concurrent writer took the selected rows.
+/// Every empty automatic drain carries one, so a host never has to
+/// reconstruct the reason from side evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum QueuedWorkClaimRefusal {
     /// The host's claim policy admitted zero rows.
@@ -98,11 +97,6 @@ pub enum QueuedWorkClaimRefusal {
     /// The durable queue holds no pending work for this lane: every row it ever
     /// held was consumed. Nothing is coming without a fresh enqueue.
     Empty,
-    /// Pending work exists for this lane, but its earliest `available_at_ms`
-    /// has not arrived, so no row was claimable yet. The work is intact and
-    /// will drain on a later attempt; the re-poll cadence is the host's, so no
-    /// timestamp is part of this contract.
-    NotYetAvailable,
     /// A session command sits at the queue head and is never skipped.
     CommandAtHead,
     /// The head batch may not cross the active turn's delivery boundary.
@@ -130,7 +124,6 @@ impl QueuedWorkClaimRefusal {
         match self {
             Self::ZeroLimit => "zero_limit",
             Self::Empty => "empty",
-            Self::NotYetAvailable => "not_yet_available",
             Self::CommandAtHead => "command_at_head",
             Self::DeliveryBoundaryBlocked => "delivery_boundary_blocked",
             Self::HeadWithheld => "head_withheld",
@@ -309,11 +302,10 @@ pub fn derive_claim_id(dialect: ClaimIdDialect, enqueue_seq: u64, fencing_token:
     format!("{prefix}:{enqueue_seq}:{fencing_token}")
 }
 
-/// Decoded claim-relevant fields of one ready queued-work batch row.
+/// Decoded claim-relevant fields of one pending queued-work batch row.
 ///
 /// Backends build these from their candidate rows, presented in
-/// `enqueue_seq` ascending order and already filtered to
-/// `available_at_ms <= now` with no live claim.
+/// `enqueue_seq` ascending order and already filtered to no live claim.
 #[derive(Clone, Debug)]
 pub struct ClaimCandidate {
     /// Durable batch identity, used to name a row in claim diagnostics.
@@ -414,10 +406,9 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
 }
 
 /// Fresh claims return a leading prefix. Interrupted claims return every
-/// candidate carrying the head row's prior claim identity, including rows
-/// separated by newly ready unrelated work.
+/// candidate carrying the head row's prior claim identity.
 ///
-/// * The queue head must be [`QueuedWorkClass::TurnWork`]. Earlier ready
+/// * The queue head must be [`QueuedWorkClass::TurnWork`]. Earlier pending
 ///   session commands are never skipped or materialized as turn input.
 /// * An [`QueuedWorkClaimBoundary::ActiveTurnCheckpoint`] boundary only
 ///   admits work whose head batch is

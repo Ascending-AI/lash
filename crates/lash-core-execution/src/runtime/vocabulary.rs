@@ -661,7 +661,6 @@ pub trait SessionStoreFactory:
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
-        now_epoch_ms: u64,
     ) -> Result<Option<bool>, crate::StoreError> {
         let Some(store) = self
             .open_existing_store(request)
@@ -670,11 +669,10 @@ pub trait SessionStoreFactory:
         else {
             return Ok(None);
         };
-        if store
+        if !store
             .list_pending_queued_work(&request.session_id)
             .await?
-            .into_iter()
-            .any(|batch| batch.available_at_ms <= now_epoch_ms)
+            .is_empty()
         {
             return Ok(Some(true));
         }

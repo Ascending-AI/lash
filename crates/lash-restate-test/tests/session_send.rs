@@ -530,7 +530,6 @@ async fn dropped_schedule_is_reconciled() {
         "boot-2",
         None,
         std::num::NonZeroUsize::MIN.saturating_add(63),
-        u64::MAX,
     )
     .await
     .expect("sweep again");
@@ -582,7 +581,6 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
         "drain-1",
         None,
         std::num::NonZeroUsize::MIN.saturating_add(63),
-        u64::MAX,
     )
     .await
     .expect("sweep");

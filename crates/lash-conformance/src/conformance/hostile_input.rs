@@ -91,10 +91,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
             "malformed session id must not reach tombstone lookup"
         );
         assert!(
-            factory
-                .has_claimable_queued_work(&request, 0)
-                .await
-                .is_err(),
+            factory.has_claimable_queued_work(&request).await.is_err(),
             "malformed session id must not reach queued-work lookup"
         );
         assert!(

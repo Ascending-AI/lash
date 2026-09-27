@@ -370,25 +370,25 @@ fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
     assert_rejected(
         "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
-             available_at_ms, enqueued_at_ms
+             enqueued_at_ms
          ) VALUES (1,
-             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 0, 0
+             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 0
          )",
         "ck_queued_work_batches_work_kind",
     );
     assert_rejected(
         "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
-             available_at_ms, enqueued_at_ms
-         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 0, 0)",
+             enqueued_at_ms
+         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 0)",
         "ck_queued_work_batches_delivery_policy",
     );
     assert_rejected(
         "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
-             available_at_ms, enqueued_at_ms, claim_id
+             enqueued_at_ms, claim_id
          ) VALUES (1,
-             'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
+             'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0,
              'claim'
          )",
         "ck_queued_work_batches_claim_id_token_all_or_none",
@@ -396,9 +396,9 @@ fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
     assert_rejected(
         "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
-             available_at_ms, enqueued_at_ms, claim_token
+             enqueued_at_ms, claim_token
          ) VALUES (1,
-             'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
+             'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0,
              'token'
          )",
         "ck_queued_work_batches_claim_id_token_all_or_none",

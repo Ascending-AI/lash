@@ -57,7 +57,6 @@ pub(crate) fn queued_work_batch_from_conn(
         kind: decode_work_kind(row.work_kind)?,
         authority: decode_authority(row.authority_json)?,
         merge_key: row.merge_key,
-        available_at_ms: row.available_at_ms,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
     };
@@ -119,7 +118,6 @@ pub(crate) fn queued_work_batches_from_conn(
                 kind: decode_work_kind(row.work_kind)?,
                 authority: decode_authority(row.authority_json)?,
                 merge_key: row.merge_key,
-                available_at_ms: row.available_at_ms,
                 enqueued_at_ms: row.enqueued_at_ms,
                 items,
             };
@@ -139,7 +137,6 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) work_kind: String,
     pub(crate) authority_json: String,
     pub(crate) merge_key: Option<String>,
-    pub(crate) available_at_ms: u64,
     pub(crate) enqueued_at_ms: u64,
     pub(crate) claim_fencing_token: u64,
     pub(crate) claim_id: Option<String>,
@@ -186,11 +183,6 @@ pub(crate) fn queued_batch_row_from_sql(
         work_kind: row.get("work_kind")?,
         authority_json: row.get("authority_json")?,
         merge_key: row.get("merge_key")?,
-        available_at_ms: u64_from_sql(
-            "QueuedWorkBatch",
-            "available_at_ms",
-            row.get("available_at_ms")?,
-        )?,
         enqueued_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "enqueued_at_ms",
@@ -246,8 +238,6 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     now: u64,
     nonce: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-    let sql_available_at_ms =
-        sql_counter_value("queued_work_available_at_ms", batch.available_at_ms)?;
     let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         conn.query_row(
             crate::process_registry::sql::process_sql()
@@ -280,7 +270,6 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
                 batch.kind().as_str(),
                 encode_json(&batch.authority)?,
                 batch.merge_key.as_deref(),
-                sql_available_at_ms,
                 now as i64,
                 crate::session_ingress::allocate_sequence(conn, &batch.session_id)?,
             ],

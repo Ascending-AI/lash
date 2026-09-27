@@ -6,21 +6,15 @@
 //! head with `IS DISTINCT FROM` because a NULL claim must compare unequal;
 //! SQLite spells the same rule with an explicit `IS NULL OR <>` and needs no
 //! row lock under `BEGIN IMMEDIATE`.
-//!
-//! The ready cutoff is bound rather than read inline. Every caller already
-//! samples it with `postgres_transaction_epoch_ms`, which is
-//! `transaction_timestamp()` — the same instant the statement would have read —
-//! and binding it is what lets the scan be one fixed string instead of a
-//! `concat!` that forks between the production and `testing` builds.
 
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only PostgreSQL issues.
     pub(crate) struct QueuedBatchPostgresStatements @ "queued_work_batch" {
         insert_new = "INSERT INTO queued_work_batches (
                  enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-                 authority_json, merge_key, available_at_ms, enqueued_at_ms
+                 authority_json, merge_key, enqueued_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT (session_id, source_key) DO NOTHING
              RETURNING batch_id";
 
@@ -33,7 +27,7 @@ lash_store_sql::statements! {
         /// Batch `?2` of session `?1` at `?3`, if no live claim holds it,
         /// locked for the caller's transaction.
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              WHERE session_id = ?1
@@ -56,39 +50,8 @@ lash_store_sql::statements! {
         /// predicate on its delete.
         delete_cancelled = "DELETE FROM queued_work_batches WHERE batch_id = ?1";
 
-        /// Session `?1`'s ready head at `?2`, for generation `?3`, unfiltered
-        /// by the delivery boundary: what an empty candidate scan is asked
-        /// about so the refusal it reports names the head's own reason.
-        select_head_candidate = "SELECT enqueue_seq, batch_id, session_id, source_key,
-                    delivery_policy, work_kind, authority_json, merge_key, available_at_ms,
-                    enqueued_at_ms, claim_fencing_token, claim_token,
-                    claim_session_lease_generation, claim_id
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND available_at_ms <= ?2
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?3
-               )
-             ORDER BY enqueue_seq ASC
-             LIMIT 1";
-
-        /// Whether session `?1` holds work that is not yet available at `?2`
-        /// for generation `?3`: the difference between an exhausted lane and a
-        /// waiting one.
-        exists_deferred = "SELECT EXISTS (
-                 SELECT 1
-                 FROM queued_work_batches
-                 WHERE session_id = ?1
-                   AND available_at_ms > ?2
-                   AND (
-                        claim_token IS NULL
-                        OR claim_session_lease_generation <> ?3
-                   )
-             )";
-
-        /// Session `?1`'s claim candidates at `?2` for generation `?3`, up to
-        /// `?4` of them, with no turn in progress.
+        /// Session `?1`'s claim candidates for generation `?2`, up to `?3` of
+        /// them, with no turn in progress.
         claim_candidates_idle = "WITH queued_work_head_candidate AS (
                  SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
                  FROM (
@@ -98,25 +61,23 @@ lash_store_sql::statements! {
                             claim_id AS head_claim_id
                      FROM queued_work_batches
                      WHERE session_id = ?1
-                       AND available_at_ms <= ?2
                        AND (
                             claim_token IS NULL
-                            OR claim_session_lease_generation <> ?3
+                            OR claim_session_lease_generation <> ?2
                        )
                      ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
                      LIMIT 1
                  ) AS unfiltered_head
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
-               AND available_at_ms <= ?2
                AND (
                     claim_token IS NULL
-                    OR claim_session_lease_generation <> ?3
+                    OR claim_session_lease_generation <> ?2
                )
                AND (work_kind = 'control' OR NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
@@ -127,7 +88,7 @@ lash_store_sql::statements! {
                AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
              ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
              LIMIT COALESCE((
-                 SELECT CASE WHEN head_claim_id IS NULL THEN ?4 ELSE 9223372036854775807 END
+                 SELECT CASE WHEN head_claim_id IS NULL THEN ?3 ELSE 9223372036854775807 END
                  FROM queued_work_head_candidate
              ), 0)
              FOR UPDATE OF queued_work_batches";
@@ -142,10 +103,9 @@ lash_store_sql::statements! {
                         claim_id AS head_claim_id
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND work_kind = 'turn'
-                   AND available_at_ms <= ?2
                    AND (
                         claim_token IS NULL
-                        OR claim_session_lease_generation <> ?3
+                        OR claim_session_lease_generation <> ?2
                    )
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
@@ -160,10 +120,9 @@ lash_store_sql::statements! {
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
                      WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
-                       AND candidate.available_at_ms <= ?2
                        AND (
                             candidate.claim_token IS NULL
-                            OR candidate.claim_session_lease_generation <> ?3
+                            OR candidate.claim_session_lease_generation <> ?2
                        )
                        AND (
                             (
@@ -182,21 +141,20 @@ lash_store_sql::statements! {
                  WHERE head_delivery_policy = 'earliest_safe_boundary'
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
-               AND available_at_ms <= ?2
                AND (
                     claim_token IS NULL
-                    OR claim_session_lease_generation <> ?3
+                    OR claim_session_lease_generation <> ?2
                )
                AND enqueue_seq >= head_enqueue_seq
                AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
              ORDER BY enqueue_seq ASC
              LIMIT COALESCE((
-                 SELECT CASE WHEN head_claim_id IS NULL THEN ?4 ELSE 9223372036854775807 END
+                 SELECT CASE WHEN head_claim_id IS NULL THEN ?3 ELSE 9223372036854775807 END
                  FROM queued_work_head_candidate
              ), 0)
              FOR UPDATE OF queued_work_batches SKIP LOCKED";
@@ -205,43 +163,28 @@ lash_store_sql::statements! {
         select_present_ids = "SELECT batch_id FROM queued_work_batches
              WHERE session_id = ?1 AND batch_id = ANY(?2)";
 
-        /// Session `?1`'s unclaimed-at-`?2` batches for generation `?3` among
-        /// the ids in the array `?4`.
+        /// Session `?1`'s unclaimed batches for generation `?2` among the ids
+        /// in the array `?3`.
         select_by_ids = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              WHERE session_id = ?1
-               AND available_at_ms <= ?2
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
-               AND batch_id = ANY(?4)
+               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
+               AND batch_id = ANY(?3)
              ORDER BY enqueue_seq ASC";
 
-        /// The same rows keyed by the claim ids in the array `?4`: an exact
+        /// The same rows keyed by the claim ids in the array `?3`: an exact
         /// claim must validate every batch the interrupted claim it recomposes
         /// covered, not only the ones it was asked for.
         select_by_claim_ids = "SELECT enqueue_seq, batch_id, session_id, source_key,
-                    delivery_policy, work_kind, authority_json, merge_key, available_at_ms,
+                    delivery_policy, work_kind, authority_json, merge_key,
                     enqueued_at_ms, claim_fencing_token, claim_token,
                     claim_session_lease_generation, claim_id
              FROM queued_work_batches
              WHERE session_id = ?1
-               AND available_at_ms <= ?2
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
-               AND claim_id = ANY(?4)
-             ORDER BY enqueue_seq ASC";
-
-        /// Session `?1`'s unclaimed-at-`?2` batches for generation `?3` whose
-        /// `enqueue_seq` lies between `?4` and `?5`: the span an exact claim
-        /// must be contiguous over.
-        select_span = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND available_at_ms <= ?2
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
-               AND enqueue_seq BETWEEN ?4 AND ?5
+               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
+               AND claim_id = ANY(?3)
              ORDER BY enqueue_seq ASC";
 
         /// The batch form of the shared `abandon_claim`, over the claims bound

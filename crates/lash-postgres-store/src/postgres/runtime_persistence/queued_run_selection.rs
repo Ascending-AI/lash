@@ -44,7 +44,6 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
     }
     let requested_rows = sqlx::query(sql.queued_batches_postgres.select_by_ids.sql())
         .bind(session_id.as_str())
-        .bind(now as i64)
         .bind(sql_session_lease_generation(generation)?)
         .bind(&sql_batch_ids)
         .fetch_all(&mut **tx)
@@ -70,7 +69,6 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
         validation_rows.extend(
             sqlx::query(sql.queued_batches_postgres.select_by_claim_ids.sql())
                 .bind(session_id.as_str())
-                .bind(now as i64)
                 .bind(sql_session_lease_generation(generation)?)
                 .bind(&involved_claim_ids)
                 .fetch_all(&mut **tx)
@@ -129,9 +127,8 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
             }
             requested_batches.insert(row.batch_id.clone(), batch);
         }
-        let span_rows = sqlx::query(sql.queued_batches_postgres.select_span.sql())
+        let span_rows = sqlx::query(sql.queued_batches.select_span.sql())
                 .bind(session_id.as_str())
-                .bind(now as i64)
                 .bind(sql_session_lease_generation(generation)?)
                 .bind(requested_rows[0].enqueue_seq as i64)
                 .bind({

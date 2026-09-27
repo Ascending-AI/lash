@@ -57,7 +57,6 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
             .query_map(
                 params![
                     session_id.as_str(),
-                    now as i64,
                     sql_session_lease_generation(generation)?,
                     sql_batch_ids,
                 ],
@@ -87,7 +86,6 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
             .query_map(
                 params![
                     session_id.as_str(),
-                    now as i64,
                     sql_session_lease_generation(generation)?,
                     encode_json(&involved_claim_ids)?,
                 ],
@@ -146,7 +144,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
         }
         let span_rows = {
             let mut stmt = tx
-                .prepare(sql.queued_batches_sqlite.select_span.sql())
+                .prepare(sql.queued_batches.select_span.sql())
                 .map_err(sqlite_error)?;
             #[expect(
                 clippy::expect_used,
@@ -159,7 +157,6 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
             stmt.query_map(
                 params![
                     session_id.as_str(),
-                    now as i64,
                     sql_session_lease_generation(generation)?,
                     requested_rows[0].enqueue_seq as i64,
                     last_enqueue_seq,

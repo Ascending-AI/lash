@@ -858,7 +858,6 @@ class RealTreeTests(unittest.TestCase):
             )
         }
         for module in (
-            "postgres_clock_contract",
             "process_prune_reclaim",
             "session_execution_lease_renewal",
         ):

@@ -144,8 +144,9 @@ pub(crate) fn ensure_session_not_deleted_conn(
 ///
 /// The boundary is a closed two-variant choice, so it selects a named statement
 /// rather than splicing a predicate: an optional boundary filter — a
-/// `COALESCE(?N, …)` or a `?N IS NULL OR …` — cannot use
-/// `idx_queued_work_batches_ready`, and this query is the claim path's hottest.
+/// `COALESCE(?N, …)` or a `?N IS NULL OR …` — cannot seek the
+/// `(session_id, enqueue_seq)` primary key cleanly, and this query is the claim
+/// path's hottest.
 fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> &'static str {
     let sql = crate::turn_ingress::turn_ingress_sql();
     match boundary {

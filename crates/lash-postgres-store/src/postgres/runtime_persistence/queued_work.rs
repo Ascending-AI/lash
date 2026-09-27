@@ -108,7 +108,6 @@ impl QueuedWorkStore for PostgresSessionStore {
         let (selected_rows, mut selected_batches, candidates) =
             scan_queued_work_candidates_postgres(
                 &mut tx,
-                now,
                 session_id,
                 generation,
                 QueuedWorkClaimBoundary::Idle,
@@ -181,7 +180,6 @@ impl QueuedWorkStore for PostgresSessionStore {
         let (selected_rows, mut selected_batches, candidates) =
             scan_queued_work_candidates_postgres(
                 &mut tx,
-                now,
                 session_id,
                 generation,
                 boundary,
@@ -194,9 +192,8 @@ impl QueuedWorkStore for PostgresSessionStore {
             TurnWorkClaimPrefix::Refused { reason: refusal } => {
                 // The candidate query applies the boundary rule in SQL, so an empty
                 // scan reaches the claim state machine as a bare `Empty`. Re-ask it
-                // with the unfiltered ready head (and, failing that, look for
-                // deferred work) so this backend names the same fact every other one
-                // names.
+                // with the unfiltered head so this backend names the same fact
+                // every other one names.
                 let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
                     postgres_refusal_for_empty_scan(
                         &mut tx, session_id, generation, boundary, &policy,
@@ -261,10 +258,6 @@ impl QueuedWorkStore for PostgresSessionStore {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if !checkpoint_work_pending_postgres(
             &self.pool,
-            crate::turn_ingress::injected_lease_epoch_ms(
-                #[cfg(any(test, feature = "testing"))]
-                self.lease_clock_for_testing.as_ref(),
-            ),
             session_id,
             session_execution_lease.fencing_token,
             turn_id,

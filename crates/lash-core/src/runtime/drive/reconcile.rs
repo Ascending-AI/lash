@@ -16,9 +16,9 @@
 //!    retryable) has its engine half re-applied by [`apply_control_intent`].
 //! 3. **Drives (O2).** Every live session with open ingress that no
 //!    unresolved park holds is asked for a drive. Acceptance commits a row and then asks the engine to drive,
-//!    fire-and-forget; a process that dies between the two, a lost send, a
-//!    re-ask the engine deduplicated, or a batch that only became available
-//!    later all leave a durable row nothing drives, and this arm asks again.
+//!    fire-and-forget; a process that dies between the two, a lost send, or a
+//!    re-ask the engine deduplicated all leave a durable row nothing drives,
+//!    and this arm asks again.
 //! 4. **Scopes.** Terminal evidence is revisited for idempotent scope close
 //!    after a crash between the commit and its notification.
 //! 5. **Parent-end plans (FIG-3822).** A named slot:
@@ -69,7 +69,7 @@ pub struct ReconcileParts<'a> {
     /// The process registry and the engine's process port, when the host
     /// runs processes. The parent-end and drain slots read them.
     pub processes: Option<ReconcileProcesses<'a>>,
-    /// The caller's clock: intent timestamps and batch availability.
+    /// The caller's clock: intent timestamps and recovery slots.
     pub clock: &'a dyn Clock,
 }
 
@@ -180,14 +180,12 @@ pub async fn reconcile_once(
     }
 
     // 3. Drives: ask again for every session with open ingress.
-    let now_ms = parts.clock.timestamp_ms();
     match reconcile_session_drives(
         parts.sessions,
         parts.work,
         tick,
         cursor.drives.as_ref(),
         page,
-        now_ms,
     )
     .await
     {
@@ -352,18 +350,15 @@ pub async fn drain_hand_over_slot(
 ///
 /// A session whose store cannot be read is reported, not fatal: one broken
 /// session never stops the others' recovery. Only a catalog that cannot be
-/// listed fails the pass. A queued batch whose `available_at_ms` is still
-/// ahead of `now_ms` does not count as open: a later tick asks for it once
-/// it is due. A session the engine still holds live work for is left alone:
-/// its ask was not lost, its owner is simply still running, and a sibling
-/// drive would fence it.
+/// listed fails the pass. A session the engine still holds live work for is
+/// left alone: its ask was not lost, its owner is simply still running, and
+/// a sibling drive would fence it.
 pub async fn reconcile_session_drives(
     sessions: &dyn SessionStoreFactory,
     engine: &dyn SessionWorkEngine,
     tick: &str,
     after: Option<&SessionId>,
     page: NonZeroUsize,
-    now_ms: u64,
 ) -> Result<DriveReconcileReport, StoreError> {
     let mut live = sessions
         .list_reconcilable_sessions(after, page.saturating_add(1))
@@ -375,7 +370,7 @@ pub async fn reconcile_session_drives(
     }
     for session in live {
         report.scanned += 1;
-        match oldest_open_row(sessions, &session, now_ms).await {
+        match oldest_open_row(sessions, &session).await {
             Ok(Some(row)) => {
                 // Checked after the row read: a row's writer registered
                 // with the engine before it wrote, so a live owner is
@@ -403,11 +398,10 @@ pub async fn reconcile_session_drives(
 }
 
 /// The id of one of `session`'s open ingress rows (its oldest turn input,
-/// else its oldest queued batch that is due at `now_ms`), if it has any.
+/// else its oldest queued batch), if it has any.
 async fn oldest_open_row(
     sessions: &dyn SessionStoreFactory,
     session: &SessionId,
-    now_ms: u64,
 ) -> Result<Option<String>, StoreError> {
     let Some(store) = sessions.open_existing_store_by_id(session).await? else {
         return Ok(None);
@@ -420,7 +414,6 @@ async fn oldest_open_row(
     let batches = store.list_pending_queued_work(session).await?;
     Ok(batches
         .iter()
-        .filter(|batch| batch.available_at_ms <= now_ms)
         .min_by_key(|batch| batch.enqueue_seq)
         .map(|batch| format!("batch:{}", batch.batch_id)))
 }

@@ -61,9 +61,6 @@ pub(in crate::runtime) struct AdmitDriveRunner {
     pub(in crate::runtime) stores: Arc<dyn crate::SessionStoreFactory>,
     pub(in crate::runtime) request: AdmitRequest,
     pub(in crate::runtime) ordinal: u32,
-    /// Decides which queued work is due: a batch made available later is
-    /// not work yet.
-    pub(in crate::runtime) clock: Arc<dyn crate::Clock>,
 }
 
 #[async_trait::async_trait]
@@ -248,8 +245,7 @@ impl AdmitDriveRunner {
             .list_pending_queued_work(session_id)
             .await
             .map_err(|error| store_fault("pending queued work read", error))?;
-        let now = self.clock.timestamp_ms();
-        if queued.iter().any(|batch| batch.available_at_ms <= now) {
+        if !queued.is_empty() {
             return Ok(Some((
                 queued_root(&admission_id(&self.request.request, self.ordinal)),
                 AdmittedWork::Queued,

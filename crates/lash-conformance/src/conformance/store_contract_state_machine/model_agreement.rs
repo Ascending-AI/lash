@@ -150,7 +150,6 @@ pub(super) async fn assert_model_agreement(
                             kind: batch.kind,
                             authority: batch.authority.clone(),
                             merge_key: batch.merge_key.clone(),
-                            available_at_ms: batch.available_at_ms,
                         },
                     );
             }

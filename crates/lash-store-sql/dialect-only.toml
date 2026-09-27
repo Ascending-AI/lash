@@ -3503,33 +3503,14 @@ lock makes the pair atomic.
 """
 
 [[dialect_only]]
-statement = "queued_work_batch.select_head_candidate"
-backends = ["sqlite", "postgres"]
-kind = "server clock"
-reason = """
-The ready cutoff is bound on both backends now, but PostgreSQL binds the
-transaction timestamp it sampled with postgres_transaction_epoch_ms and SQLite
-binds the host clock it shares with its runtime, so the two are different
-statements carrying the same shape. Declared for both so neither can quietly
-acquire the other's clock.
-"""
-
-[[dialect_only]]
-statement = "queued_work_batch.exists_deferred"
-backends = ["sqlite", "postgres"]
-kind = "server clock"
-reason = "Same clock fork as queued_work_batch.select_head_candidate."
-
-[[dialect_only]]
 statement = "queued_work_batch.claim_candidates_idle"
 backends = ["sqlite", "postgres"]
 kind = "SKIP LOCKED"
 reason = """
 PostgreSQL takes FOR UPDATE OF … SKIP LOCKED over the candidate rows; SQLite is
-already the only writer. Same clock fork as
-queued_work_batch.select_head_candidate. One statement per delivery boundary,
-chosen by an exhaustive match over the two-variant QueuedWorkClaimBoundary,
-because an optional boundary filter cannot use idx_queued_work_batches_ready.
+already the only writer. One statement per delivery boundary, chosen by an
+exhaustive match over the two-variant QueuedWorkClaimBoundary, because an
+optional boundary filter cannot seek the session index cleanly.
 """
 
 [[dialect_only]]
@@ -3564,12 +3545,6 @@ statement = "queued_work_batch.select_by_claim_ids"
 backends = ["sqlite", "postgres"]
 kind = "list bind"
 reason = "Same list-bind fork as queued_work_batch.select_present_ids, keyed by claim id."
-
-[[dialect_only]]
-statement = "queued_work_batch.select_span"
-backends = ["sqlite", "postgres"]
-kind = "server clock"
-reason = "Same clock fork as queued_work_batch.select_head_candidate."
 
 [[dialect_only]]
 statement = "queued_work_batch.abandon_claims"

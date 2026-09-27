@@ -584,7 +584,6 @@ impl LashRuntime {
                         stores: self.host.core.session_store_factory(),
                         request: admit_request,
                         ordinal,
-                        clock: Arc::clone(&self.host.core.clock),
                     }),
                     None,
                 ),

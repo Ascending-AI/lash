@@ -141,17 +141,6 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
 pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    store
-        .enqueue_queued_work(
-            queued_draft(
-                &SessionId::from("root"),
-                "not ready",
-                DeliveryPolicy::EarliestSafeBoundary,
-            )
-            .with_available_at_ms(4_102_444_800_000),
-        )
-        .await
-        .expect("enqueue unavailable work");
     let exclusive = store
         .enqueue_queued_work(queued_draft(
             &SessionId::from("root"),
@@ -204,7 +193,7 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
         vec![exclusive.batch_id.as_str()],
-        "an exclusive batch must claim alone and unavailable earlier work must be skipped"
+        "an exclusive batch must claim alone"
     );
     let next_root = store
         .claim_ready_queued_work(
@@ -814,107 +803,20 @@ pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_g
     );
 }
 
-/// FIG-1575: a lane holding a deferred row is not an exhausted lane.
+/// An interrupted claim keeps its identity across generations even when the
+/// queue gained a row the claim never covered.
 ///
-/// Both states present the same "no claimable candidate" view to the claim
-/// state machine, and a host reading one as the other either abandons intact
-/// work or waits forever on a queue that will never fill. Every backend must
-/// tell them apart identically.
+/// W1 and W3 leave the store in one claim; W2 arrives only after that claim
+/// exists, so the redrive must answer the interrupted claim's own members —
+/// never W2, and never a re-merged W1+W2+W3.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
+pub async fn queued_work_redrive_selects_interrupted_claim_identity_over_later_rows(
     store: Arc<dyn RuntimePersistence>,
-    lease_timing: &RuntimePersistenceLeaseTiming,
 ) {
-    let session_id = "deferred-versus-exhausted";
-    let owner = lease_owner("deferred-owner");
-    let lease = claim_session_execution_lease_for_test(
-        &store,
-        &SessionId::from(session_id),
-        &owner.owner_id,
-    )
-    .await;
-
-    assert_eq!(
-        store
-            .claim_ready_queued_work(
-                &SessionId::from(session_id),
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(10),
-            )
-            .await
-            .expect("claim an empty lane")
-            .refusal(),
-        Some(crate::QueuedWorkClaimRefusal::Empty),
-        "a lane that never held a row is exhausted, not deferred"
-    );
-
-    let deferred = store
-        .enqueue_queued_work(
-            keyed_queued_draft(
-                &SessionId::from(session_id),
-                "deferred",
-                DeliveryPolicy::EarliestSafeBoundary,
-                "deferred-row",
-            )
-            .with_available_at_ms(lease_timing.delayed_queue_row_available_at_ms()),
-        )
-        .await
-        .expect("enqueue deferred work");
-
-    assert_eq!(
-        store
-            .claim_ready_queued_work(
-                &SessionId::from(session_id),
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(10),
-            )
-            .await
-            .expect("claim a deferred lane")
-            .refusal(),
-        Some(crate::QueuedWorkClaimRefusal::NotYetAvailable),
-        "work whose availability has not arrived is intact, so the lane is not \
-         exhausted"
-    );
-
-    store
-        .cancel_queued_work_batch(&SessionId::from(session_id), &deferred.batch_id)
-        .await
-        .expect("cancel the deferred row");
-
-    assert_eq!(
-        store
-            .claim_ready_queued_work(
-                &SessionId::from(session_id),
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(10),
-            )
-            .await
-            .expect("claim a drained lane")
-            .refusal(),
-        Some(crate::QueuedWorkClaimRefusal::Empty),
-        "a lane whose last row is gone is exhausted again"
-    );
-    release_session_execution_lease_for_test(&store, &lease).await;
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
-    store: Arc<dyn RuntimePersistence>,
-    lease_timing: &RuntimePersistenceLeaseTiming,
-) {
-    let session_id = "interrupted-batch-ready-gap";
+    let session_id = "interrupted-batch-claim-gap";
     store
         .enqueue_queued_work(
             keyed_queued_draft(
@@ -926,20 +828,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
             .with_merge_key("gap-key"),
         )
         .await
-        .expect("enqueue ready gap W1");
-    store
-        .enqueue_queued_work(
-            keyed_queued_draft(
-                &SessionId::from(session_id),
-                "w2",
-                DeliveryPolicy::EarliestSafeBoundary,
-                "gap-w2",
-            )
-            .with_merge_key("gap-key")
-            .with_available_at_ms(lease_timing.delayed_queue_row_available_at_ms()),
-        )
-        .await
-        .expect("enqueue delayed gap W2");
+        .expect("enqueue gap W1");
     store
         .enqueue_queued_work(
             keyed_queued_draft(
@@ -951,7 +840,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
             .with_merge_key("gap-key"),
         )
         .await
-        .expect("enqueue ready gap W3");
+        .expect("enqueue gap W3");
 
     let first_owner = lease_owner("gap-owner-a");
     let first_lease = claim_session_execution_lease_for_test(
@@ -969,19 +858,31 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
             crate::testing::queued_work_claim_policy(64),
         )
         .await
-        .expect("claim ready rows across delayed gap")
+        .expect("claim the original pair")
         .claim()
-        .expect("ready W1 and W3 form the original claim");
+        .expect("W1 and W3 form the original claim");
     assert_eq!(
         first_claim
             .batches
             .iter()
             .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
+        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 2)]
     );
     release_session_execution_lease_for_test(&store, &first_lease).await;
-    lease_timing.cross_delayed_queue_row_boundary().await;
+
+    store
+        .enqueue_queued_work(
+            keyed_queued_draft(
+                &SessionId::from(session_id),
+                "w2",
+                DeliveryPolicy::EarliestSafeBoundary,
+                "gap-w2",
+            )
+            .with_merge_key("gap-key"),
+        )
+        .await
+        .expect("enqueue later gap W2");
 
     let successor = lease_owner("gap-owner-b");
     let successor_lease = claim_session_execution_lease_for_test(
@@ -999,18 +900,18 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
             crate::testing::queued_work_claim_policy(64),
         )
         .await
-        .expect("redrive ready-gap claim")
+        .expect("redrive interrupted claim")
         .claim()
-        .expect("interrupted identity remains reclaimable across gap");
+        .expect("interrupted identity remains reclaimable over later work");
     assert_eq!(
         redriven
             .batches
             .iter()
             .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
+        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 2)]
     );
-    let delayed = store
+    let later = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
             &successor_lease.fence(),
@@ -1019,16 +920,16 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
             crate::testing::queued_work_claim_policy(64),
         )
         .await
-        .expect("claim newly ready gap row")
+        .expect("claim the later gap row")
         .claim()
         .expect("W2 remains a separate claim");
     assert_eq!(
-        delayed
+        later
             .batches
             .iter()
             .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![(Some("gap-w2"), 2)]
+        vec![(Some("gap-w2"), 3)]
     );
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }

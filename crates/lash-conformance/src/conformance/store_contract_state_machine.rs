@@ -207,7 +207,6 @@ struct ExpectedQueuedWake {
     kind: crate::QueuedWorkKind,
     authority: crate::QueuedWorkAuthority,
     merge_key: Option<String>,
-    available_at_ms: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1086,7 +1085,6 @@ async fn apply_operation(
                     kind: draft.kind(),
                     authority: draft.authority,
                     merge_key: draft.merge_key,
-                    available_at_ms: draft.available_at_ms,
                 },
             );
             *sequence = sequence

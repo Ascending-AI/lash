@@ -707,11 +707,8 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
-        now_epoch_ms: u64,
     ) -> Result<Option<bool>, StoreError> {
-        self.inner
-            .has_claimable_queued_work(request, now_epoch_ms)
-            .await
+        self.inner.has_claimable_queued_work(request).await
     }
 
     async fn reclaim_retained_evidence(

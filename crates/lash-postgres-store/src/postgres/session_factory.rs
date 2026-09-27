@@ -104,7 +104,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
-        now_epoch_ms: u64,
     ) -> Result<Option<bool>, StoreError> {
         lash_core_execution::store::validate_session_id(&request.session_id)?;
         sqlx::query_scalar(
@@ -114,7 +113,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 .sql(),
         )
         .bind(request.session_id.as_str())
-        .bind(now_epoch_ms as i64)
         .fetch_one(&self.pool)
         .await
         .map(Some)

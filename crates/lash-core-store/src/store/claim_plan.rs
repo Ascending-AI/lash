@@ -426,13 +426,10 @@ pub fn plan_turn_input_claim(
 ///
 /// The candidate query enforces the delivery-boundary rule in SQL, so a scan
 /// that comes back empty tells the shared claim state machine nothing. Asking
-/// it again with the unfiltered ready head keeps the classification in one
-/// place: whatever the head alone is refused for is what this claim is
-/// refused for. With no ready head at all, a lane still holding deferred work
-/// is not an exhausted lane.
+/// it again with the unfiltered head keeps the classification in one place:
+/// whatever the head alone is refused for is what this claim is refused for.
 pub fn classify_empty_claim_scan(
     head_candidates: &[ClaimCandidate],
-    deferred_row_pending: bool,
     boundary: crate::QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
@@ -443,11 +440,7 @@ pub fn classify_empty_claim_scan(
         ));
     }
     Ok(TurnWorkEmptyScanDiagnostic::Refused {
-        reason: if deferred_row_pending {
-            QueuedWorkClaimRefusal::NotYetAvailable
-        } else {
-            QueuedWorkClaimRefusal::Empty
-        },
+        reason: QueuedWorkClaimRefusal::Empty,
     })
 }
 

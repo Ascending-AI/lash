@@ -4,10 +4,10 @@ lash_store_sql::statements! {
     /// Statements over more than one of the family's tables, only SQLite
     /// issues.
     pub(crate) struct TurnIngressSqliteStatements @ "turn_ingress" {
-        /// Whether session `?1` has checkpoint work for turn `?4` at `?2`,
-        /// generation `?3`, at the `after_work` checkpoint: an admitted
-        /// active-turn input while `?5` inputs may still be claimed, or a
-        /// non-command item behind the boundary head while `?6` batches may.
+        /// Whether session `?1` has checkpoint work for turn `?3`, generation
+        /// `?2`, at the `after_work` checkpoint: an admitted active-turn input
+        /// while `?4` inputs may still be claimed, or a non-command item
+        /// behind the boundary head while `?5` batches may.
         ///
         /// One probe, so one statement: the claim it guards takes a write
         /// transaction, and asking the two halves separately would let a
@@ -22,10 +22,9 @@ lash_store_sql::statements! {
                         claim_id AS head_claim_id
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND work_kind = 'turn'
-                   AND available_at_ms <= ?2
                    AND (
                         claim_token IS NULL
-                        OR claim_session_lease_generation <> ?3
+                        OR claim_session_lease_generation <> ?2
                    )
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
@@ -40,10 +39,9 @@ lash_store_sql::statements! {
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
                      WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
-                       AND candidate.available_at_ms <= ?2
                        AND (
                             candidate.claim_token IS NULL
-                            OR candidate.claim_session_lease_generation <> ?3
+                            OR candidate.claim_session_lease_generation <> ?2
                        )
                        AND (
                             (
@@ -65,20 +63,20 @@ lash_store_sql::statements! {
                  WHERE head_delivery_policy = 'earliest_safe_boundary'
              )
              SELECT (
-                ?5 > 0 AND EXISTS (
+                ?4 > 0 AND EXISTS (
                     SELECT 1
                     FROM pending_turn_inputs
                     WHERE session_id = ?1
                       AND {{active_turn_input_state(state)}}
-                      AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
+                      AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
                       AND json_extract(ingress_json, '$.scope') = 'active_turn'
-                      AND json_extract(ingress_json, '$.turn_id') = ?4
+                      AND json_extract(ingress_json, '$.turn_id') = ?3
                       AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work')
                           IN ('after_work')
                     LIMIT 1
                 )
              ) OR (
-                ?6 > 0 AND EXISTS (
+                ?5 > 0 AND EXISTS (
                     SELECT 1
                     FROM queued_work_head_candidate AS head
                     JOIN queued_work_items AS item
@@ -99,10 +97,9 @@ lash_store_sql::statements! {
                         claim_id AS head_claim_id
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND work_kind = 'turn'
-                   AND available_at_ms <= ?2
                    AND (
                         claim_token IS NULL
-                        OR claim_session_lease_generation <> ?3
+                        OR claim_session_lease_generation <> ?2
                    )
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
@@ -117,10 +114,9 @@ lash_store_sql::statements! {
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
                      WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
-                       AND candidate.available_at_ms <= ?2
                        AND (
                             candidate.claim_token IS NULL
-                            OR candidate.claim_session_lease_generation <> ?3
+                            OR candidate.claim_session_lease_generation <> ?2
                        )
                        AND (
                             (
@@ -142,20 +138,20 @@ lash_store_sql::statements! {
                  WHERE head_delivery_policy = 'earliest_safe_boundary'
              )
              SELECT (
-                ?5 > 0 AND EXISTS (
+                ?4 > 0 AND EXISTS (
                     SELECT 1
                     FROM pending_turn_inputs
                     WHERE session_id = ?1
                       AND {{active_turn_input_state(state)}}
-                      AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
+                      AND (claim_token IS NULL OR claim_session_lease_generation <> ?2)
                       AND json_extract(ingress_json, '$.scope') = 'active_turn'
-                      AND json_extract(ingress_json, '$.turn_id') = ?4
+                      AND json_extract(ingress_json, '$.turn_id') = ?3
                       AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work')
                           IN ('after_work', 'before_completion')
                     LIMIT 1
                 )
              ) OR (
-                ?6 > 0 AND EXISTS (
+                ?5 > 0 AND EXISTS (
                     SELECT 1
                     FROM queued_work_head_candidate AS head
                     JOIN queued_work_items AS item

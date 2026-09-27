@@ -314,8 +314,9 @@ impl LashRuntime {
         }
     }
 
-    /// Why an idle drive ran nothing: queued work that is not due yet, or no
-    /// work at all.
+    /// Why an idle drive ran nothing: no work at all, or work that appeared
+    /// after admission read the queue and is therefore another claim's to
+    /// take.
     async fn idle_drain_refusal(&self) -> Result<crate::QueuedWorkClaimRefusal, RuntimeError> {
         let Some(store) = self
             .session
@@ -331,7 +332,7 @@ impl LashRuntime {
         Ok(if pending.is_empty() {
             crate::QueuedWorkClaimRefusal::Empty
         } else {
-            crate::QueuedWorkClaimRefusal::NotYetAvailable
+            crate::QueuedWorkClaimRefusal::ClaimRaceLost
         })
     }
 

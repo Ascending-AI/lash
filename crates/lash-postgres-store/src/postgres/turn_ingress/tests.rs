@@ -99,35 +99,3 @@ fn a_checkpoint_statement_spells_the_boundary_its_generator_spells() {
         );
     }
 }
-
-#[test]
-fn the_checkpoint_probe_keeps_the_server_clock_as_its_fallback() {
-    // The probe runs outside a transaction, so it cannot share a sampled
-    // `transaction_timestamp()` with a sibling statement. It binds an injected
-    // test epoch and falls back to the server clock, which is what it always
-    // read; a production build binds NULL. The indexed column stays on the
-    // left of the comparison so the ready index is still seekable.
-    let sql = turn_ingress_sql();
-    for statement in [
-        &sql.family_postgres.checkpoint_work_pending_after_work,
-        &sql.family_postgres
-            .checkpoint_work_pending_before_completion,
-    ] {
-        let spelled = statement
-            .sql()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            spelled.contains(
-                "available_at_ms <= COALESCE( $4, FLOOR(EXTRACT(EPOCH FROM \
-                 transaction_timestamp()) * 1000))"
-            ),
-            "`{}` no longer falls back to the server clock:\n{spelled}",
-            statement.name(),
-        );
-    }
-    // With no lease clock injected the probe binds NULL and reads the server
-    // clock; in a production build the seam has no parameter at all.
-    assert_eq!(super::injected_lease_epoch_ms(None), None);
-}

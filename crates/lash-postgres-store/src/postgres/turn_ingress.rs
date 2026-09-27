@@ -178,28 +178,6 @@ pub(crate) fn turn_ingress_sql() -> &'static TurnIngressSql {
     &TURN_INGRESS_SQL
 }
 
-/// The test lease epoch a build may inject into a statement's ready cutoff.
-///
-/// The claim path samples `transaction_timestamp()` once per transaction and
-/// binds it, so only the checkpoint probe — which runs outside a transaction —
-/// carries the server clock in its own text. This is how that probe still
-/// honours a steered lease clock without a second round trip, and in a
-/// production build it is a compile-time `None`.
-pub(crate) fn injected_lease_epoch_ms(
-    #[cfg(any(test, feature = "testing"))] lease_clock: Option<
-        &std::sync::Arc<dyn lash_core_execution::Clock>,
-    >,
-) -> Option<i64> {
-    #[cfg(any(test, feature = "testing"))]
-    {
-        lease_clock.map(|clock| clock.timestamp_ms() as i64)
-    }
-    #[cfg(not(any(test, feature = "testing")))]
-    {
-        None
-    }
-}
-
 #[cfg(test)]
 #[path = "turn_ingress/tests.rs"]
 mod tests;

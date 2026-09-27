@@ -566,7 +566,7 @@ async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
     };
 
     assert_eq!(
-        crate::SessionStoreFactory::has_claimable_queued_work(&factory, &request, 0)
+        crate::SessionStoreFactory::has_claimable_queued_work(&factory, &request)
             .await
             .expect("the conservative default succeeds"),
         None,

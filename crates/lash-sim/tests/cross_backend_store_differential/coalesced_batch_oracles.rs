@@ -7,11 +7,6 @@ impl AdvancingDifferentialClock {
     fn new(timestamp_ms: u64) -> Self {
         Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
     }
-
-    fn advance(&self, duration_ms: u64) {
-        self.0
-            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
-    }
 }
 
 #[async_trait::async_trait]
@@ -330,7 +325,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with `kiln run //crates/lash-sim:cross_backend_store_differential__test -- --include-ignored`)"]
-async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
+async fn interrupted_claim_identity_stands_over_a_later_row() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => database_url,
         _ => {
@@ -340,7 +335,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
                 "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
             );
             eprintln!(
-                "SKIPPED interrupted-claim ready-gap literal oracle; compared_backends=[]; \
+                "SKIPPED interrupted-claim later-row literal oracle; compared_backends=[]; \
                  required_backends=[sqlite-memory,sqlite,postgres]"
             );
             return;
@@ -348,12 +343,12 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
     };
     let mut database_lock = PgConnection::connect(&database_url)
         .await
-        .expect("connect Postgres ready-gap advisory lock");
+        .expect("connect Postgres later-row advisory lock");
     sqlx::query("SELECT pg_advisory_lock($1)")
         .bind(SHARED_DATABASE_LOCK_KEY)
         .execute(&mut database_lock)
         .await
-        .expect("acquire Postgres ready-gap advisory lock");
+        .expect("acquire Postgres later-row advisory lock");
     // Worker open never provisions (FIG-3797): apply the committed artifact,
     // the same step `lash migrate` performs, before opening.
     sqlx::raw_sql(PostgresStorage::schema_ddl())
@@ -362,41 +357,31 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
         .expect("provision the shared Postgres database from schema.sql");
     let postgres = PostgresStorage::connect(&database_url)
         .await
-        .expect("connect required Postgres ready-gap backend");
-    let sqlite_root = tempfile::tempdir().expect("create ready-gap SQLite root");
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock is after Unix epoch")
-        .as_millis() as u64;
-    let delayed_at_ms = now_ms + 2_000;
-    let clock = Arc::new(AdvancingDifferentialClock::new(now_ms));
-    let mut runners = runners_for_case_with_clock(
+        .expect("connect required Postgres later-row backend");
+    let sqlite_root = tempfile::tempdir().expect("create later-row SQLite root");
+    let mut runners = runners_for_case(
         CaseName::QueuedWorkClaimAndAbandon,
         sqlite_root.path(),
         &postgres,
         &database_url,
-        &format!("{}-ready-gap", run_nonce()),
-        Arc::clone(&clock) as Arc<dyn Clock>,
+        &format!("{}-claim-gap", run_nonce()),
     )
     .await;
 
     for runner in &mut runners {
         let store = runner.store();
-        for (source_key, available_at_ms) in
-            [("gap-w1", 0), ("gap-w2", delayed_at_ms), ("gap-w3", 0)]
-        {
+        for source_key in ["gap-w1", "gap-w3"] {
             store
                 .enqueue_queued_work(
                     oracle_wake_draft(&runner.session_id, source_key)
-                        .with_merge_key("ready-gap-key")
-                        .with_available_at_ms(available_at_ms),
+                        .with_merge_key("claim-gap-key"),
                 )
                 .await
-                .expect("enqueue ready-gap literal row");
+                .expect("enqueue claim-gap literal row");
         }
         let owner = LeaseOwnerIdentity::opaque(
-            format!("ready-gap-a-{}", runner.name),
-            format!("ready-gap-a-{}:incarnation", runner.name),
+            format!("claim-gap-a-{}", runner.name),
+            format!("claim-gap-a-{}:incarnation", runner.name),
         );
         let lease = store
             .try_claim_session_execution_lease(
@@ -406,9 +391,9 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("claim first ready-gap session lease")
+            .expect("claim first claim-gap session lease")
             .acquired()
-            .expect("first ready-gap session lease is free");
+            .expect("first claim-gap session lease is free");
         let claim = store
             .claim_ready_queued_work(
                 &runner.session_id,
@@ -418,35 +403,34 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
                 lash_core::testing::queued_work_claim_policy(64),
             )
             .await
-            .expect("claim original ready-gap composition")
+            .expect("claim original claim-gap composition")
             .claim()
-            .expect("original ready-gap composition exists");
+            .expect("original claim-gap composition exists");
         assert_eq!(
             claim.batches.iter().map(oracle_row_id).collect::<Vec<_>>(),
             vec!["gap-w1".to_string(), "gap-w3".to_string()],
-            "{} backend changed the initial literal ready-gap composition",
+            "{} backend changed the initial literal claim-gap composition",
             runner.name
         );
         store
             .release_session_execution_lease(&lease.completion())
             .await
-            .expect("release first ready-gap session lease");
+            .expect("release first claim-gap session lease");
+        // The gap row arrives only after the interrupted claim exists, so a
+        // redrive must answer the claim's own members, never a re-merge.
+        store
+            .enqueue_queued_work(
+                oracle_wake_draft(&runner.session_id, "gap-w2").with_merge_key("claim-gap-key"),
+            )
+            .await
+            .expect("enqueue later claim-gap literal row");
     }
-
-    clock.advance(4_000);
-    let wait_ms = delayed_at_ms.saturating_sub(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock is after Unix epoch")
-            .as_millis() as u64,
-    );
-    tokio::time::sleep(Duration::from_millis(wait_ms + 50)).await;
 
     for runner in &mut runners {
         let store = runner.store();
         let owner = LeaseOwnerIdentity::opaque(
-            format!("ready-gap-b-{}", runner.name),
-            format!("ready-gap-b-{}:incarnation", runner.name),
+            format!("claim-gap-b-{}", runner.name),
+            format!("claim-gap-b-{}:incarnation", runner.name),
         );
         let lease = store
             .try_claim_session_execution_lease(
@@ -456,9 +440,9 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("claim successor ready-gap session lease")
+            .expect("claim successor claim-gap session lease")
             .acquired()
-            .expect("successor ready-gap session lease is free");
+            .expect("successor claim-gap session lease is free");
         let redriven = store
             .claim_ready_queued_work(
                 &runner.session_id,
@@ -468,9 +452,9 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
                 lash_core::testing::queued_work_claim_policy(64),
             )
             .await
-            .expect("redrive ready-gap composition")
+            .expect("redrive claim-gap composition")
             .claim()
-            .expect("ready-gap composition remains reclaimable");
+            .expect("claim-gap composition remains reclaimable");
         assert_eq!(
             redriven
                 .batches
@@ -481,7 +465,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             "{} backend did not recover the literal claim identity",
             runner.name
         );
-        let delayed = store
+        let later = store
             .claim_ready_queued_work(
                 &runner.session_id,
                 &lease.fence(),
@@ -490,28 +474,24 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
                 lash_core::testing::queued_work_claim_policy(64),
             )
             .await
-            .expect("claim delayed ready-gap row")
+            .expect("claim the later claim-gap row")
             .claim()
-            .expect("delayed ready-gap row remains separate");
+            .expect("later claim-gap row remains separate");
         assert_eq!(
-            delayed
-                .batches
-                .iter()
-                .map(oracle_row_id)
-                .collect::<Vec<_>>(),
+            later.batches.iter().map(oracle_row_id).collect::<Vec<_>>(),
             vec!["gap-w2".to_string()],
-            "{} backend did not preserve the literal delayed-row remainder",
+            "{} backend did not preserve the literal later-row remainder",
             runner.name
         );
         store
             .release_session_execution_lease(&lease.completion())
             .await
-            .expect("release successor ready-gap session lease");
+            .expect("release successor claim-gap session lease");
         runner.close_reopened_postgres_pool().await;
     }
 
     eprintln!(
-        "PASSED interrupted-claim ready-gap literal oracle; \
+        "PASSED interrupted-claim later-row literal oracle; \
          compared_backends=[sqlite-memory,sqlite,postgres]"
     );
 }

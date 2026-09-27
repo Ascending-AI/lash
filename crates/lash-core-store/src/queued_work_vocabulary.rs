@@ -302,7 +302,6 @@ pub struct QueuedWorkBatch {
     pub authority: QueuedWorkAuthority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
-    pub available_at_ms: u64,
     pub enqueued_at_ms: u64,
     pub items: Vec<QueuedWorkItem>,
 }
@@ -368,7 +367,6 @@ pub struct QueuedWorkBatchDraft {
     pub authority: QueuedWorkAuthority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
-    pub available_at_ms: u64,
     pub payloads: QueuedWorkBatchPayloads,
 }
 impl QueuedWorkBatchDraft {
@@ -385,7 +383,6 @@ impl QueuedWorkBatchDraft {
             delivery_policy,
             authority: QueuedWorkAuthority::default(),
             merge_key: None,
-            available_at_ms: 0,
             payloads,
         }
     }
@@ -404,11 +401,6 @@ impl QueuedWorkBatchDraft {
             process_id: process_id.into(),
             sequence,
         });
-        self
-    }
-
-    pub fn with_available_at_ms(mut self, available_at_ms: u64) -> Self {
-        self.available_at_ms = available_at_ms;
         self
     }
 
@@ -593,7 +585,7 @@ impl serde::Serialize for QueuedWorkBatchDraft {
         use serde::ser::SerializeStruct;
         let mut state = serializer.serialize_struct(
             "QueuedWorkBatchDraft",
-            6 + usize::from(self.source_key.is_some())
+            5 + usize::from(self.source_key.is_some())
                 + usize::from(self.process_wake_source.is_some())
                 + usize::from(self.merge_key.is_some()),
         )?;
@@ -610,7 +602,6 @@ impl serde::Serialize for QueuedWorkBatchDraft {
         if let Some(key) = &self.merge_key {
             state.serialize_field("merge_key", key)?;
         }
-        state.serialize_field("available_at_ms", &self.available_at_ms)?;
         state.serialize_field("payloads", &self.payloads)?;
         state.end()
     }
@@ -628,7 +619,6 @@ impl TryFrom<QueuedWorkDraftWire> for QueuedWorkBatchDraft {
             delivery_policy: wire.delivery_policy,
             authority: wire.authority,
             merge_key: wire.merge_key,
-            available_at_ms: wire.available_at_ms,
             payloads: wire.payloads,
         })
     }
@@ -731,7 +721,6 @@ struct QueuedWorkDraftWire {
     kind: QueuedWorkKind,
     authority: QueuedWorkAuthority,
     merge_key: Option<String>,
-    available_at_ms: u64,
     payloads: QueuedWorkBatchPayloads,
 }
 

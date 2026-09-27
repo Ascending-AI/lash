@@ -842,7 +842,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
-        now_epoch_ms: u64,
     ) -> Result<Option<bool>, StoreError> {
         lash_core_execution::store::validate_session_id(&request.session_id)?;
         if !self.core.target().exists() {
@@ -858,7 +857,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                     .family
                     .has_claimable_work
                     .sql(),
-                params![session_id.as_str(), now_epoch_ms as i64],
+                params![session_id.as_str()],
                 |row| row.get(0),
             )
         })
