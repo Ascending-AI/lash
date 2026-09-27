@@ -64,15 +64,10 @@ pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_
 /// `Resolution` for an await-event, the process output for a process await.
 /// What a handler's durable-wait resolve answers: the index's outcome, or its
 /// typed cancel-decided refusal (ADR 0099 §4, W17).
-pub(crate) type ResolveEventFuture<'run> = Pin<
-    Box<
-        dyn Future<Output = Result<RestateDurableWaitResolveResponse, TerminalError>> + Send + 'run,
-    >,
->;
+pub(crate) type ResolveEventFuture<'run> =
+    crate::JournaledFuture<'run, RestateDurableWaitResolveResponse>;
 
-type TurnCancelRaceFuture<'run, T> = Pin<
-    Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,
->;
+type TurnCancelRaceFuture<'run, T> = crate::JournaledFuture<'run, RestateTurnCancelRaceOutcome<T>>;
 
 /// Whether a wait that observes no turn races its process segment's durable
 /// cancel promise (FIG-3673).
@@ -314,9 +309,7 @@ async fn race_process_cancel<'run, T>(
 /// The default every unregistered group-index call shares: a pinned refusal
 /// naming the handler, so a wiring miss surfaces as a typed terminal error
 /// rather than a silent `Ok`.
-fn unregistered_group_index<'run, T>(
-    handler: &'static str,
-) -> Pin<Box<dyn Future<Output = Result<T, TerminalError>> + Send + 'run>>
+fn unregistered_group_index<'run, T>(handler: &'static str) -> crate::JournaledFuture<'run, T>
 where
     T: Send + 'run,
 {
@@ -324,10 +317,7 @@ where
 }
 
 pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
-    fn sleep_send<'run>(
-        &'run self,
-        duration: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    fn sleep_send<'run>(&'run self, duration: Duration) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run;
 
@@ -350,7 +340,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         effect_name: String,
         retry_policy: Option<RunRetryPolicy>,
         future: Fut,
-    ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, Json<T>>
     where
         'ctx: 'run,
         T: Serialize + DeserializeOwned + Send + 'static,
@@ -393,14 +383,14 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         sender_generation: Option<lash_core::engine::BuildGeneration>,
-    ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, String, ProcessWorkflowStartFailure>
     where
         'ctx: 'run;
 
     fn request_process_workflow_cancel<'run>(
         &'run self,
         request: RestateProcessCancelRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run;
 
@@ -409,7 +399,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         cancellation: tokio_util::sync::CancellationToken,
-    ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, Resolution>
     where
         'ctx: 'run;
 
@@ -436,9 +426,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     ///
     /// Contexts without a workflow promise surface carry no process
     /// cancellation and answer `false`.
-    fn peek_process_cancel_requested<'run>(
-        &'run self,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    fn peek_process_cancel_requested<'run>(&'run self) -> crate::JournaledFuture<'run, bool>
     where
         'ctx: 'run,
     {
@@ -449,14 +437,14 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         address: RestateDurableWaitAddress,
         replay_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, Option<Resolution>>
     where
         'ctx: 'run;
 
     fn await_process_terminal<'run>(
         &'run self,
         process_id: ProcessId,
-    ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, ProcessAwaitOutput>
     where
         'ctx: 'run;
 
@@ -488,7 +476,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn attach_process_terminal<'run>(
         &'run self,
         request: RestateProcessAttachRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run;
 
@@ -496,14 +484,14 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         session_id: SessionId,
         revoke: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run;
 
     fn session_is_revoked<'run>(
         &'run self,
         _session_id: SessionId,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, bool>
     where
         'ctx: 'run,
     {
@@ -518,7 +506,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _index_key: String,
         _replay_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, bool>
     where
         'ctx: 'run,
     {
@@ -529,7 +517,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _index_key: String,
         _replay_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run,
     {
@@ -542,7 +530,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _index_key: String,
         _group_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, bool>
     where
         'ctx: 'run,
     {
@@ -552,7 +540,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn effect_group_probe<'run>(
         &'run self,
         _group_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<EffectGroupProbeResponse, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, EffectGroupProbeResponse>
     where
         'ctx: 'run,
     {
@@ -568,7 +556,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         _group_key: String,
         _children: Vec<lash_core::RuntimeEffectEnvelope>,
         _route: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, Option<usize>>
     where
         'ctx: 'run,
     {
@@ -583,7 +571,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _group_key: String,
         _request: EffectGroupOpenRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<EffectGroupOpenResponse, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, EffectGroupOpenResponse>
     where
         'ctx: 'run,
     {
@@ -598,7 +586,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _request: EffectGroupDispatchRequest,
         _route: String,
-    ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, String>
     where
         'ctx: 'run,
     {
@@ -613,9 +601,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _group_key: String,
         _request: EffectGroupReadRankRequest,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>,
-    >
+    ) -> crate::JournaledFuture<'run, EffectGroupReadRankResponse>
     where
         'ctx: 'run,
     {
@@ -629,11 +615,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn effect_group_payload_get<'run>(
         &'run self,
         _payload_key: String,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run,
-        >,
-    >
+    ) -> crate::JournaledFuture<'run, EffectGroupPayloadGetResponse>
     where
         'ctx: 'run,
     {
@@ -648,7 +630,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _group_key: String,
         _request: EffectGroupCloseRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<EffectGroupCloseResponse, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, EffectGroupCloseResponse>
     where
         'ctx: 'run,
     {
@@ -666,7 +648,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _index_key: String,
         _replay_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
+    ) -> crate::JournaledFuture<'run, Option<String>>
     where
         'ctx: 'run,
     {
@@ -678,13 +660,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _group_key: String,
         _request: EffectGroupCommitChildRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<EffectGroupCommitChildResponse, TerminalError>>
-                + Send
-                + 'run,
-        >,
-    >
+    ) -> crate::JournaledFuture<'run, EffectGroupCommitChildResponse>
     where
         'ctx: 'run,
     {
@@ -698,13 +674,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _group_key: String,
         _request: EffectGroupAdmitSemanticRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<EffectGroupAdmitSemanticResponse, TerminalError>>
-                + Send
-                + 'run,
-        >,
-    >
+    ) -> crate::JournaledFuture<'run, EffectGroupAdmitSemanticResponse>
     where
         'ctx: 'run,
     {
@@ -717,13 +687,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _group_key: String,
         _commit_seq: u64,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<EffectGroupDrainBlockersResponse, TerminalError>>
-                + Send
-                + 'run,
-        >,
-    >
+    ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
     where
         'ctx: 'run,
     {
@@ -829,7 +793,7 @@ macro_rules! impl_restate_controller_context {
                 fn sleep_send<'run>(
                     &'run self,
                     duration: Duration,
-                ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
@@ -894,7 +858,7 @@ macro_rules! impl_restate_controller_context {
                     effect_name: String,
                     retry_policy: Option<RunRetryPolicy>,
                     future: Fut,
-                ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, Json<T>>
                 where
                     'ctx: 'run,
                     T: Serialize + DeserializeOwned + Send + 'static,
@@ -963,13 +927,7 @@ macro_rules! impl_restate_controller_context {
                     registration: ProcessRegistration,
                     execution_context: ProcessExecutionContext,
                     sender_generation: Option<lash_core::engine::BuildGeneration>,
-                ) -> Pin<
-                    Box<
-                        dyn Future<Output = Result<String, ProcessWorkflowStartFailure>>
-                            + Send
-                            + 'run,
-                    >,
-                >
+                ) -> crate::JournaledFuture<'run, String, ProcessWorkflowStartFailure>
                 where
                     'ctx: 'run,
                 {
@@ -1006,7 +964,7 @@ macro_rules! impl_restate_controller_context {
                 fn request_process_workflow_cancel<'run>(
                     &'run self,
                     request: RestateProcessCancelRequest,
-                ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
@@ -1032,7 +990,7 @@ macro_rules! impl_restate_controller_context {
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
                     _cancellation: tokio_util::sync::CancellationToken,
-                ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, Resolution>
                 where
                     'ctx: 'run,
                 {
@@ -1198,7 +1156,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     address: RestateDurableWaitAddress,
                     replay_key: String,
-                ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, Option<Resolution>>
                 where
                     'ctx: 'run,
                 {
@@ -1215,7 +1173,7 @@ macro_rules! impl_restate_controller_context {
                 fn attach_process_terminal<'run>(
                     &'run self,
                     request: RestateProcessAttachRequest,
-                ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
@@ -1234,7 +1192,7 @@ macro_rules! impl_restate_controller_context {
                 fn await_process_terminal<'run>(
                     &'run self,
                     process_id: ProcessId,
-                ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, ProcessAwaitOutput>
                 where
                     'ctx: 'run,
                 {
@@ -1350,7 +1308,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     session_id: SessionId,
                     revoke: bool,
-                ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
@@ -1370,7 +1328,7 @@ macro_rules! impl_restate_controller_context {
                 fn session_is_revoked<'run>(
                     &'run self,
                     session_id: SessionId,
-                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, bool>
                 where
                     'ctx: 'run,
                 {
@@ -1387,7 +1345,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     index_key: String,
                     replay_key: String,
-                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, bool>
                 where
                     'ctx: 'run,
                 {
@@ -1407,7 +1365,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     index_key: String,
                     replay_key: String,
-                ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
@@ -1427,7 +1385,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     index_key: String,
                     group_key: String,
-                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, bool>
                 where
                     'ctx: 'run,
                 {
@@ -1444,7 +1402,7 @@ macro_rules! impl_restate_controller_context {
                 fn effect_group_probe<'run>(
                     &'run self,
                     group_key: String,
-                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupProbeResponse, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, EffectGroupProbeResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1463,7 +1421,7 @@ macro_rules! impl_restate_controller_context {
                     group_key: String,
                     children: Vec<lash_core::RuntimeEffectEnvelope>,
                     route: String,
-                ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, Option<usize>>
                 where
                     'ctx: 'run,
                 {
@@ -1485,7 +1443,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     group_key: String,
                     request: EffectGroupOpenRequest,
-                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupOpenResponse, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, EffectGroupOpenResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1503,7 +1461,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     request: EffectGroupDispatchRequest,
                     route: String,
-                ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, String>
                 where
                     'ctx: 'run,
                 {
@@ -1527,7 +1485,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     group_key: String,
                     request: EffectGroupReadRankRequest,
-                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, EffectGroupReadRankResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1544,7 +1502,7 @@ macro_rules! impl_restate_controller_context {
                 fn effect_group_payload_get<'run>(
                     &'run self,
                     payload_key: String,
-                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, EffectGroupPayloadGetResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1562,7 +1520,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     group_key: String,
                     request: EffectGroupCloseRequest,
-                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupCloseResponse, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, EffectGroupCloseResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1579,7 +1537,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     index_key: String,
                     replay_key: String,
-                ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, Option<String>>
                 where
                     'ctx: 'run,
                 {
@@ -1599,13 +1557,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     group_key: String,
                     request: EffectGroupCommitChildRequest,
-                ) -> Pin<
-                    Box<
-                        dyn Future<Output = Result<EffectGroupCommitChildResponse, TerminalError>>
-                            + Send
-                            + 'run,
-                    >,
-                >
+                ) -> crate::JournaledFuture<'run, EffectGroupCommitChildResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1620,14 +1572,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     group_key: String,
                     request: EffectGroupAdmitSemanticRequest,
-                ) -> Pin<
-                    Box<
-                        dyn Future<
-                                Output = Result<EffectGroupAdmitSemanticResponse, TerminalError>,
-                            > + Send
-                            + 'run,
-                    >,
-                >
+                ) -> crate::JournaledFuture<'run, EffectGroupAdmitSemanticResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1642,7 +1587,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     group_key: String,
                     commit_seq: u64,
-                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupDrainBlockersResponse, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
                 where
                     'ctx: 'run,
                 {
@@ -1708,7 +1653,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn peek_process_cancel_requested<'run>(
                     &'run self,
-                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                ) -> crate::JournaledFuture<'run, bool>
                 where
                     'ctx: 'run,
                 {

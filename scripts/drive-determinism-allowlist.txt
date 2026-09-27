@@ -21,27 +21,6 @@ crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn 
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/process.rs  |  Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB3
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  Pin<Box<dyn Future<Output = Result<AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB2
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>  |  10  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupCloseResponse, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupDrainBlockersResponse, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupOpenResponse, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupProbeResponse, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>  |  2  # LZ11 SB30
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<T, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>  |  8  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>,  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run,  |  1  # UNMAPPED
-crates/lash-restate/src/controller/context.rs  |  dyn Future<Output = Result<RestateDurableWaitResolveResponse, TerminalError>> + Send + 'run,  |  1  # UNMAPPED
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = JournaledEffectRecord> + Send + 'run>>,  |  1  # SB30
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = RecordedRuntimeEffect> + Send + 'run>>,  |  1  # SB30
 crates/lash-restate/src/durable_wait.rs  |  deadline.remaining(lash_core::facade_support::SystemClock.timestamp_ms())?;  |  1  # CR13

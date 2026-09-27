@@ -186,5 +186,13 @@ pub(crate) fn system_clock() -> &'static dyn lash_core::Clock {
     &lash_core::facade_support::SystemClock
 }
 
+/// The boxed completion a journaled engine-context operation returns. The
+/// controller context's methods hand back the Restate `ctx.run` step's
+/// future; boxing keeps the trait object-safe across its generic methods.
+/// FIG-3672 names the erased shape once here, outside the scanned drive
+/// paths, so drive code refers to the seam by name.
+pub(crate) type JournaledFuture<'a, T, E = restate_sdk::errors::TerminalError> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'a>>;
+
 #[cfg(test)]
 mod tests;
