@@ -1073,7 +1073,7 @@ async fn operation_payload(args: &[FlowValue]) -> Result<Value, ExecutionHostErr
 
 impl ExecutionHost for HostBridge<'_> {
     fn capture_console_observation_value(&self) -> bool {
-        true
+        !self.model_views.lock_recover().is_empty()
     }
 
     fn perform(

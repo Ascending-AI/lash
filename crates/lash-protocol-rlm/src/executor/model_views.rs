@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use lash_core::ToolCallOutput;
 use lashlang::Value as FlowValue;
@@ -6,13 +6,18 @@ use serde_json::Value;
 
 use crate::projection::flow_to_json_value;
 
+const MAX_ENTRIES: usize = 256;
+
 /// A view belongs to the structured result, never to a program value.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(super) struct ModelViews(BTreeMap<String, String>);
+pub(super) struct ModelViews {
+    entries: BTreeMap<String, String>,
+    oldest_first: VecDeque<String>,
+}
 
 impl ModelViews {
     pub(super) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.entries.is_empty()
     }
 
     #[cfg(test)]
@@ -20,7 +25,7 @@ impl ModelViews {
         let Some((key, view)) = output_entry(output) else {
             return;
         };
-        self.0.insert(key, view);
+        self.insert(key, view);
     }
 
     pub(super) fn record_at(
@@ -39,16 +44,31 @@ impl ModelViews {
             return;
         }
         latest_in_cell.insert(key.clone(), index);
-        self.0.insert(key, view);
+        self.insert(key, view);
     }
 
     pub(super) fn for_print(&self, value: &FlowValue) -> Option<&str> {
-        if self.0.is_empty() || value.contains_projected() {
+        let structured = matches!(value, FlowValue::Record(fields) if !fields.is_empty())
+            || matches!(value, FlowValue::List(items) | FlowValue::Tuple(items) if !items.is_empty());
+        if self.entries.is_empty() || !structured || value.contains_projected() {
             return None;
         }
-        self.0
+        self.entries
             .get(&key(&flow_to_json_value(value)))
             .map(String::as_str)
+    }
+
+    fn insert(&mut self, key: String, view: String) {
+        if self.entries.contains_key(&key) {
+            self.oldest_first.retain(|previous| previous != &key);
+        }
+        self.entries.insert(key.clone(), view);
+        self.oldest_first.push_back(key);
+        if self.entries.len() > MAX_ENTRIES {
+            if let Some(oldest) = self.oldest_first.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
     }
 }
 
@@ -57,7 +77,13 @@ fn output_entry(output: &ToolCallOutput) -> Option<(String, String)> {
     if !output.is_success() || view.len() > crate::MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES {
         return None;
     }
-    Some((key(&output.value_for_projection()), view.clone()))
+    let value = output.value_for_projection();
+    if !matches!(&value, Value::Object(fields) if !fields.is_empty())
+        && !matches!(&value, Value::Array(items) if !items.is_empty())
+    {
+        return None;
+    }
+    Some((key(&value), view.clone()))
 }
 
 #[expect(clippy::expect_used, reason = "a serde_json::Value always serializes")]
@@ -98,7 +124,7 @@ mod tests {
 
     #[test]
     fn latest_call_wins_even_when_replies_finish_out_of_order() {
-        let value = serde_json::json!({"id": 1});
+        let value = serde_json::json!({"items": []});
         let mut views = ModelViews::default();
         let mut order = BTreeMap::new();
         views.record_at(
@@ -123,6 +149,70 @@ mod tests {
         assert_eq!(
             views.for_print(&lashlang::from_json(value)),
             Some("next cell")
+        );
+    }
+
+    #[test]
+    fn scalar_and_empty_results_do_not_supply_views_to_program_values() {
+        let mut views = ModelViews::default();
+        for value in [
+            serde_json::json!([]),
+            serde_json::json!({}),
+            serde_json::json!(0),
+            serde_json::json!("ok"),
+            serde_json::Value::Null,
+        ] {
+            views.record(&ToolCallOutput::success(value.clone()).with_model_view("tool view"));
+            assert_eq!(views.for_print(&lashlang::from_json(value)), None);
+        }
+        assert!(views.is_empty());
+        views.record(
+            &ToolCallOutput::success(serde_json::json!({ "id": 1 })).with_model_view("view"),
+        );
+        for value in [
+            serde_json::json!([]),
+            serde_json::json!({}),
+            serde_json::json!(0),
+            serde_json::json!("ok"),
+            serde_json::Value::Null,
+        ] {
+            assert_eq!(views.for_print(&lashlang::from_json(value)), None);
+        }
+    }
+
+    #[test]
+    fn oldest_view_is_evicted_and_replacement_becomes_newest() {
+        let mut views = ModelViews::default();
+        for id in 0..MAX_ENTRIES {
+            views.record(
+                &ToolCallOutput::success(serde_json::json!({ "id": id }))
+                    .with_model_view(format!("view {id}")),
+            );
+        }
+        views.record(
+            &ToolCallOutput::success(serde_json::json!({ "id": 0 })).with_model_view("newest"),
+        );
+        let mut views: ModelViews =
+            serde_json::from_value(serde_json::to_value(views).expect("serialize views"))
+                .expect("restore views");
+        views.record(
+            &ToolCallOutput::success(serde_json::json!({ "id": MAX_ENTRIES }))
+                .with_model_view("overflow"),
+        );
+        assert_eq!(views.entries.len(), MAX_ENTRIES);
+        assert_eq!(
+            views.for_print(&lashlang::from_json(serde_json::json!({ "id": 0 }))),
+            Some("newest")
+        );
+        assert_eq!(
+            views.for_print(&lashlang::from_json(serde_json::json!({ "id": 1 }))),
+            None
+        );
+        assert_eq!(
+            views.for_print(&lashlang::from_json(
+                serde_json::json!({ "id": MAX_ENTRIES })
+            )),
+            Some("overflow")
         );
     }
 }

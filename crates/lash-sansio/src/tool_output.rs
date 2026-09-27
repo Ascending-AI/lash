@@ -216,7 +216,9 @@ impl ToolCallOutput {
         }
     }
 
-    /// Sets the text shown to the model when the whole successful result is printed.
+    /// Sets the text shown when a non-empty structured result is printed in RLM code mode.
+    /// An equal-content copy also shows this view. The view must be a pure function
+    /// of the structured value: include any displayed query or context in that value.
     /// The program and recorded call continue to use the structured value.
     pub fn with_model_view(mut self, model_view: impl Into<String>) -> Self {
         if self.is_success() {

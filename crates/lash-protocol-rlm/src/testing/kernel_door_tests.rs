@@ -81,6 +81,15 @@ impl lash_core::ToolProvider for ViewedToolProvider {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if let Some(probe) = call.args.get("probe") {
+            let outcome = lash_core::ToolOutcomeDone::ok(probe.clone());
+            let outcome = if self.with_view {
+                outcome.with_model_view("tool view")
+            } else {
+                outcome
+            };
+            return lash_core::ToolAttemptOutcome::done_without_intents(outcome);
+        }
         let id = call
             .args
             .get("variant")
@@ -275,6 +284,37 @@ async fn a_tool_model_view_prints_without_changing_the_program_result() {
         );
         handler.close().await.expect("close the handler");
     }
+}
+
+#[tokio::test]
+async fn scalar_and_empty_tool_results_do_not_change_program_prints() {
+    let double = super::kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(super::default_cell_scope())
+        .await
+        .expect("open the handler");
+    let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+        super::double_ports(&double, &handler),
+        std::sync::Arc::new(ViewedToolProvider { with_view: true }),
+        lash_core::ToolCatalog::from_tool_definitions(vec![viewed_definition()]),
+    );
+    let response = run_cell(
+        context,
+        "await search.find({probe: []}); print([]); await search.find({probe: {}}); print({}); await search.find({probe: 0}); print(0); await search.find({probe: 'ok'}); print('ok'); await search.find({probe: null}); print(null); finish(true);",
+    )
+    .await;
+    assert_eq!(response.error, None);
+    assert_eq!(response.terminal_finish, Some(serde_json::json!(true)));
+    assert_eq!(
+        response
+            .observations
+            .iter()
+            .map(|observation| observation.text.as_str())
+            .collect::<Vec<_>>(),
+        ["[]", "{}", "0", "ok", "null"]
+    );
+    assert!(response.observations.iter().all(|item| !item.is_model_view));
+    handler.close().await.expect("close the handler");
 }
 
 #[tokio::test]

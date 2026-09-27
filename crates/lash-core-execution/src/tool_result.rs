@@ -244,7 +244,9 @@ impl ToolOutcome {
         Self::from_output(crate::ToolCallOutput::success(result))
     }
 
-    /// Shows this text when the whole successful result is printed in RLM code mode.
+    /// Shows this text when a non-empty structured result is printed in RLM code mode.
+    /// Equal-content copies show it too, so the text must be a pure function of
+    /// the structured value. Include any displayed query or context in that value.
     pub fn with_model_view(mut self, model_view: impl Into<String>) -> Self {
         if let Self::Done(output) = &mut self
             && output.is_success()
