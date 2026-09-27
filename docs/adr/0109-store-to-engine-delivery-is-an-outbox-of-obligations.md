@@ -392,8 +392,8 @@ behind it. On SQLite `parent_end_plans` and `processes` live in the registry
 file: they are armed in that file's transaction, not the catalog's.
 
 **Ingress (S8-I).** The ingress rows live in `pending_turn_inputs` and
-`queued_work_batches` until the ADR 0101 table cutover folds them into
-`session_ingress`; the ingress ledger is the two tables' ledgers composed, a
+`queued_work_batches`, which together are the session's one logical ingress
+(ADR 0101's FIG-3540 close-out); the ingress ledger is the two tables' ledgers composed, a
 due page being the oldest due rows of both. A row's obligation id is
 `ingress:{item_id}` (its `ti:` input id or `qwb:` batch id), derived rather
 than read back. The engine accepting the relay's ask does not deliver it:

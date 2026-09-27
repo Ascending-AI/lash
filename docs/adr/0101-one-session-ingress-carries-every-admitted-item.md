@@ -3,10 +3,12 @@
 ## Status
 
 Accepted 2026-09-23 (FIG-3540) as the design freeze for the one-ingress
-cutover. **Not yet implemented**: the FIG-3540 cutover PR series builds it, after
-FIG-3532, FIG-3513 and FIG-3531 land. The pending follow-on (§3) is implemented
-(FIG-3542), ahead of the table cutover; its note says what differs until then.
-Nothing else below describes current behaviour unless it says so. The FIG-3540 arc note is the frozen design this ADR records.
+cutover. The pending follow-on (§3) is implemented (FIG-3542). The one-table
+model of §1 is **not adopted**: the *Amendment (FIG-3540 close-out)* below
+makes the session's one logical ingress the two admission tables composed
+under one sequence, and records which sections it overrides. Nothing else below
+describes current behaviour unless it says so. The FIG-3540 arc note is the
+frozen design this ADR records.
 
 Supersedes [ADR 0010](0010-pending-turn-input-is-admission-evidence.md).
 Strengthens [ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md).
@@ -34,10 +36,10 @@ Amended 2026-09-24 (FIG-3600; Sam's rulings on that ticket). The *Amendment
 (FIG-3600)* section below makes the ingress the only way a turn starts and the
 backend's work driver the only thing that runs one: the caller submits with
 `session.send(..)` and observes through a handle. It also makes the session
-model durable session config changed by a session command. **Not yet
-implemented**: FIG-3600 builds it inside the FIG-3540 cutover series, after
-FIG-3585. Where the amendment and an earlier section disagree, the amendment
-wins; the passages it overrides carry a short note.
+model durable session config changed by a session command. It is implemented;
+its status paragraph names what remains. Where the amendment and an earlier
+section disagree, the amendment wins; the passages it overrides carry a short
+note.
 
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
@@ -94,6 +96,10 @@ behaviour is a property of the item's kind, never of a separate table or claim
 type.**
 
 ### 1. The model
+
+*(Not adopted: the Amendment (FIG-3540 close-out) keeps the two admission
+tables as one logical ingress. The rest of this section is the design as
+frozen.)*
 
 One table per SQL backend, `session_ingress` (SQLite) / `lash_session_ingress`
 (PostgreSQL), and one `Vec` plus one counter in the in-memory store. One row is
@@ -564,6 +570,9 @@ and rides the §15 cutover.
 
 ### 14. Deletions
 
+*(The table and two-list deletions below are overridden by the Amendment
+(FIG-3540 close-out).)*
+
 * Tables `pending_turn_inputs`, `queued_work_batches`, `queued_work_items` on
   every backend.
 * `BatchId` (host-facing pins become item ids), `DeliveryPolicy`,
@@ -705,9 +714,13 @@ advisory lock on the merged table.
 
 ## Amendment (FIG-3600, 2026-09-24): one `send()` ingress; the driver runs every turn
 
-**Status.** Decided by Sam on FIG-3600, 2026-09-24. **Not yet implemented**:
-FIG-3600 builds it inside the FIG-3540 cutover series, after FIG-3585, so the
-cutover changes two stores, not three. It is one wholehog cutover: no aliases,
+**Status.** Decided by Sam on FIG-3600, 2026-09-24, and implemented: `send()`
+is the only caller path, the backend's work driver runs every turn through a
+journaled admission, and the session model is durable config changed by
+command. FIG-3589's surface is deleted (A8). Still published, and owned by
+FIG-3837: `LashRuntime::{stream_turn, run_turn_assembled,
+stream_prepared_turn}` and the live-input gate `ensure_durable_effect_input`
+(A6, A8). It is one wholehog cutover: no aliases,
 no compatibility path for caller-driven turns, and no convenience wrapper that
 runs a turn inline. The evidence, including the design that was not taken, is
 in `/workspace/notes/lash/fig3573-arc/input-lifecycle/`. It amends ADR 0045,
@@ -872,6 +885,56 @@ in the same cutover, to `send` plus `outcome()` or `events()`.
 The peer evidence is pi `a8ed4977` (one `send()`, with steer and follow-up when
 busy; the model as a session setting with `model_change` entries), codex
 `7db578f`, openai-agents `32edd3c` / js `a0b1c6f`, and langgraph `1211af4`.
+
+## Amendment (FIG-3540 close-out, 2026-09-27): one logical ingress over two admission tables
+
+**Status.** Decided in the FIG-3540 close-out, 2026-09-27, as the default the
+arc named; logged for Sam, and reversible. Implemented.
+
+**Decision.** The one-table model of §1 is not adopted. The `session_ingress`
+table, `SessionIngressStore`, its claim and settlement planners, its vocabulary
+(`IngressClaim`, `ClaimMode`, the §10 record types) and its laws were built
+ahead of a cutover that never wired a producer to them: the runtime admits from
+`pending_turn_inputs` and `queued_work_batches` / `queued_work_items`, and
+FIG-3851 put the ADR 0109 ingress obligations on those rows. That unused path is
+deleted end to end on every store. The session's **one logical ingress is the
+two admission tables together**:
+
+* **One order.** Every producer allocates `enqueue_seq` from one per-session
+  counter (`session_ingress_sequence`, the only `session_ingress` table left)
+  under the session lock, so sequence numbers are comparable across both
+  tables and follow commit order (law 1).
+* **The command lane first (§4, binding).** Admission drains every open session
+  command before it claims turn-lane work, and a checkpoint claim never takes a
+  command. The lane is fixed by table and kind: a command row is the command
+  lane; host input and process wakes are the turn lane.
+* **One delivery obligation.** Both tables carry the ADR 0109 ingress
+  obligation, and the claim that admits a row delivers it.
+* **One cancel record (§10).** `TurnCancelInputOutcome` is the affected-item
+  record: `affected_inputs` for host input under the request's disposition, and
+  `affected_wakes` for held wakes, which a cancel always defers (FIG-3543).
+
+**Why two tables.** No ADR 0101 invariant was found that needs one table.
+Order needs one counter, not one table; command-lane precedence is an
+admission rule; the obligation and the cancel record are per row and per kind.
+Dedup stays per table: a cross-kind source-key collision has no producer, the
+reason *Alternatives* rejects a `dedup_domain` column.
+
+**What this overrides.** §1's table, single store trait and single claim type;
+§14's table and two-list deletions; §15's table cutover; §16's
+re-expression against `SessionIngressStore` (the laws hold per table).
+`WithheldTerminalWork` keeps one list per claim type: a turn-input claim and a
+queued-work claim remain different types.
+
+**FIG-3589's surface is deleted with it** (A8): `claim_bound_*`, `TurnBound`,
+the bind and reclaim store methods, and `ClaimMode::Exact`. A redrive of an
+aborted root replays the drive its root claim recorded (FIG-3840), and a park is
+released once no open input bound to its root in `session_root_inputs` remains.
+
+**Not yet held.** §5 says the turn lane has no kind priority. At idle,
+admission takes the head host input before any queued wake whatever their
+`enqueue_seq`; the shared counter makes the cross-table comparison possible,
+but admission does not make it yet.
 
 ## Alternatives considered
 

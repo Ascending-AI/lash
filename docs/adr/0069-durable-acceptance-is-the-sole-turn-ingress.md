@@ -6,12 +6,12 @@ Accepted. Ratified on FIG-1661; the four sections of the decision are the four
 rulings recorded there. Implemented separately by FIG-1671, which added
 section 5 — how an accepted input is settled by the turn that drove it.
 
-Strengthened 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) makes the Pending
-Turn Input row class the `input` kind of one Session Ingress item, beside
-process wakes and session commands, so "sole ingress" is literal: host, process
-and command admissions share one table, sequence and lifecycle (commands in a
-class-level lane applied at turn boundaries), and no commit writes ingress rows
-(the frame follow-on is a session-head fact). A row's delivery is immutable
+Strengthened 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) makes "sole ingress" literal:
+host, process and command admissions share one per-session sequence (commands
+in a class-level lane applied at turn boundaries), and no commit writes ingress
+rows (the frame follow-on is a session-head fact). Its FIG-3540 close-out
+amendment keeps Pending Turn Input as its own table: the pending-input and
+queued-work tables together are the session's one logical ingress. A row's delivery is immutable
 intent: final commits no longer re-defer addressed input, and an ended turn's
 items are next-turn items by rule. Section 6 stands; section 5's unclaimed
 regime is deleted (see the note there). References below to ADR 0010 read as
@@ -21,16 +21,16 @@ Amended 2026-09-23 (FIG-3589): section 7 adds the one ingress row state the
 acceptance timeline lacked. A direct turn that aborts with `Err` binds its drive
 claim to its turn, so the input no longer lapses to whichever lease generation
 comes next; only that turn's redrive or a cancel by its receipt consumes it. A
-crashed turn is untouched: section 3's recovery still reclaims it.
+crashed turn is untouched: section 3's recovery still reclaims it. The binding
+is deleted with FIG-3600 (see section 7).
 
-Amended 2026-09-24 (FIG-3600), **not yet implemented**: [ADR 0101's FIG-3600
+Amended 2026-09-24 (FIG-3600), implemented: [ADR 0101's FIG-3600
 amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn)
 makes `session.send(input)` the only way a turn starts and the backend's work
 driver the only thing that runs one. Durable acceptance stays the sole ingress.
-On landing of FIG-3600, the caller-driven parts of this ADR are superseded:
-section 1's `run` / `stream_to` sugar, section 3's caller future as first
-driver, the direct-turn `Queued { ahead }` outcome in section 6, and section 7
-entirely. The text below still describes current code.
+The caller-driven parts of this ADR are superseded: section 1's `run` /
+`stream_to` sugar, section 3's caller future as first driver, the direct-turn
+`Queued { ahead }` outcome in section 6, and section 7 entirely.
 
 Amended 2026-09-24 (FIG-3552): section 6's cede rule covers every claim a
 redrive restores, not only its journaled drive. A checkpoint claim of turn input
@@ -370,12 +370,13 @@ regimes section 5 defines.
 
 ### 7. An aborted direct turn's input is bound to that turn
 
-> Superseded on landing of FIG-3600 by [ADR 0101's FIG-3600
+> Superseded by [ADR 0101's FIG-3600
 > amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn).
-> No caller runs a turn after that cutover, so no caller owns an aborted turn's
-> continuation. The substrate re-drives it or parks it (A3, A4), and the
-> binding, the `TurnBound` read status and cancel refusal, and the receipt
-> re-drive are deleted (A8). This section still describes current code.
+> No caller runs a turn, so no caller owns an aborted turn's continuation. The
+> substrate re-drives it or parks it (A3, A4). The binding, the `TurnBound` read
+> status and cancel refusal, and the receipt re-drive are deleted (A8; FIG-3540
+> close-out): a redrive of an aborted root replays the drive its root claim
+> recorded. This section records the retired design.
 
 Section 3 makes a crashed direct turn recoverable by anyone: its claim is pinned
 to a lease generation that stops holding the lane, and the next generation

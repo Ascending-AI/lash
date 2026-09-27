@@ -81,7 +81,7 @@ FIG-3667, SQLite in FIG-3668.
 - process execution environments;
 - process definitions, and process records as data;
 - triggers;
-- the `session_ingress` rows
+- the ingress rows, `pending_turn_inputs` and the queued-work tables
   ([ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md),
   FIG-3600);
 - parked-work storage (FIG-3659).
