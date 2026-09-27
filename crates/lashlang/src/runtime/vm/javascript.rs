@@ -321,6 +321,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), arguments @ ..] = values.as_slice()
             && method.as_str() == javascript_substrate::CONSOLE_OBSERVATION_TEXT
         {
+            if let [Value::Projected(projected)] = arguments
+                && projected.has_model_view()
+            {
+                self.stack.push(arguments[0].clone());
+                return Ok(());
+            }
             let text =
                 javascript_substrate::javascript_console_observation_text(&self.heap, arguments)?;
             // Rendering writes each output byte once.

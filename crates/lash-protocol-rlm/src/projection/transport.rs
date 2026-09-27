@@ -310,7 +310,8 @@ pub(crate) fn flow_to_json_value(value: &FlowValue) -> Value {
         FlowValue::Projected(value) => {
             // A model view changes printing, not the value passed to another tool.
             if value.projection_ref().is_some_and(|reference| {
-                reference.get("kind").and_then(Value::as_str) == Some("tool_result_model_view")
+                reference.get("kind").and_then(Value::as_str)
+                    == Some(lashlang::TOOL_RESULT_MODEL_VIEW_KIND)
             }) {
                 return value
                     .materialize()

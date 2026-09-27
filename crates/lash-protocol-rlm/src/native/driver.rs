@@ -711,7 +711,11 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
     ToolCallOutput {
         outcome,
         control,
-        model_view: output.model_view.clone(),
+        model_view: output
+            .model_view
+            .as_ref()
+            .filter(|view| view.len() <= MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES)
+            .cloned(),
     }
 }
 

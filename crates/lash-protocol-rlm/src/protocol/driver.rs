@@ -957,7 +957,11 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
     ToolCallOutput {
         outcome,
         control,
-        model_view: output.model_view.clone(),
+        model_view: output
+            .model_view
+            .as_ref()
+            .filter(|view| view.len() <= MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES)
+            .cloned(),
     }
 }
 
@@ -1371,6 +1375,19 @@ mod tests {
             })
         );
         assert_eq!(bounded.output.attachments(), vec![attachment]);
+    }
+
+    #[test]
+    fn bounded_output_discards_an_oversized_model_view() {
+        let oversized = "x".repeat(MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES + 1);
+        let output =
+            ToolCallOutput::success(serde_json::json!({"id": 1})).with_model_view(oversized);
+        let bounded = bounded_tool_call_record(&record(0, output));
+        assert_eq!(bounded.output.model_view, None);
+        assert_eq!(
+            bounded.output.value_for_projection(),
+            serde_json::json!({"id": 1})
+        );
     }
 
     #[test]

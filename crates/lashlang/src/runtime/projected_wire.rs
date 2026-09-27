@@ -55,10 +55,10 @@ impl CanonicalProjectedValue {
             name: projected.name().to_string(),
             type_name: projected.value_type_name().to_string(),
             projection_ref: projected
-                .projection_ref()
+                .durable_projection_ref()
                 .map(|value| {
                     CanonicalJsonValue::from_json(
-                        value,
+                        &value,
                         &format!("{location}.projection_ref"),
                         depth + 1,
                     )

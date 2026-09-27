@@ -61,7 +61,9 @@ fn viewed_definition() -> lash_core::ToolDefinition {
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["search"], "find"))
 }
 
-struct ViewedToolProvider;
+struct ViewedToolProvider {
+    with_view: bool,
+}
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ViewedToolProvider {
@@ -79,12 +81,15 @@ impl lash_core::ToolProvider for ViewedToolProvider {
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolAttemptOutcome::done_without_intents(
-            lash_core::ToolOutcomeDone::ok(serde_json::json!({
-                "items": [{"id": "item-0", "detail": {"excerpt": "complete passage"}}]
-            }))
-            .with_model_view("Search results\n0. item-0: complete passage"),
-        )
+        let outcome = lash_core::ToolOutcomeDone::ok(serde_json::json!({
+            "items": [{"id": "item-0", "detail": {"excerpt": "complete passage"}}]
+        }));
+        let outcome = if self.with_view {
+            outcome.with_model_view("Search results\n0. item-0: complete passage")
+        } else {
+            outcome
+        };
+        lash_core::ToolAttemptOutcome::done_without_intents(outcome)
     }
 }
 
@@ -184,47 +189,66 @@ async fn a_cell_on_the_doubles_lent_ports_runs_its_tool_calls_in_the_handler() {
 
 #[tokio::test]
 async fn a_tool_model_view_prints_without_changing_the_program_result() {
-    let double = super::kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
-    let handler = double
-        .open_handler(super::default_cell_scope())
-        .await
-        .expect("open the handler");
-    let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
-        super::double_ports(&double, &handler),
-        std::sync::Arc::new(ViewedToolProvider),
-        lash_core::ToolCatalog::from_tool_definitions(vec![viewed_definition()]),
-    );
-    let response = run_cell(
-        context,
-        "const r = await search.find({}); print(r); print(r.items[0].id); print([r]); finish(r.items[0].id);",
-    )
-    .await;
-    assert_eq!(response.error, None);
-    assert_eq!(response.terminal_finish, Some(serde_json::json!("item-0")));
-    assert_eq!(response.observations.len(), 3);
-    assert_eq!(
-        response.observations[0].text,
-        "Search results\n0. item-0: complete passage"
-    );
-    assert!(response.observations[0].is_model_view);
-    assert_eq!(response.observations[1].text, "item-0");
-    assert!(!response.observations[1].is_model_view);
-    assert!(response.observations[2].text.contains("\"items\""));
-    assert!(!response.observations[2].text.contains("Search results"));
-    assert!(!response.observations[2].is_model_view);
-    let record = response.calls[0]
-        .host_record
-        .as_ref()
-        .expect("recorded tool call");
-    assert_eq!(
-        record.output.value_for_projection()["items"][0]["id"],
-        "item-0"
-    );
-    assert_eq!(
-        record.output.model_view.as_deref(),
-        Some("Search results\n0. item-0: complete passage")
-    );
-    handler.close().await.expect("close the handler");
+    for with_view in [false, true] {
+        let seed = if with_view { SEED + 1 } else { SEED + 2 };
+        let double = super::kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(super::default_cell_scope())
+            .await
+            .expect("open the handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            super::double_ports(&double, &handler),
+            std::sync::Arc::new(ViewedToolProvider { with_view }),
+            lash_core::ToolCatalog::from_tool_definitions(vec![viewed_definition()]),
+        );
+        let response = run_cell(
+            context,
+            "const r = await search.find({}); function same(x) { return x; } const alias = r; const boxed = [r]; console.log(r); print(r); print(alias); print(boxed[0]); print(same(r)); print(JSON.stringify(r)); console.log(r, 'tail'); print(r.items[0].id); print(r); print([r]); finish(r.items[0].id);",
+        )
+        .await;
+        assert_eq!(response.error, None);
+        assert_eq!(response.terminal_finish, Some(serde_json::json!("item-0")));
+        assert_eq!(response.observations.len(), 10);
+        if with_view {
+            assert_eq!(
+                response.observations[0].text,
+                "Search results\n0. item-0: complete passage"
+            );
+        } else {
+            assert!(response.observations[0].text.contains("\"items\""));
+            assert!(response.observations[0].text.contains("complete passage"));
+        }
+        assert_eq!(response.observations[0].is_model_view, with_view);
+        for observation in &response.observations[1..5] {
+            assert_eq!(observation.text, response.observations[0].text);
+            assert_eq!(observation.is_model_view, with_view);
+        }
+        assert!(response.observations[5].text.contains("\"items\""));
+        assert!(!response.observations[5].is_model_view);
+        assert!(response.observations[6].text.contains("\"items\""));
+        assert!(response.observations[6].text.ends_with(" tail"));
+        assert!(!response.observations[6].is_model_view);
+        assert_eq!(response.observations[7].text, "item-0");
+        assert!(!response.observations[7].is_model_view);
+        for observation in &response.observations[8..] {
+            assert!(observation.text.contains("\"items\""));
+            assert!(!observation.text.contains("Search results"));
+            assert!(!observation.is_model_view);
+        }
+        let record = response.calls[0]
+            .host_record
+            .as_ref()
+            .expect("recorded tool call");
+        assert_eq!(
+            record.output.value_for_projection()["items"][0]["id"],
+            "item-0"
+        );
+        assert_eq!(
+            record.output.model_view.as_deref(),
+            with_view.then_some("Search results\n0. item-0: complete passage")
+        );
+        handler.close().await.expect("close the handler");
+    }
 }
 
 /// A cell whose context installs its own parent invocation claims that

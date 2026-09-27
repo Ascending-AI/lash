@@ -1309,6 +1309,52 @@ fn excludes_direct_projected_globals() {
 }
 
 #[test]
+fn bound_variables_include_viewed_values_at_their_structured_shape() {
+    let structured = serde_json::json!({"items": [{"id": "item-0"}]});
+    let viewed = FlowValue::Projected(lash_lashlang_runtime::tool_result_model_view_projection(
+        structured.clone(),
+        "Search results".to_string(),
+    ));
+    let mut state = RlmExecutionState::new();
+    state.rlm.insert_global("r", viewed.clone()).expect("r");
+    state
+        .rlm
+        .insert_global("array", FlowValue::List(vec![viewed.clone()].into()))
+        .expect("array");
+    let mut record = FlowRecord::new();
+    record.insert("r".to_string(), viewed);
+    state
+        .rlm
+        .insert_global("object", FlowValue::Record(Arc::new(record)))
+        .expect("object");
+
+    let values = state.bound_variable_values(&BTreeSet::new());
+    let rendered = crate::rlm_support::render_bound_variables(
+        &mut crate::rlm_support::BoundVariableRenderCache::default(),
+        &values,
+        &[],
+        crate::dialect::DialectPromptVocabulary::default(),
+    );
+    for name in ["r", "array", "object"] {
+        assert!(rendered.contains(&format!("- `{name}`")), "{rendered}");
+    }
+    assert!(rendered.contains("type ArrayItem"), "{rendered}");
+    assert!(rendered.contains("type Object"), "{rendered}");
+    assert!(rendered.contains("item-0"), "{rendered}");
+    assert!(!rendered.contains("Search results"), "{rendered}");
+    let values = values
+        .iter()
+        .map(|(name, value)| (name.as_str(), crate::projection::flow_to_json_value(value)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(values.get("r"), Some(&structured));
+    assert_eq!(values.get("array"), Some(&serde_json::json!([structured])));
+    assert_eq!(
+        values.get("object"),
+        Some(&serde_json::json!({"r": structured}))
+    );
+}
+
+#[test]
 fn excludes_top_level_globals_containing_nested_projected_values() {
     let mut state = RlmExecutionState::new();
     let mut record = FlowRecord::new();

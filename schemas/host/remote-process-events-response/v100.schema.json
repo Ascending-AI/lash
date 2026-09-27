@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-events-response/v101",
+  "$id": "https://lash.dev/schemas/remote-process-events-response/v100",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -848,12 +848,6 @@
     "RemoteProcessToolCallOutput": {
       "properties": {
         "control": true,
-        "model_view": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "outcome": {
           "$ref": "#/definitions/RemoteProcessToolCallOutcome"
         }
@@ -1339,6 +1333,6 @@
   ],
   "title": "RemoteProcessEventsResponse",
   "type": "object",
-  "x-lash-schema-version": 101,
+  "x-lash-schema-version": 100,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

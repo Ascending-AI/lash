@@ -1061,18 +1061,21 @@ impl RlmExecutionState {
     ///
     /// Excludes the reserved `history` binding, the supplied `exclude` names
     /// (read-only values, which get their own type-only section), and any
-    /// value that contains read-only projected data. Those are never
-    /// materialized for a value preview here.
+    /// value that still contains read-only projected data after model views
+    /// have been replaced with their structured values.
     pub(crate) fn bound_variable_values(
         &self,
         exclude: &BTreeSet<String>,
     ) -> Vec<(String, FlowValue)> {
         let mut out = Vec::new();
         for (name, value) in self.rlm.globals().iter() {
-            if name == "history" || exclude.contains(name) || value.contains_projected() {
+            if name == "history" || exclude.contains(name) {
                 continue;
             }
-            out.push((name.to_string(), value.clone()));
+            let value = super::host_bridge::materialize_nested_model_views(value);
+            if !value.contains_projected() {
+                out.push((name.to_string(), value));
+            }
         }
         out
     }

@@ -85,7 +85,7 @@ pub fn protocol_tool_output_to_lashlang_value(
     }
 }
 
-const TOOL_RESULT_MODEL_VIEW_KIND: &str = "tool_result_model_view";
+use lashlang::TOOL_RESULT_MODEL_VIEW_KIND;
 
 fn success_value(output: &lash_core::ToolCallOutput) -> LashlangValue {
     let value = output.value_for_projection();
@@ -101,7 +101,7 @@ fn success_value(output: &lash_core::ToolCallOutput) -> LashlangValue {
 pub fn tool_result_model_view_projection(value: serde_json::Value, view: String) -> ProjectedValue {
     let reference = serde_json::json!({
         "kind": TOOL_RESULT_MODEL_VIEW_KIND,
-        "key": { "value": value, "view": view },
+        "key": { "view": view },
         "descriptor_type": TOOL_RESULT_MODEL_VIEW_KIND,
     });
     ProjectedValue::scalar_with_model_view(
@@ -121,10 +121,11 @@ pub fn restore_tool_result_model_view_projection(
     Some(
         (|| {
             let key = reference.get("key").ok_or("missing model view key")?;
-            let value = key
-                .get("value")
-                .cloned()
+            let value_json = key
+                .get("value_json")
+                .and_then(serde_json::Value::as_str)
                 .ok_or("missing structured value")?;
+            let value = serde_json::from_str(value_json).map_err(|_| "invalid structured value")?;
             let view = key
                 .get("view")
                 .and_then(serde_json::Value::as_str)

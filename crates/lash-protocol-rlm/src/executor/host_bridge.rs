@@ -1021,7 +1021,10 @@ impl HostBridge<'_> {
     }
 }
 
-fn materialize_nested_model_views(value: &FlowValue) -> FlowValue {
+pub(super) fn materialize_nested_model_views(value: &FlowValue) -> FlowValue {
+    if !contains_model_view(value) {
+        return value.clone();
+    }
     match value {
         FlowValue::Projected(projected) if projected.has_model_view() => projected
             .materialize()
@@ -1048,6 +1051,15 @@ fn materialize_nested_model_views(value: &FlowValue) -> FlowValue {
                 .collect(),
         )),
         _ => value.clone(),
+    }
+}
+
+fn contains_model_view(value: &FlowValue) -> bool {
+    match value {
+        FlowValue::Projected(projected) => projected.has_model_view(),
+        FlowValue::List(items) | FlowValue::Tuple(items) => items.iter().any(contains_model_view),
+        FlowValue::Record(record) => record.iter().any(|(_, value)| contains_model_view(value)),
+        _ => false,
     }
 }
 

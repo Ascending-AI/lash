@@ -17,6 +17,13 @@ fn tool_result_model_view_survives_state_restore_and_keeps_indexing() {
         let FlowValue::Projected(projected) = &value else {
             panic!("model view result must keep its durable projection");
         };
+        assert!(
+            projected
+                .projection_ref()
+                .and_then(|reference| reference.pointer("/key/value"))
+                .is_none(),
+            "the live wrapper keeps the structured value only once"
+        );
         assert_eq!(
             projected.render().expect("render whole result"),
             "Search results\n0. item-0"
@@ -67,6 +74,119 @@ fn tool_result_model_view_survives_state_restore_and_keeps_indexing() {
         };
         assert_eq!(value, FlowValue::String("item-0".into()));
     });
+}
+
+#[test]
+fn tool_result_model_view_mutations_use_the_structured_value_before_and_after_restore() {
+    block_on(async {
+        let original = serde_json::json!({"items": [{"id": "item-0"}]});
+        for restored in [false, true] {
+            for (code, expected) in [
+                (
+                    "r.extra = 1; finish(r);",
+                    serde_json::json!({"items": [{"id": "item-0"}], "extra": 1}),
+                ),
+                (
+                    "const alias = r; alias.extra = 1; finish(r);",
+                    serde_json::json!({"items": [{"id": "item-0"}], "extra": 1}),
+                ),
+                ("r.items = []; finish(r);", serde_json::json!({"items": []})),
+                (
+                    "r.items.push({id: 'new'}); finish(r);",
+                    serde_json::json!({"items": [{"id": "item-0"}, {"id": "new"}]}),
+                ),
+                (
+                    "r.items[0].id = 'mut'; finish(r);",
+                    serde_json::json!({"items": [{"id": "mut"}]}),
+                ),
+            ] {
+                let mut state = lashlang::State::new();
+                state
+                    .insert_global(
+                        "r",
+                        FlowValue::Projected(
+                            lash_lashlang_runtime::tool_result_model_view_projection(
+                                original.clone(),
+                                "Search results".to_string(),
+                            ),
+                        ),
+                    )
+                    .expect("seed viewed result");
+                if restored {
+                    let bytes = state.snapshot().to_canonical_bytes().expect("snapshot");
+                    state = lashlang::State::from_snapshot(
+                        lashlang::Snapshot::from_canonical_bytes(&bytes).expect("restore"),
+                    );
+                    rehydrate_projected_globals(
+                        &mut state,
+                        Arc::new(ProjectionRegistry::new()) as Arc<dyn ProjectionResolver>,
+                    )
+                    .await
+                    .expect("rehydrate viewed result");
+                }
+                let names = BTreeSet::from(["r".to_string()]);
+                let program = lash_typescript::parse_with_globals(code, &names)
+                    .unwrap_or_else(|error| panic!("parse {code}: {error}"));
+                let program = lashlang::testing::harness::try_compile_program(&program)
+                    .expect("compile mutation");
+                let outcome =
+                    execute_with_projected(&program, &mut state, &ProjectedBindings::new())
+                        .await
+                        .unwrap_or_else(|error| {
+                            panic!("execute {code} after restore={restored}: {error}")
+                        });
+                assert!(matches!(outcome, ExecutionOutcome::Finished(_)), "{code}");
+                let value = state.globals().get("r").expect("mutated binding");
+                assert!(
+                    !value.contains_projected(),
+                    "mutation drops the view: {code}: {value:?}"
+                );
+                assert_eq!(
+                    flow_to_json_value(value),
+                    expected,
+                    "{code} after restore={restored}"
+                );
+            }
+        }
+    });
+}
+
+#[test]
+fn tool_result_model_view_snapshot_stores_one_compact_structured_value() {
+    let structured = serde_json::json!({
+        "items": (0..100).map(|index| serde_json::json!({
+            "id": index,
+            "excerpt": format!("passage {index}: {}", "x".repeat(40))
+        })).collect::<Vec<_>>()
+    });
+    let mut plain = lashlang::State::new();
+    plain
+        .insert_global("r", lashlang::from_json(structured.clone()))
+        .expect("plain result");
+    let plain_bytes = plain
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("plain snapshot");
+    let mut viewed = lashlang::State::new();
+    viewed
+        .insert_global(
+            "r",
+            FlowValue::Projected(lash_lashlang_runtime::tool_result_model_view_projection(
+                structured,
+                "Search results".to_string(),
+            )),
+        )
+        .expect("viewed result");
+    let viewed_bytes = viewed
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("viewed snapshot");
+    assert!(
+        viewed_bytes.len() < plain_bytes.len(),
+        "plain={} viewed={}",
+        plain_bytes.len(),
+        viewed_bytes.len()
+    );
 }
 
 const SEED: u64 = 0x5_2c05;

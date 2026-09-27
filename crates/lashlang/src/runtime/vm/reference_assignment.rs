@@ -1,6 +1,24 @@
 use super::*;
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
+    pub(super) fn materialize_model_view_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
+        let Some(Value::Projected(projected)) = self.slots.get(slot) else {
+            return Ok(());
+        };
+        if !projected.has_model_view() {
+            return Ok(());
+        }
+        let projected = projected.clone();
+        let value = projected.materialize()?;
+        let imported = self.heap.import_values(vec![value], 1)?.remove(0);
+        for root in self.slots.values.iter_mut().filter_map(Option::as_mut) {
+            if matches!(root, Value::Projected(other) if projected.shares_model_view_value(other)) {
+                *root = imported.clone();
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn execute_reference_path_assignment(
         &mut self,
         slot: usize,
@@ -14,6 +32,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let root_name = &slot_names[slot];
         self.slots
             .ensure_assignable(slot, slot_names, self.active_projected_bindings())?;
+        self.materialize_model_view_slot(slot)?;
         let root =
             self.slots
                 .get(slot)
