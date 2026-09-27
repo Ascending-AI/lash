@@ -839,7 +839,7 @@ async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Res
             .await?;
         core.substrate_slot.ports().await.queued.schedule_drive(
             &session_id,
-            lash_core::engine::DriveRequestId::new(batch.batch_id.to_string()),
+            lash_core::drive::ingress_drive_request(batch.batch_id.as_str()),
         );
         tokio::time::timeout(
             std::time::Duration::from_secs(10),

@@ -121,6 +121,7 @@ mod effect_replay;
 mod fleet_format;
 mod forks;
 mod graph;
+mod ingress_obligation;
 mod lifecycle;
 mod location;
 mod obligation_ledger;

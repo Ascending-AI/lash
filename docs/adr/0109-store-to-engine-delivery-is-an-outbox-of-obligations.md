@@ -4,8 +4,8 @@
 
 Accepted 2026-09-27 (FIG-3600 S8). It records Sam's S8 rulings of that date.
 **Not yet implemented** beyond the foundation (§1's vocabulary, relay loop and
-leader lease). The per-ledger slices under *Slice plan* build the rest, and
-each slice updates this status when it lands.
+leader lease) and S8-I (ingress, §3 and §7). The per-ledger slices under
+*Slice plan* build the rest, and each slice updates this status when it lands.
 
 Amends [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 O2 and O3 (the mechanism behind "reconcile every unacknowledged intent" and
@@ -348,7 +348,7 @@ and is not a second ingress.
 
 | Kind | Table (both stores) | Armed by | Delivered when | Replaces |
 |---|---|---|---|---|
-| `Ingress` | `session_ingress` | the admission transaction | the engine accepted drive request `ingress:{obligation_id}` | the drives arm and `session_work_in_flight` (deleted) |
+| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | the admission transaction | the engine accepted drive request `ingress:{item_id}` | the drives arm and `session_work_in_flight` (deleted) |
 | `ControlIntent` | `control_intents` | the verb's transaction | the engine half is applied, the intent settled, and its follow-on drive `intent:{id}` accepted | the intents arm; the `attempts` column (use `obligation_attempts`) |
 | `ScopeClose` | `session_roots` | the root's terminal transaction | the close's own transaction | the scopes arm |
 | `ParentEnd` | `parent_end_plans` | the plan's record | every child's cancel delivered or refused | the parent-end slot and the native worker sweep |
@@ -361,9 +361,24 @@ child that refused, so one unreachable child stalls its plan, never the rows
 behind it. On SQLite `parent_end_plans` and `processes` live in the registry
 file: they are armed in that file's transaction, not the catalog's.
 
+**Ingress (S8-I).** The ingress rows live in `pending_turn_inputs` and
+`queued_work_batches` until the ADR 0101 table cutover folds them into
+`session_ingress`; the ingress ledger is the two tables' ledgers composed, a
+due page being the oldest due rows of both. A row's obligation id is
+`ingress:{item_id}` (its `ti:` input id or `qwb:` batch id), derived rather
+than read back, and the drive it asks for is the same string, so the engine
+dedupes a redelivery and a waiter attaches to the drive its row asked for.
+A native wake delivers its batch's drive once and leaves the settle to the
+relay.
+
 **Parks.** The parks arm no longer resumes a paused drive blindly: a pause
 after the engine's own retries is recorded as a turn park, and only a redrive
-verb resumes it.
+verb resumes it. A drive paused in its admission is parked on the root the
+session's next admission names (an unfinished queued run, an owed follow-on,
+else the head input unless a command precedes it); a session already parked
+keeps its park, and its verb resumes the drive with the root. A drive whose
+next work names no root stays paused for the engine's operator; one whose
+session is gone is killed.
 
 **Repair.** The leader keeps one rate-bounded repair pass per kind that
 reports, and arms, a row that should owe an obligation and does not. It never
@@ -408,6 +423,18 @@ The settlement waiter's command drain (`session_api.rs`, the
 the SQL session-execution lease, not a drive epoch. Before any PR removes that
 lease, the drain is fenced by the drive epoch and a test races it against a
 live engine drive.
+
+S8-I fences it by the session's current drive fence, read after the lane is
+taken: a drive that seals an admission after that read refuses the drain's
+commit, and the drain stops for the drive (law
+`a_settlement_drain_is_refused_by_a_drive_that_seals_after_its_fence`, on the
+Restate double, SQLite and PostgreSQL). The drain never raises the epoch
+itself: a raise supersedes a drive mid-admission, and a superseded drive
+stops, leaving what it was asked for to nobody now that no arm re-asks. A
+drain that retries after a refusal presents the fence then current, so it
+shares that fence with the drive that sealed it; mutual exclusion with that
+drive is still the lease's. Removing the lease needs the drain to seal an
+admission of its own, and to ask for a hand-over drive before it does.
 
 ## 8. Slice plan
 

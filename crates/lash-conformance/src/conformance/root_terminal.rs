@@ -406,7 +406,6 @@ async fn reconcile_scopes(
     stores: &Arc<dyn crate::StoreSet>,
     scopes: &dyn ScopeCloseSink,
     clock: &dyn lash_core::Clock,
-    tick: &str,
 ) -> usize {
     let factory = stores.session_store_factory();
     let work = crate::NoSessionWork::new();
@@ -422,7 +421,6 @@ async fn reconcile_scopes(
         },
         &lash_core::engine::ReconcileCursor::default(),
         std::num::NonZeroUsize::new(64).unwrap_or(std::num::NonZeroUsize::MIN),
-        tick,
     )
     .await;
     let scope_failures: Vec<_> = report
@@ -613,7 +611,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
     let scopes = crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock());
     for tick in ["root-close-recover", "root-close-again"] {
         assert!(
-            reconcile_scopes(&stores, &scopes, parts.host.clock.as_ref(), tick).await >= 1,
+            reconcile_scopes(&stores, &scopes, parts.host.clock.as_ref()).await >= 1,
             "tick {tick} closed the ended root's scope, at least once"
         );
     }
@@ -662,7 +660,6 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         &stores,
         &crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock()),
         parts.host.clock.as_ref(),
-        "root-close-parked",
     )
     .await;
     recovery_sweep(&stores, &effect_host).await;

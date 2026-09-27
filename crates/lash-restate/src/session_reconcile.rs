@@ -15,28 +15,23 @@ use std::sync::Weak;
 use std::time::Duration;
 
 use lash_core::SessionDriver;
-use lash_core::engine::{ReconcileCursor, ReconcileTicks};
+use lash_core::engine::ReconcileCursor;
 
 /// Tick `driver`'s recovery pass every ten seconds until it is dropped.
 ///
 /// A deployment runs one interval per installed driver: the session work
-/// starts it only when its slot takes a new driver. Tick ids carry a nonce
-/// drawn for this run ([`ReconcileTicks`]), so drive asks from one tick
-/// dedupe while asks from two ticks — of this process or of any before
-/// it — never do. A failed pass is logged and retried by the next tick; the
-/// cursor only advances on success.
+/// starts it only when its slot takes a new driver. A failed pass is logged
+/// and retried by the next tick; the cursor only advances on success.
 pub(crate) async fn run(driver: Weak<dyn SessionDriver>) {
     let mut cursor = ReconcileCursor::default();
-    let mut ticks = ReconcileTicks::start("restate");
     let mut interval = tokio::time::interval(Duration::from_secs(10));
     loop {
         interval.tick().await;
         let Some(driver) = driver.upgrade() else {
             break;
         };
-        let tick = ticks.next_tick();
         match driver
-            .reconcile(&cursor, NonZeroUsize::MIN.saturating_add(63), &tick)
+            .reconcile(&cursor, NonZeroUsize::MIN.saturating_add(63))
             .await
         {
             Ok(next) => cursor = next,

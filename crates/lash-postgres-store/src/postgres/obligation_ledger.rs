@@ -19,7 +19,6 @@ use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
 use lash_store_sql::process::processes::ProcessObligationStatements;
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_ingress::SessionIngressObligationStatements;
 use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
 use sqlx::postgres::PgRow;
@@ -29,7 +28,6 @@ use crate::StoreError;
 use crate::process_sql::{
     ParentEndPlanObligationPostgresStatements, ProcessObligationPostgresStatements,
 };
-use crate::session_ingress::SessionIngressObligationPostgresStatements;
 use crate::session_roots::{
     ControlIntentObligationPostgresStatements, SessionRootObligationPostgresStatements,
 };
@@ -42,12 +40,6 @@ struct LedgerSql<S, P> {
     locking: P,
 }
 
-static INGRESS: LazyLock<
-    LedgerSql<SessionIngressObligationStatements, SessionIngressObligationPostgresStatements>,
-> = LazyLock::new(|| LedgerSql {
-    shared: SessionIngressObligationStatements::render(Dialect::postgres()),
-    locking: SessionIngressObligationPostgresStatements::render(Dialect::postgres()),
-});
 static INTENTS: LazyLock<
     LedgerSql<ControlIntentObligationStatements, ControlIntentObligationPostgresStatements>,
 > = LazyLock::new(|| LedgerSql {
@@ -79,13 +71,12 @@ static PROCESSES: LazyLock<
     locking: ProcessObligationPostgresStatements::render(Dialect::postgres()),
 });
 
-/// `kind`'s shared statements and its locking due read.
+/// `kind`'s shared statements and its locking due read. Ingress names its
+/// turn-input table here; its ledger composes that table with the
+/// queued-batch table (`crate::ingress_obligation`).
 fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str) {
     match kind {
-        ObligationKind::Ingress => (
-            INGRESS.shared.obligation_sql(),
-            INGRESS.locking.obligation_select_due_locking.sql(),
-        ),
+        ObligationKind::Ingress => crate::ingress_obligation::turn_input_sql(),
         ObligationKind::ControlIntent => (
             INTENTS.shared.obligation_sql(),
             INTENTS.locking.obligation_select_due_locking.sql(),
@@ -188,8 +179,23 @@ pub(crate) async fn arm_obligation_tx(
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
     let kind = key.kind();
-    let id = ObligationId::mint(kind);
+    if kind == ObligationKind::Ingress {
+        return crate::ingress_obligation::arm_ingress_tx(conn, key, now_ms).await;
+    }
     let (sql, _) = obligation_sql(kind);
+    arm_table_tx(conn, sql, key, ObligationId::mint(kind), now_ms).await
+}
+
+/// Arm `key`'s row in the table `sql` addresses as obligation `id`, due at
+/// `now_ms`, on the caller's connection. `None` when the row is missing or
+/// already carries an obligation.
+pub(crate) async fn arm_table_tx(
+    conn: &mut sqlx::PgConnection,
+    sql: ObligationSql<'static>,
+    key: &ObligationKey,
+    id: ObligationId,
+    now_ms: u64,
+) -> Result<Option<ObligationId>, StoreError> {
     let changed = key_query(sqlx::query(sql.arm.sql()), key)
         .bind(id.as_str())
         .bind(sql_i64("obligation due instant", now_ms)?)
@@ -204,12 +210,31 @@ pub(crate) async fn arm_obligation_tx(
 #[derive(Clone)]
 pub(crate) struct PostgresObligationLedger {
     kind: ObligationKind,
+    sql: ObligationSql<'static>,
+    locking: &'static str,
     pool: PgPool,
 }
 
 impl PostgresObligationLedger {
     pub(crate) fn new(kind: ObligationKind, pool: PgPool) -> Self {
-        Self { kind, pool }
+        let (sql, locking) = obligation_sql(kind);
+        Self::over_table(kind, sql, locking, pool)
+    }
+
+    /// The ledger of one table of `kind`, through that table's statements
+    /// and its locking due read.
+    pub(crate) fn over_table(
+        kind: ObligationKind,
+        sql: ObligationSql<'static>,
+        locking: &'static str,
+        pool: PgPool,
+    ) -> Self {
+        Self {
+            kind,
+            sql,
+            locking,
+            pool,
+        }
     }
 }
 
@@ -241,7 +266,7 @@ impl ObligationLedger for PostgresObligationLedger {
         claim_ttl_ms: u64,
         limit: NonZeroUsize,
     ) -> Result<Vec<ClaimedObligation>, StoreError> {
-        let (sql, locking) = obligation_sql(self.kind);
+        let (sql, locking) = (self.sql, self.locking);
         let now = sql_i64("obligation claim instant", now_ms)?;
         let until = sql_i64(
             "obligation claim expiry",
@@ -280,7 +305,7 @@ impl ObligationLedger for PostgresObligationLedger {
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
-        let (sql, _) = obligation_sql(self.kind);
+        let sql = self.sql;
         let until = sql_i64(
             "obligation claim expiry",
             now_ms.saturating_add(claim_ttl_ms),
@@ -304,7 +329,7 @@ impl ObligationLedger for PostgresObligationLedger {
         settlement: ObligationSettlement,
         now_ms: u64,
     ) -> Result<SettleOutcome, StoreError> {
-        let (sql, _) = obligation_sql(self.kind);
+        let sql = self.sql;
         let now = sql_i64("obligation settle instant", now_ms)?;
         let query = match settlement {
             ObligationSettlement::Delivered => sqlx::query(sql.settle_delivered.sql())
@@ -336,7 +361,7 @@ impl ObligationLedger for PostgresObligationLedger {
     }
 
     async fn rearm(&self, id: &ObligationId, now_ms: u64) -> Result<bool, StoreError> {
-        let (sql, _) = obligation_sql(self.kind);
+        let sql = self.sql;
         let changed = sqlx::query(sql.rearm.sql())
             .bind(id.as_str())
             .bind(sql_i64("obligation due instant", now_ms)?)
@@ -352,7 +377,7 @@ impl ObligationLedger for PostgresObligationLedger {
         after: Option<&ObligationId>,
         limit: NonZeroUsize,
     ) -> Result<Vec<StalledObligation>, StoreError> {
-        let (sql, _) = obligation_sql(self.kind);
+        let sql = self.sql;
         let rows = sqlx::query(sql.select_stalled.sql())
             .bind(after.map_or("", ObligationId::as_str))
             .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
@@ -380,7 +405,7 @@ impl ObligationLedger for PostgresObligationLedger {
     }
 
     async fn count_stalled(&self) -> Result<u64, StoreError> {
-        let (sql, _) = obligation_sql(self.kind);
+        let sql = self.sql;
         let count: i64 = sqlx::query_scalar(sql.count_stalled.sql())
             .fetch_one(&self.pool)
             .await
@@ -389,7 +414,7 @@ impl ObligationLedger for PostgresObligationLedger {
     }
 
     async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
-        let (sql, _) = obligation_sql(self.kind);
+        let sql = self.sql;
         let label: Option<Option<String>> = sqlx::query_scalar(sql.select_state.sql())
             .bind(id.as_str())
             .fetch_optional(&self.pool)

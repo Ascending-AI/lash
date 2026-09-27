@@ -56,11 +56,14 @@ pub(super) enum Subject {
 
 impl Subject {
     /// The drive request a follower waits on: an accepted row's request is
-    /// its input id (the id its acceptance scheduled), so waiting attaches to
-    /// that drive, or starts it when its ask was lost.
+    /// the one its ingress obligation delivers (ADR 0109 §3), so waiting
+    /// attaches to that drive, or starts it when no delivery reached the
+    /// engine yet.
     fn drive_request(&self) -> DriveRequestId {
         match self {
-            Self::Input(receipt) => DriveRequestId::new(receipt.input_id.to_string()),
+            Self::Input(receipt) => {
+                lash_core::drive::ingress_drive_request(receipt.input_id.as_str())
+            }
             Self::Root(root) => DriveRequestId::new(format!("root:{root}")),
         }
     }
@@ -422,6 +425,15 @@ pub(super) async fn follow(
                     return Ok(Followed::Answered(Box::new(SendOutcome {
                         root: Some(parked.root.clone()),
                         status: TurnStatus::Parked(parked),
+                        output: None,
+                        gaps: observation.gaps,
+                    })));
+                }
+                Resolution::Stalled(stalled) => {
+                    drain(ctx, &mut adoption, &mut observation, tap).await;
+                    return Ok(Followed::Answered(Box::new(SendOutcome {
+                        root: None,
+                        status: TurnStatus::Stalled(stalled),
                         output: None,
                         gaps: observation.gaps,
                     })));

@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::engine::{DriveRequestId, RootOutcome};
+use lash_core::engine::RootOutcome;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
@@ -169,7 +169,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .expect("accept the turn input");
     // The acceptance scheduled the drive under the input's own request; the
     // attach names the same request, so it waits on that one drive.
-    let request = DriveRequestId::new(handle.input_id().to_string());
+    let request = lash_core::drive::ingress_drive_request(handle.input_id().as_str());
     let server = backend.server();
     let drive = tokio::time::timeout(
         std::time::Duration::from_secs(8),

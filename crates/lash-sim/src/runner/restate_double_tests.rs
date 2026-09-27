@@ -72,11 +72,11 @@ async fn pending_tool_completion_proof_runs_on_the_restate_server_double() {
     );
 }
 
-/// The sim's engine installs no wall-clock reconcile sweep: a deployment's
-/// own interval would land a `reconcile:` drive ask wherever its store
-/// reads happened to finish, carrying a per-process nonce a seed cannot
-/// reproduce. A scenario reconciles through `SessionDriver::reconcile`
-/// when it wants a pass; one that never asks sees no sweep ask.
+/// The sim's engine installs no wall-clock reconcile interval: a
+/// deployment's own interval would relay due obligations wherever its store
+/// reads happened to finish, which a seed cannot reproduce. A scenario
+/// reconciles through `SessionDriver::reconcile` when it wants a pass; one
+/// that never asks sees no reconcile ask.
 #[tokio::test]
 async fn the_server_double_runs_no_wall_clock_reconcile_sweep() {
     let engine = crate::backend::SimEngine::new(0x5eed_70f1)

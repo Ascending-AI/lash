@@ -24,6 +24,7 @@ mod fencing_tests;
 mod fleet_format;
 mod fork_plan;
 mod graph_commit;
+pub mod ingress_obligation;
 mod lease_timings;
 mod load;
 mod maintenance;
@@ -96,7 +97,7 @@ pub use control_intent::{
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
     InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, close_admission,
-    decide_drive_epoch_seal, require_current_drive_fence,
+    current_drive_fence, decide_drive_epoch_seal, require_current_drive_fence,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{

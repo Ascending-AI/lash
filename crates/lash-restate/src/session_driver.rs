@@ -38,15 +38,17 @@
 //! and both handlers read it from the deployment's
 //! [`RestateSessionDriverSlot`], so a host wires nothing.
 //!
-//! **Scheduling (O2).** [`SessionWorkEngine::schedule_drive`] is a one-way
-//! send to `LashSession/{session}/drive` whose idempotency key is the drive
-//! request's id. Every schedule names its own request (the committed row it
-//! follows, or one reconcile sweep's ask), never the session or a running
-//! drive, so a schedule issued while a drive runs is never deduplicated
-//! away: it queues behind the running drive on the object, and its first
-//! admission is the re-check that admits whatever that drive left pending. A
-//! schedule lost with its process is healed by the reconcile sweep at the
-//! next boot or `drain_status`, or by the session's next schedule.
+//! **Scheduling (O2).** [`SessionWorkEngine::request_drive`] is a send to
+//! `LashSession/{session}/drive` whose idempotency key is the drive
+//! request's id, answered once Restate accepted it; `schedule_drive` is its
+//! fire-and-forget twin. Every ask names its own request (the admitted row
+//! its ingress obligation delivers, `ingress:{item}`, or a continuation),
+//! never the session or a running drive, so an ask issued while a drive runs
+//! is never deduplicated away: it queues behind the running drive on the
+//! object, and its first admission is the re-check that admits whatever that
+//! drive left pending. An ask lost with its process is the ingress relay's
+//! to retry from the row's obligation (ADR 0109 §3); nothing scans the
+//! session catalog for undriven rows.
 //!
 //! **Generations.** Both handlers' requests carry
 //! [`LASH_SESSION_DRIVE_VERSION`], the generation of the commands their
@@ -82,8 +84,8 @@ use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    LashService, RestateAdminClient, RestateAuthorityId, RestateIngressClient,
-    RestateRuntimeEffectController, parked_turn_failure,
+    LashService, RestateAuthorityId, RestateIngressClient, RestateRuntimeEffectController,
+    parked_turn_failure,
 };
 
 /// The generation of the session driver's journaled command prefix: the
@@ -277,7 +279,6 @@ impl std::fmt::Debug for RestateSessionDriverSlot {
 #[derive(Clone)]
 pub struct RestateSessionWork {
     ingress: RestateIngressClient,
-    admin: RestateAdminClient,
     slot: RestateSessionDriverSlot,
     /// The drain generation of the build scheduling drives: every drive
     /// request it sends is stamped with it.
@@ -292,14 +293,12 @@ pub struct RestateSessionWork {
 impl RestateSessionWork {
     pub(crate) fn new(
         ingress: RestateIngressClient,
-        admin: RestateAdminClient,
         slot: RestateSessionDriverSlot,
         build_generation: BuildGeneration,
         control: Arc<dyn lash_core::engine::SessionControlEngine>,
     ) -> Self {
         Self {
             ingress,
-            admin,
             slot,
             build_generation,
             control,
@@ -315,8 +314,8 @@ impl RestateSessionWork {
     /// request id: a repeated send of one request attaches to its first
     /// invocation instead of driving twice. A transient send failure retries
     /// under the same idempotency key before the ask is given up to the
-    /// reconcile sweep. Resolves once Restate accepted the send, not once
-    /// the drive ran.
+    /// ingress relay. Resolves once Restate accepted the send, not once the
+    /// drive ran.
     pub async fn send_drive(
         &self,
         session: &SessionId,
@@ -439,15 +438,30 @@ impl SessionWorkEngine for RestateSessionWork {
     fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
         Arc::clone(&self.control)
     }
+
+    /// Restate accepting the send delivers the ask: an ingress row's
+    /// obligation settles on it, and a send that did not reach Restate is
+    /// retried by the ingress relay under the same idempotency key.
+    async fn request_drive(
+        &self,
+        session: &SessionId,
+        request: DriveRequestId,
+    ) -> Result<(), lash_core::engine::EngineRefusal> {
+        self.send_drive(session, request)
+            .await
+            .map(drop)
+            .map_err(|error| lash_core::engine::EngineRefusal::Retryable(error.to_string()))
+    }
+
     fn schedule_drive(&self, session: &SessionId, request: DriveRequestId) {
-        // The ask is fire-and-forget by contract: the row it follows is
-        // already durable, and a send that never reached Restate is healed by
-        // the reconcile sweep or the session's next schedule.
+        // Fire-and-forget: a drive the engine itself continues, never one an
+        // admitted row owes (that one is `request_drive`'s, and the ingress
+        // relay retries it).
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             tracing::warn!(
                 session_id = session.as_str(),
                 request = request.as_str(),
-                "session drive not sent: scheduled outside a Tokio runtime; the reconcile sweep drives it"
+                "session drive not sent: scheduled outside a Tokio runtime"
             );
             return;
         };
@@ -459,7 +473,7 @@ impl SessionWorkEngine for RestateSessionWork {
                     session_id = session.as_str(),
                     request = request.as_str(),
                     error = %error,
-                    "session drive send failed; the reconcile sweep drives the session"
+                    "session drive send failed"
                 );
             }
         });
@@ -516,37 +530,6 @@ impl SessionWorkEngine for RestateSessionWork {
                 build_generation: self.build_generation.clone(),
             });
         }
-    }
-
-    /// A session has live engine work while any lash invocation scoped to it
-    /// is not at a terminal status: a `LashSession` handler keyed by the
-    /// session itself, or a `LashTurn`/handler workflow whose key carries
-    /// the session through [`turn_workflow_key`]. Its resumption re-decides
-    /// the session's open ingress, so the reconcile sweep leaves it alone.
-    /// An admin read that fails answers `false`: a re-ask the live owner
-    /// then absorbs is the cheaper failure than a lost one.
-    async fn session_work_in_flight(&self, session: &SessionId) -> bool {
-        #[derive(serde::Deserialize)]
-        struct Target {
-            target_service_key: Option<String>,
-        }
-        let Ok(rows) = self
-            .admin
-            .query_json::<Target>(
-                "SELECT target_service_key FROM sys_invocation \
-                 WHERE status IN ('pending', 'scheduled', 'running', 'backing-off', 'suspended', 'paused') \
-                 AND target_service_name LIKE 'Lash%'",
-            )
-            .await
-        else {
-            return false;
-        };
-        rows.iter().any(|row| {
-            row.target_service_key.as_deref().is_some_and(|key| {
-                key == session.as_str()
-                    || parse_turn_workflow_key(key).is_some_and(|(owner, _)| owner == *session)
-            })
-        })
     }
 }
 
@@ -1160,10 +1143,6 @@ mod tests {
                 "https://cloud.example",
                 transport.clone(),
             )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
             Arc::new(lash_core::engine::NoEngineControl),
@@ -1210,10 +1189,6 @@ mod tests {
         });
         let work = RestateSessionWork::new(
             crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
                 "https://cloud.example",
                 transport.clone(),
             )),
@@ -1289,10 +1264,6 @@ mod tests {
                 "https://cloud.example",
                 transport.clone(),
             )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
             Arc::new(lash_core::engine::NoEngineControl),
@@ -1351,10 +1322,6 @@ mod tests {
         });
         let work = RestateSessionWork::new(
             crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
                 "https://cloud.example",
                 transport.clone(),
             )),

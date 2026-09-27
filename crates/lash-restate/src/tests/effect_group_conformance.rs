@@ -715,7 +715,6 @@ impl LiveConformanceHarness {
     pub(super) fn session_work(&self) -> crate::RestateSessionWork {
         crate::RestateSessionWork::new(
             crate::RestateIngressClient::new(self.connection.clone()),
-            self.admin_client(),
             self.session_driver.clone(),
             lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
             Arc::new(crate::session_control::RestateSessionControl {

@@ -94,6 +94,17 @@ impl BoundSession {
         self.work.engine() as Arc<dyn SessionWorkEngine>
     }
 
+    /// The ingress relay an acceptance through this binding delivers with
+    /// (ADR 0109 §3): the backend's ingress ledger asking the binding's
+    /// owner-issued queued-work port for drives.
+    pub(crate) fn ingress_relay(&self) -> lash_core::drive::IngressRelay {
+        lash_core::drive::IngressRelay::over_backend(
+            &self.backend,
+            self.queued(),
+            Arc::clone(&self.clock),
+        )
+    }
+
     /// The same port as [`queued`](Self::queued), with how a send waits on
     /// its drive.
     pub(crate) fn work(&self) -> crate::core::HeldWork {

@@ -308,11 +308,10 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         &self,
         cursor: &lash_core::engine::ReconcileCursor,
         page: std::num::NonZeroUsize,
-        tick: &str,
     ) -> std::result::Result<lash_core::engine::ReconcileCursor, lash_core::StoreError> {
         // The environment's build-time queued port is a placeholder; the
-        // drive arm asks the port the substrate resolved — the engine the
-        // core's sends schedule on.
+        // relays and arms ask the port the substrate resolved — the engine
+        // the core's sends deliver to.
         let work: Arc<dyn lash_core::SessionWorkEngine> =
             match self.substrate_slot.get().and_then(std::sync::Weak::upgrade) {
                 Some(slot) => slot.ports().await.queued_port(),
@@ -333,7 +332,14 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         // Which recovery duties this deployment runs this tick (ADR 0109
         // §1.7). The obligation slices register their relays here.
         let duties = self.config.recovery.duties().await;
-        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> = Vec::new();
+        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
+            vec![Arc::new(
+                lash_core::runtime::drive::IngressRelay::over_backend(
+                    self.config.env.core.backend(),
+                    Arc::clone(&work),
+                    Arc::clone(&self.config.env.core.clock),
+                ),
+            )];
         let report = lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: self.config.store_factory.as_ref(),
@@ -346,7 +352,6 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
             },
             cursor,
             page,
-            tick,
         )
         .await;
         for failure in &report.failures {

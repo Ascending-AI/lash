@@ -594,6 +594,17 @@ impl TurnInputStore for PostgresSessionStore {
                     StoreError::Backend("pending turn input insert disappeared".to_string())
                 })?
         };
+        // The admitted input owes its session a drive (ADR 0109 §3): the row
+        // is armed in the transaction that admits it. A row an earlier
+        // submission admitted already carries its obligation and is left as
+        // it stands.
+        crate::ingress_obligation::arm_turn_input_tx(
+            &mut tx,
+            &input.session_id,
+            input.input_id.as_str(),
+            now,
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(input)
     }

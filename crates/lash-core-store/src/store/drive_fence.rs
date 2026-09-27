@@ -21,11 +21,13 @@ use crate::SessionId;
 
 /// The authority of one drive over one session.
 ///
-/// It has no public constructor. A fence comes from exactly two places: the
-/// store's own seal ([`DriveEpochStore::seal_drive_epoch`]), and serde
-/// decoding of a recorded `SealVerdict::Sealed` or `InheritVerdict::Valid`
-/// from the drive's journal. `Deserialize` exists only for that
-/// recorded-verdict path; nothing else may decode a fence. A decoded fence
+/// It has no public constructor. A fence comes from exactly three places:
+/// the store's own seal ([`DriveEpochStore::seal_drive_epoch`]); the store's
+/// read of the current fence ([`current_drive_fence`]),
+/// which a writer beside the drive presents so that it never writes over a
+/// later admission; and serde decoding of a recorded `SealVerdict::Sealed`
+/// or `InheritVerdict::Valid` from the drive's journal. `Deserialize` exists
+/// only for that recorded-verdict path; nothing else may decode a fence. A decoded fence
 /// still authorizes nothing by itself: every fenced store operation checks
 /// its epoch *and* admission against the session's `session_meta` row in its
 /// own transaction. It is never part of an envelope hash (ADR 0105 law
@@ -259,6 +261,24 @@ pub trait DriveEpochStore: Send + Sync {
 
     /// The session's stored drive epoch.
     async fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
+}
+
+/// The fence of the admission that last raised `session_id`'s epoch in
+/// `store`, as a writer beside the drive presents it (ADR 0109 §7): a write
+/// it fences is refused once any later admission seals. `None` before the
+/// session's first seal.
+///
+/// # Errors
+///
+/// The store's drive-epoch read failed.
+pub async fn current_drive_fence<S: DriveEpochStore + ?Sized>(
+    store: &S,
+    session_id: &SessionId,
+) -> Result<Option<DriveFence>, StoreError> {
+    let stored = store.drive_epoch(session_id).await?;
+    Ok(stored
+        .admission
+        .map(|admission| DriveFence::sealed_by_store(session_id.clone(), stored.epoch, admission)))
 }
 
 /// A drive-epoch ledger held in memory, for store doubles that keep no

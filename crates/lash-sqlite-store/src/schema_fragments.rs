@@ -104,15 +104,6 @@ CREATE TABLE IF NOT EXISTS session_ingress (
     claim_fencing_token INTEGER NOT NULL DEFAULT 0,
     claim_drive_epoch INTEGER,
     claim_turn_id     TEXT,
-    obligation_id     TEXT,
-    obligation_state  TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms INTEGER,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_settled_at_ms INTEGER,
-    CONSTRAINT ck_session_ingress_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_session_ingress_kind CHECK (kind IN ('input', 'process_wake', 'session_command')),
     CONSTRAINT ck_session_ingress_lane CHECK ((kind = 'session_command' AND lane = 'command') OR (kind IN ('input', 'process_wake') AND lane = 'turn')),
     CONSTRAINT ck_session_ingress_state CHECK (state IN ('open', 'accepted', 'completed', 'cancelled')),
@@ -124,17 +115,6 @@ CREATE TABLE IF NOT EXISTS session_ingress (
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
-
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_session_ingress_obligation_id
-    ON session_ingress(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_session_ingress_obligation_due
-    ON session_ingress(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_session_ingress_obligation_stalled
-    ON session_ingress(obligation_id)
-    WHERE obligation_state = 'stalled';
 
 CREATE INDEX IF NOT EXISTS idx_session_ingress_open
     ON session_ingress(session_id, lane, enqueue_seq) WHERE state IN ('open', 'accepted');

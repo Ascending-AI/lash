@@ -81,7 +81,6 @@ pub struct RootVerbStatements {
     pub delete_batch_items: crate::Rendered,
     pub delete_batch: crate::Rendered,
     pub terminals: crate::Rendered,
-    pub sessions: crate::Rendered,
     pub intents: crate::Rendered,
 }
 
@@ -104,7 +103,6 @@ impl RootVerbStatements {
             set_kind: group1.set_kind,
             intents: group1.intents,
             raise_epoch: group2.raise_epoch,
-            sessions: group2.sessions,
             input: group3.input,
             release_inputs: group3.release_inputs,
             release_batches: group4.release_batches,

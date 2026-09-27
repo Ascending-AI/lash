@@ -323,7 +323,6 @@ impl SessionWorkEngine for NativeQueuedWork {
             let shutdown = self.inner.shutdown.clone();
             self.inner.wake_tasks.spawn(async move {
                 let mut cursor = crate::engine::ReconcileCursor::default();
-                let mut ticks = crate::engine::ReconcileTicks::start("native");
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
                 loop {
                     tokio::select! {
@@ -333,13 +332,8 @@ impl SessionWorkEngine for NativeQueuedWork {
                     let Some(driver) = installed.upgrade() else {
                         break;
                     };
-                    let tick = ticks.next_tick();
                     match driver
-                        .reconcile(
-                            &cursor,
-                            std::num::NonZeroUsize::MIN.saturating_add(63),
-                            &tick,
-                        )
+                        .reconcile(&cursor, std::num::NonZeroUsize::MIN.saturating_add(63))
                         .await
                     {
                         Ok(next) => cursor = next,

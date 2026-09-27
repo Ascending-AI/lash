@@ -1,5 +1,9 @@
 //! Restate's implementation of root release, resume and bounded park recovery.
 //!
+//! A paused session drive is never resumed by recovery (ADR 0109 §3): it is
+//! parked on its session's next root, and the park's redrive, cancel or fork
+//! resumes it.
+//!
 //! Every verb reaches the engine through the Restate admin API: pausing,
 //! resuming and killing an invocation have no ingress form. A deployment
 //! therefore always configures the admin endpoint
@@ -108,11 +112,8 @@ impl RestateSessionControl {
         let service = crate::services::ServiceRoute::parse(&invocation.target_service_name)
             .map(|route| route.service());
         if service == Some(crate::LashService::SessionDriver) {
-            self.admin
-                .resume_invocation(&invocation.invocation_id())
-                .await
-                .map_err(refusal)?;
-            report.resumed_drives.push(key.as_str().into());
+            self.reconcile_drive(parks, invocation, key.as_str().into(), report)
+                .await?;
         } else if service == Some(crate::LashService::ProcessWorkflow) {
             let pass = crate::process::park_reconcile::reconcile_process_invocations(
                 &self.processes,
@@ -149,7 +150,9 @@ impl RestateSessionControl {
             {
                 EngineParkRecorded::Parked(_) => report.parked.push(target),
                 EngineParkRecorded::AttachedToExisting(_) => report.attached += 1,
-                EngineParkRecorded::Redriven => report.unchanged += 1,
+                EngineParkRecorded::Redriven | EngineParkRecorded::NothingToPark => {
+                    report.unchanged += 1;
+                }
                 EngineParkRecorded::TargetTerminal | EngineParkRecorded::TargetGone => {
                     self.admin
                         .kill_invocation(&invocation.invocation_id())
@@ -163,6 +166,82 @@ impl RestateSessionControl {
         }
         Ok(())
     }
+
+    /// Settle one paused session drive (ADR 0109 §3): never resumed here.
+    /// Its session is parked on its next root, and only that park's operator
+    /// verb resumes it ([`Self::resume_session_drives`]); a drive whose
+    /// session is gone is killed.
+    async fn reconcile_drive(
+        &self,
+        parks: &dyn ParkRecoveryWriter,
+        invocation: crate::ingress::RestatePausedInvocation,
+        session: lash_core::SessionId,
+        report: &mut ParkReconcileReport,
+    ) -> Result<(), EngineRefusal> {
+        let target = ParkTarget::Drive {
+            session: session.clone(),
+        };
+        let reason = crate::process::park_reconcile::exhausted_reason(&invocation);
+        let probe = PausedInvocation {
+            admin: &self.admin,
+            invocation: invocation.invocation_id(),
+        };
+        match parks
+            .record_engine_park(
+                &target,
+                reason,
+                EnginePark::new(invocation.id.clone()),
+                &probe,
+            )
+            .await
+            .map_err(refusal)?
+        {
+            EngineParkRecorded::Parked(_) => report.parked.push(target),
+            EngineParkRecorded::AttachedToExisting(_) => report.attached += 1,
+            EngineParkRecorded::NothingToPark => {
+                tracing::warn!(
+                    session_id = %session,
+                    invocation = invocation.id.as_str(),
+                    event = "session.drive.paused",
+                    "a paused session drive has no root to park on; it stays paused until \
+                     Restate's operator resumes it"
+                );
+                report.unchanged += 1;
+            }
+            EngineParkRecorded::Redriven | EngineParkRecorded::TargetTerminal => {
+                report.unchanged += 1;
+            }
+            EngineParkRecorded::TargetGone => {
+                self.admin
+                    .kill_invocation(&invocation.invocation_id())
+                    .await
+                    .map_err(refusal)?;
+                report.released_drives.push(session);
+            }
+        }
+        Ok(())
+    }
+
+    /// Resume the session's paused drive, if one is paused: the half of a
+    /// park's operator verb that lets the session's admission go on. Whether
+    /// any was resumed.
+    async fn resume_session_drives(
+        &self,
+        session: &lash_core::SessionId,
+    ) -> Result<bool, EngineRefusal> {
+        let paused = self
+            .admin
+            .paused_session_drives(session.as_str())
+            .await
+            .map_err(refusal)?;
+        for drive in &paused {
+            self.admin
+                .resume_invocation(&drive.invocation_id())
+                .await
+                .map_err(refusal)?;
+        }
+        Ok(!paused.is_empty())
+    }
 }
 
 #[async_trait::async_trait]
@@ -172,17 +251,26 @@ impl SessionControlEngine for RestateSessionControl {
         target: &RootRef,
         handle: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal> {
-        let Some(status) = self.invocation(target, handle).await? else {
-            return Ok(EngineAck::NothingHeld);
+        // A redrive resumes the root's stopped execution and the session's
+        // drive stopped behind the park (ADR 0109 §3): the only resume a
+        // paused drive gets.
+        let status = self.invocation(target, handle).await?;
+        let root = match status {
+            Some(status) if status.status == crate::ingress::RestateInvocationLifecycle::Paused => {
+                self.admin
+                    .resume_invocation(&status.invocation_id())
+                    .await
+                    .map_err(refusal)?;
+                true
+            }
+            _ => false,
         };
-        if status.status != crate::ingress::RestateInvocationLifecycle::Paused {
-            return Ok(EngineAck::NothingHeld);
-        }
-        self.admin
-            .resume_invocation(&status.invocation_id())
-            .await
-            .map_err(refusal)?;
-        Ok(EngineAck::Resumed)
+        let drive = self.resume_session_drives(&target.session).await?;
+        Ok(if root || drive {
+            EngineAck::Resumed
+        } else {
+            EngineAck::NothingHeld
+        })
     }
 
     async fn resume_process(
@@ -214,17 +302,25 @@ impl SessionControlEngine for RestateSessionControl {
         target: &RootRef,
         handle: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal> {
-        let Some(status) = self.invocation(target, handle).await? else {
-            return Ok(EngineAck::NothingHeld);
+        let status = self.invocation(target, handle).await?;
+        let released = match status {
+            Some(status) if status.is_still_active() => {
+                self.admin
+                    .kill_invocation(&status.invocation_id())
+                    .await
+                    .map_err(refusal)?;
+                true
+            }
+            _ => false,
         };
-        if !status.is_still_active() {
-            return Ok(EngineAck::NothingHeld);
-        }
-        self.admin
-            .kill_invocation(&status.invocation_id())
-            .await
-            .map_err(refusal)?;
-        Ok(EngineAck::Released)
+        // The store already ended the root: the session's drive stopped
+        // behind its park admits what follows it once resumed.
+        self.resume_session_drives(&target.session).await?;
+        Ok(if released {
+            EngineAck::Released
+        } else {
+            EngineAck::NothingHeld
+        })
     }
 
     /// One bounded page of paused invocations. Each invocation is settled on

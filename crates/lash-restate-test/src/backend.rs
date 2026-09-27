@@ -589,8 +589,12 @@ impl SessionWorkEngine for ExplicitlyReconciledSessionWork {
         self.inner.await_drive(session, request).await
     }
 
-    async fn session_work_in_flight(&self, session: &lash_core::SessionId) -> bool {
-        self.inner.session_work_in_flight(session).await
+    async fn request_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> Result<(), lash_core::engine::EngineRefusal> {
+        self.inner.request_drive(session, request).await
     }
 }
 

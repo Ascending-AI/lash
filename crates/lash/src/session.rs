@@ -185,11 +185,13 @@ impl SessionBuilder {
     /// known; see [`DurableSession`] for the typed refusals.
     pub async fn durable(self) -> Result<DurableSession> {
         let work = self.core.held_work().await;
+        let ingress = self.core.ingress_relay(&work);
         let live_replay_store = Arc::clone(&self.core.live_replay_store);
         Ok(DurableSession::from_catalog(
             self.session_id,
             Arc::clone(&self.core.store_factory),
             work,
+            ingress,
             Arc::clone(&self.core.env.core.control.effect_host),
             live_replay_store,
         ))
@@ -215,10 +217,12 @@ impl SessionBuilder {
         let policy = self.session_policy();
         let resolved = self.create_store(&policy).await?;
         let work = self.core.held_work().await;
+        let ingress = self.core.ingress_relay(&work);
         Ok(DurableSession::from_binding(
             self.session_id,
             resolved.store,
             work,
+            ingress,
             Arc::clone(&self.core.env.core.control.effect_host),
             Arc::clone(&self.core.live_replay_store),
             resolved.catalog,
@@ -955,6 +959,7 @@ impl LashSession {
             SessionId::from(self.runtime.observe().session_id()),
             self.binding.store(),
             self.binding.work(),
+            self.binding.ingress_relay(),
             self.binding.effect_host(),
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),

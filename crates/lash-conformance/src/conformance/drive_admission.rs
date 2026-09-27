@@ -80,11 +80,20 @@ impl DriveParts {
         }
     }
 
+    pub(super) async fn runtime(&self) -> crate::LashRuntime {
+        self.runtime_over(Arc::clone(&self.store)).await
+    }
+
+    /// The law's runtime over `store`: the session's own store, or a law's
+    /// decorator of it.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: the law's runtime builds"
     )]
-    pub(super) async fn runtime(&self) -> crate::LashRuntime {
+    pub(super) async fn runtime_over(
+        &self,
+        store: Arc<dyn crate::RuntimePersistence>,
+    ) -> crate::LashRuntime {
         let state = self.initial_state();
         let policy = state.policy.clone();
         Box::pin(
@@ -93,7 +102,7 @@ impl DriveParts {
                 .with_policy(policy)
                 .with_initial_state(state)
                 .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-                .with_store(Arc::clone(&self.store))
+                .with_store(store)
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )

@@ -239,6 +239,10 @@ pub enum ParkTarget {
     Root { session: SessionId, root: TurnId },
     /// A process.
     Process { process: crate::ProcessId },
+    /// A session's drive, stopped in its admission before it ran a root: it
+    /// is parked on the root the session's next admission names (ADR 0109
+    /// §3), and only that park's operator verb resumes it.
+    Drive { session: SessionId },
 }
 
 /// What [`ParkRecoveryWriter::record_engine_park`] did.
@@ -260,6 +264,10 @@ pub enum EngineParkRecorded {
     /// it as stopped, or is about to. Nothing was written; a later pass
     /// re-lists the execution if it stops again.
     Redriven,
+    /// A stopped drive whose session's next work names no root — only
+    /// queued commands, or nothing: nothing was written, and the engine's
+    /// pause stands until the engine's own operator resumes it.
+    NothingToPark,
 }
 
 /// The engine's live view of the one stalled execution a
@@ -308,8 +316,10 @@ pub struct ParkReconcileReport {
     /// Roots whose execution this pass released because the store had
     /// already ended them.
     pub released: Vec<RootRef>,
-    /// Sessions whose stalled admission-only drive this pass resumed.
-    pub resumed_drives: Vec<SessionId>,
+    /// Sessions whose stopped drive this pass released because the session
+    /// is gone. A stopped drive is never resumed here (ADR 0109 §3): it is
+    /// parked, and only the park's operator verb resumes it.
+    pub released_drives: Vec<SessionId>,
     /// Stalled executions this pass left as they were.
     pub unchanged: usize,
     /// Stalled executions this pass could not settle, each with why: one

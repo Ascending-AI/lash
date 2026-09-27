@@ -334,6 +334,9 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         )
         .map_err(sqlite_error)?;
     }
+    // The admitted batch owes its session a drive (ADR 0109 §3), armed in
+    // the transaction that admits it.
+    crate::ingress_obligation::arm_queued_batch_tx(conn, &batch.session_id, &batch_id, now)?;
     let inserted = load_queued_batch_by_id_conn(conn, &batch_id)?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
     Ok(QueuedWorkEnqueueOutcome::Inserted(inserted))

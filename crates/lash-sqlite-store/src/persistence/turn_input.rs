@@ -604,6 +604,16 @@ impl TurnInputStore for Store {
                             &input_id,
                         )
                     })?;
+                    // The admitted input owes its session a drive (ADR 0109
+                    // §3): the row is armed in the transaction that admits
+                    // it, so no crash between the commit and the drive ask
+                    // loses the ask.
+                    crate::ingress_obligation::arm_turn_input_tx(
+                        tx,
+                        &draft.session_id,
+                        &input_id,
+                        now,
+                    )?;
                     load_pending_turn_input_by_id_conn(tx, &draft.session_id, &input_id)?
                         .ok_or_else(|| {
                             StoreError::Backend("pending turn input insert disappeared".to_string())

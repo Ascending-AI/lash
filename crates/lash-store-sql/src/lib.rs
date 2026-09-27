@@ -258,7 +258,11 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(turn_ingress::turn_parks::TurnParkStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::turn_park_events::TurnParkEventStatements::NEUTRAL);
     statements.extend_from_slice(recovery_leader::RecoveryLeaderStatements::NEUTRAL);
-    statements.extend_from_slice(session_ingress::SessionIngressObligationStatements::NEUTRAL);
+    statements.extend_from_slice(
+        turn_ingress::pending_inputs::PendingTurnInputObligationStatements::NEUTRAL,
+    );
+    statements
+        .extend_from_slice(turn_ingress::queued_batches::QueuedBatchObligationStatements::NEUTRAL);
     statements.extend_from_slice(
         session_roots::control_intents::ControlIntentObligationStatements::NEUTRAL,
     );

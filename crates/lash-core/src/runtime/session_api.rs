@@ -643,6 +643,16 @@ impl LashRuntime {
             .map(|services| services.process_service())
     }
 
+    /// The ingress relay of this runtime's backend, asking this runtime's
+    /// session work for drives (ADR 0109 §3).
+    pub(in crate::runtime) fn ingress_relay(&self) -> super::drive::IngressRelay {
+        super::drive::IngressRelay::over_backend(
+            self.host.core.backend(),
+            Arc::clone(self.host.queued_work()),
+            Arc::clone(&self.host.core.clock),
+        )
+    }
+
     pub fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
         Arc::clone(&self.host.core.control.effect_host)
     }
@@ -661,7 +671,7 @@ impl LashRuntime {
         enqueue_turn_input_to_store(
             self.state.session_id.clone(),
             store,
-            Arc::clone(self.host.queued_work()),
+            &self.ingress_relay(),
             input,
             ingress,
             source_key,
@@ -1028,13 +1038,12 @@ impl LashRuntime {
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     session_id: SessionId,
     store: Arc<dyn crate::RuntimePersistence>,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
+    ingress_relay: &super::drive::IngressRelay,
     input: crate::TurnInput,
     ingress: crate::TurnInputIngress,
     source_key: Option<String>,
 ) -> Result<crate::PendingTurnInput, RuntimeError> {
     super::turn_loop::ensure_durable_effect_input(&input)?;
-    let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
     let mut draft = crate::PendingTurnInputDraft::new(session_id, ingress, input);
     // A keyed input's id is its key's: a host re-attaches by the key alone.
     if let Some(key) = source_key.as_deref() {
@@ -1052,22 +1061,14 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         .enqueue_pending_turn_input(draft)
         .await
         .map_err(super::error::runtime_error_from_turn_input_admission)?;
-    if is_next_turn {
-        // One drive request per accepted row (FIG-3600): an engine dedupes a
-        // repeated ask for the same row, and a drive admits whatever else is
-        // pending too.
-        queued_work.schedule_drive(
-            &enqueued.session_id,
-            crate::engine::DriveRequestId::new(enqueued.input_id.to_string()),
-        );
-    }
+    // The admission armed the row's ingress obligation; deliver it now
+    // (ADR 0109 §3). An attempt that fails is the relay's to retry: the
+    // input is accepted either way.
+    ingress_relay
+        .deliver_admitted(enqueued.input_id.as_str())
+        .await;
     Ok(enqueued)
 }
-
-/// The first re-ask of a settlement wait whose session another drive holds;
-/// each later one doubles, up to [`SETTLEMENT_REASK_MAX_SHIFT`] doublings.
-const SETTLEMENT_REASK_BASE_MS: u64 = 10;
-const SETTLEMENT_REASK_MAX_SHIFT: u32 = 7;
 
 enum AcceptedSessionCommand {
     Inline(crate::SessionCommandReceipt),
@@ -1101,7 +1102,7 @@ impl LashRuntime {
                 batch_id: crate::BatchId::new(format!("inline-command:{}", uuid::Uuid::new_v4())),
                 source_key,
             };
-            self.apply_session_command_after_admission(vec![command], None, None)
+            self.apply_session_command_after_admission(vec![command], None, None, None)
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
@@ -1117,6 +1118,12 @@ impl LashRuntime {
         let enqueued = store.enqueue_queued_work(draft).await.map_err(|err| {
             RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
         })?;
+        // The command's batch owes its session a drive, armed at admission;
+        // deliver it now (ADR 0109 §3). The drive applies the command at its
+        // next boundary, before any turn input (ADR 0101 §4).
+        self.ingress_relay()
+            .deliver_admitted(enqueued.batch_id.as_str())
+            .await;
         Ok(AcceptedSessionCommand::Queued(
             crate::runtime::SessionCommandSettlementHandle {
                 receipt: crate::SessionCommandReceipt {
@@ -1190,8 +1197,6 @@ impl LashRuntime {
         // timings through `with_lease_timings` tighten this wait as well.
         let settlement_timeout = self.host.core.control.lease_timings.ttl();
         let settlement_started = self.host.core.clock.now();
-        let mut asks = 0_u32;
-        let mut next_ask = std::time::Duration::ZERO;
         loop {
             let still_pending = store
                 .list_queued_work(&handle.receipt.session_id)
@@ -1254,51 +1259,29 @@ impl LashRuntime {
             .map_err(super::runtime_error_from_store_commit)?;
             if let Some(lease) = lease {
                 let fence = lease.fence();
-                while self.drain_next_session_command(&fence).await?.is_some() {
-                    let target_pending = store
-                        .list_queued_work(&handle.receipt.session_id)
+                // The waiter drains beside the engine's drive, so every
+                // command commit it makes is fenced by the drive epoch
+                // (ADR 0109 §7): a drive that seals an admission after the
+                // waiter took the lane refuses the waiter's commit, and the
+                // waiter goes back to waiting for that drive to apply the
+                // command.
+                let drained = match self.settlement_drive_fence(store.as_ref()).await {
+                    Ok(drive_fence) => {
+                        self.drain_commands_until_settled(
+                            store.as_ref(),
+                            &fence,
+                            drive_fence.as_ref(),
+                            &handle.receipt,
+                        )
                         .await
-                        .map_err(super::runtime_error_from_store_commit)?
-                        .iter()
-                        .any(|batch| batch.batch_id == handle.receipt.batch_id);
-                    if !target_pending {
-                        break;
                     }
-                }
+                    Err(error) => Err(error),
+                };
                 lease
                     .release_if_live()
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-            } else if self
-                .host
-                .core
-                .clock
-                .now()
-                .saturating_duration_since(settlement_started)
-                >= next_ask
-            {
-                // Another drive holds the session. Ask for a drive again,
-                // under an id no earlier ask used: an engine dedupes a
-                // repeated id, and a drive already past its last admission
-                // would swallow it. The asks back off, so a long drive is
-                // not flooded (review-2290 MEDIUM-9).
-                asks = asks.saturating_add(1);
-                self.host.queued_work().schedule_drive(
-                    &handle.receipt.session_id,
-                    crate::engine::DriveRequestId::new(format!(
-                        "{}#settle-{asks}",
-                        handle.receipt.batch_id
-                    )),
-                );
-                next_ask = self
-                    .host
-                    .core
-                    .clock
-                    .now()
-                    .saturating_duration_since(settlement_started)
-                    .saturating_add(std::time::Duration::from_millis(
-                        SETTLEMENT_REASK_BASE_MS << asks.min(SETTLEMENT_REASK_MAX_SHIFT),
-                    ));
+                drained?;
             }
             let remaining = settlement_timeout.saturating_sub(
                 self.host
@@ -1335,10 +1318,6 @@ impl LashRuntime {
             AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
             AcceptedSessionCommand::Queued(handle) => handle.receipt,
         };
-        self.host.queued_work().schedule_drive(
-            &receipt.session_id,
-            crate::engine::DriveRequestId::new(receipt.batch_id.to_string()),
-        );
         self.invalidate_resident_session_state();
         Ok(receipt)
     }
@@ -1386,6 +1365,25 @@ impl LashRuntime {
     pub async fn drain_next_session_command_with_cancellation(
         &mut self,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        cancellation: tokio_util::sync::CancellationToken,
+        effect_controller: &dyn crate::RuntimeEffectController,
+    ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
+        self.drain_next_session_command_fenced(
+            session_execution_lease,
+            None,
+            cancellation,
+            effect_controller,
+        )
+        .await
+    }
+
+    /// Drain the next session command, its commit fenced by `drive_fence`
+    /// when one is given (ADR 0109 §7): a drive that sealed an admission
+    /// since the fence was read refuses the commit as superseded.
+    pub(super) async fn drain_next_session_command_fenced(
+        &mut self,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        drive_fence: Option<&crate::store::DriveFence>,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
@@ -1439,6 +1437,7 @@ impl LashRuntime {
             commands,
             Some(claim.completion()),
             Some(session_execution_lease),
+            drive_fence,
             cancellation,
             effect_controller,
         )
@@ -1451,6 +1450,7 @@ impl LashRuntime {
         commands: Vec<crate::SessionCommand>,
         completion: Option<crate::QueuedWorkCompletion>,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        drive_fence: Option<&crate::store::DriveFence>,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<(), RuntimeError> {
@@ -1467,6 +1467,7 @@ impl LashRuntime {
                     commands,
                     completion,
                     session_execution_lease,
+                    drive_fence,
                 )
                 .await;
         }
@@ -1496,6 +1497,7 @@ impl LashRuntime {
                         commands,
                         completion,
                         session_execution_lease,
+                        drive_fence,
                     )
                     .await
                     .map_err(RuntimeCommitAdmissionError)
@@ -1510,6 +1512,7 @@ impl LashRuntime {
         commands: Vec<crate::SessionCommand>,
         completion: Option<crate::QueuedWorkCompletion>,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        drive_fence: Option<&crate::store::DriveFence>,
     ) -> Result<(), RuntimeError> {
         self.refresh_session_graph_from_store()
             .await
@@ -1605,12 +1608,21 @@ impl LashRuntime {
             ));
         };
         commit.session_execution_lease_fence = Some(session_execution_lease.clone());
+        commit.drive_fence = drive_fence.cloned().map(Box::new);
         if let Some(completion) = completion {
             commit = commit.completing_queue_claim(completion);
         }
         let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
             .await
-            .map_err(super::runtime_error_from_store_commit)?;
+            .map_err(|error| match error {
+                // A later admission sealed after the drain presented its
+                // fence: nothing was written, and the drive applies the
+                // command (ADR 0109 §7).
+                error @ crate::StoreError::StaleDriveFence { .. } => {
+                    RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, error.to_string())
+                }
+                error => super::runtime_error_from_store_commit(error),
+            })?;
         commit_state.apply_persisted_commit_result(result);
         commit_state.mark_node_ids_persisted(persisted_node_ids);
         if let Some(next_state) = next_config_state {

@@ -754,7 +754,6 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
         &parts,
         &lash_core::engine::ReconcileCursor::default(),
         PAGE,
-        "parent-end-tick-1",
     )
     .await;
     assert_eq!(
@@ -766,8 +765,7 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
         "the tick applied the unapplied plan: {:?}",
         first.failures
     );
-    let second =
-        lash_core::drive::reconcile_once(&parts, &first.next, PAGE, "parent-end-tick-2").await;
+    let second = lash_core::drive::reconcile_once(&parts, &first.next, PAGE).await;
     assert_eq!(
         (
             second.parent_end_plans.handled,

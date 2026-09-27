@@ -36,6 +36,7 @@ const HARNESS_SOURCES: &[&str] = &[
     include_str!("corrupt_input_cases.rs"),
     include_str!("fork_cases.rs"),
     include_str!("generated_surface.rs"),
+    include_str!("ingress_cases.rs"),
     include_str!("obligation_cases.rs"),
     include_str!("observations.rs"),
     include_str!("plugin_state_case.rs"),

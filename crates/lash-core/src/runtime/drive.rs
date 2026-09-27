@@ -39,6 +39,7 @@
 mod admission;
 mod close;
 mod control;
+pub mod ingress;
 mod park;
 mod reconcile;
 pub mod relay;
@@ -46,10 +47,11 @@ mod root;
 mod turn_config;
 
 pub use control::apply_control_intent;
+pub use ingress::{IngressRelay, ingress_drive_request};
 pub use park::StoreParkRecovery;
 pub use reconcile::{
-    ReconcileParts, ReconcileProcesses, drain_hand_over_slot, reconcile_drive_request,
-    reconcile_once, reconcile_parent_end_plans_slot, reconcile_session_drives,
+    ReconcileParts, ReconcileProcesses, drain_hand_over_slot, reconcile_once,
+    reconcile_parent_end_plans_slot,
 };
 pub(crate) use turn_config::provider_binding_unavailable;
 pub use turn_config::{validate_route, validate_route_with};

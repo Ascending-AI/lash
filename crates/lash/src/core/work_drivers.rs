@@ -244,8 +244,12 @@ impl SessionWorkEngine for ResolvedQueuedWork {
         self.port.await_drive(session, request).await
     }
 
-    async fn session_work_in_flight(&self, session: &lash_core::SessionId) -> bool {
-        self.port.session_work_in_flight(session).await
+    async fn request_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> std::result::Result<(), lash_core::engine::EngineRefusal> {
+        self.port.request_drive(session, request).await
     }
 }
 

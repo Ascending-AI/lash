@@ -563,19 +563,6 @@ pub trait SessionStoreFactory:
         })
     }
 
-    /// Live session identities in bounded keyset order for recovery: every
-    /// session that is not closing and that no park holds unresolved (a
-    /// park a redrive names is being resolved and does not hold it).
-    async fn list_reconcilable_sessions(
-        &self,
-        _after: Option<&SessionId>,
-        _limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<SessionId>, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "list_reconcilable_sessions",
-        })
-    }
-
     /// Terminal roots in bounded lexicographic order for at-least-once scope close.
     async fn list_terminal_roots(
         &self,

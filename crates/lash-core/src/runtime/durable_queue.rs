@@ -41,21 +41,22 @@ fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
 #[derive(Clone)]
 pub struct DurableSessionOps {
     session_id: SessionId,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
+    ingress: super::drive::IngressRelay,
     live_replay_store: Arc<dyn LiveReplayStore>,
 }
 
 impl DurableSessionOps {
-    /// Bind the session identity, the queued-work port that receives driver
-    /// wakes, and the Live Replay publisher queue events are published through.
+    /// Bind the session identity, the ingress relay that delivers what an
+    /// acceptance admits (ADR 0109 §3), and the Live Replay publisher queue
+    /// events are published through.
     pub fn new(
         session_id: SessionId,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
+        ingress: super::drive::IngressRelay,
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
         Self {
             session_id,
-            queued_work,
+            ingress,
             live_replay_store,
         }
     }
@@ -63,6 +64,19 @@ impl DurableSessionOps {
     /// The session these operations are bound to.
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
+    }
+
+    /// The ingress obligation of the accepted input or batch `item_id`, when
+    /// its delivery to the engine stalled (ADR 0109 §3).
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub async fn stalled_ingress(
+        &self,
+        item_id: &str,
+    ) -> Result<Option<crate::store::StalledObligation>, crate::StoreError> {
+        self.ingress.stalled(item_id).await
     }
 
     /// A head that cannot be read is not an error for a best-effort
@@ -118,10 +132,11 @@ impl DurableSessionOps {
         }
     }
 
-    /// Durably accept host turn input, then wake the queued-work driver.
+    /// Durably accept host turn input, then deliver the drive its admission
+    /// owes (ADR 0109 §3).
     ///
-    /// Success acknowledges durable acceptance only; the wake is a separate
-    /// best-effort signal reconciled from the pending row.
+    /// Success acknowledges durable acceptance only; a delivery that fails is
+    /// retried by the ingress relay from the row's obligation.
     pub async fn enqueue_turn_input(
         &self,
         store: &Arc<dyn crate::RuntimePersistence>,
@@ -133,7 +148,7 @@ impl DurableSessionOps {
         let enqueued = super::session_api::enqueue_turn_input_to_store(
             self.session_id.clone(),
             Arc::clone(store),
-            Arc::clone(&self.queued_work),
+            &self.ingress,
             input,
             ingress,
             source_key,
