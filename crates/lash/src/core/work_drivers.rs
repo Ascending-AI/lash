@@ -236,6 +236,10 @@ impl SessionWorkEngine for ResolvedQueuedWork {
         self.port.install_session_driver(driver)
     }
 
+    fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
+        self.port.control()
+    }
+
     async fn await_drive(
         &self,
         session: &lash_core::SessionId,
