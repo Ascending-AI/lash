@@ -3,14 +3,16 @@
 //! the worker's fence (FIG-3571), before the engine is entered.
 
 use super::*;
-use crate::lib_tests::{durable_process_events, process_module};
+use crate::lib_tests::process_module;
 use lashlang::testing::ast_builders as b;
 
-/// Runs the `pause` sleep process through a real process context, returning
-/// its outcome and trace graph.
+/// Runs the `pause` sleep process through a real `LashProcessWorkflow`
+/// segment on the Restate server double, returning its terminal record and
+/// trace graph.
 pub(crate) async fn run_sleep_process()
--> (lash_core::ProcessRunOutcome, Arc<TraceLashlangGraphStore>) {
-    let store = crate::lib_tests::memory_artifact_store().await;
+-> (lash_core::ProcessAwaitOutput, Arc<TraceLashlangGraphStore>) {
+    let harness = crate::lib_tests::double_process_harness().await;
+    let store = harness.artifact_store();
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::default().with_sleep(),
@@ -52,85 +54,18 @@ pub(crate) async fn run_sleep_process()
     )
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),
-    ));
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a SQLite memory backend");
-    let registry = lash_core::Backend::from(backend.clone()).process_registry();
-    let process_id = crate::lib_tests::register_harness_process(&registry, &registration).await;
-    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
-    let scoped = lash_core::EffectHost::scoped_static(
-        effect_host.as_ref(),
-        lash_core::AdmittedScope::process(process_id.clone()),
-    )
-    .expect("valid process scope")
-    .expect("the backend host lends a static controller");
-    let parent = lash_core::RuntimeInvocation::effect(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::process(process_id.clone()),
-            "process-body",
-        )
-        .expect("valid process effect address"),
-        lash_core::RuntimeAttribution::none(),
-        "process-body",
-    );
-    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
-        .runtime_parent_invocation(parent)
-        .build();
-    let plugins = Arc::clone(&built.dispatch.plugins);
-    let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let expected_catalog = Arc::clone(&catalog);
-    let authority =
-        lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "sleep-run")
-            .bind_attempt(1);
-    let process_events = durable_process_events(&registry, &process_id, &authority).await;
-    let execution_registration = registration.clone();
-    let execution_process_id = process_id.clone();
-    let context = lash_core::ProcessEngineRunContext::new(
-        registration,
-        process_id.clone(),
-        lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
-        lash_core::testing::process_work_wiring_for_registry(registry),
-        lash_core::SessionId::from("sleep-session"),
-        plugins,
-        catalog,
-        None,
-        None,
-        Arc::new(lash_core::NoSessionWork::new()),
-        lash_core::DeliveryPolicy::EarliestSafeBoundary,
-        Arc::new(lash_core::facade_support::SystemClock),
-        true,
-        lash_core::CancellationToken::new(),
-        None,
-        scoped,
-        None,
-        Box::new(move |catalog| {
-            assert!(Arc::ptr_eq(&catalog, &expected_catalog));
-            Ok(
-                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built.into_runtime().with_process_execution(
-                        execution_process_id,
-                        &execution_registration,
-                        process_events,
-                    ),
-                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
-                        Box::pin(async { Ok(()) })
-                    }),
-                ),
-            )
-        }),
-    );
+    ))
+    .with_execution_env_ref(Some(harness.env_ref().clone()));
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
-    let result = Box::pin(crate::process::run_lashlang_process(
+    harness.install_lashlang_worker(
         LashlangProcessEngine::new(store, LashlangSurface::default())
             .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
-        context,
-        serde_json::to_value(input).expect("process input serializes"),
-    ))
-    .await
-    .expect("process run succeeds");
-    (result, graph_store)
+        Vec::new(),
+    );
+    let process_id = harness.admit(registration).await;
+    let terminal = harness.await_terminal(&process_id).await;
+    (terminal, graph_store)
 }
 
 /// T12 (FIG-3586): a parked segment written under the previous segment-state

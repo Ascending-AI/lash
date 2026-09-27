@@ -17,6 +17,7 @@ use std::sync::Mutex;
 
 const TOOL_NAME: &str = "strict_omission_probe";
 const DEFAULT_LIMIT: usize = 37;
+const SEED: u64 = 0x5711_c7e5;
 
 #[derive(Clone, Copy, Debug)]
 enum Endpoint {
@@ -203,13 +204,11 @@ async fn core(
     provider: ProviderHandle,
     seen: Arc<Mutex<Vec<CapturedCall>>>,
     label: &str,
-) -> LashCore {
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("memory backend"),
-    );
-    LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
+) -> (LashCore, lash_restate_test::RestateTestBackend) {
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("Restate server double");
+    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -227,7 +226,10 @@ async fn core(
             format!("strict-omission-{label}"),
             format!("strict-omission-{label}-boot"),
         ))
-        .expect("core")
+        .expect("core");
+    // A core built over `double.lash_backend()` does not hold the double: the
+    // caller keeps it to the end of the case (FIG-3723).
+    (core, double)
 }
 
 fn tool_response(endpoint: Endpoint, arguments: &Value) -> String {
@@ -310,7 +312,7 @@ async fn run_case(
         final_response(endpoint),
     ]));
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let runtime = core(
+    let (runtime, _double) = core(
         provider(endpoint, strict_tools, Arc::clone(&transport)),
         Arc::clone(&seen),
         label,

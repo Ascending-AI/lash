@@ -59,6 +59,29 @@ pub(crate) async fn restate_double(seed: u64) -> lash_restate_test::RestateTestB
         .expect("build the Restate double")
 }
 
+/// Under the Restate double a session's writer claim frees when the engine
+/// lane's last turn settles, and a host admit (`open`, `durable`, `create`)
+/// can race that release: retry `Contended` until a bounded deadline. The
+/// same release race race_recovery's open loop already tolerates.
+pub(crate) async fn retry_when_claim_frees<T, F, Fut>(mut attempt: F) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        match attempt().await {
+            Err(error)
+                if format!("{error:?}").contains("Contended")
+                    && std::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
 /// A fresh SQLite memory store set: storage ports only, no engine. For a
 /// test whose every use is a store port.
 #[allow(

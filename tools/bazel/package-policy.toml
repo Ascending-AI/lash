@@ -411,10 +411,6 @@ contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 # unmeasured runs would still oversize it.
 "//crates/lash-restate-test:test_batch" = { cpu_count = 2, memory_kb = 1048576 }
 "//crates/lash-typescript:test_batch" = { cpu_count = 4, memory_kb = 1048576 }
-# Measured under the row threshold (0.2 cores, 30 MiB): the drift census loads
-# the session corpora read-only and finishes inside one core.
-"//crates/lash-protocol-rlm:cell_binding_drift__test" = { cpu_count = 1, memory_kb = 1048576 }
-
 # --- Service jobs --------------------------------------------------------------
 
 # The service jobs build these packages' test labels from the shared cache and

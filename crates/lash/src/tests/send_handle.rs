@@ -342,6 +342,10 @@ async fn an_input_answered_inside_another_root_resolves_answered_with_that_root(
 /// held by a drive nothing owns.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_drive_stops_once_its_host_lets_go_of_the_core() -> Result<()> {
+    // The law is the in-process engine's: a drive the core's own driver was
+    // still running stops with it. On Restate the engine owns the invocation;
+    // letting go of a core stops nothing, so there is no double leg. The law
+    // goes with the in-process engine (FIG-3668 B3).
     let Fixture {
         core,
         release: _release,
@@ -367,7 +371,7 @@ async fn a_drive_stops_once_its_host_lets_go_of_the_core() -> Result<()> {
 /// too, the registry, and the core's driver that holds it, are released.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
-    let fixture = fixture(Engine::Sqlite, 1).await?;
+    let fixture = fixture(Engine::Restate, 1).await?;
     let residents = Arc::downgrade(&fixture.core.residents);
     let session = fixture.core.session("dropped-unclosed").open().await?;
     session
@@ -393,7 +397,7 @@ async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
 /// stay on the host's admitted open.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
-    let fixture = fixture(Engine::Sqlite, 1).await?;
+    let fixture = fixture(Engine::Restate, 1).await?;
     let session_id = lash_core::SessionId::from("send-observed");
     let host = fixture.core.session(session_id.clone()).open().await?;
     host.send(TurnInput::text("first"))
@@ -449,8 +453,9 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets_with_backend_work(super::rlm_core_builder_over(
-        memory_backend().await.into(),
+        double.lash_backend(),
     ))
     .provider(
         crate::testing::TestProvider::builder()
@@ -471,8 +476,11 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
         .id("engine-first-root")
         .output()
         .await?;
+    drop(durable);
 
-    let session = core.session("engine-first").open().await?;
+    // The engine lane releases the session's writer claim when the sent
+    // root settles; the host's open races that release under Restate.
+    let session = retry_when_claim_frees(|| core.session("engine-first").open()).await?;
     let again = session
         .send(TurnInput::text("and a host opens it after"))
         .id("host-after-root")
@@ -490,8 +498,9 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets_with_backend_work(super::rlm_core_builder_over(
-        memory_backend().await.into(),
+        double.lash_backend(),
     ))
     .provider({
         let calls = Arc::clone(&calls);
@@ -787,5 +796,4 @@ macro_rules! send_handle_laws {
     };
 }
 
-send_handle_laws!(sqlite, Engine::Sqlite);
 send_handle_laws!(restate, Engine::Restate);

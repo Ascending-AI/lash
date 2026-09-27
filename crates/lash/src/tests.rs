@@ -2220,8 +2220,8 @@ pub(crate) use harness::{
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_backend_work,
     explicit_ephemeral_facets_with_budget, inline_session_work, memory_backend,
     memory_backend_with_clock, memory_store_backend, memory_store_set, mock_model_spec, model_spec,
-    output_into_cancelled_by, restate_double, run_async_test_on_stack_budget,
-    run_async_test_on_stack_size, sqlite_turn_input_states,
+    output_into_cancelled_by, restate_double, retry_when_claim_frees,
+    run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_turn_input_states,
 };
 mod aborted_turn_groups;
 mod agent_scenarios;

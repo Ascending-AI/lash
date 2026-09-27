@@ -4,6 +4,8 @@
 use super::*;
 use lash_sansio::SessionId;
 
+const SEED: u64 = 0xd0a4_b1e5;
+
 /// Catalog wrapper that counts which seam a caller reached for.
 ///
 /// A Durable Session must resolve through the non-creating by-id seam exactly
@@ -203,17 +205,17 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
     }
 }
 
-/// A counting catalog over a fresh memory backend's own.
-async fn counting_factory(
+/// A counting catalog over `inner`'s own.
+fn counting_factory(
+    inner: &lash_core::Backend,
     open_delay_ms: u64,
 ) -> (DecoratedBackend, Arc<CountingSessionStoreFactory>) {
-    let inner = memory_backend().await;
     let factory = Arc::new(CountingSessionStoreFactory::new(
         inner.session_store_factory(),
         open_delay_ms,
     ));
     let catalog = Arc::clone(&factory);
-    let backend = DecoratedBackend::over(inner.into()).session_store_factory(move |_| catalog);
+    let backend = DecoratedBackend::over(inner.clone()).session_store_factory(move |_| catalog);
     (backend, factory)
 }
 
@@ -230,7 +232,8 @@ fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
 
 #[tokio::test]
 async fn durable_acquisition_is_non_creating_and_happens_once_per_handle() -> Result<()> {
-    let (backend, factory) = counting_factory(20).await;
+    let double = restate_double(SEED).await;
+    let (backend, factory) = counting_factory(&double.lash_backend(), 20);
     let creates = Arc::clone(&factory.creates);
     let by_id_opens = Arc::clone(&factory.by_id_opens);
     let core = counting_core(backend.clone())?;
@@ -278,7 +281,8 @@ async fn durable_acquisition_is_non_creating_and_happens_once_per_handle() -> Re
 
 #[tokio::test]
 async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -> Result<()> {
-    let (backend, factory) = counting_factory(0).await;
+    let double = restate_double(SEED).await;
+    let (backend, factory) = counting_factory(&double.lash_backend(), 0);
     let creates = Arc::clone(&factory.creates);
     let core = counting_core(backend.clone())?;
 
@@ -317,7 +321,8 @@ async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -
 
 #[tokio::test]
 async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()> {
-    let (backend, factory) = counting_factory(0).await;
+    let double = restate_double(SEED).await;
+    let (backend, factory) = counting_factory(&double.lash_backend(), 0);
     let core = counting_core(backend.clone())?;
     drop(core.session("deleted-durable").open().await?);
     lash_core::SessionStoreFactory::delete_session(
@@ -348,7 +353,8 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
 
 #[tokio::test]
 async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Result<()> {
-    let (backend, _) = counting_factory(0).await;
+    let double = restate_double(SEED).await;
+    let (backend, _) = counting_factory(&double.lash_backend(), 0);
     let core = counting_core(backend.clone())?;
 
     // Metadata only: created through the catalog, never committed.
@@ -356,11 +362,29 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     let metadata_only = core.session("metadata-only").durable().await?;
     assert!(metadata_only.exists().await?);
     assert!(metadata_only.pending_turn_inputs().await?.is_empty());
-    let accepted = metadata_only
-        .send(TurnInput::text("queued against metadata-only"))
-        .id("metadata-only-input")
-        .accepted()
-        .await?;
+    // A facade send asks the engine to drive; the pending input below must
+    // stay pending for the read, so it is written through the store port
+    // instead (the send path's enqueue event is not under test here), parked
+    // on a turn that never runs so the engine cannot claim it either.
+    let accepted = double
+        .lash_backend()
+        .session_store_factory()
+        .open_existing_store_by_id(&SessionId::from("metadata-only"))
+        .await?
+        .expect("the created session has a store")
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+            input_id: Some("metadata-only-input".to_string()),
+            ..lash_core::PendingTurnInputDraft::new(
+                SessionId::from("metadata-only"),
+                lash_core::TurnInputIngress::active_turn(
+                    lash_core::TurnId::from("metadata-only-parked-turn"),
+                    lash_core::TurnInputCheckpointBoundary::AfterWork,
+                ),
+                TurnInput::text("queued against metadata-only"),
+            )
+        })
+        .await
+        .expect("enqueue the pending input");
     assert_eq!(
         metadata_only
             .pending_turn_inputs()
@@ -371,21 +395,45 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
         vec![accepted.input_id.to_string()]
     );
 
-    // Checkpointed: a committed turn behind it.
-    let session = core.session("checkpointed").open().await?;
+    // Checkpointed: a committed turn behind it. The send needs the engine's
+    // queued-work port, so this leg runs on a second core whose driver is
+    // dropped before the pending reads below.
+    let drive_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = drive_core.session("checkpointed").open().await?;
     session
         .send(TurnInput::text("commit a turn"))
         .output()
         .await?;
     drop(session);
+    drop(drive_core);
     let checkpointed = core.session("checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
     assert!(checkpointed.read().await?.is_some());
-    checkpointed
-        .send(TurnInput::text("queued against a checkpointed head"))
-        .id("checkpointed-input")
-        .accepted()
-        .await?;
+    double
+        .lash_backend()
+        .session_store_factory()
+        .open_existing_store_by_id(&SessionId::from("checkpointed"))
+        .await?
+        .expect("the committed session has a store")
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+            input_id: Some("checkpointed-input".to_string()),
+            ..lash_core::PendingTurnInputDraft::new(
+                SessionId::from("checkpointed"),
+                lash_core::TurnInputIngress::active_turn(
+                    lash_core::TurnId::from("checkpointed-parked-turn"),
+                    lash_core::TurnInputCheckpointBoundary::AfterWork,
+                ),
+                TurnInput::text("queued against a checkpointed head"),
+            )
+        })
+        .await
+        .expect("enqueue the pending input");
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
     Ok(())
 }
@@ -393,6 +441,10 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
 #[tokio::test]
 async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed_ids() -> Result<()>
 {
+    // A named file and the "absent id creates no store" bound are
+    // sqlite-store-level semantics: the double's store set exposes no file
+    // level to reopen. The sqlite backend survives as storage-only, so this
+    // law stays here.
     let dir = tempfile::tempdir().expect("temp dir");
     let backend = Arc::new(
         lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions.db"))
@@ -473,6 +525,11 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
 #[tokio::test]
 async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session() -> Result<()>
 {
+    // The enqueue must publish `Enqueued` yet stay pending for the cancel:
+    // on the double the engine claims admitted input on its own schedule, so
+    // the cancel would race the claim. The inline engine only drives when a
+    // caller waits, so the law stays on SQLite until the facade has an
+    // enqueue-without-drive path again (B4/B5).
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
@@ -523,8 +580,9 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
 
 #[tokio::test]
 async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -542,14 +600,16 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
     // runtime-free publication that follows must be reachable from it.
     let cursor = session.observe().current_observation().cursor;
     Box::pin(session.close()).await?;
-    let durable = core.session(session_id.clone()).durable().await?;
+    // The engine lane's writer claim frees when the closed lane settles;
+    // both admits below race that release under the double.
+    let durable = retry_when_claim_frees(|| core.session(session_id.clone()).durable()).await?;
     let pending = durable
         .send(TurnInput::text("queued with nothing live"))
         .id("no-runtime")
         .accepted()
         .await?;
 
-    let reopened = core.session(session_id.clone()).open().await?;
+    let reopened = retry_when_claim_frees(|| core.session(session_id.clone()).open()).await?;
     let SessionResume::Replayed { events } = reopened.observe().resume_from_cursor(&cursor)? else {
         panic!("a cursor minted before the publication must replay it");
     };
@@ -567,6 +627,11 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
 
 #[tokio::test]
 async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> Result<()> {
+    // The "both inputs still pending beside a live writer" read is only
+    // quiescent where no queued-work driver can claim the rows: the Restate
+    // engine's driver claims them on its own schedule, while the inline
+    // engine only drives what a caller waits on. It stays on SQLite until
+    // the claim path it observes is gone (B5).
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
@@ -656,8 +721,9 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
 
 #[tokio::test]
 async fn abandoning_a_claim_a_caller_does_not_hold_moves_nothing() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -667,11 +733,27 @@ async fn abandoning_a_claim_a_caller_does_not_hold_moves_nothing() -> Result<()>
     let session_id = SessionId::from("durable-claim-token");
     let session = core.session(session_id.clone()).open().await?;
     let durable = session.durable();
-    let accepted = durable
-        .send(TurnInput::text("claimed input"))
-        .id("claim-token")
-        .accepted()
-        .await?;
+    // Seeded through the store port: a facade send would ask the engine to
+    // drive, racing the pending reads this law makes. Parked on a turn that
+    // never runs so the engine cannot claim it either.
+    let accepted = core
+        .store_factory
+        .open_existing_store_by_id(&session_id)
+        .await?
+        .expect("the opened session has a store")
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+            input_id: Some("claim-token".to_string()),
+            ..lash_core::PendingTurnInputDraft::new(
+                session_id.clone(),
+                lash_core::TurnInputIngress::active_turn(
+                    lash_core::TurnId::from("claim-token-parked-turn"),
+                    lash_core::TurnInputCheckpointBoundary::AfterWork,
+                ),
+                TurnInput::text("claimed input"),
+            )
+        })
+        .await
+        .expect("enqueue the pending input");
 
     let input = durable
         .pending_turn_inputs()
@@ -851,12 +933,16 @@ async fn persisted_tool_state_bytes(
 #[tokio::test]
 async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<()> {
     let session_id = SessionId::from("fig-3353-durable-poll");
-    let backend = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
 
     // A core that carries the session's tool source, to persist tool state.
-    let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+    // Its send needs the engine's queued-work port; the pending enqueue that
+    // follows must stay pending, so it goes through the grantless core — the
+    // only core left without a driver once this one is dropped.
+    let granting_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -878,20 +964,23 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
         .send(TurnInput::text("persist a checkpoint with tool state"))
         .output()
         .await?;
-    let queued = granted
-        .durable()
-        .send(TurnInput::text("left pending for the grantless core"))
-        .id("fig-3353-pending")
-        .accepted()
-        .await?;
+
     Box::pin(granted.close()).await?;
+    drop(granting_core);
+
+    // The engine may still run a session drive the send or close scheduled —
+    // a reconcile, say — and under the double that drive's admit materialises
+    // a runtime on the grantless core's session-work handle, landing after
+    // the counter baseline below. Gate the drive for the measurement window;
+    // the durable ops under test are store reads and never need it.
+    let _hold = double.hold_session_drive(&session_id).await;
 
     let tool_state_before = persisted_tool_state_bytes(factory.as_ref(), &session_id).await?;
 
     // The grantless core: same store, no tool source, fully instrumented.
     let counters = Arc::new(RuntimeBuildCounters::default());
     let grantless_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        DecoratedBackend::over(backend.clone().into())
+        DecoratedBackend::over(backend.clone())
             .process_work({
                 let counters = Arc::clone(&counters);
                 move |registry| {
@@ -915,7 +1004,8 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     // Precondition: on this core, `open()` really does orphan the tool. A
     // negative test whose premise does not hold proves nothing.
     {
-        let opened = grantless_core.session(session_id.clone()).open().await?;
+        let opened =
+            retry_when_claim_frees(|| grantless_core.session(session_id.clone()).open()).await?;
         let state = opened.admin().tools().state().await?;
         let entry = state
             .get(&lash_core::ToolId::from("tool:app_lookup"))
@@ -941,8 +1031,28 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     counters.session_restored_events.store(0, Ordering::SeqCst);
     counters.process_admissions.store(0, Ordering::SeqCst);
 
-    // The FIG-3353 poll, through the Durable Session.
+    // The FIG-3353 poll, through the Durable Session. The pending input is
+    // seeded through the store port and parked on a turn that never runs:
+    // a facade send would ask the engine to drive, and a next-turn row the
+    // engine could claim would race the pending reads below.
     let durable = grantless_core.session(session_id.clone()).durable().await?;
+    let queued = factory
+        .open_existing_store_by_id(&session_id)
+        .await?
+        .expect("the persisted session has a store")
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+            input_id: Some("fig-3353-pending".to_string()),
+            ..lash_core::PendingTurnInputDraft::new(
+                session_id.clone(),
+                lash_core::TurnInputIngress::active_turn(
+                    lash_core::TurnId::from("fig-3353-parked-turn"),
+                    lash_core::TurnInputCheckpointBoundary::AfterWork,
+                ),
+                TurnInput::text("left pending for the grantless core"),
+            )
+        })
+        .await
+        .expect("enqueue the pending input");
     let pending = durable.pending_turn_inputs().await?;
     assert_eq!(
         pending
@@ -1153,7 +1263,8 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
 #[tokio::test]
 async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_session() -> Result<()>
 {
-    let backend = DecoratedBackend::over(memory_backend().await.into())
+    let double = restate_double(SEED).await;
+    let backend = DecoratedBackend::over(double.lash_backend())
         .session_store_factory(|inner| Arc::new(NoByIdLookupFactory { inner }));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),
@@ -1232,6 +1343,11 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         })
         .build()
         .into_handle();
+    // The pending-then-held sequence this law observes needs a claim that
+    // starts only when `attach` drives: the Restate engine's driver claims
+    // the enqueued row on its own, so the pre-claim read races it, while the
+    // inline engine leaves `attach` nothing to drive. It stays on
+    // SQLite until the claim path it watches is gone (B5).
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
@@ -1296,8 +1412,9 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
 #[tokio::test]
 async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     let counters = Arc::new(RuntimeBuildCounters::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        DecoratedBackend::over(memory_backend().await.into())
+    let double = restate_double(SEED).await;
+    let idle = explicit_ephemeral_facets(LashCore::standard_builder(
+        DecoratedBackend::over(double.lash_backend())
             .process_work({
                 let counters = Arc::clone(&counters);
                 move |registry| {
@@ -1324,7 +1441,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
 
     // Enqueue to an id nobody created is refused...
     assert!(matches!(
-        core.session("created-then-queued")
+        idle.session("created-then-queued")
             .durable()
             .await?
             .send(TurnInput::text("too early"))
@@ -1334,13 +1451,26 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
         EmbedError::UnknownSession { .. }
     ));
 
-    // ...and `create()` is the explicit two-step's first half.
-    let durable = core.session("created-then-queued").create().await?;
-    let accepted = durable
-        .send(TurnInput::text("queued before the first turn"))
-        .id("created-then-queued-input")
-        .accepted()
-        .await?;
+    // ...and `create()` is the explicit two-step's first half. The queued
+    // input is seeded through the store port: a facade send would ask the
+    // engine to drive, racing the pending read below. A store-seeded row is
+    // never scheduled, so nothing claims it before the drive core below.
+    let durable = idle.session("created-then-queued").create().await?;
+    let accepted = idle
+        .store_factory
+        .open_existing_store_by_id(&SessionId::from("created-then-queued"))
+        .await?
+        .expect("the created session has a store")
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+            input_id: Some("created-then-queued-input".to_string()),
+            ..lash_core::PendingTurnInputDraft::new(
+                SessionId::from("created-then-queued"),
+                lash_core::TurnInputIngress::NextTurn,
+                TurnInput::text("queued before the first turn"),
+            )
+        })
+        .await
+        .expect("enqueue the pending input");
     assert_eq!(durable.pending_turn_inputs().await?.len(), 1);
     assert!(durable.exists().await?);
 
@@ -1351,8 +1481,19 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     );
 
     // The session a host creates this way is an ordinary session: opening it
-    // runs the input that was waiting.
-    let session = core.session("created-then-queued").open().await?;
+    // runs the input that was waiting. The store-seeded row was never
+    // scheduled, so a second core supplies the drive that reconciles it.
+    let drive_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    // `idle`'s created handle still holds a writer claim: the drive core's
+    // open races its release under the double.
+    let session =
+        retry_when_claim_frees(|| drive_core.session("created-then-queued").open()).await?;
     let drained = session.attach(accepted.input_id.clone()).output().await?;
     assert_eq!(
         drained.assistant_message(),
@@ -1377,8 +1518,9 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
 /// create recorded, including the Session Relation.
 #[tokio::test]
 async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1387,16 +1529,29 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("create-parent").create().await?);
 
-    let first = core
+    let _first = core
         .session("create-idempotent")
         .parent("create-parent")
         .create()
         .await?;
-    let accepted = first
-        .send(TurnInput::text("survives the second create"))
-        .id("idempotent-input")
-        .accepted()
-        .await?;
+    // Seeded through the store port: a facade send would ask the engine to
+    // drive, racing the pending read after the second create. A store-seeded
+    // row is never scheduled, so nothing claims it before the drive below.
+    let accepted = core
+        .store_factory
+        .open_existing_store_by_id(&SessionId::from("create-idempotent"))
+        .await?
+        .expect("the created session has a store")
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+            input_id: Some("idempotent-input".to_string()),
+            ..lash_core::PendingTurnInputDraft::new(
+                SessionId::from("create-idempotent"),
+                lash_core::TurnInputIngress::NextTurn,
+                TurnInput::text("survives the second create"),
+            )
+        })
+        .await
+        .expect("enqueue the pending input");
 
     // A second create, naming no parent, must not rewrite the relation or drop
     // the queue.
@@ -1411,7 +1566,9 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
         vec![accepted.input_id.to_string()],
         "re-creating an existing id keeps its durable queue"
     );
-    let reopened = core.session("create-idempotent").open().await?;
+    // `second`'s writer claim is still live; the reopen races its release
+    // under the double.
+    let reopened = retry_when_claim_frees(|| core.session("create-idempotent").open()).await?;
     assert_eq!(
         reopened.parent_session_id(),
         Some("create-parent"),
@@ -1423,10 +1580,11 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
 /// Session ids are single-use, so `create()` refuses a tombstoned one.
 #[tokio::test]
 async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
-    let backend = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1463,8 +1621,9 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
 /// retry replays the original acceptance (FIG-3544).
 #[tokio::test]
 async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

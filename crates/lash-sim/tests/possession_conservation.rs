@@ -45,21 +45,27 @@ use lash_core::{
     ToolIntents, TurnBudget, TurnId,
 };
 
-/// One live opener: a session's run-local execution context plus the counters
+/// One live opener: a session's run-local possession set plus the counters
 /// that keep its tool-call and intent identities distinct across steps.
+///
+/// On the Restate double a run-local context is lent by a handler, not owned:
+/// the opener carries the set the context's `started_process_ids` would hold,
+/// and every step rebuilds a handler-scoped context that restores the set on
+/// entry and hands it back on exit — the same boundary a segment handover
+/// performs, so each step also exercises the restore path.
 struct Opener {
     session: SessionId,
-    context: RuntimeExecutionContext<'static>,
+    possessed: Vec<ProcessId>,
     next_call: u64,
     next_intent: u32,
 }
 
-/// The two-opener world: one registry, one context per live opener, and the
-/// world's own ledger of what each start channel actually realized.
+/// The two-opener world: one registry, one possession set per live opener,
+/// and the world's own ledger of what each start channel actually realized.
 struct PossessionWorld {
-    /// The memory backend (ADR 0102) the world's contexts journal on and
+    /// The server double the world's handler-scoped contexts journal on and
     /// whose registry the session host's process routes write.
-    backend: lash_sqlite_store::SqliteBackend,
+    double: lash_restate_test::RestateTestBackend,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     host: Arc<MockSessionManager>,
     openers: BTreeMap<&'static str, Opener>,
@@ -74,21 +80,23 @@ struct PossessionWorld {
     labels: BTreeMap<String, ProcessId>,
 }
 
+const SEED: u64 = 0x1ca1_51de;
+
 impl PossessionWorld {
     #[expect(
         clippy::expect_used,
-        reason = "test fixture: a memory backend that fails to open aborts the law"
+        reason = "test fixture: a server double that fails to open aborts the law"
     )]
     async fn new() -> Self {
-        let backend = lash_sqlite_store::SqliteBackend::memory()
+        let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
             .await
-            .expect("open a memory backend");
-        let registry = lash_core::Backend::from(backend.clone()).process_registry();
+            .expect("open the server double");
+        let registry = double.lash_backend().process_registry();
         Self {
             host: Arc::new(
                 MockSessionManager::default().with_process_registry(Arc::clone(&registry)),
             ),
-            backend,
+            double,
             registry,
             openers: BTreeMap::new(),
             realized: BTreeMap::new(),
@@ -97,25 +105,55 @@ impl PossessionWorld {
         }
     }
 
-    fn context_for(&self, session: &SessionId) -> RuntimeExecutionContext<'static> {
-        TestExecutionContextBuilder::for_backend(&self.backend.clone().into())
+    /// Runs `step` on a fresh handler-scoped context of `session`'s turn:
+    /// `possessed` is restored into the context before the step and the set
+    /// the live context ends the step holding is captured back out. Returns
+    /// the captured set with `step`'s own result.
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: a turn handler that fails to open or close aborts the law"
+    )]
+    async fn step_with<R>(
+        &self,
+        session: &SessionId,
+        possessed: &[ProcessId],
+        step: impl for<'h> AsyncFnOnce(&'h RuntimeExecutionContext<'h>) -> R,
+    ) -> (Vec<ProcessId>, R) {
+        let handler = self
+            .double
+            .open_handler(lash_core::AdmittedScope::turn(
+                session.clone(),
+                TurnId::from("test-turn"),
+            ))
+            .await
+            .expect("open the opener's turn handler");
+        let context =
+            TestExecutionContextBuilder::new(lash_core::testing::TestExecutionPorts::lent(
+                &self.double.lash_backend(),
+                handler.scoped(),
+            ))
             .session_id(session.clone())
             .shared_session_host(self.host.clone())
             .processes(self.host.clone())
             .build()
-            .into_runtime()
+            .into_runtime();
+        context.restore_started_process_ids(possessed);
+        let result = step(&context).await;
+        let possessed = context.started_process_ids();
+        drop(context);
+        handler.close().await.expect("close the opener's handler");
+        (possessed, result)
     }
 
     /// World creation is itself a step: an empty world must already satisfy
     /// the law before any opener acts.
     async fn add_opener(&mut self, name: &'static str, session: &str) {
         let session = SessionId::from(session);
-        let context = self.context_for(&session);
         self.openers.insert(
             name,
             Opener {
                 session,
-                context,
+                possessed: Vec::new(),
                 next_call: 0,
                 next_intent: 0,
             },
@@ -133,32 +171,45 @@ impl PossessionWorld {
     /// A direct in-session start: `start_child_process` registers the row and
     /// records possession in the same settled step.
     async fn realize_direct_start(&mut self, opener_name: &'static str, child: &str) {
-        let opener = self.opener(opener_name);
-        let reply = opener
-            .context
-            .start_child_process(
-                ProcessStartRequest::new(
-                    ProcessInput::Engine {
-                        kind: "sim-child".to_string(),
-                        payload: serde_json::Value::Null,
-                    },
-                    RecoveryContract::Rerunnable,
-                    ProcessOriginator::Session {
-                        session_id: opener.session.clone(),
-                        agent_frame_id: None,
-                    },
-                    lash_core::lifetime::starter(&opener.context.start_cx().unwrap_or_else(
-                        |error| panic!("the opener's turn materializes a start context: {error}"),
-                    )),
-                )
-                .with_start_key(Some(lash_core::StartKey::for_host(
-                    lash_core::StartKeyOwner::HOST,
-                    format!("{opener_name}-{child}"),
-                ))),
-                "engine",
-                Some(child.to_string()),
-            )
+        let (session, possessed) = {
+            let opener = self.opener(opener_name);
+            (opener.session.clone(), opener.possessed.clone())
+        };
+        let (possessed, reply) = self
+            .step_with(&session, &possessed, async |context| {
+                context
+                    .start_child_process(
+                        ProcessStartRequest::new(
+                            ProcessInput::Engine {
+                                kind: "sim-child".to_string(),
+                                payload: serde_json::Value::Null,
+                            },
+                            RecoveryContract::Rerunnable,
+                            ProcessOriginator::Session {
+                                session_id: session.clone(),
+                                agent_frame_id: None,
+                            },
+                            lash_core::lifetime::starter(&context.start_cx().unwrap_or_else(
+                                |error| {
+                                    panic!(
+                                        "the opener's turn materializes a start context: {error}"
+                                    )
+                                },
+                            )),
+                        )
+                        .with_start_key(Some(
+                            lash_core::StartKey::for_host(
+                                lash_core::StartKeyOwner::HOST,
+                                format!("{opener_name}-{child}"),
+                            ),
+                        )),
+                        "engine",
+                        Some(child.to_string()),
+                    )
+                    .await
+            })
             .await;
+        self.opener(opener_name).possessed = possessed;
         let ToolCallOutcome::Success(handle) = &reply.output.outcome else {
             panic!(
                 "direct start of {child} under {opener_name} failed: {:?}",
@@ -190,7 +241,6 @@ impl PossessionWorld {
             .unwrap_or_else(|err| panic!("register realized child {child}: {err}"));
         let child_id = record.id;
         let handle = RuntimeExecutionContext::process_handle_json(&child_id);
-        let opener = self.opener(opener_name);
         let outcome = settled_outcome(
             &call_id,
             handle.clone(),
@@ -200,11 +250,19 @@ impl PossessionWorld {
                 result: handle,
             }],
         );
-        opener
-            .context
-            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
-            .await
-            .expect("the call presents");
+        let (session, possessed) = {
+            let opener = self.opener(opener_name);
+            (opener.session.clone(), opener.possessed.clone())
+        };
+        let (possessed, presented) = self
+            .step_with(&session, &possessed, async |context| {
+                context
+                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .await
+            })
+            .await;
+        self.opener(opener_name).possessed = possessed;
+        presented.expect("the call presents");
         self.labels
             .insert(format!("{opener_name}-{child}"), child_id.clone());
         self.realized.insert(child_id, opener_name);
@@ -220,8 +278,7 @@ impl PossessionWorld {
         reason = "test fixture: a call that fails to present aborts the law"
     )]
     async fn settle_refused_start(&mut self, opener_name: &'static str, child: &str) {
-        let opener = self.opener(opener_name);
-        let (call_id, identity) = opener.next_intent_identity(child);
+        let (call_id, identity) = self.opener(opener_name).next_intent_identity(child);
         let intent_index = identity.intent_index;
         let outcome = settled_outcome(
             &call_id,
@@ -233,11 +290,19 @@ impl PossessionWorld {
                 refusal: ToolIntentRefusalReason::MissingToolCallId,
             }],
         );
-        opener
-            .context
-            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
-            .await
-            .expect("the call presents");
+        let (session, possessed) = {
+            let opener = self.opener(opener_name);
+            (opener.session.clone(), opener.possessed.clone())
+        };
+        let (possessed, presented) = self
+            .step_with(&session, &possessed, async |context| {
+                context
+                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .await
+            })
+            .await;
+        self.opener(opener_name).possessed = possessed;
+        presented.expect("the call presents");
         self.assert_conservation(&format!("{opener_name} refused-start {child}"))
             .await;
     }
@@ -248,9 +313,15 @@ impl PossessionWorld {
         reason = "test fixture: a call that fails to present aborts the law"
     )]
     async fn settle_protocol_refused(&mut self, opener_name: &'static str) {
-        let opener = self.opener(opener_name);
-        opener.next_call += 1;
-        let call_id = format!("call-{opener_name}-{}", opener.next_call);
+        let (session, possessed, call_id) = {
+            let opener = self.opener(opener_name);
+            opener.next_call += 1;
+            (
+                opener.session.clone(),
+                opener.possessed.clone(),
+                format!("call-{opener_name}-{}", opener.next_call),
+            )
+        };
         let outcome = settled_outcome(
             &call_id,
             serde_json::json!({"refused": true}),
@@ -258,11 +329,15 @@ impl PossessionWorld {
                 refusal: ToolIntentRefusalReason::MissingToolCallId,
             }],
         );
-        opener
-            .context
-            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
-            .await
-            .expect("the call presents");
+        let (possessed, presented) = self
+            .step_with(&session, &possessed, async |context| {
+                context
+                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .await
+            })
+            .await;
+        self.opener(opener_name).possessed = possessed;
+        presented.expect("the call presents");
         self.assert_conservation(&format!("{opener_name} protocol-refused"))
             .await;
     }
@@ -286,8 +361,7 @@ impl PossessionWorld {
             "echo victim {victim} ({victim_id}) is not registered"
         );
         let echoed = RuntimeExecutionContext::process_handle_json(&victim_id);
-        let opener = self.opener(opener_name);
-        let (call_id, identity) = opener.next_intent_identity("signal");
+        let (call_id, identity) = self.opener(opener_name).next_intent_identity("signal");
         let outcome = settled_outcome(
             &call_id,
             serde_json::json!({"signaled": true}),
@@ -297,11 +371,19 @@ impl PossessionWorld {
                 result: echoed,
             }],
         );
-        opener
-            .context
-            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
-            .await
-            .expect("the call presents");
+        let (session, possessed) = {
+            let opener = self.opener(opener_name);
+            (opener.session.clone(), opener.possessed.clone())
+        };
+        let (possessed, presented) = self
+            .step_with(&session, &possessed, async |context| {
+                context
+                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .await
+            })
+            .await;
+        self.opener(opener_name).possessed = possessed;
+        presented.expect("the call presents");
         self.assert_conservation(&format!("{opener_name} signal-echo on {victim}"))
             .await;
     }
@@ -331,15 +413,18 @@ impl PossessionWorld {
     /// A segment handover: the run's next context restores the possession
     /// snapshot the boundary carried (`restore_started_process_ids`), and the
     /// prior context retires with it. Possession stays exactly-one across the
-    /// swap.
+    /// swap. Every step already performs this boundary — a handler-scoped
+    /// context is rebuilt from the snapshot each time — so a handover is a
+    /// step that changes nothing but the incarnation.
     async fn handover(&mut self, opener_name: &'static str) {
-        let (session, snapshot) = {
+        let (session, possessed) = {
             let opener = self.opener(opener_name);
-            (opener.session.clone(), opener.context.started_process_ids())
+            (opener.session.clone(), opener.possessed.clone())
         };
-        let context = self.context_for(&session);
-        context.restore_started_process_ids(&snapshot);
-        self.opener(opener_name).context = context;
+        let (possessed, ()) = self
+            .step_with(&session, &possessed, async |_context| {})
+            .await;
+        self.opener(opener_name).possessed = possessed;
         self.assert_conservation(&format!("{opener_name} handover"))
             .await;
     }
@@ -408,8 +493,8 @@ impl PossessionWorld {
     async fn assert_conservation(&self, step: &str) {
         let mut owners: BTreeMap<ProcessId, Vec<&'static str>> = BTreeMap::new();
         for (name, opener) in &self.openers {
-            for process_id in opener.context.started_process_ids() {
-                owners.entry(process_id).or_default().push(name);
+            for process_id in &opener.possessed {
+                owners.entry(process_id.clone()).or_default().push(name);
             }
         }
         for (process_id, names) in &owners {

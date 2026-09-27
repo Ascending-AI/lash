@@ -129,7 +129,6 @@ MINIMUM_MEMORY_KB = {
     "lash-internal-core-execution/lash_core_execution": 2 * 1024 * 1024,
     "lash-internal-core-execution/store_backed": 2 * 1024 * 1024,
     "lash-internal-restate-test/turn_crash_replay": 2 * 1024 * 1024,
-    "lash-internal-protocol-rlm/cell_binding_drift": 2 * 1024 * 1024,
     "lash-internal-subagents/lash_subagents": 2 * 1024 * 1024,
     "lash-internal-restate-test/suspended_turn": 2 * 1024 * 1024,
     "lash-internal-restate-test/start_gate_peek": 2 * 1024 * 1024,

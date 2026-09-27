@@ -377,13 +377,6 @@
     "peak_bytes": 887050240,
     "samples": 401
   },
-  "lash-internal-protocol-rlm/cell_binding_drift": {
-    "cpu_count": 2,
-    "memory_kb": 2621440,
-    "p95_cores": 1.49,
-    "peak_bytes": 1493831680,
-    "samples": 462
-  },
   "lash-internal-protocol-rlm/lash_protocol_rlm": {
     "cpu_count": 2,
     "memory_kb": 3670016,

@@ -85,7 +85,7 @@ impl lash_core::ToolProvider for ParkToolProvider {
 
 pub(crate) async fn execute_parked_cell_for_tests(
     state: &mut RlmExecutionState,
-    ctx: lash_core::RuntimeExecutionContext<'static>,
+    ctx: lash_core::RuntimeExecutionContext<'_>,
     language: &str,
     code: &str,
     break_retention: bool,

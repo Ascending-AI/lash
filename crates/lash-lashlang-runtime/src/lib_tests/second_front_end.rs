@@ -503,12 +503,13 @@ async fn a_second_front_end_keeps_its_sites_across_relink_and_stored_reload() {
     );
 }
 
-/// Runs the lifted worker once through the process engine, reading its module
-/// from `store`, and returns its observed graph.
+/// Runs the lifted worker once in a real `LashProcessWorkflow` segment on the
+/// Restate server double, reading its module from `store`, and returns its
+/// observed graph.
 async fn run_worker(
-    run: &str,
     store: LashlangArtifacts,
 ) -> (lashlang::ModuleCompileOutput, TraceLashlangGraph) {
+    let harness = crate::lib_tests::double_process_harness().await;
     let output = mini_module();
     let worker = lifted_worker(&output.artifact);
     let input = LashlangProcessInput {
@@ -531,83 +532,24 @@ async fn run_worker(
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),
     ));
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a SQLite memory backend");
-    let registry = lash_core::Backend::from(backend.clone()).process_registry();
-    let process_id = crate::lib_tests::register_harness_process(&registry, &registration).await;
-    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
-    let scoped = lash_core::EffectHost::scoped_static(
-        effect_host.as_ref(),
-        lash_core::AdmittedScope::process(process_id.clone()),
-    )
-    .expect("valid process scope")
-    .expect("the backend host lends a static controller");
-    let parent = lash_core::RuntimeInvocation::effect(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::process(process_id.clone()),
-            "process-body",
-        )
-        .expect("valid process effect address"),
-        lash_core::RuntimeAttribution::none(),
-        "process-body",
-    );
-    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
-        .runtime_parent_invocation(parent)
-        .build();
-    let plugins = Arc::clone(&built.dispatch.plugins);
-    let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), run)
-        .bind_attempt(1);
-    let process_events = durable_process_events(&registry, &process_id, &authority).await;
-    let execution_registration = registration.clone();
-    let execution_process_id = process_id.clone();
-    let context = lash_core::ProcessEngineRunContext::new(
-        registration,
-        process_id.clone(),
-        lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
-        lash_core::testing::process_work_wiring_for_registry(registry),
-        lash_core::SessionId::from("mini-session"),
-        plugins,
-        catalog,
-        None,
-        None,
-        Arc::new(lash_core::NoSessionWork::new()),
-        lash_core::DeliveryPolicy::EarliestSafeBoundary,
-        Arc::new(lash_core::facade_support::SystemClock),
-        true,
-        lash_core::CancellationToken::new(),
-        None,
-        scoped,
-        None,
-        Box::new(move |_catalog| {
-            Ok(
-                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built.into_runtime().with_process_execution(
-                        execution_process_id,
-                        &execution_registration,
-                        process_events,
-                    ),
-                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
-                        Box::pin(async { Ok(()) })
-                    }),
-                ),
-            )
-        }),
-    );
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
-    let result = Box::pin(crate::process::run_lashlang_process(
+    harness.install_lashlang_worker(
         LashlangProcessEngine::new(store, LashlangSurface::default())
             .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
-        context,
-        serde_json::to_value(input).expect("process input serializes"),
-    ))
-    .await
-    .expect("the worker runs");
+        Vec::new(),
+    );
+    let process_id = crate::lib_tests::register_harness_process(
+        &harness.registry(),
+        &registration,
+        harness.env_ref(),
+    )
+    .await;
+    harness.drive_pending().await;
+    let terminal = harness.await_terminal(&process_id).await;
     assert!(
-        result.is_terminal() && !format!("{result:?}").contains("Failure"),
-        "the worker finishes: {result:?}"
+        matches!(terminal, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),
+        "the worker finishes: {terminal:?}"
     );
     let graph = graph_store
         .graphs()
@@ -652,8 +594,7 @@ async fn a_second_front_end_lifted_process_is_observed_and_redrives_identically(
     let dir = tempfile::tempdir().expect("store directory");
     let path = dir.path().join("artifacts.db");
     let module = mini_module();
-    let (output, graph) =
-        run_worker("mini-first", stored_reload(&path, &module.artifact).await).await;
+    let (output, graph) = run_worker(stored_reload(&path, &module.artifact).await).await;
     let worker = lifted_worker(&output.artifact);
     assert_eq!(graph.source_identity, output.artifact.source_identity());
 
@@ -690,7 +631,7 @@ async fn a_second_front_end_lifted_process_is_observed_and_redrives_identically(
             .await
             .expect("reopen the store"),
     ));
-    let (_, redriven) = run_worker("mini-redrive", reopened).await;
+    let (_, redriven) = run_worker(reopened).await;
     assert_eq!(
         emitted(&redriven),
         first,

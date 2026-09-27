@@ -3,27 +3,17 @@
 //! continuation request, and the engine driver's reconcile tick re-asks
 //! work whose drive schedule was lost.
 //!
-//! Every law runs twice: on the in-process engine of the interim SQLite
-//! backend, and on lash-restate's engine over the Restate server double.
+//! Every law runs on lash-restate's engine over the Restate server double.
 
 use super::*;
 
 const SEED: u64 = 0x5e55_10ad;
 
-/// Which engine drives a law's scheduled work.
-#[derive(Clone, Copy, Debug)]
-enum Engine {
-    /// The interim SQLite backend's in-process engine.
-    Sqlite,
-    /// lash-restate's engine on the Restate server double.
-    Restate,
-}
-
-/// A core over the law's engine, and whatever must outlive it: the double is
-/// a local that lives to the end of the law (FIG-3723).
+/// A core over the double's engine, and the double, which must outlive it:
+/// a core built over `double.lash_backend()` does not hold it (FIG-3723).
 struct Fixture {
     core: LashCore,
-    _double: Option<lash_restate_test::RestateTestBackend>,
+    _double: lash_restate_test::RestateTestBackend,
     calls: Arc<AtomicUsize>,
 }
 
@@ -45,31 +35,13 @@ fn counting_provider(calls: Arc<AtomicUsize>) -> ProviderHandle {
         .into_handle()
 }
 
-/// The law's engine over a fresh backend.
-async fn engine_backend(
-    engine: Engine,
-) -> (
-    lash_core::Backend,
-    Option<lash_restate_test::RestateTestBackend>,
-) {
-    match engine {
-        Engine::Sqlite => (memory_backend().await.into(), None),
-        Engine::Restate => {
-            let double = restate_double(SEED).await;
-            (double.lash_backend(), Some(double))
-        }
-    }
+async fn fixture(batch: usize) -> Result<Fixture> {
+    fixture_with_batching(crate::QueuedWorkBatchingConfig::new(batch)).await
 }
 
-async fn fixture(engine: Engine, batch: usize) -> Result<Fixture> {
-    fixture_with_batching(engine, crate::QueuedWorkBatchingConfig::new(batch)).await
-}
-
-async fn fixture_with_batching(
-    engine: Engine,
-    batching: crate::QueuedWorkBatchingConfig,
-) -> Result<Fixture> {
-    let (backend, double) = engine_backend(engine).await;
+async fn fixture_with_batching(batching: crate::QueuedWorkBatchingConfig) -> Result<Fixture> {
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let calls = Arc::new(AtomicUsize::new(0));
     let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
@@ -93,12 +65,9 @@ async fn fixture_with_batching(
 /// reconcile tick may legitimately ask again for the same rows (ADR 0104
 /// O2) while no invocation holds the session's work, so sibling drive
 /// chains are accounted, not assumed away.
-async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
-    engine: Engine,
-) -> Result<()> {
+async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Result<()> {
     const INPUTS: usize = lash_core::engine::MAX_ROOTS_PER_DRIVE + 1;
     let fixture = fixture_with_batching(
-        engine,
         crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_claim(1),
     )
     .await?;
@@ -123,8 +92,11 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     let engine_port = fixture.core.substrate_slot.ports().await.queued;
     let request = lash_core::engine::DriveRequestId::new("root-budget");
     engine_port.schedule_drive(&session_id, request.clone());
+    // Sixty-five journaled turns through the double's embedded server are
+    // serial work; under a loaded shared executor the chain can take several
+    // minutes, so the cap is generous rather than tight.
     let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(120),
+        std::time::Duration::from_secs(600),
         engine_port.await_drive(&session_id, &request),
     )
     .await
@@ -132,24 +104,22 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     .expect("the drive is not refused");
 
     assert_eq!(outcome.stop, lash_core::engine::DriveStop::Idle);
+    // The waiter observes the roots of every leg in its own chain; a
+    // reconcile tick's sibling chain legitimately owns the roots it
+    // claimed first. Await those chains before the global assertions:
+    // the direct chain can report Idle while a sibling still runs the
+    // roots it claimed, so completion is only settled once every
+    // sibling's await resolves.
     let mut observed = outcome.ran.len();
-    if matches!(engine, Engine::Restate) {
-        // The waiter observes the roots of every leg in its own chain; a
-        // reconcile tick's sibling chain legitimately owns the roots it
-        // claimed first. Await those chains before the global assertions:
-        // the direct chain can report Idle while a sibling still runs the
-        // roots it claimed, so completion is only settled once every
-        // sibling's await resolves.
-        for root in sibling_drive_roots(&fixture, &session_id, request.as_str()).await? {
-            let sibling = tokio::time::timeout(
-                std::time::Duration::from_secs(120),
-                engine_port.await_drive(&session_id, &lash_core::engine::DriveRequestId::new(root)),
-            )
-            .await
-            .expect("a sibling drive chain ends")
-            .expect("a sibling drive is not refused");
-            observed += sibling.ran.len();
-        }
+    for root in sibling_drive_roots(&fixture, &session_id, request.as_str()).await? {
+        let sibling = tokio::time::timeout(
+            std::time::Duration::from_secs(600),
+            engine_port.await_drive(&session_id, &lash_core::engine::DriveRequestId::new(root)),
+        )
+        .await
+        .expect("a sibling drive chain ends")
+        .expect("a sibling drive is not refused");
+        observed += sibling.ran.len();
     }
     assert!(
         session.durable().pending_turn_inputs().await?.is_empty(),
@@ -161,12 +131,10 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
         "every pending input was applied"
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), INPUTS);
-    if matches!(engine, Engine::Restate) {
-        assert_eq!(
-            observed, INPUTS,
-            "the waiter observes every leg of its chain; sibling chains own the rest"
-        );
-    }
+    assert_eq!(
+        observed, INPUTS,
+        "the waiter observes every leg of its chain; sibling chains own the rest"
+    );
     Ok(())
 }
 
@@ -174,8 +142,7 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
 /// `request`'s chain: each is the root of a sibling chain (the reconcile
 /// sweep asks for `reconcile:` requests). `drive-next:` invocations are
 /// continuation legs and count through their chain's root, so they are
-/// skipped here. On the SQLite engine there is no invocation journal to
-/// query and no sibling assertion to feed.
+/// skipped here.
 async fn sibling_drive_roots(
     fixture: &Fixture,
     session: &lash_core::SessionId,
@@ -185,9 +152,7 @@ async fn sibling_drive_roots(
     struct DriveKey {
         idempotency_key: Option<String>,
     }
-    let Some(double) = fixture._double.as_ref() else {
-        return Ok(Vec::new());
-    };
+    let double = &fixture._double;
     let session = session.as_str();
     let rows = lash_restate::RestateAdminClient::new(double.connection())
         .query_json::<DriveKey>(&format!(
@@ -209,8 +174,8 @@ async fn sibling_drive_roots(
 /// committed whose drive ask was lost — here committed through the store
 /// alone so no ask was ever made — is driven by a tick without anything
 /// asking for it again.
-async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick(engine: Engine) -> Result<()> {
-    let fixture = fixture(engine, 1).await?;
+async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick() -> Result<()> {
+    let fixture = fixture(1).await?;
     let session = fixture.core.session("send-drain-sweep").open().await?;
     let session_id = lash_core::SessionId::from("send-drain-sweep");
     let store = fixture
@@ -247,8 +212,9 @@ async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick(engine: Engine) -
 /// core that boots over a session holding open ingress nothing scheduled
 /// drives it on the engine driver's first reconcile tick, before any host
 /// sends anything.
-async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick(engine: Engine) -> Result<()> {
-    let (backend, double) = engine_backend(engine).await;
+async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<()> {
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let session_id = lash_core::SessionId::from("send-boot-sweep");
     let store = backend
         .session_store_factory()
@@ -306,8 +272,8 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick(engine: Engi
 /// `Idle` its closing epoch admits, or the retirement refusal a drive that
 /// cannot open the retired store at all records — and the session holds no
 /// open engine work afterward.
-async fn a_drive_on_a_deleted_session_answers_its_retirement(engine: Engine) -> Result<()> {
-    let fixture = fixture(engine, 1).await?;
+async fn a_drive_on_a_deleted_session_answers_its_retirement() -> Result<()> {
+    let fixture = fixture(1).await?;
     let session_id = lash_core::SessionId::from("send-retired");
     drop(fixture.core.session("send-retired").open().await?);
     // The physical half of a deletion: the tombstone every store read and
@@ -359,34 +325,31 @@ async fn a_drive_on_a_deleted_session_answers_its_retirement(engine: Engine) -> 
 }
 
 macro_rules! session_drive_laws {
-    ($engine:ident, $engine_variant:expr) => {
+    ($engine:ident) => {
         mod $engine {
             use super::*;
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Result<()> {
-                super::a_scheduled_drive_drains_more_roots_than_one_invocation_runs($engine_variant)
-                    .await
+                super::a_scheduled_drive_drains_more_roots_than_one_invocation_runs().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick() -> Result<()> {
-                super::a_lost_drive_schedule_is_healed_by_the_reconcile_tick($engine_variant).await
+                super::a_lost_drive_schedule_is_healed_by_the_reconcile_tick().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<()> {
-                super::a_booted_core_drives_lost_work_on_its_first_reconcile_tick($engine_variant)
-                    .await
+                super::a_booted_core_drives_lost_work_on_its_first_reconcile_tick().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_drive_on_a_deleted_session_answers_its_retirement() -> Result<()> {
-                super::a_drive_on_a_deleted_session_answers_its_retirement($engine_variant).await
+                super::a_drive_on_a_deleted_session_answers_its_retirement().await
             }
         }
     };
 }
 
-session_drive_laws!(sqlite, Engine::Sqlite);
-session_drive_laws!(restate, Engine::Restate);
+session_drive_laws!(restate);

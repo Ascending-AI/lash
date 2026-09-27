@@ -1,9 +1,28 @@
 use super::*;
 
+const SEED: u64 = 0xc0e1_ca9e;
+
+/// A mock-provider standard core over a fresh double, and the double, which
+/// must outlive the core: under the Restate engine the queued-work driver is
+/// what runs a send, where the SQLite engine ran it inline.
+async fn double_standard_core() -> (LashCore, lash_restate_test::RestateTestBackend) {
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())
+    .expect("standard core over the double");
+    (core, double)
+}
+
 #[tokio::test]
 pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(semantic_group_provider())
@@ -29,8 +48,9 @@ pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Re
 #[tokio::test]
 pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant_prose()
 -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(semantic_group_provider())
@@ -54,8 +74,9 @@ pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant
 
 #[tokio::test]
 pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(retry_once_provider())
@@ -97,7 +118,7 @@ pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> 
 
 #[tokio::test]
 pub(super) async fn control_turn_accepts_prebuilt_turn_input() -> Result<()> {
-    let core = standard_core().await;
+    let (core, _double) = double_standard_core().await;
     let session = core.session("raw-turn").open().await?;
 
     let result = session
@@ -114,8 +135,9 @@ pub(super) async fn control_turn_accepts_prebuilt_turn_input() -> Result<()> {
 pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(checkpoint_gated_provider(entered_tx, release_rx))
@@ -180,7 +202,7 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
 
 #[tokio::test]
 pub(super) async fn cancel_before_drive_yields_cancelled_outcome() -> Result<()> {
-    let core = standard_core().await;
+    let (core, _double) = double_standard_core().await;
     let session = core.session("pre-cancelled").open().await?;
     let handle = session.send(TurnInput::text("never runs")).await?;
     let receipt = handle.cancel().await?;
@@ -198,8 +220,9 @@ pub(super) async fn cancel_before_drive_yields_cancelled_outcome() -> Result<()>
 pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -247,8 +270,9 @@ pub(super) async fn an_input_cancel_stops_its_inflight_turn() -> Result<()> {
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -361,8 +385,9 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -440,9 +465,10 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
         })
         .build()
         .into_handle();
-    let inner = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let inner = double.lash_backend();
     let catalog = inner.session_store_factory();
-    let backend = DecoratedBackend::over(inner.into())
+    let backend = DecoratedBackend::over(inner)
         .session_store_factory(|inner| Arc::new(CreateOnlySessionStoreFactory { inner }));
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
         backend.into(),
@@ -573,6 +599,10 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
         })
         .build()
         .into_handle();
+    // The hydration count this law asserts is the native queued-work
+    // driver's batching: under the Restate engine each drain is its own
+    // invocation and hydrates afresh. It stays on SQLite until B3 removes
+    // the native driver.
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
@@ -686,8 +716,9 @@ pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_t
     // starts a fresh provider call after the user pressed stop.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -734,8 +765,9 @@ pub(super) async fn an_input_cancel_reaches_a_send_through_a_separately_opened_h
     // reaches a send another handle made, and cancels nothing else.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -778,8 +810,9 @@ pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Re
     // that one request: one cancellation is one identity.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -823,8 +856,9 @@ pub(super) async fn a_session_cancel_reaches_a_sent_input_its_waiter_drives() ->
     // cancel from the session still reaches that root through its gate.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -871,6 +905,12 @@ pub(super) async fn assert_session_turn_cancel_disposition(
 ) -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
+    // The Drop arm asserts the raw `pending_turn_inputs.state` lifecycle
+    // column: evidence no engine-neutral API reports, reachable only through
+    // the sqlite catalog (`StoreSet` exposes no downcast and the double
+    // offers no durable-core inspection affordance). Both disposition arms
+    // share this helper, so it stays on SQLite until a store-level
+    // lifecycle read exists — see the report's unresolved items.
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -1040,8 +1080,9 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1180,8 +1221,9 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1309,11 +1351,13 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
             })
             .build()
             .into_handle();
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
-            .provider(provider)
-            .model(mock_model_spec())
-            .map_backend(crate::tests::inline_session_work)
-            .build(crate::testing::runtime_lease_owner())?;
+        let double = restate_double(SEED).await;
+        let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(
+            double.lash_backend(),
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-active-input-next-iteration")
             .open()
@@ -1388,7 +1432,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
 
 #[tokio::test]
 pub(super) async fn turn_stream_receives_semantic_activities() -> Result<()> {
-    let core = standard_core().await;
+    let (core, _double) = double_standard_core().await;
     let session = core.session("semantic-stream").open().await?;
     let turn_events = RecordingEvents::default();
 
@@ -1413,7 +1457,7 @@ pub(super) async fn turn_stream_receives_semantic_activities() -> Result<()> {
 
 #[tokio::test]
 pub(super) async fn run_collects_ordered_assistant_prose_activity() -> Result<()> {
-    let core = standard_core().await;
+    let (core, _double) = double_standard_core().await;
     let session = core.session("main").open().await?;
 
     let result = session.send(TurnInput::text("visible")).output().await?;
@@ -1448,8 +1492,9 @@ pub(super) async fn run_collects_ordered_assistant_prose_activity() -> Result<()
 #[tokio::test]
 pub(super) async fn core_catalog_and_actual_turn_resolve_the_identical_contract() -> Result<()> {
     let tools = ContractRecordingTools::default();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(tool_roundtrip_provider())
@@ -1549,8 +1594,9 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
 #[tokio::test]
 pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     let live = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(tool_roundtrip_provider())
@@ -1593,6 +1639,11 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
 #[test]
 pub(super) fn turn_run_batch_tool_runs_every_call_concurrently_and_preserves_order() -> Result<()> {
     run_async_test_on_stack_size("runtime-batch-tool-order-test", 8 * 1024 * 1024, || async {
+        // The barrier concurrency this law asserts needs the batch's child
+        // dispatches overlapped in-process: the double's journaled nested
+        // dispatch settles them one at a time, so the overlap law stays on
+        // the SQLite engine until a concurrent-dispatch route exists on the
+        // double (see the B1 report's unresolved items).
         let tools = Arc::new(RuntimeBatchTools::new());
         let tool_provider: Arc<dyn ToolProvider> = tools.clone();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -1665,8 +1716,9 @@ pub(super) fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()
         || async {
             let tools = Arc::new(RuntimeBatchTools::new());
             let tool_provider: Arc<dyn ToolProvider> = tools.clone();
-            let core = explicit_ephemeral_facets(LashCore::standard_builder(
-                memory_backend().await.into(),
+            let double = restate_double(SEED).await;
+            let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+                double.lash_backend(),
                 crate::TurnBudget::Unbounded,
             ))
             .provider(runtime_batch_provider())

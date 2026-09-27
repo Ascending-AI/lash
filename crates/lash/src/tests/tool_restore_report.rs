@@ -4,6 +4,8 @@
 use super::*;
 use lash_sansio::SessionId;
 
+const SEED: u64 = 0x7001_3357;
+
 /// Counts the lifecycle facts a refused open must not produce.
 #[derive(Default)]
 struct OpenLifecycleCounters {
@@ -64,18 +66,16 @@ impl lash_core::facade_support::SessionPlugin for OpenLifecycleProbePlugin {
     }
 }
 
-/// Persist a session whose checkpoint carries `tool:app_lookup`, on a core that
-/// has the tool's source, and hand back the catalog it lives in.
+/// Persist a session whose checkpoint carries `tool:app_lookup`, on a core
+/// over `backend` that has the tool's source, and hand back the catalog it
+/// lives in.
 async fn seed_session_with_a_persisted_tool(
+    backend: &lash_core::Backend,
     session_id: &SessionId,
-) -> Result<(
-    Arc<lash_sqlite_store::SqliteBackend>,
-    Arc<dyn SessionStoreFactory>,
-)> {
-    let backend = memory_backend().await;
+) -> Result<Arc<dyn SessionStoreFactory>> {
     let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
-    let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+    let granting_core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -89,7 +89,7 @@ async fn seed_session_with_a_persisted_tool(
         .output()
         .await?;
     Box::pin(granted.close()).await?;
-    Ok((backend, factory))
+    Ok(factory)
 }
 
 async fn durable_head_revision(
@@ -114,10 +114,12 @@ async fn durable_head_revision(
 #[tokio::test]
 async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     let session_id = SessionId::from("fig-3367-tolerate");
-    let (backend, _) = seed_session_with_a_persisted_tool(&session_id).await?;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
+    let _factory = seed_session_with_a_persisted_tool(&backend, &session_id).await?;
 
     let grantless_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -146,12 +148,14 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
 #[tokio::test]
 async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     let session_id = SessionId::from("fig-3367-require");
-    let (backend, factory) = seed_session_with_a_persisted_tool(&session_id).await?;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
+    let factory = seed_session_with_a_persisted_tool(&backend, &session_id).await?;
     let head_before = durable_head_revision(factory.as_ref(), &session_id).await?;
 
     let counters = Arc::new(OpenLifecycleCounters::default());
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -195,7 +199,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     // The lease the refused open claimed was released: a following open takes
     // it. Tolerate here, because the point is the lease, not the policy.
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -212,10 +216,12 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
 #[tokio::test]
 async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     let session_id = SessionId::from("fig-3367-per-open");
-    let (backend, _) = seed_session_with_a_persisted_tool(&session_id).await?;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
+    let _factory = seed_session_with_a_persisted_tool(&backend, &session_id).await?;
 
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -262,11 +268,15 @@ async fn require_makes_a_queued_work_rebuild_a_terminal_failure() -> Result<()> 
     use crate::runtime::{QueuedWorkRunErrorClass, QueuedWorkRunRequest};
     use lash_core::facade_support::QueuedWorkRunHandle as _;
 
+    // The native queued-work handle is the driver this law exercises: its
+    // substrate is a later FIG-3668 step's deletion, so this one stays on the
+    // SQLite engine until then (B3).
     let session_id = SessionId::from("fig-3367-queued");
-    let (backend, factory) = seed_session_with_a_persisted_tool(&session_id).await?;
+    let backend: lash_core::Backend = memory_backend().await.into();
+    let factory = seed_session_with_a_persisted_tool(&backend, &session_id).await?;
 
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

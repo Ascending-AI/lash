@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0xb1_1d45;
+
 #[tokio::test]
 pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effects() -> Result<()> {
     let recorder = EffectRecorder::default();
@@ -161,8 +163,9 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -216,8 +219,9 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
 #[tokio::test]
 pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
 -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -298,8 +302,9 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
 
 #[tokio::test]
 pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

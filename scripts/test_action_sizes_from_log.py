@@ -507,18 +507,18 @@ class TestRunRequestTest(unittest.TestCase):
         )
 
     def test_a_pinned_label_asks_for_its_pin(self) -> None:
-        label = "//crates/lash-protocol-rlm:cell_binding_drift__test"
+        label = "//crates/lash-restate-test:test_batch"
         pin = generator.PINNED_TEST_RUNS[label]
         self.assertEqual(
             generator.test_run_request(
-                "lash-internal-protocol-rlm", "cell_binding_drift", label
+                "lash-internal-restate-test", "test_batch", label
             ),
             dict(pin),
         )
         # The pin reaches the feature variant through the base label.
         self.assertEqual(
             generator.test_run_request(
-                "lash-internal-protocol-rlm", "cell_binding_drift", f"{label}__fv_0123abcd"
+                "lash-internal-restate-test", "test_batch", f"{label}__fv_0123abcd"
             ),
             dict(pin),
         )

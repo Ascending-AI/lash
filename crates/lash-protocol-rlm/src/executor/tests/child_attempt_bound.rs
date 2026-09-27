@@ -2,6 +2,8 @@
 
 use super::*;
 
+const SEED: u64 = 0x07e5_5b0d;
+
 /// An artifact store that publishes normally but fails every read.
 ///
 /// A worker wired to this store meets the same infrastructure failure on every
@@ -92,7 +94,9 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
 
     let published: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
-    let backend = memory_backend().await;
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let registry = backend.process_registry();
     let process_env_store = backend.process_env_store();
     let surface = LashlangSurface::new(
@@ -115,6 +119,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
         let surface = surface.clone();
         let session_policy = session_policy.clone();
         let backend = backend.clone();
+        let double = &double;
         async move {
             let effect_host = backend.effect_host();
             let processes: Arc<dyn lash_core::ProcessService> =
@@ -125,12 +130,15 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
                     env_store: Arc::clone(&process_env_store),
                     engines: fixture_process_engines(published.clone(), surface.clone()),
                 });
+            // Each run is a fresh cell on a handler of its own, as it ran on a
+            // host of its own.
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("open the cell's handler");
             let ctx = lash_core::testing::with_engine_child_max_attempts(
                 lash_core::testing::code_execution_context_with_process_dependencies(
-                    lash_core::testing::TestExecutionPorts::over_host(
-                        effect_host,
-                        process_env_store,
-                    ),
+                    crate::testing::double_ports(double, &handler),
                     Arc::new(ProcessControlToolProvider),
                     process_control_tool_catalog(),
                     None,
@@ -145,7 +153,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
             // A fresh execution state is exactly the redrive case: the pin the
             // first run held never reached the durable snapshot.
             let mut state = RlmExecutionState::for_engine("typescript");
-            execute_code_with_channel_and_bounds(
+            let response = execute_code_with_channel_and_bounds(
                 &mut state,
                 ctx.clone(),
                 ExecRequest {
@@ -166,7 +174,10 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )
-            .await
+            .await;
+            drop(ctx);
+            handler.close().await.expect("close the cell's handler");
+            response
         }
     };
 

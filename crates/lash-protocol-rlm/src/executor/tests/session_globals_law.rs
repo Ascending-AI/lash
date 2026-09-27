@@ -103,10 +103,15 @@ fn assert_exact_globals(state: &RlmExecutionState, names: &[&str], after: &str) 
     );
 }
 
-/// A cell context whose tool surface can start a process.
-async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
+/// A cell context whose tool surface can start a process: the double's
+/// ports under `handler`, with the process service journaling its env and
+/// signal routes on the double's deployment host.
+async fn process_context<'h>(
+    double: &lash_restate_test::RestateTestBackend,
+    handler: &'h lash_restate_test::OpenHandler,
+) -> lash_core::RuntimeExecutionContext<'h> {
     let artifact_store: lashlang::LashlangArtifacts = crate::testing::memory_artifact_store().await;
-    let backend = memory_backend().await;
+    let backend = double.lash_backend();
     let process_env_store = backend.process_env_store();
     let effect_host = backend.effect_host();
     let session_policy = lash_core::SessionPolicy {
@@ -124,7 +129,7 @@ async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
         engines: fixture_process_engines(artifact_store, LashlangSurface::default()),
     });
     lash_core::testing::code_execution_context_with_process_dependencies(
-        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
+        crate::testing::double_ports(double, handler),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
@@ -199,9 +204,15 @@ const total = [1, 2, 3].map((value) => value * 2).length;"#,
         let mut state = cold_reload(&state);
         assert_exact_globals(&state, CELL_1_GLOBALS, "reload after cell 1");
 
+        let process_double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let process_handler = process_double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the process cell's handler");
         let second = run_in(
             &mut state,
-            process_context().await,
+            process_context(&process_double, &process_handler).await,
             r#"let reader = null;
 if (counter > 0) {
   let answer = 5;
@@ -213,6 +224,10 @@ const later = reader() + answer;
 const from_host = host_config.label;"#,
         )
         .await;
+        process_handler
+            .close()
+            .await
+            .expect("close the process cell's handler");
         assert_eq!(second.error, None, "cell 2");
         assert_exact_globals(&state, CELL_2_GLOBALS, "cell 2");
         let mut state = cold_reload(&state);

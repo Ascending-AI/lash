@@ -3,6 +3,8 @@ use super::*;
 use crate::process_grammar_tests::run_sleep_process;
 use lashlang::testing::ast_builders as b;
 
+const SEED: u64 = 0x1a5_1a9;
+
 thread_local! {
     /// Backends opened on this test thread, held until the thread ends: a
     /// memory backend's effect journal reaches its process registry by name,
@@ -12,6 +14,9 @@ thread_local! {
 }
 
 /// A fresh SQLite memory backend (ADR 0102), held for the rest of the test.
+/// Kept for the durable-journal subjects later lanes still own (FIG-3668 B4:
+/// deferred grant folds dispatch `language_runtime_value` effects through the
+/// journal, which only the real engine host synthesizes).
 pub(crate) async fn memory_backend() -> lash_sqlite_store::SqliteBackend {
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
@@ -20,11 +25,11 @@ pub(crate) async fn memory_backend() -> lash_sqlite_store::SqliteBackend {
     backend
 }
 
-/// A fresh memory backend's Lashlang artifact store.
+/// A fresh memory store set's Lashlang artifact store: a storage port a test
+/// reaches without an engine.
 pub(crate) async fn memory_artifact_store() -> LashlangArtifacts {
-    LashlangArtifacts::new(lash_core::Backend::module_artifacts(
-        &memory_backend().await.into(),
-    ))
+    use lash_core_execution::StoreSet;
+    LashlangArtifacts::new(memory_store_set().await.module_artifacts())
 }
 
 thread_local! {
@@ -95,46 +100,171 @@ fn effect_group_wait_identity_uses_the_durable_group_contract() {
 pub(crate) async fn register_harness_process(
     registry: &Arc<dyn lash_core::ProcessRegistry>,
     registration: &lash_core::ProcessRegistration,
+    env_ref: &lash_core::ProcessExecutionEnvRef,
 ) -> lash_core::ProcessId {
-    let env_ref = lash_core::testing::process_execution_env_fixture_ref();
     registry
-        .register_process(registration.clone().with_execution_env_ref(Some(env_ref)))
+        .register_process(
+            registration
+                .clone()
+                .with_execution_env_ref(Some(env_ref.clone())),
+        )
         .await
         .expect("register the harness process")
         .id
 }
 
-/// A process engine runs inside a durable process execution. The harness
-/// records the registered process's start under the invocation's authority and
-/// wires its event log, which the runtime writes the durable effect summary to
-/// (FIG-3464).
-pub(crate) async fn durable_process_events(
-    registry: &Arc<dyn lash_core::ProcessRegistry>,
-    process_id: &lash_core::ProcessId,
-    authority: &lash_core::ProcessExecutionWriteAuthority,
-) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
-    let started = authority
-        .invocation_started()
-        .expect("the harness invocation names its execution");
-    registry
-        .record_first_started_with_authority(process_id, started, authority)
+/// The session policy the harness's execution env declares: the worker
+/// builds its runtime over it, so it must carry model metadata.
+fn harness_session_policy() -> lash_core::SessionPolicy {
+    lash_core::SessionPolicy {
+        model: lash_core::ModelSpec::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("harness model"),
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+    }
+}
+
+/// A lashlang process fixture over the Restate server double: an admitted
+/// process runs inside a real `LashProcessWorkflow` segment, so its effects
+/// journal exactly the way a deployed segment's do. The harness owns the
+/// double, which must outlive every run it admits.
+pub(crate) struct DoubleProcessHarness {
+    double: lash_restate_test::RestateTestBackend,
+    backend: lash_core::Backend,
+    wiring: lash_core::ProcessWorkWiring,
+    env_ref: lash_core::ProcessExecutionEnvRef,
+}
+
+impl DoubleProcessHarness {
+    /// The double's lash backend: its process registry is the process table
+    /// the deployed workflow and this fixture share.
+    pub(crate) fn backend(&self) -> &lash_core::Backend {
+        &self.backend
+    }
+
+    /// The registry `admit` registers on and `await_terminal` watches.
+    pub(crate) fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
+        self.backend.process_registry()
+    }
+
+    /// The execution env the harness published: every registration it admits
+    /// must carry this reference.
+    pub(crate) fn env_ref(&self) -> &lash_core::ProcessExecutionEnvRef {
+        &self.env_ref
+    }
+
+    /// The artifact store the installed worker loads its modules from: the
+    /// backend's own, so a module a test publishes is the module the segment
+    /// decodes.
+    pub(crate) fn artifact_store(&self) -> LashlangArtifacts {
+        LashlangArtifacts::new(lash_core::Backend::module_artifacts(&self.backend))
+    }
+
+    /// Serve process segments on `engine`, with `extra_factories` added to
+    /// the code-protocol test plugins any process may need.
+    pub(crate) fn install_lashlang_worker(
+        &self,
+        engine: LashlangProcessEngine,
+        extra_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+    ) {
+        let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+            self.backend.clone(),
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_process_engine_registration(lashlang_process_engine_registration(engine));
+        let mut factories = lash_core::testing::test_code_protocol_factories();
+        factories.extend(extra_factories);
+        let worker = lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::new(
+                Arc::new(lash_core::facade_support::PluginHost::new(factories)),
+                runtime_host,
+                lash_core_worker::WorkerProcessWork::External(self.wiring.clone()),
+                Arc::new(lash_core::NoSessionWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(harness_session_policy()),
+        )
+        .expect("valid double process worker");
+        self.double.install_process_worker(worker);
+    }
+
+    /// Register `registration` and admit it: the engine's ingress sweep
+    /// submits the row to the deployment, whose workflow runs it on the
+    /// installed worker.
+    pub(crate) async fn admit(
+        &self,
+        registration: lash_core::ProcessRegistration,
+    ) -> lash_core::ProcessId {
+        let process_id = self
+            .registry()
+            .register_process(registration)
+            .await
+            .expect("register the harness process")
+            .id;
+        self.drive_pending().await;
+        process_id
+    }
+
+    /// Admit every pending registry row to the installed worker: for a test
+    /// that registers through `register_harness_process` or its own sweep.
+    pub(crate) async fn drive_pending(&self) {
+        let _report = self
+            .wiring
+            .admit_pending_processes("test")
+            .await
+            .expect("admit the harness process");
+    }
+
+    /// Await the process's terminal registry record.
+    pub(crate) async fn await_terminal(
+        &self,
+        process_id: &lash_core::ProcessId,
+    ) -> lash_core::ProcessAwaitOutput {
+        lash_core::NativeProcessWork::for_registry(self.registry())
+            .await_terminal(process_id)
+            .await
+            .expect("the harness process reaches a terminal record")
+    }
+}
+
+/// A fresh double ready to admit a process: the harness execution env is
+/// published up front, its reference stamped on every registration `admit`
+/// and `register_harness_process` make.
+pub(crate) async fn double_process_harness() -> DoubleProcessHarness {
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
-        .expect("record the harness execution start");
-    lash_core_execution::session::RuntimeExecutionProcessEventContext {
-        execution_write_authority: authority.clone(),
-        process_work: lash_core::testing::process_work_wiring_for_registry(Arc::clone(registry)),
-        store: None,
-        session_store_factory: None,
-        queued_work: Arc::new(lash_core::NoSessionWork::new()),
-        process_wake_delivery_policy: lash_core::DeliveryPolicy::EarliestSafeBoundary,
-        clock: Arc::new(lash_core::facade_support::SystemClock),
+        .expect("build the Restate server double");
+    let backend = double.lash_backend();
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
+        backend.process_env_store().as_ref(),
+        &lash_core::ArtifactOwner::host("lashlang-harness-env"),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::default(),
+            harness_session_policy(),
+        ),
+    )
+    .await
+    .expect("the harness execution env publishes");
+    let wiring = backend
+        .process_work()
+        .expect("the double wires process work");
+    DoubleProcessHarness {
+        double,
+        backend,
+        wiring,
+        env_ref,
     }
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn real_process_sleep_until_emits_deadline_and_completion() {
     let (result, graph_store) = run_sleep_process().await;
-    assert!(result.is_terminal());
+    assert!(
+        matches!(result, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),
+        "the sleep process settles successfully: {result:?}"
+    );
     let graph = graph_store
         .graphs()
         .into_iter()
@@ -187,7 +317,8 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         }
     }
 
-    let store = crate::lib_tests::memory_artifact_store().await;
+    let harness = crate::lib_tests::double_process_harness().await;
+    let store = harness.artifact_store();
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process listen() signals { ready: any } { await wait_signal(ready); finish null }",
         program: b::module(
@@ -226,118 +357,29 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         process_name: "listen".to_string(),
         args: serde_json::Map::new(),
     };
-    let registration = || {
-        lash_core::ProcessRegistration::new(
-            input.to_process_input().expect("valid process input"),
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::host(),
-            lash_core::LifetimeDecision::Detached,
-        )
-        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-            input.process_identity(),
-        ))
-        .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
-            "signal-fixture-env",
-        )))
-    };
-    let registry = lash_core::Backend::from(memory_backend().await).process_registry();
-    let process_id = registry
-        .register_process(registration())
-        .await
-        .expect("signal process registers")
-        .id;
-    let owner = lash_core::LeaseOwnerIdentity::opaque("signal-worker", "signal-worker-run");
-    let lease = registry
-        .claim_process_lease(&process_id, &owner, 60_000)
-        .await
-        .expect("claim signal process")
-        .acquired()
-        .expect("signal process lease");
-    registry
-        .record_first_started_with_authority(
-            &process_id,
-            lash_core::ProcessStarted {
-                owner,
-                fencing_token: lease.fencing_token,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-            &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
-        )
-        .await
-        .expect("record signal process start");
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a SQLite memory backend");
-    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
-    let scoped = lash_core::EffectHost::scoped_static(
-        effect_host.as_ref(),
-        lash_core::AdmittedScope::process(process_id.clone()),
+    let registration = lash_core::ProcessRegistration::new(
+        input.to_process_input().expect("valid process input"),
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+        lash_core::LifetimeDecision::Detached,
     )
-    .expect("valid process scope")
-    .expect("the backend host lends a static controller");
-    let parent = lash_core::RuntimeInvocation::effect(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::process(process_id.clone()),
-            "process-body",
-        )
-        .expect("valid process effect address"),
-        lash_core::RuntimeAttribution::none(),
-        "process-body",
-    );
-    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
-        .runtime_parent_invocation(parent)
-        .build();
-    let plugins = Arc::clone(&built.dispatch.plugins);
-    let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let expected_catalog = Arc::clone(&catalog);
-    let registry_port: Arc<dyn lash_core::ProcessRegistry> = registry;
-    let context = lash_core::ProcessEngineRunContext::new(
-        registration(),
-        process_id.clone(),
-        lash_core::ProcessExecutionContext::default().with_execution_write_authority(
-            lash_core::ProcessExecutionWriteAuthority::lease(lease).bind_attempt(1),
-        ),
-        lash_core::testing::process_work_wiring_for_registry(registry_port),
-        lash_core::SessionId::from("signal-session"),
-        plugins,
-        catalog,
-        None,
-        None,
-        Arc::new(lash_core::NoSessionWork::new()),
-        lash_core::DeliveryPolicy::EarliestSafeBoundary,
-        Arc::new(lash_core::facade_support::SystemClock),
-        true,
-        lash_core::CancellationToken::new(),
-        None,
-        scoped,
-        None,
-        Box::new(move |catalog| {
-            assert!(Arc::ptr_eq(&catalog, &expected_catalog));
-            Ok(
-                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built.into_runtime(),
-                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
-                        Box::pin(async { Ok(()) })
-                    }),
-                ),
-            )
-        }),
-    );
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        input.process_identity(),
+    ))
+    .with_execution_env_ref(Some(harness.env_ref().clone()));
     let graph = Arc::new(TraceLashlangGraphStore::default());
     let (waiting, mut observed_wait) = tokio::sync::mpsc::unbounded_channel();
     let sink: Arc<dyn lash_trace::TraceSink> = Arc::new(SignalSink {
         graph: Arc::clone(&graph),
         waiting,
     });
-    let run = Box::pin(crate::process::run_lashlang_process(
+    harness.install_lashlang_worker(
         LashlangProcessEngine::new(store, LashlangSurface::default())
             .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
-        context,
-        serde_json::to_value(input).expect("process input serializes"),
-    ));
+        Vec::new(),
+    );
+    let process_id = harness.admit(registration).await;
+    let effect_host = harness.backend().effect_host();
     let resolve = async {
         if observed_wait.recv().await.is_none() {
             return false;
@@ -361,17 +403,23 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         ));
         true
     };
-    let (result, observed) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        tokio::join!(run, resolve)
+    let (terminal, observed) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let resolve = resolve;
+        let observed = resolve.await;
+        let terminal = harness.await_terminal(&process_id).await;
+        (terminal, observed)
     })
     .await
     .expect("signal process and resolver finish");
     assert!(
         observed,
-        "run ended before signal wait: {result:?}; graphs: {:?}",
+        "run ended before signal wait: {terminal:?}; graphs: {:?}",
         graph.graphs()
     );
-    assert!(result.expect("signal process runs").is_terminal());
+    assert!(
+        matches!(terminal, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),
+        "the signal process settles successfully: {terminal:?}"
+    );
     let graph = graph.graphs().into_iter().next().expect("signal graph");
     let expected_key = lash_core::facade_support::process_signal_wait_key(&process_id, "ready", 1);
     assert!(graph.history.iter().any(|event| matches!(
@@ -389,6 +437,30 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
+    /// The fixture echo tool under the `tools` module binding the compiled
+    /// program calls it by: the deployment's manifest must carry the
+    /// `typescript.tool` binding the import spelled.
+    struct BoundFixtureTools(lash_core::testing::FixtureTools);
+
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for BoundFixtureTools {
+        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+            vec![
+                lash_core::testing::fixture_echo_definition()
+                    .with_tool_binding(ToolBinding::new(["tools"], "echo"))
+                    .manifest(),
+            ]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+            self.0.resolve_contract(name)
+        }
+
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+            self.0.execute(call).await
+        }
+    }
+
     let tool = lash_core::testing::fixture_echo_definition()
         .with_tool_binding(ToolBinding::new(["tools"], "echo"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
@@ -400,7 +472,8 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
             vec![b::record(vec![("value", b::string(value))])],
         ))
     };
-    let store = crate::lib_tests::memory_artifact_store().await;
+    let harness = crate::lib_tests::double_process_harness().await;
+    let store = harness.artifact_store();
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process batch() -> null { let values = await (tools.echo({value: 'a'})?, tools.echo({value: 'b'})?); finish null }",
         program: b::module(
@@ -445,86 +518,30 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),
     ));
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a SQLite memory backend");
-    let registry = lash_core::Backend::from(backend.clone()).process_registry();
-    let process_id = crate::lib_tests::register_harness_process(&registry, &registration).await;
-    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
-    let scoped = lash_core::EffectHost::scoped_static(
-        effect_host.as_ref(),
-        lash_core::AdmittedScope::process(process_id.clone()),
-    )
-    .expect("valid process scope")
-    .expect("the backend host lends a static controller");
-    let parent = lash_core::RuntimeInvocation::effect(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::process(process_id.clone()),
-            "process-body",
-        )
-        .expect("valid process effect address"),
-        lash_core::RuntimeAttribution::none(),
-        "process-body",
-    );
-    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
-        .provider(Arc::new(lash_core::testing::FixtureTools::new()))
-        .tool_catalog(catalog)
-        .runtime_parent_invocation(parent)
-        .build();
-    let plugins = Arc::clone(&built.dispatch.plugins);
-    let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let expected_catalog = Arc::clone(&catalog);
-    let authority =
-        lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "batch-run")
-            .bind_attempt(1);
-    let process_events = durable_process_events(&registry, &process_id, &authority).await;
-    let execution_registration = registration.clone();
-    let execution_process_id = process_id.clone();
-    let context = lash_core::ProcessEngineRunContext::new(
-        registration,
-        process_id.clone(),
-        lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
-        lash_core::testing::process_work_wiring_for_registry(registry),
-        lash_core::SessionId::from("batch-session"),
-        plugins,
-        catalog,
-        None,
-        None,
-        Arc::new(lash_core::NoSessionWork::new()),
-        lash_core::DeliveryPolicy::EarliestSafeBoundary,
-        Arc::new(lash_core::facade_support::SystemClock),
-        true,
-        lash_core::CancellationToken::new(),
-        None,
-        scoped,
-        None,
-        Box::new(move |catalog| {
-            assert!(Arc::ptr_eq(&catalog, &expected_catalog));
-            Ok(
-                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built.into_runtime().with_process_execution(
-                        execution_process_id,
-                        &execution_registration,
-                        process_events,
-                    ),
-                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
-                        Box::pin(async { Ok(()) })
-                    }),
-                ),
-            )
-        }),
-    );
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
-    let result = Box::pin(crate::process::run_lashlang_process(
+    harness.install_lashlang_worker(
         LashlangProcessEngine::new(store, LashlangSurface::default())
             .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
-        context,
-        serde_json::to_value(input).expect("process input serializes"),
-    ))
-    .await
-    .expect("batch process runs");
-    assert!(result.is_terminal());
+        vec![Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "fixture-tools",
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
+                BoundFixtureTools(lash_core::testing::FixtureTools::new()),
+            )),
+        ))],
+    );
+    let process_id = crate::lib_tests::register_harness_process(
+        &harness.registry(),
+        &registration,
+        harness.env_ref(),
+    )
+    .await;
+    harness.drive_pending().await;
+    let result = harness.await_terminal(&process_id).await;
+    assert!(
+        matches!(result, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),
+        "the batch process settles successfully: {result:?}"
+    );
     let graph = graph_store
         .graphs()
         .into_iter()
@@ -1647,6 +1664,9 @@ process scan(root: str) -> str {
         ),
     ];
     for (input, catalog, registry_available, expected_code, expected_message) in cases {
+        let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+            .await
+            .expect("build the Restate server double");
         let payload = serde_json::to_value(&input).expect("valid process payload");
         let registration = lash_core::ProcessRegistration::new(
             input.to_process_input().expect("valid engine input"),
@@ -1658,7 +1678,7 @@ process scan(root: str) -> str {
             input.process_identity(),
         ));
         let context = lash_core::testing::process_engine_run_context_for_validation(
-            &memory_backend().await.into(),
+            &double.lash_backend(),
             registration,
             catalog,
             registry_available,
