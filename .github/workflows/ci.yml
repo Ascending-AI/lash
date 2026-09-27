@@ -520,6 +520,7 @@ jobs:
           python3 scripts/test_checkout_step.py
           python3 scripts/test_ci_workspace_cache.py
           python3 scripts/test_ci_artifact_provenance.py
+          python3 scripts/test_ci_report_failed_tests.py
           python3 scripts/test_toolchain_pin.py
           GATES
 
@@ -689,7 +690,31 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --cache_test_results=yes --test_output=errors \
-            //:feature_lane_tests
+            //:feature_lane_tests 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
+
+      # A FAILED line names the target but not the case; on a remote executor
+      # kill it is all the output there is. The report names each failed
+      # target and its failing cases and stages the targets' testlogs
+      # directories for the artifact below.
+      - name: Summarize failing test targets
+        if: failure()
+        shell: bash
+        run: |
+          python3 scripts/ci/report_failed_tests.py \
+            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
+            --testlogs bazel-testlogs \
+            --stage "${RUNNER_TEMP}/failed-testlogs" \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload failing test logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failed-testlogs-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failed-testlogs/
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
 
       # The `default-off-tests` leg of the retired `Runtime feature boundary`
       # matrix counted the default build's test cases as well as running them.
@@ -792,11 +817,11 @@ jobs:
             bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
               ${BAZEL_SHARED_CACHE_FLAGS} \
               --remote_download_outputs=minimal \
-              --remote_download_regex='.*test\.outputs.*' \
+              --remote_download_regex='.*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$' \
               --cache_test_results=yes --test_output=errors \
               --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
               --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-              -- "${tests[@]}"
+              -- "${tests[@]}" 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
           fi
 
       # Every label is deterministic and service-free; service-backed tests
@@ -842,11 +867,36 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
-            --remote_download_regex='.*test\.outputs.*' \
+            --remote_download_regex='.*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$' \
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
             --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            -- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures ${{ needs.plan.outputs.pr_tail_labels }}
+            -- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures ${{ needs.plan.outputs.pr_tail_labels }} \
+            2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
+
+      # A FAILED line names the target but not the case; on a remote executor
+      # kill it is all the output there is. The report names each failed
+      # target and its failing cases and stages the targets' testlogs
+      # directories for the artifact below.
+      - name: Summarize failing test targets
+        if: failure()
+        shell: bash
+        run: |
+          python3 scripts/ci/report_failed_tests.py \
+            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
+            --testlogs bazel-testlogs \
+            --stage "${RUNNER_TEMP}/failed-testlogs" \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload failing test logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failed-testlogs-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failed-testlogs/
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
 
       # FIG-3429 item 8: conformance laws leave an execution receipt in each
       # target's undeclared outputs; this census fails on any registered law
@@ -925,11 +975,35 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
-            --remote_download_regex='.*test\.outputs.*' \
+            --remote_download_regex='.*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$' \
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
             --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            //:workspace_tail_tests
+            //:workspace_tail_tests 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
+
+      # A FAILED line names the target but not the case; on a remote executor
+      # kill it is all the output there is. The report names each failed
+      # target and its failing cases and stages the targets' testlogs
+      # directories for the artifact below.
+      - name: Summarize failing test targets
+        if: failure()
+        shell: bash
+        run: |
+          python3 scripts/ci/report_failed_tests.py \
+            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
+            --testlogs bazel-testlogs \
+            --stage "${RUNNER_TEMP}/failed-testlogs" \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload failing test logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failed-testlogs-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failed-testlogs/
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
 
       # Same law-execution census as the main leg: whichever law-bearing
       # targets the tail ran must have executed their full registered set.
@@ -1523,7 +1597,29 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --cache_test_results=yes --test_output=errors \
-            //:deferred_tests
+            //:deferred_tests 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
+
+      # Same failing-target report as the partition jobs: names the target and
+      # its failing cases and stages the testlogs for the artifact below.
+      - name: Summarize failing test targets
+        if: failure()
+        shell: bash
+        run: |
+          python3 scripts/ci/report_failed_tests.py \
+            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
+            --testlogs bazel-testlogs \
+            --stage "${RUNNER_TEMP}/failed-testlogs" \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload failing test logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failed-testlogs-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failed-testlogs/
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
 
       - name: Test deferred Unicode suites (Cargo)
         if: needs.plan.outputs.bazel_trusted != 'true'

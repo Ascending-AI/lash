@@ -841,14 +841,14 @@
   },
   "//crates/lash:lash__unit_test": {
     "cpu_count": 6,
-    "memory_kb": 1048576,
+    "memory_kb": 3145728,
     "p95_cores": 5.61,
     "peak_bytes": 189743104,
     "samples": 18
   },
   "//crates/lash:lash__unit_test__fv_70fc9f3b": {
     "cpu_count": 4,
-    "memory_kb": 1048576,
+    "memory_kb": 3145728,
     "p95_cores": 3.65,
     "peak_bytes": 69361664,
     "samples": 4

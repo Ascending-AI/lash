@@ -647,6 +647,35 @@ class BazelTestContractTests(unittest.TestCase):
                     "${{ runner.temp }}/bazel-exec-log.binpb.zst", upload["with"]["path"]
                 )
 
+    def test_failing_tests_leave_names_and_logs_in_ci(self) -> None:
+        """A red pool test must be diagnosable from the job alone.
+
+        The partition runs `minimal` downloads, so a failed target's test.log
+        and JUnit XML reach the runner only through `remote_download_regex`
+        (the same selection `--config=shared` carries locally). Each remote
+        test leg tees its console output for the failing-target report, which
+        also stages the targets' testlogs for the `failure()`-gated artifact.
+        """
+        jobs = workflow()["jobs"]
+        regex = ".*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$"
+        for job_id, step_name in (
+            ("bazel-tests", "Test the affected targets with shared cache"),
+            ("bazel-tests", "Test the workspace core suite with shared cache"),
+            ("bazel-tests-tail", "Test the workspace tail suite with shared cache"),
+            ("feature-lanes", "Run the executable feature lanes"),
+            ("unicode-tests", "Test deferred Unicode suites (Bazel)"),
+        ):
+            with self.subTest(job=job_id, step=step_name):
+                run = job_step(jobs[job_id], step_name)["run"]
+                self.assertIn('tee "${RUNNER_TEMP}/bazel-test-output.txt"', run)
+                if "remote_download_outputs=minimal" in run:
+                    self.assertIn(f"--remote_download_regex='{regex}'", run)
+                step_names = [step.get("name") for step in jobs[job_id]["steps"]]
+                self.assertIn("Summarize failing test targets", step_names)
+                self.assertIn("Upload failing test logs", step_names)
+                for name in ("Summarize failing test targets", "Upload failing test logs"):
+                    self.assertEqual("failure()", job_step(jobs[job_id], name)["if"])
+
     def test_the_shared_cache_action_fails_closed_on_a_bad_secret(self) -> None:
         """A misconfigured environment must name what is wrong, not build wrong.
 
