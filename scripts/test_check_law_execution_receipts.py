@@ -515,6 +515,116 @@ class BazelBatchCensusTests(unittest.TestCase):
         )
 
 
+class AttemptDirCensusTests(unittest.TestCase):
+    """Attempt dirs under one target are runs of it, not targets (FIG-3917).
+
+    Bazel writes ``run_K_of_N`` dirs for ``--runs_per_test``/retries and
+    ``shard_K_of_N`` dirs for sharded executions, and never removes a
+    previous invocation's -- they are read-only, so a developer cannot clear
+    them either.  A target dir can therefore hold several runs' receipts at
+    once: a re-executed law must not read as a duplicate, while two records
+    inside one run still must.
+    """
+
+    def setUp(self) -> None:
+        self.macros = MODULE.macro_blocks(MACROS)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._old_root = MODULE.ROOT
+        MODULE.ROOT = self.root
+        crate = self.root / "crates" / "fakepkg"
+        (crate / "tests").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(
+            '[package]\nname = "fakepkg"\n', encoding="utf-8"
+        )
+        (crate / "tests" / "laws.rs").write_text(
+            "plain_suite_tests!({ fixture });\n", encoding="utf-8"
+        )
+        self.target_dir = (
+            self.root / "testlogs" / "crates" / "fakepkg" / "laws__test"
+        )
+
+    def tearDown(self) -> None:
+        MODULE.ROOT = self._old_root
+        self._tmp.cleanup()
+
+    def write_run(self, run_dir: str, observed: dict[str, Counter]) -> None:
+        run = self.target_dir / run_dir if run_dir else self.target_dir
+        (run / "test.outputs").mkdir(parents=True, exist_ok=True)
+        (run / "test.log").write_text("ok", encoding="utf-8")
+        (run / "test.outputs" / "law-receipts.txt").write_text(
+            receipts_text(observed), encoding="utf-8"
+        )
+
+    def census(self) -> list[str]:
+        errors, _ = MODULE.census_testlogs(
+            self.root / "testlogs", {}, self.macros, set()
+        )
+        return errors
+
+    def test_repeated_runs_of_the_same_laws_dedupe(self) -> None:
+        """--runs_per_test=3 leaves three identical receipt sets; the law is
+        owed once per run, not three times."""
+        for run in ("run_1_of_3", "run_2_of_3", "run_3_of_3"):
+            self.write_run(run, full_receipts("laws"))
+        self.assertEqual(self.census(), [])
+
+    def test_stale_and_shard_receipts_from_earlier_runs_dedupe(self) -> None:
+        """The reported shape: a focused earlier run left top-level receipts
+        for one law, and the current leg ran the target sharded."""
+        self.write_run("", {"laws": Counter({("timed_law", "timed"): 1})})
+        self.write_run(
+            "shard_1_of_2",
+            {"laws": Counter({("shared_law", "shared"): 1, ("timed_law", "timed"): 1})},
+        )
+        self.write_run(
+            "shard_2_of_2", {"laws": Counter({("extra_law", "extra"): 1})}
+        )
+        self.assertEqual(self.census(), [])
+
+    def test_a_duplicate_inside_one_run_still_fails(self) -> None:
+        run_observed = full_receipts("laws")
+        run_observed["laws"][("timed_law", "timed")] += 1
+        self.write_run("run_1_of_3", run_observed)
+        self.write_run("run_2_of_3", full_receipts("laws"))
+        errors = self.census()
+        self.assertTrue(
+            any(
+                "duplicate" in error and "timed_law" in error for error in errors
+            ),
+            f"a second receipt inside one run must still fail: {errors}",
+        )
+
+    def test_one_law_in_two_shards_of_one_run_is_a_duplicate(self) -> None:
+        """Shards of one execution share a run: the same law on two slices
+        is a real duplicate, not a re-execution."""
+        self.write_run(
+            "shard_1_of_2",
+            {"laws": Counter({("shared_law", "shared"): 1, ("timed_law", "timed"): 1})},
+        )
+        self.write_run(
+            "shard_2_of_2",
+            {"laws": Counter({("timed_law", "timed"): 1, ("extra_law", "extra"): 1})},
+        )
+        errors = self.census()
+        self.assertTrue(
+            any(
+                "duplicate" in error and "timed_law" in error for error in errors
+            ),
+            f"a law on two shards of one run must fail as a duplicate: {errors}",
+        )
+
+    def test_receipts_under_merges_runs_by_per_run_max(self) -> None:
+        """--receipts-root sees the same accumulation: a focused top-level
+        run beside a repeated run covers each law once."""
+        self.write_run("", {"laws": Counter({("timed_law", "timed"): 1})})
+        self.write_run("run_1_of_3", full_receipts("laws"))
+        self.write_run("run_2_of_3", full_receipts("laws"))
+        observed, errors = MODULE.receipts_under(self.root / "testlogs")
+        self.assertEqual(errors, [])
+        self.assertEqual(observed, full_receipts("laws"))
+
+
 class DeferredCensusTests(unittest.TestCase):
     """``--deferred`` must owe every manifest suite, not just the first.
 

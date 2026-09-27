@@ -28,8 +28,18 @@ receipts, exactly:
 * a registered law with fewer receipts than invocations is missing;
 * a receipt naming a (law, label) the claimant does not owe is a bug in the
   receipt -- stale, fabricated, or emitted under the wrong claimant;
-* more receipts than invocations is a duplicate;
+* more receipts than invocations *within one run* is a duplicate;
 * a claimant with receipts but no expectation fails too.
+
+A Bazel target dir accumulates one receipt set per execution that ever ran
+it: ``test.outputs/`` for a plain run, ``run_K_of_N/test.outputs/`` for a
+``--runs_per_test`` or retry leg, ``shard_K_of_N/test.outputs/`` per shard.
+Bazel never removes a previous invocation's attempt dirs -- their files are
+read-only, so a developer cannot clear them either -- so receipts merge per
+run: shards of one execution share a run and sum, and across runs a law's
+count is the largest any single run recorded.  A law re-executed by a repeat
+or covered by a stale earlier run stays owed once; a genuine second record
+inside one run still counts twice and still fails.
 
 A bare ``X_tests!({fixture})`` owes the suite's whole catalogue; a direct
 ``X_tests!(@arm fixture; [rows])`` expands a single arm, so it owes only what
@@ -63,8 +73,10 @@ executes:
 * ``--deferred <recipe>``: the deferred manifest's entries for one recipe.
 * ``--bazel-testlogs <dir>``: self-describing per-target mode for Bazel legs.
   Every test target that ran is discovered under
-  ``<dir>/crates/<pkg>/<target>/``; each law-bearing target must have left a
-  complete receipt set in its own ``test.outputs``.  This catches
+  ``<dir>/crates/<pkg>/<target>/`` -- ``run_K_of_N``/``shard_K_of_N`` attempt
+  dirs attribute to the target above them, not to a label of their own --
+  and each law-bearing target must have left a complete receipt set in its
+  run dirs.  This catches
   fixture-skips inside a binary that ran; it cannot see a binary the job never
   ran, which is what the explicit claims above are for.
 """
@@ -78,6 +90,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import sys
+import tempfile
 import tomllib
 import zipfile
 
@@ -97,6 +110,10 @@ DELEGATE_CALL = re.compile(r"\b([a-z_][a-z0-9_]*_tests)\s*!\s*\(\s*@([a-z_]+)")
 LINE_COMMENT = re.compile(r"//[^\n]*")
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 TEST_TARGET = re.compile(r'name\s*=\s*"([^"]+)"')
+
+# A Bazel per-attempt dir: `run_K_of_N` for --runs_per_test/retries,
+# `shard_K_of_N` for a sharded run's slices.
+ATTEMPT_DIR = re.compile(r"(run|shard)_([0-9]+)_of_([0-9]+)")
 
 IGNORE_HEAD = re.compile(r"\s*\(\s*#\s*\[\s*ignore\b")
 PAREN_OPEN = re.compile(r"\s*\(")
@@ -922,24 +939,92 @@ def read_receipts(paths: list[Path]) -> tuple[dict[str, Counter], list[str]]:
     return observed, errors
 
 
+def run_group(components: tuple[str, ...]) -> tuple:
+    """The one execution a receipts path's directories belong to.
+
+    A ``run_K_of_N`` dir is an independent execution of the whole binary --
+    ``--runs_per_test``, a flaky retry -- so each is its own group.  A
+    ``shard_K_of_N`` dir is a slice of one execution, so every shard of the
+    same total shares a group and their receipts sum.  Anything else -- the
+    target's top-level ``test.outputs`` -- is the plain single-run group.
+    The first attempt dir decides: a shard nested under a run belongs to
+    that run's group.
+    """
+    for part in components:
+        match = ATTEMPT_DIR.fullmatch(part)
+        if match is None:
+            continue
+        if match.group(1) == "run":
+            return ("run", int(match.group(2)), int(match.group(3)))
+        return ("shards", int(match.group(3)))
+    return ()
+
+
+def receipts_by_run(
+    grouped: dict[tuple, list[Path]],
+) -> tuple[dict[str, Counter], list[str]]:
+    """Receipts per run group, merged across runs by the per-run max.
+
+    Within one run receipts sum, so a law recorded twice in the same
+    execution still fails the census as a duplicate.  Across runs the same
+    obligation is re-satisfied -- a ``--runs_per_test`` repeat, an attempt
+    dir an earlier invocation left behind, a shard of a differently-split
+    run -- so the count charged is the largest any single run recorded,
+    never the sum of every run.
+    """
+    observed: dict[str, Counter] = {}
+    errors: list[str] = []
+    for key in sorted(grouped, key=repr):
+        run_observed, run_errors = read_receipts(grouped[key])
+        errors.extend(run_errors)
+        for claimant, counter in run_observed.items():
+            slot = observed.setdefault(claimant, Counter())
+            for pair, count in counter.items():
+                slot[pair] = max(slot[pair], count)
+    return observed, errors
+
+
+def receipts_under(root: Path) -> tuple[dict[str, Counter], list[str]]:
+    """Every receipts file under a bazel-testlogs subtree, merged per run."""
+    grouped: dict[tuple, list[Path]] = {}
+    for path in sorted(root.rglob(RECEIPT_NAME)):
+        grouped.setdefault(
+            run_group(path.relative_to(root).parent.parts), []
+        ).append(path)
+    return receipts_by_run(grouped)
+
+
 def bazel_receipts(target_dir: Path) -> tuple[dict[str, Counter], list[str]]:
-    """Receipts a single Bazel test target left in its undeclared outputs."""
-    outputs_dir = target_dir / "test.outputs"
-    found: list[Path] = []
-    for candidate in (
-        outputs_dir / RECEIPT_NAME,
-        outputs_dir / "outputs" / RECEIPT_NAME,
-    ):
-        if candidate.is_file():
-            found.append(candidate)
-    for zip_path in target_dir.glob("test.outputs/*.zip"):
-        with zipfile.ZipFile(zip_path) as zf:
-            for member in zf.namelist():
-                if member.endswith(RECEIPT_NAME):
-                    tmp = target_dir / "test.outputs" / "__census_receipts.txt"
-                    tmp.write_bytes(zf.read(member))
-                    found.append(tmp)
-    return read_receipts(found)
+    """Receipts a single Bazel test target left in its undeclared outputs.
+
+    The target dir holds one receipt set per execution shape that ever ran
+    it -- top-level ``test.outputs/``, ``run_K_of_N/``, ``shard_K_of_N/`` --
+    and stale attempt dirs of earlier invocations stay alongside, so the
+    merge is per run group rather than per file.
+    """
+    grouped: dict[tuple, list[Path]] = {}
+    for path in target_dir.rglob(RECEIPT_NAME):
+        grouped.setdefault(
+            run_group(path.relative_to(target_dir).parent.parts), []
+        ).append(path)
+    # Undeclared outputs may also arrive zipped; the archives sit in each
+    # attempt's test.outputs and are read-only, so extract under a tempdir
+    # rather than into the testlogs tree.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        index = 0
+        for zip_path in sorted(target_dir.rglob("*.zip")):
+            if zip_path.parent.name != "test.outputs":
+                continue
+            key = run_group(zip_path.relative_to(target_dir).parent.parts)
+            with zipfile.ZipFile(zip_path) as zf:
+                for member in zf.namelist():
+                    if member.endswith(RECEIPT_NAME):
+                        extracted = tmpdir / f"receipts-{index}.txt"
+                        index += 1
+                        extracted.write_bytes(zf.read(member))
+                        grouped.setdefault(key, []).append(extracted)
+        return receipts_by_run(grouped)
 
 
 def census_compare(
@@ -995,14 +1080,23 @@ def census_testlogs(
     its members' roots -- the claimants stay per member binary. Every member
     label must resolve to a test root, and a ran target that left receipts it
     cannot account for is a failure, never a skip.
+
+    A marker under a ``run_K_of_N``/``shard_K_of_N`` dir belongs to the
+    target above it: attempt dirs are not labels, and a leftover attempt dir
+    from an earlier invocation is how a target accumulates several runs'
+    receipts at once.
     """
     errors: list[str] = []
     verified = 0
-    target_dirs = {
-        marker.parent
-        for marker in testlogs_dir.rglob("*")
-        if marker.name in ("test.log", "test.outputs") and marker.parent.is_dir()
-    }
+    target_dirs: set[Path] = set()
+    for marker in testlogs_dir.rglob("*"):
+        if marker.name not in ("test.log", "test.outputs"):
+            continue
+        owner = marker.parent
+        while owner != testlogs_dir and ATTEMPT_DIR.fullmatch(owner.name):
+            owner = owner.parent
+        if owner.is_dir():
+            target_dirs.add(owner)
     for target_dir in sorted(target_dirs):
         rel = target_dir.relative_to(testlogs_dir)
         if len(rel.parts) < 2:
@@ -1076,8 +1170,6 @@ def main() -> int:
     manifest_set = manifest_check(errors)
 
     receipts_paths: list[Path] = [Path(p) for p in args.receipts]
-    for root in args.receipts_root:
-        receipts_paths.extend(sorted(Path(root).rglob(RECEIPT_NAME)))
     for path in receipts_paths:
         if not path.is_file():
             # Not an error on its own: a claim with expected laws fails below
@@ -1092,6 +1184,14 @@ def main() -> int:
         [p for p in receipts_paths if p.is_file()]
     )
     errors.extend(receipt_errors)
+    # A receipts root is a bazel-testlogs subtree: it keeps one receipt set
+    # per run a target ever took, so the merge is per run -- a re-executed
+    # law stays owed once, a duplicate inside one run still fails.
+    for root in args.receipts_root:
+        root_observed, root_errors = receipts_under(Path(root))
+        errors.extend(root_errors)
+        for claimant, counter in root_observed.items():
+            observed.setdefault(claimant, Counter()).update(counter)
 
     invocations: list[Invocation] = []
     for crate in args.crates:
