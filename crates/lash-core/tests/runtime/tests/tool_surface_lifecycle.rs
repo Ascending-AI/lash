@@ -746,7 +746,6 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );
@@ -1013,7 +1012,6 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1163,7 +1161,6 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
@@ -1207,7 +1204,6 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ))
@@ -2165,7 +2161,6 @@ fn payload_gated_request(
             kind: kind.to_string(),
             payload,
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id)),
         lash_core::Lifetime::Detached,
     )

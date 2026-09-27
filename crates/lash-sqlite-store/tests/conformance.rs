@@ -21,7 +21,6 @@ use std::sync::Arc;
 use lash_core_execution::{
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventLog as _, ProcessInput,
     ProcessLifecycle as _, ProcessProvenance, ProcessRegistrar as _, ProcessRegistration,
-    RecoveryContract,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteProcessRegistry, SqliteRuntimeEffectController, SqliteTriggerStore,
@@ -75,7 +74,6 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )

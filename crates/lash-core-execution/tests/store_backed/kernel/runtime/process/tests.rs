@@ -7,7 +7,7 @@ use crate::runtime::process::{
     ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemanticsSpec, ProcessEventType,
     ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessInput, ProcessObserverBy,
     ProcessProvenance, ProcessRegistration, ProcessValueSelector, ProcessWakeSpec,
-    ProjectionWatermark, RecoveryContract, artifact_owner_is_permanently_retired,
+    ProjectionWatermark, artifact_owner_is_permanently_retired,
     artifact_staging_owner_edge_is_missing,
 };
 use crate::{Lifetime, ProcessId, ProcessRegistry, SessionId};
@@ -23,7 +23,6 @@ fn registration(_id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        crate::RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
@@ -172,7 +171,6 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"module_ref": "module-1"}),
         },
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         Lifetime::Detached,
     )

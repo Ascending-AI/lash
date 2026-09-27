@@ -716,16 +716,6 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
             .await
     }
 
-    async fn request_process_abandon(
-        &self,
-        process_id: &ProcessId,
-        request: crate::AbandonRequest,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.inner
-            .request_process_abandon(process_id, request)
-            .await
-    }
-
     async fn record_caller_departure(
         &self,
         process_id: &ProcessId,

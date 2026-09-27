@@ -64,11 +64,6 @@ pub struct RuntimeExecutionContext<'run> {
     protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
     turn_context: crate::TurnContext,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
-    /// Attempt bound this execution stamps onto children a script engine starts
-    /// on the model's behalf. Resolved from the host config when the enclosing
-    /// execution is wired; the engine bridges pin the resolved value in their
-    /// own durable segment state so a redrive re-registers what was recorded.
-    engine_child_max_attempts: std::num::NonZeroU32,
     process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -493,7 +488,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            engine_child_max_attempts: crate::runtime::DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
             process_execution: None,
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
@@ -532,7 +526,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             protocol_extension: self.protocol_extension.clone(),
             turn_context: self.turn_context.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
-            engine_child_max_attempts: self.engine_child_max_attempts,
             process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
@@ -837,22 +830,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .model
             .capability
             .attachment_acceptance
-    }
-
-    /// The attempt bound a script engine stamps onto a child it starts for the
-    /// model. Engine bridges read this once when an execution segment begins
-    /// and record the resolved value in their durable segment state, so the
-    /// registration fingerprint stays stable across a host config change.
-    pub fn engine_child_max_attempts(&self) -> std::num::NonZeroU32 {
-        self.engine_child_max_attempts
-    }
-
-    pub fn with_engine_child_max_attempts(
-        mut self,
-        engine_child_max_attempts: std::num::NonZeroU32,
-    ) -> Self {
-        self.engine_child_max_attempts = engine_child_max_attempts;
-        self
     }
 
     pub fn with_execution_env_spec(

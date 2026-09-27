@@ -453,7 +453,7 @@ impl Roll {
     /// sent, so they are pinned to the build newest then.
     async fn register_process(&self) -> ProcessId {
         self.registry
-            .register_process(rerunnable_registration())
+            .register_process(executed_registration())
             .await
             .expect("register the process")
             .id
@@ -469,7 +469,7 @@ impl Roll {
                 "run",
                 &RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
                     process_id: process_id.clone(),
-                    registration: rerunnable_registration(),
+                    registration: executed_registration(),
                     execution_context: ProcessExecutionContext::default(),
                     segment_ordinal: 0,
                     sender_generation: Some(generation("N")),
@@ -939,7 +939,7 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
             "run",
             &RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
                 process_id: process_id.clone(),
-                registration: rerunnable_registration(),
+                registration: executed_registration(),
                 execution_context: ProcessExecutionContext::default(),
                 segment_ordinal: SUCCESSOR,
                 sender_generation: Some(generation("N")),
@@ -1127,7 +1127,7 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
     let input = |sender: &'static str| {
         RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
             process_id: process_id.clone(),
-            registration: rerunnable_registration(),
+            registration: executed_registration(),
             execution_context: ProcessExecutionContext::default(),
             segment_ordinal: SUCCESSOR,
             sender_generation: Some(generation(sender)),
@@ -1194,7 +1194,7 @@ async fn a_generation_lane_refuses_a_misrouted_input(seed: u64) {
                 "run",
                 &RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
                     process_id: process_id.clone(),
-                    registration: rerunnable_registration(),
+                    registration: executed_registration(),
                     execution_context: ProcessExecutionContext::default(),
                     segment_ordinal: 1,
                     sender_generation: sender.clone(),

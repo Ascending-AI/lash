@@ -16,7 +16,7 @@
 use super::super::events::{ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSpec};
 use super::super::model::{
     Ancestry, Lifetime, LifetimeDecision, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance,
-    ProcessRegistration, ProcessStatus, RecoveryContract, ScopeGrant, ScopeId,
+    ProcessRegistration, ProcessStatus, ScopeGrant, ScopeId,
 };
 use super::super::validation::ProcessRegistrationRefusal;
 
@@ -30,16 +30,12 @@ const FIXTURE_ENV_REF: &str = concat!(
 pub const REFUSAL_FIXTURE_START_KEY: &str = "refusal-fixture";
 
 fn host_registration(input: ProcessInput) -> ProcessRegistration {
-    ProcessRegistration::new(
-        input,
-        RecoveryContract::ExternallyOwned,
-        ProcessProvenance::host(),
-        Lifetime::Detached,
+    ProcessRegistration::new(input, ProcessProvenance::host(), Lifetime::Detached).with_start_key(
+        Some(crate::StartKey::for_host(
+            crate::StartKeyOwner::HOST,
+            REFUSAL_FIXTURE_START_KEY,
+        )),
     )
-    .with_start_key(Some(crate::StartKey::for_host(
-        crate::StartKeyOwner::HOST,
-        REFUSAL_FIXTURE_START_KEY,
-    )))
 }
 
 /// A registration core accepts, and the base every fixture below mutates.
@@ -126,11 +122,6 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
             let mut registration = accepted_process_registration();
             registration.lifetime = LifetimeDecision::Detached;
             registration.session_capability = Some(crate::SessionId::from("a-different-session"));
-            vec![registration]
-        }
-        ProcessRegistrationRefusal::ZeroMaxAttempts => {
-            let mut registration = accepted_process_registration();
-            registration.max_attempts = Some(0);
             vec![registration]
         }
         ProcessRegistrationRefusal::ToolCallWithoutCallId => {

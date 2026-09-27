@@ -95,13 +95,13 @@ fn selected_value_to_await_output(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(cancellation))
         }
         // Reached only if a producer declares its own `Abandoned` terminal event
-        // and emits a raw value (not a serialized `ProcessAwaitOutput`); the
-        // sweep/drain path writes structured evidence through `complete_process`,
-        // which deserializes directly above. With no structured evidence to carry,
-        // synthesize a minimal owner-drain marker.
+        // and emits a raw value (not a serialized `ProcessAwaitOutput`); every
+        // lash-written abandonment carries structured evidence through
+        // `complete_process`, which deserializes directly above. With no
+        // structured evidence to carry, the producer is the writer.
         ProcessStatus::Abandoned => ProcessAwaitOutput::Abandoned {
             evidence: Box::new(AbandonEvidence {
-                writer: AbandonWriter::OwnerDrain,
+                writer: AbandonWriter::Producer,
                 owner: None,
                 epoch_ms: 0,
             }),

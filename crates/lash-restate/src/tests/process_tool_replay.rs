@@ -7,11 +7,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
         memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
-    let registration = counting_tool_registration(
-        "restate-process-tool-replay",
-        lash_core::RecoveryContract::Rerunnable,
-        env_ref,
-    );
+    let registration = counting_tool_registration("restate-process-tool-replay", env_ref);
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -97,11 +93,8 @@ async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
         memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
-    let registration = counting_tool_registration(
-        "restate-process-redrive-after-complete",
-        lash_core::RecoveryContract::Rerunnable,
-        env_ref,
-    );
+    let registration =
+        counting_tool_registration("restate-process-redrive-after-complete", env_ref);
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -212,7 +205,6 @@ async fn signal_waiting_process_registration() -> ProcessRegistration {
             process_name: worker,
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -339,11 +331,8 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
         memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
-    let registration = counting_tool_registration(
-        "restate-process-pre-run-read-invariant",
-        lash_core::RecoveryContract::Rerunnable,
-        env_ref,
-    );
+    let registration =
+        counting_tool_registration("restate-process-pre-run-read-invariant", env_ref);
     let process_id = registry
         .register_process(registration.clone())
         .await

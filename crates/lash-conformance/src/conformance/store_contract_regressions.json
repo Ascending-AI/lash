@@ -18,8 +18,7 @@
       {
         "op": "register",
         "process": 0,
-        "disposition": 2,
-        "max_attempts": 1,
+        "external": true,
         "wake_target": null
       },
       { "op": "terminal", "process": 0, "disposition": 0 }
@@ -31,8 +30,7 @@
       {
         "op": "register",
         "process": 2,
-        "disposition": 2,
-        "max_attempts": 1,
+        "external": true,
         "wake_target": null
       },
       { "op": "terminal", "process": 2, "disposition": 0 },
@@ -40,8 +38,7 @@
       {
         "op": "register",
         "process": 2,
-        "disposition": 0,
-        "max_attempts": 3,
+        "external": false,
         "wake_target": null
       }
     ]
@@ -68,8 +65,7 @@
       {
         "op": "register",
         "process": 1,
-        "disposition": 2,
-        "max_attempts": 1,
+        "external": true,
         "wake_target": null
       },
       { "op": "terminal", "process": 1, "disposition": 0 },
@@ -83,8 +79,7 @@
       {
         "op": "register",
         "process": 2,
-        "disposition": 0,
-        "max_attempts": 1,
+        "external": false,
         "wake_target": null
       },
       { "op": "cancel_request", "process": 2, "requester": 0 },

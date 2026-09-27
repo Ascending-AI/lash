@@ -502,7 +502,6 @@ finish(await handle);
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1236,7 +1235,6 @@ fn start_recovery_effect(
                 serde_json::Value::Null,
             ),
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

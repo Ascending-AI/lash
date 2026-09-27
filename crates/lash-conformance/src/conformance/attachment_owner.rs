@@ -424,7 +424,6 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )

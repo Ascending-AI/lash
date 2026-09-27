@@ -12,7 +12,6 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::session(SessionScope::new("filter-origin")).with_caused_by(
                     Some(crate::CausalRef::TriggerOccurrence {
                         occurrence_id: "indexed-occurrence-target".to_string(),

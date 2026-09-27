@@ -1370,27 +1370,6 @@
             },
             "type": {
               "enum": [
-                "abandon_requested"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "sequence",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "type": {
-              "enum": [
                 "caller_departed"
               ],
               "type": "string"

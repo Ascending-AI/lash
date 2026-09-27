@@ -10,9 +10,9 @@ use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
     ProcessAwaitOutput, ProcessCompletionOutcome, ProcessInput, ProcessLeaseClaimOutcome,
-    ProcessProvenance, ProcessRegistration, RecoveryContract, RuntimeCommit, RuntimeSessionState,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, TurnInput,
-    TurnInputCheckpointBoundary, TurnInputIngress, facade_support::SessionCommand,
+    ProcessProvenance, ProcessRegistration, RuntimeCommit, RuntimeSessionState, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, TurnInput, TurnInputCheckpointBoundary,
+    TurnInputIngress, facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 use sqlx::Connection as _;
@@ -543,14 +543,19 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
         .process_registry()
         .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
     let process_id = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            RecoveryContract::Rerunnable,
-            ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
-        ))
+        .register_process(
+            ProcessRegistration::new(
+                ProcessInput::Engine {
+                    kind: "postgres-clock-test".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                ProcessProvenance::host(),
+                lash_core_execution::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(
+                lash_core_execution::ProcessExecutionEnvRef::new("process-env:postgres-clock-test"),
+            )),
+        )
         .await
         .expect("register process for clock contract")
         .id;

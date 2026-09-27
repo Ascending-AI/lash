@@ -809,39 +809,13 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         now,
                         fleet_format,
                     )?;
-                    match lash_core_execution::runtime::prepare_process_start(
-                        &record, &started, &authority,
-                    )? {
+                    match lash_core_execution::runtime::prepare_process_start(&record, &started)? {
                         ProcessStartPlan::AlreadyApplied => {
                             return Ok(ProcessStartOutcome::AlreadyApplied(record));
                         }
-                        ProcessStartPlan::AlreadyStarted { by } => {
-                            return Ok(ProcessStartOutcome::AlreadyStarted {
-                                current: record,
-                                by,
-                            });
-                        }
-                        ProcessStartPlan::AttemptsExhausted {
-                            attempts,
-                            max_attempts,
-                        } => {
-                            return Ok(ProcessStartOutcome::AttemptsExhausted {
-                                current: record,
-                                attempts,
-                                max_attempts,
-                            });
-                        }
                         ProcessStartPlan::Append => {}
                     }
-                    let resumed_from_handover = record
-                        .first_started
-                        .as_deref()
-                        .is_some_and(|retained| authority.permits_owner_bound_resume(retained));
-                    let request = ProcessEventAppendRequest::first_started(
-                        &process_id,
-                        &started,
-                        resumed_from_handover,
-                    );
+                    let request = ProcessEventAppendRequest::first_started(&process_id, &started);
                     Self::append_event_conn(
                         tx,
                         &mut record,
@@ -930,42 +904,6 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         }
                     }
                     Ok((record, lash_core_execution::StoreRealization::Realized))
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
-    async fn request_process_abandon(
-        &self,
-        process_id: &ProcessId,
-        request: AbandonRequest,
-    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let now = self.clock.timestamp_ms();
-        let wake_delivery_config = self.wake_delivery_config;
-        let fleet_format = self.fleet_format;
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    match lash_core_execution::runtime::prepare_process_transition(
-                        &record,
-                        ProcessTransition::RequestAbandon(request),
-                    )? {
-                        ProcessTransitionPlan::Unchanged => return Ok(record),
-                        ProcessTransitionPlan::Append(append) => {
-                            Self::append_event_conn(
-                                tx,
-                                &mut record,
-                                *append,
-                                now,
-                                wake_delivery_config,
-                                fleet_format,
-                            )?;
-                        }
-                    }
-                    Ok(record)
                 })()))
             })
             .await

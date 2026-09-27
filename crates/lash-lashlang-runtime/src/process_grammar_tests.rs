@@ -48,7 +48,6 @@ pub(crate) async fn run_sleep_process()
     };
     let registration = lash_core::ProcessRegistration::new(
         input.to_process_input().expect("valid process input"),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

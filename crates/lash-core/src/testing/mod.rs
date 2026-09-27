@@ -49,7 +49,6 @@ pub use lash_core_execution::testing::{
     standard_test_policy, store_fixtures, test_code_protocol_factories, test_plugin_host,
     test_standard_protocol_factories, test_standard_protocol_factory_with_runtime_state,
     test_trigger_router, tool_registry_with_live_provider, trace_capture,
-    with_engine_child_max_attempts,
 };
 
 // Each submodule documents itself in its own file. Adding an outer doc comment

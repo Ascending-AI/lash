@@ -279,6 +279,11 @@ row.
 
 #### Retry bound
 
+Superseded by [ADR 0110](0110-the-engine-owns-process-recovery.md) (FIG-3588):
+lash keeps no attempt budget, so a child registration records no bound and the
+segment state pins none. The engine's retry policy bounds retries. The
+paragraph below is the history.
+
 Lashlang child registration resolves `max_attempts` from the runtime host
 configuration instead of recording `None`. The bridge reads the default once at
 segment start and carries it in segment state, so redrive after configuration

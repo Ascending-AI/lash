@@ -124,7 +124,6 @@ mod tests {
                     prepared_payload: serde_json::json!({"context": "prepared"}),
                 },
             },
-            crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         );

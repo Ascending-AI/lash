@@ -215,10 +215,7 @@ pub struct RemoteProcessStartRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_key: Option<String>,
     pub input: RemoteProcessInput,
-    pub disposition: RemoteRecoveryContract,
     pub lifetime: RemoteStartLifetime,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_spec: Option<RemoteProcessExecutionEnvSpec>,
     pub originator: RemoteProcessOriginator,
@@ -236,12 +233,6 @@ impl RemoteProcessStartRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         if let Some(start_key) = &self.start_key {
             require_non_empty("RemoteProcessStartRequest", "start_key", start_key)?;
-        }
-        if self.max_attempts == Some(0) {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessStartRequest",
-                message: "max_attempts must be greater than zero when provided".to_string(),
-            });
         }
         self.lifetime.validate("RemoteProcessStartRequest")?;
         self.input.validate("RemoteProcessStartRequest")?;

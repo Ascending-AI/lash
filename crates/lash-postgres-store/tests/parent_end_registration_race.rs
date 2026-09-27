@@ -56,7 +56,6 @@ fn cancel_child(
         lash_core_execution::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core_execution::RecoveryContract::Rerunnable,
         lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
             session_name(index),
         )),

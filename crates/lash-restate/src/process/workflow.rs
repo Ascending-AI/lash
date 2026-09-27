@@ -96,10 +96,6 @@ pub(crate) enum TerminalProposal {
         output: Box<ProcessAwaitOutput>,
         prelude: Vec<lash_core::ProcessEventAppendRequest>,
     },
-    Abandoned {
-        writer: AbandonWriter,
-        owner: Option<lash_core::LeaseOwnerIdentity>,
-    },
 }
 
 /// How a segment's runner ended, before its terminal is stored.
@@ -628,21 +624,8 @@ where
             .run_json_or_retry_send::<Result<ProcessAwaitOutput, String>, _>(
                 COMPLETE_STEP.to_string(),
                 async move {
-                    let (proposed, prelude) = match proposal {
-                        TerminalProposal::Output { output, prelude } => (*output, prelude),
-                        TerminalProposal::Abandoned { writer, owner } => (
-                            ProcessAwaitOutput::Abandoned {
-                                evidence: Box::new(AbandonEvidence {
-                                    writer,
-                                    owner,
-                                    epoch_ms: restate_now_ms(),
-                                }),
-                                control: None,
-                            },
-                            Vec::new(),
-                        ),
-                    };
-                    match complete_process_outcome(registry, process_id, proposed, prelude).await {
+                    let TerminalProposal::Output { output, prelude } = proposal;
+                    match complete_process_outcome(registry, process_id, *output, prelude).await {
                         Ok(stored) => Ok(Ok(stored)),
                         Err(error) => step_fault(error),
                     }
@@ -744,22 +727,9 @@ where
                 Ok(lash_core::ProcessRunOutcome::SegmentBoundary(handover))
             }
             SegmentRunEnd::Terminal(proposal) => {
-                let (proposed, prelude) = match proposal {
-                    TerminalProposal::Output { output, prelude } => (*output, prelude),
-                    TerminalProposal::Abandoned { writer, owner } => (
-                        ProcessAwaitOutput::Abandoned {
-                            evidence: Box::new(AbandonEvidence {
-                                writer,
-                                owner,
-                                epoch_ms: restate_now_ms(),
-                            }),
-                            control: None,
-                        },
-                        Vec::new(),
-                    ),
-                };
+                let TerminalProposal::Output { output, prelude } = proposal;
                 let stored =
-                    complete_process_outcome(&self.registry, &process_id, proposed, prelude)
+                    complete_process_outcome(&self.registry, &process_id, *output, prelude)
                         .await
                         .map_err(handler_error_from_plugin)?;
                 Ok(stored.into())
@@ -869,12 +839,6 @@ where
             }
             Ok(lash_core::ProcessRunOutcome::SegmentBoundary(boundary)) => {
                 Ok(SegmentRunEnd::Boundary(boundary))
-            }
-            Err(PluginError::ProcessAlreadyStarted { by, .. }) => {
-                Ok(SegmentRunEnd::Terminal(TerminalProposal::Abandoned {
-                    writer: AbandonWriter::Sweep,
-                    owner: Some(*by),
-                }))
             }
             // A segment whose journal diverged parks the process (FIG-3659
             // NOW-B, FIG-3674): the park is written through the registry —

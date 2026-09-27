@@ -8,8 +8,8 @@ use crate::runtime::process::{
     validate_generic_process_event_append,
 };
 use crate::{
-    AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, ProcessStarted, RecoveryContract, WaitKind, WaitState,
+    ProcessEventAppendRequest, ProcessExternalRef, ProcessInput, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, ProcessStarted, WaitKind, WaitState,
 };
 
 fn fixture_registration(_label: &str) -> ProcessRegistration {
@@ -17,19 +17,13 @@ fn fixture_registration(_label: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
 }
 
 fn registration_for_input(input: ProcessInput) -> ProcessRegistration {
-    ProcessRegistration::new(
-        input,
-        RecoveryContract::Rerunnable,
-        ProcessProvenance::host(),
-        crate::Lifetime::Detached,
-    )
+    ProcessRegistration::new(input, ProcessProvenance::host(), crate::Lifetime::Detached)
 }
 
 #[test]
@@ -450,7 +444,6 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
                 build_generation: None,
                 generation: None,
             },
-            false,
         ),
         ProcessEventAppendRequest::wait_entered(&record.id, &wait),
         ProcessEventAppendRequest::wait_cleared(&record.id, &wait),
@@ -461,14 +454,6 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
                 id: "external".to_string(),
                 metadata: None,
                 segment_ordinal: None,
-            },
-        ),
-        ProcessEventAppendRequest::abandon_requested(
-            &record.id,
-            &AbandonRequest {
-                requested_by: "fixture".to_string(),
-                requested_at_ms: 3,
-                reason: None,
             },
         ),
     ];
@@ -496,7 +481,6 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
     assert!(record.first_started.is_some());
     assert!(record.wait.is_none());
     assert!(record.external_ref.is_some());
-    assert!(record.abandon_request.is_some());
 }
 
 #[test]

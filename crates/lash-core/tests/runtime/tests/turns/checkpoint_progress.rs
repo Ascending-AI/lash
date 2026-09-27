@@ -1571,7 +1571,6 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -1680,7 +1679,6 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -1848,7 +1846,6 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -2027,7 +2024,6 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )

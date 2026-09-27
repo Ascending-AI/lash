@@ -199,7 +199,6 @@ fn external_registration(start_key: Option<&str>) -> lash_core::ProcessRegistrat
         lash_core::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -355,7 +354,6 @@ fn start_request() -> lash_core::ProcessStartRequest {
         lash_core::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )

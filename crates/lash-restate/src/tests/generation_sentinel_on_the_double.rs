@@ -141,7 +141,7 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
         .expect("register the deployment");
 
     let process_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the process")
         .id;
@@ -152,7 +152,7 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
             "run",
             &RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
                 process_id: process_id.clone(),
-                registration: rerunnable_registration(),
+                registration: executed_registration(),
                 execution_context: ProcessExecutionContext::default(),
                 segment_ordinal: 0,
                 sender_generation: None,

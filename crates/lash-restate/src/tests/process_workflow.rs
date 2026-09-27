@@ -7,7 +7,7 @@ use lashlang::testing::ast_builders as b;
 pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
     let (registry, continuations) = process_stores();
     let _record = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register process");
     let (_, cursor) = registry
@@ -67,7 +67,7 @@ pub(super) async fn cancel_redrives_successor_engine() {
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     );
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -163,7 +163,7 @@ pub(super) fn controller_handler_error_classification_keeps_lane_busy_retryable(
 #[tokio::test]
 pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_awaiting_parent() {
     let registry = process_registry();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let record = registry
         .register_process(registration.clone())
         .await
@@ -256,10 +256,9 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
 }
 
 #[tokio::test]
-pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminalizing_rerunnable_child()
- {
+pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminalizing_child() {
     let registry = process_registry();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -303,7 +302,7 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
         .expect("interrupted child remains registered");
     assert!(
         !interrupted.is_terminal() && interrupted.outcome.is_none(),
-        "a divergence abort must leave the rerunnable child non-terminal: {interrupted:?}"
+        "a divergence abort must leave the child non-terminal: {interrupted:?}"
     );
 
     let rerun = workflow
@@ -320,7 +319,7 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
             None,
         )
         .await
-        .expect("the rerunnable child must succeed on a fresh invocation");
+        .expect("the child must succeed on a fresh invocation");
     assert!(matches!(
         rerun,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
@@ -332,11 +331,11 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
 #[tokio::test]
 pub(super) async fn opaque_process_infrastructure_failure_does_not_become_terminal_process_truth() {
     let registry = process_registry();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register rerunnable child")
+        .expect("register child")
         .id;
     let runner = Arc::new(OpaqueFailureThenSuccessRunner {
         runs: AtomicUsize::new(0),
@@ -480,7 +479,7 @@ pub(super) fn runtime_handler_error_classification_makes_terminal_runtime_error_
 #[test]
 pub(super) fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
     let mut record = lash_core::ProcessRecord::from_registration(
-        rerunnable_registration(),
+        executed_registration(),
         ProcessId::fixture("wait"),
     );
     record.wait = Some(lash_core::WaitState {
@@ -527,12 +526,28 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
         .build();
     let context = Arc::new(RecordingContext::with_endpoint(endpoint));
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
-    let registration = rerunnable_registration()
-        .with_wake_session_id(Some(SessionId::from("wake-smoke")))
-        .with_start_key(Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "background-smoke-start",
-        )));
+    // A tool-call process: lash executes it, and a Restate start needs no
+    // process-engine registry for it.
+    let registration = ProcessRegistration::new(
+        ProcessInput::ToolCall {
+            call: lash_core::PreparedToolCall::from_parts(
+                "smoke-call",
+                "tool:smoke",
+                "smoke",
+                serde_json::Value::Null,
+                None,
+                serde_json::Value::Null,
+            ),
+        },
+        lash_core::ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_execution_env_ref(Some(persist_recovery_env_ref().await))
+    .with_wake_session_id(Some(SessionId::from("wake-smoke")))
+    .with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        "background-smoke-start",
+    )));
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
         runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-smoke").into_runtime_invocation(),
     ));
@@ -548,7 +563,9 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
                     execution_context: Box::new(execution_context),
                 }),
             ),
-            registry_local_executor(registry.clone()),
+            registry_local_executor(registry.clone())
+                .with_process_env_store(RECOVERY_PROCESS_ENV_STORE.clone()
+                    as Arc<dyn lash_core::ProcessExecutionEnvStore>),
         )
         .await
         .expect("start through endpoint smoke");
@@ -954,7 +971,6 @@ pub(super) async fn segmented_child_await_registration(
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
             "segmented-child-await-root",
         )),
@@ -1256,7 +1272,6 @@ pub(super) async fn snapshot_lashlang_registration(
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -1315,7 +1330,6 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                 serde_json::Value::Null,
             ),
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(creator_scope.clone()),
         lash_core::Lifetime::Detached,
     )
@@ -1359,7 +1373,6 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))

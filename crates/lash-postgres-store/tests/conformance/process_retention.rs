@@ -7,14 +7,19 @@ use super::*;
 /// are listed as non-terminal and are never prune candidates.
 async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegistry) {
     let process_id = &registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core_execution::RecoveryContract::Rerunnable,
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
-        ))
+        .register_process(
+            lash_core_execution::ProcessRegistration::new(
+                lash_core_execution::ProcessInput::Engine {
+                    kind: "retention-test".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(
+                lash_core_execution::ProcessExecutionEnvRef::new("process-env:retention-test"),
+            )),
+        )
         .await
         .expect("register waiting retention process")
         .id;

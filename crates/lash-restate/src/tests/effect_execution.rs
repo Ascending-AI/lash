@@ -4,7 +4,7 @@ use super::*;
 pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
     let (registry, continuations) = process_stores();
     let mid_chain_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register")
         .id;
@@ -60,47 +60,35 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
 }
 
 #[tokio::test]
-pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_request() {
-    // ADR 0019 at the Restate tier: the ingress sweep never POSTs a run for an
-    // ExternallyOwned row (Lash does not execute it), but it does reconcile such
-    // a row's pending Abandon Request into an `Abandoned{ReconciledRequest}`
-    // terminal — mirroring the core sweep's `reconcile_externally_owned_abandon`.
-    // A Rerunnable row alongside them still submits, so exactly one ingress call
-    // fires and it is for the Lash-executed row.
+pub(super) async fn ingress_sweep_skips_externally_owned_rows() {
+    // ADR 0110 at the Restate tier: the ingress sweep never POSTs a run for an
+    // externally-owned row (Lash does not execute it) and never closes one: its
+    // external owner does. A lash-executed row alongside them still submits, so
+    // exactly one ingress call fires and it is for that row.
     let registry = process_registry();
-    let ext_abandon_id = registry
+    let ext_first_id = registry
         .register_process(external_registration())
         .await
-        .expect("register externally-owned row with pending abandon")
+        .expect("register the first externally-owned row")
         .id;
-    registry
-        .request_process_abandon(
-            &ext_abandon_id,
-            lash_core::AbandonRequest {
-                requested_by: "operator".to_string(),
-                requested_at_ms: 111,
-                reason: Some("host retired".to_string()),
-            },
-        )
-        .await
-        .expect("record abandon request");
-    let ext_idle_id = registry
+    let ext_second_id = registry
         .register_process(external_registration())
         .await
-        .expect("register externally-owned row without abandon")
+        .expect("register the second externally-owned row")
         .id;
-    let rerun_1_id = registry
-        .register_process(rerunnable_registration())
+    let executed_id = registry
+        .register_process(executed_registration())
         .await
-        .expect("register rerunnable row")
+        .expect("register a lash-executed row")
         .id;
 
-    // The capture server accepts exactly one connection: if any ExternallyOwned
-    // row were submitted, a second connect would be attempted and the extra
-    // submit would fail, so the single-response server also proves they are not.
+    // The capture server accepts exactly one connection: if any externally
+    // owned row were submitted, a second connect would be attempted and the
+    // extra submit would fail, so the single-response server also proves they
+    // are not.
     let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
         status: "202 Accepted",
-        body: r#"{"invocationId":"inv_rerun_1","status":"Accepted"}"#,
+        body: r#"{"invocationId":"inv_executed","status":"Accepted"}"#,
     }])
     .await;
     let runner =
@@ -108,12 +96,12 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
     let report = runner
         .admit_pending_processes("test")
         .await
-        .expect("sweep skips externally-owned rows and submits the rerunnable one");
+        .expect("sweep skips externally-owned rows and submits the executed one");
     server.await.expect("mock ingress server task");
 
     // Skipped is not silent: an externally-owned row is a typed deferral on this
     // tier too, so one registry reads the same whichever tier drove it.
-    assert_eq!(report.admitted, vec![rerun_1_id.to_string()]);
+    assert_eq!(report.admitted, vec![executed_id.to_string()]);
     let externally_owned = report
         .deferred
         .iter()
@@ -122,52 +110,35 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
         .collect::<Vec<_>>();
     assert_eq!(
         externally_owned,
-        vec![ext_abandon_id.to_string(), ext_idle_id.to_string()]
+        vec![ext_first_id.to_string(), ext_second_id.to_string()]
     );
 
     let requests = captured.lock_recover().clone();
     assert_eq!(
         requests.len(),
         1,
-        "only the Rerunnable row is submitted; ExternallyOwned rows are never POSTed"
+        "only the lash-executed row is submitted; externally-owned rows are never POSTed"
     );
     assert!(
-        requests[0].starts_with(&format!("POST /LashProcessWorkflow/{rerun_1_id}/run/send ")),
+        requests[0].starts_with(&format!(
+            "POST /LashProcessWorkflow/{executed_id}/run/send "
+        )),
         "the single submit is the Lash-executed row: {}",
         requests[0]
     );
 
-    // The abandon-request externally-owned row is now terminal Abandoned, written
-    // by the reconciled-request path with no Lash execution owner to name.
-    let abandoned = registry
-        .get_process(&ext_abandon_id)
-        .await
-        .expect("read process")
-        .expect("get reconciled row");
-    assert!(
-        abandoned.is_terminal(),
-        "an externally-owned row with a pending abandon request is reconciled to terminal"
-    );
-    let Some(ProcessAwaitOutput::Abandoned { evidence, .. }) = abandoned.outcome.as_ref() else {
-        panic!("expected Abandoned terminal, got {:?}", abandoned.status);
-    };
-    assert_eq!(evidence.writer, AbandonWriter::ReconciledRequest);
-    assert!(
-        evidence.owner.is_none(),
-        "externally-owned work has no Lash execution owner to name"
-    );
-
-    // The externally-owned row without an abandon request is left untouched for
-    // its external owner to complete.
-    let idle = registry
-        .get_process(&ext_idle_id)
-        .await
-        .expect("read process")
-        .expect("get idle externally-owned row");
-    assert!(
-        !idle.is_terminal(),
-        "an externally-owned row with no abandon request is left non-terminal"
-    );
+    // Both externally-owned rows are left untouched for their external owner.
+    for id in [&ext_first_id, &ext_second_id] {
+        let row = registry
+            .get_process(id)
+            .await
+            .expect("read process")
+            .expect("get externally-owned row");
+        assert!(
+            !row.is_terminal(),
+            "the sweep never closes an externally-owned row"
+        );
+    }
 }
 
 pub(super) struct MockHttpResponse {
@@ -1620,7 +1591,7 @@ pub(super) async fn restate_admin_client_cancels_kills_and_queries_invocation_st
 pub(super) async fn a_failed_ingress_submit_defers_its_row_without_discarding_the_pass() {
     let registry = process_registry();
     let submit_fails_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the row whose submit fails")
         .id;
@@ -1661,7 +1632,7 @@ pub(super) async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink()
     let sink = RecordingProcessEventSink::default();
     let registry = process_registry();
     let submit_fails_loudly_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the row whose submit fails")
         .id;

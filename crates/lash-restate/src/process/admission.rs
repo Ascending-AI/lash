@@ -577,7 +577,7 @@ async fn start_root_segment(
     build_generation: lash_core::engine::BuildGeneration,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
-    if record.disposition == lash_core::RecoveryContract::ExternallyOwned {
+    if record.input.is_externally_owned() {
         // Not an admission invariant: an externally owned process's terminal
         // belongs to its owner, and the workflow-key authority is refused on
         // it, so the invocation fails without writing one (FIG-3819).
@@ -615,30 +615,16 @@ async fn start_root_segment(
     started.started_at_ms = super::restate_now_ms();
     started.generation = generation.clone();
     started.build_generation = Some(build_generation.clone());
-    match registry
+    registry
         .record_first_started_with_authority(process_id, started, &authority)
         .await
-        .map_err(store_fault)?
-    {
-        lash_core::ProcessStartOutcome::Started(_)
-        | lash_core::ProcessStartOutcome::AlreadyApplied(_) => Ok(StartOutcome::Started {
-            execution_id: nonce,
-            process_id: record.id.clone(),
-            generation,
-            build_generation: Some(build_generation),
-        }),
-        lash_core::ProcessStartOutcome::AlreadyStarted { current, .. }
-        | lash_core::ProcessStartOutcome::AttemptsExhausted { current, .. } => {
-            Ok(match current.first_started.as_deref().cloned() {
-                Some(lost) => StartOutcome::SubstrateLost { lost },
-                None => StartOutcome::Invariant {
-                    message: format!(
-                        "process `{process_id}` refused a root start without naming the start it kept"
-                    ),
-                },
-            })
-        }
-    }
+        .map_err(store_fault)?;
+    Ok(StartOutcome::Started {
+        execution_id: nonce,
+        process_id: record.id.clone(),
+        generation,
+        build_generation: Some(build_generation),
+    })
 }
 
 async fn start_later_segment(

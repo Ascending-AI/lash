@@ -85,14 +85,9 @@ impl RuntimeExecutionContext<'_> {
                 return ToolInvocationReply::from_output(record.output.clone()).with_record(record);
             }
         };
-        let registration = ProcessRegistration::session_start_draft(
-            ProcessInput::ToolCall {
-                call: prepared_call.clone(),
-            },
-            // Tool-call rows are journaled and idempotent by their start
-            // key, so recovery may re-execute them (ADR 0019, ADR 0107).
-            crate::RecoveryContract::Rerunnable,
-        )
+        let registration = ProcessRegistration::session_start_draft(ProcessInput::ToolCall {
+            call: prepared_call.clone(),
+        })
         .with_start_key(Some(crate::StartKey::for_orchestration_call(
             self.admitted_scope().scope(),
             &handle_id,

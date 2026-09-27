@@ -114,8 +114,7 @@ mod floor_tests {
         let mut scenario = StoreContractScenario::new(handles);
         let register = StoreContractOp::Register {
             process: 0,
-            disposition: 0,
-            max_attempts: 1,
+            external: false,
             wake_target: Some(0),
         };
         for operation in [
@@ -196,8 +195,7 @@ mod floor_tests {
             &[
                 StoreContractOp::Register {
                     process: 1,
-                    disposition: 0,
-                    max_attempts: 1,
+                    external: false,
                     wake_target: Some(0),
                 },
                 StoreContractOp::Terminal {
@@ -216,8 +214,7 @@ mod floor_tests {
                 StoreContractOp::Prune { watermark: false },
                 StoreContractOp::Register {
                     process: 1,
-                    disposition: 0,
-                    max_attempts: 1,
+                    external: false,
                     wake_target: Some(0),
                 },
                 StoreContractOp::SetExternalRef {
@@ -237,8 +234,7 @@ mod floor_tests {
             &[
                 StoreContractOp::Register {
                     process: 2,
-                    disposition: 0,
-                    max_attempts: 1,
+                    external: false,
                     wake_target: None,
                 },
                 StoreContractOp::AddObserver {

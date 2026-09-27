@@ -201,6 +201,8 @@ struct Scenario {
     /// The id the child's start minted, once the law has seen it.
     child_id: Arc<Mutex<Option<ProcessId>>>,
     registry: Arc<dyn crate::ProcessRegistry>,
+    /// Where the child's start publishes its execution environment.
+    env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     probe: Arc<Probe>,
 }
 
@@ -271,7 +273,23 @@ impl Scenario {
     }
 
     fn child_registration(&self) -> ProcessRegistration {
-        segment_registration().with_start_key(Some(self.child_start_key.clone()))
+        ProcessRegistration::new(
+            // A tool-call child: lash executes it, and no engine tier needs a
+            // process-engine registry to start it.
+            crate::ProcessInput::ToolCall {
+                call: crate::PreparedToolCall::from_parts(
+                    "segment-redrive-child",
+                    "tool:segment_redrive_child",
+                    "segment_redrive_child",
+                    serde_json::json!({ "law": "segment-redrive" }),
+                    None,
+                    serde_json::Value::Null,
+                ),
+            },
+            crate::ProcessProvenance::host(),
+            crate::Lifetime::Detached,
+        )
+        .with_start_key(Some(self.child_start_key.clone()))
     }
 
     /// Records the id the child's start minted, and refuses a second one.
@@ -297,7 +315,10 @@ impl Scenario {
                 command: Box::new(crate::ProcessCommand::Start {
                     registration: self.child_registration(),
                     observers: Vec::new(),
-                    env_spec: None,
+                    env_spec: Some(crate::ProcessExecutionEnvSpec::new(
+                        crate::PluginOptions::default(),
+                        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                    )),
                     execution_context: Box::default(),
                 }),
             },
@@ -459,17 +480,20 @@ fn trigger_run(outcome: &RuntimeEffectOutcome) -> usize {
     }
 }
 
-/// A process the law runs segments of: re-runnable by its once-granted
-/// contract, which the final recovery rules no longer honour.
+/// A process the law runs segments of: one lash executes, so a started
+/// segment resumes only by replaying its journal.
 fn segment_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        crate::ProcessInput::External {
-            metadata: serde_json::json!({ "law": "segment-redrive" }),
+        crate::ProcessInput::Engine {
+            kind: "segment-redrive".to_string(),
+            payload: serde_json::json!({ "law": "segment-redrive" }),
         },
-        crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
+    .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+        "process-env:segment-redrive",
+    )))
 }
 
 fn effect_error(result: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>) -> String {
@@ -633,7 +657,8 @@ async fn segment_body(
                     RuntimeEffectLocalExecutor::processes(
                         Arc::clone(&registry),
                         Arc::new(crate::NativeProcessWork::for_registry(registry)),
-                    ),
+                    )
+                    .with_process_env_store(Arc::clone(&scenario.env_store)),
                 )
                 .await;
             let observed = match &outcome {
@@ -779,6 +804,7 @@ async fn run_scenario(
         child_id: Arc::new(Mutex::new(None)),
         process_id,
         registry: Arc::clone(&registry),
+        env_store: stores.process_env_store(),
         probe: Arc::new(Probe::default()),
     };
     if kind == EffectKind::ChildStart {

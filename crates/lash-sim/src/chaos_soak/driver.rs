@@ -935,7 +935,6 @@ async fn register_child(
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "chaos_soak": "child" }),
         },
-        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.as_str())),
         lash_core::Lifetime::Detached,
     );

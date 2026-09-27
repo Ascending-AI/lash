@@ -206,7 +206,6 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
                 },
                 // A fixture-owned external process: the worker must not try to
                 // recover an input it does not own.
-                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),

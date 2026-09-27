@@ -9,7 +9,7 @@ use super::{
     LashlangProcessTraceIdentity, LashlangSegmentState, LashlangSegmentStateError,
     ReplayOrdinalsState, SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
     process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
-    refuse_foreign_program, resolve_child_max_attempts,
+    refuse_foreign_program,
 };
 use lash_sansio::ExecutionNodeKind;
 use lash_sansio::sync::MutexExt;
@@ -525,7 +525,6 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
             signal_wait_ordinals: Default::default(),
         },
         started_process_ids: Vec::new(),
-        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
@@ -580,7 +579,6 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
             signal_wait_ordinals: [("ready".to_string(), 11)].into(),
         },
         started_process_ids: Vec::new(),
-        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
@@ -805,7 +803,6 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
             signal_wait_ordinals: Default::default(),
         },
         started_process_ids: Vec::new(),
-        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
@@ -862,7 +859,6 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
             signal_wait_ordinals: Default::default(),
         },
         started_process_ids: Vec::new(),
-        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: writer.pending(),
         effect_omissions: writer.omissions(),
@@ -1015,49 +1011,5 @@ fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
             }
         ),
         "unexpected error: {error}"
-    );
-}
-
-#[test]
-fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_change() {
-    let program = lashlang::testing::harness::try_compile_program(&finish_null())
-        .expect("compile pinning program");
-    let mut state = lashlang::State::new();
-    let host = SegmentFixtureHost;
-    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
-    let mut vm =
-        lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct pinning VM");
-    let recorded = std::num::NonZeroU32::new(3).expect("non-zero recorded bound");
-    let segment_state = LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: vm.suspend().expect("capture pinning VM continuation"),
-        ordinals: ReplayOrdinalsState {
-            commands: crate::LashlangRunOrdinals {
-                next: 0,
-                dispatched: crate::DispatchedOrdinalsDigest::empty(),
-            },
-            event_sequence: 0,
-            signal_wait_ordinals: Default::default(),
-        },
-        started_process_ids: Vec::new(),
-        child_max_attempts: recorded,
-        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
-        pending_summary: Vec::new(),
-        effect_omissions: std::collections::BTreeMap::new(),
-        outstanding_groups: Vec::new(),
-    };
-    let encoded = serde_json::to_vec(&segment_state).expect("encode segment handover");
-    let decoded = decode_lashlang_segment_state(&encoded).expect("decode segment handover");
-
-    let changed_host_default = std::num::NonZeroU32::new(11).expect("non-zero host default");
-    assert_eq!(
-        resolve_child_max_attempts(Some(&decoded), changed_host_default),
-        recorded,
-        "a resumed segment re-registers children with the bound already in their fingerprint"
-    );
-    assert_eq!(
-        resolve_child_max_attempts(None, changed_host_default),
-        changed_host_default,
-        "only a first segment reads the live host default"
     );
 }

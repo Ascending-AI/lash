@@ -177,7 +177,6 @@ pub enum RemoteSessionProcessEventKind {
     Waiting { sequence: u64 },
     Resumed { sequence: u64 },
     CancelRequested { sequence: u64 },
-    AbandonRequested { sequence: u64 },
     CallerDeparted { sequence: u64 },
     Completed { sequence: u64 },
     Failed { sequence: u64 },

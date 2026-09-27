@@ -222,7 +222,7 @@ impl InternalProcessAdmin<'_> {
     }
 
     /// Record the terminal outcome of an Externally-Owned process this session
-    /// owns (ADR 0019). A host that launches work outside lash registers it as
+    /// owns (ADR 0110). A host that launches work outside lash registers it as
     /// an Externally-Owned row and completes it with the launch identity —
     /// lash never claims it as running. Only Externally-Owned rows accept this
     /// out-of-band completion.

@@ -29,11 +29,11 @@ use lash_core_execution::{
     AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity, ProcessInput,
     ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
-    ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
-    RecoveryContract, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionCommitStore,
-    SessionStoreFactory, TriggerStore,
+    ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter, Resolution,
+    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimePersistence, SessionCommitStore, SessionStoreFactory,
+    TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteBackendOptions, SqliteDatabase, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
@@ -790,7 +790,6 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )

@@ -20,7 +20,6 @@ pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))

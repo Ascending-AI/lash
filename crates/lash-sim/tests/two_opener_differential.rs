@@ -58,7 +58,7 @@ use lash_core::{
     LoserPolicy, PendingCompletion, PluginOptions, PreparedToolCall, ProcessEngineRegistry,
     ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessId, ProcessInput,
     ProcessOriginator, ProcessRegistration, ProcessRegistry, ProcessService,
-    ProcessStartDeclaration, ProtocolPosition, RecoveryContract, Resolution, RuntimeAttribution,
+    ProcessStartDeclaration, ProtocolPosition, Resolution, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
     SessionId, SessionPolicy, StartProcessIntent, StoreEffectGroupDrain, ToolAttemptOutcome,
@@ -1144,7 +1144,6 @@ async fn fixture(
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 Lifetime::Detached,
             )

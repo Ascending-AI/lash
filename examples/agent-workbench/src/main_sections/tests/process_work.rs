@@ -93,7 +93,6 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
                 lash::process::ProcessInput::External {
                     metadata: Value::Null,
                 },
-                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
                 lash::process::Lifetime::Detached,
             )
@@ -171,7 +170,6 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
             lash::process::ProcessInput::External {
                 metadata: Value::Null,
             },
-            lash::process::RecoveryContract::ExternallyOwned,
             lash::process::ProcessProvenance::host(),
             lash::process::Lifetime::Detached,
         ))
@@ -280,7 +278,6 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
             lash::process::ProcessInput::External {
                 metadata: json!({ "test": true }),
             },
-            lash::process::RecoveryContract::ExternallyOwned,
             lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                 &session_id,
             )),
@@ -354,7 +351,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         ProcessInput, ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode,
         ProcessObserverBy, ProcessOriginator, ProcessProvenance, ProcessRegistration,
         ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
-        ProjectionWatermark, RecoveryContract, SessionScope,
+        ProjectionWatermark, SessionScope,
     };
     let registry_dir = tempfile::tempdir().expect("process registry tempdir");
     let registry = crate::tests::standalone_process_registry(
@@ -448,7 +445,6 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         lash::process::StartKey::for_host(lash::process::StartKeyOwner::HOST, process_id);
     let registration = ProcessRegistration::new(
         input,
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         lash::process::Lifetime::Detached,
     )
@@ -457,7 +453,6 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     .with_admitted_identity(lash::process::AdmittedProcessIdentity::for_testing(
         identity,
     ))
-    .with_max_attempts(Some(3))
     .with_execution_env_ref(Some(execution_env_ref.clone()))
     .with_extra_event_types([ProcessEventType {
         name: "progress".to_string(),
@@ -466,8 +461,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     }])
     .with_wake_session_id(Some(SessionId::from("session-finance")));
     assert_eq!(registration.start_key.as_ref(), Some(&start_key));
-    assert_eq!(registration.disposition, RecoveryContract::Rerunnable);
-    assert_eq!(registration.max_attempts, Some(3));
+    assert!(!registration.input.is_externally_owned());
     assert_eq!(
         registration
             .env_ref
@@ -511,8 +505,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         record.identity.label.as_deref(),
         Some("Nightly invoice export")
     );
-    assert_eq!(record.max_attempts, Some(3));
-    assert_eq!(record.disposition, RecoveryContract::Rerunnable);
+    assert!(!record.input.is_externally_owned());
     assert_eq!(record.input.engine_specific_kind(), Some("report-export"));
     assert_eq!(
         record.provenance.originator,
@@ -534,7 +527,6 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(record.updated_at_ms >= record.created_at_ms);
     assert!(record.external_ref.is_none());
     assert!(record.first_started.is_none());
-    assert!(record.abandon_request.is_none());
     assert!(record.wait.is_none());
     assert!(record.outcome.is_none());
     let replay = registry
@@ -893,7 +885,6 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
             ProcessInput::External {
                 metadata: json!({ "backend": "batch-service" }),
             },
-            RecoveryContract::ExternallyOwned,
             ProcessProvenance::new(ProcessOriginator::host_scoped("batch-service")),
             lash::process::Lifetime::Detached,
         ))
@@ -1012,7 +1003,7 @@ fn session_delete_reclaims_the_deleted_sessions_terminal_work() {
 async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     use lash::process::{
         ProcessCompletionAuthority, ProcessInput, ProcessProvenance, ProcessRegistration,
-        RecoveryContract, SessionScope,
+        SessionScope,
     };
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-session-delete-retention-{}",
@@ -1097,7 +1088,6 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
                     ProcessInput::External {
                         metadata: json!({ "trigger_delivery": originator.is_some() }),
                     },
-                    RecoveryContract::ExternallyOwned,
                     match &originator {
                         Some(session_id) => {
                             ProcessProvenance::session(SessionScope::new(session_id))
@@ -1418,7 +1408,6 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
                 lash::process::ProcessInput::External {
                     metadata: json!({ "test": true }),
                 },
-                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     &session_id,
                 )),

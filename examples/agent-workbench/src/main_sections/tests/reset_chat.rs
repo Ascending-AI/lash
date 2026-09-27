@@ -278,7 +278,6 @@ async fn register_terminal_processes(
                 lash::process::ProcessInput::External {
                     metadata: Value::Null,
                 },
-                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     session_id.to_string(),
                 )),

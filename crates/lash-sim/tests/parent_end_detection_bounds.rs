@@ -27,7 +27,7 @@ use lash_core::testing::TestClock;
 use lash_core::{
     Ancestry, CancelRequest, ClockWallTime, Lifetime, LifetimeDecision, NativeProcessWork,
     PluginError, ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProcessTerminalWait, ProcessWorkSubstrate, RecoveryContract, ScopeGrant, ScopeId, SessionScope,
+    ProcessTerminalWait, ProcessWorkSubstrate, ScopeGrant, ScopeId, SessionScope,
 };
 
 /// A `ProcessWorkSubstrate` whose `deliver_cancel` pops a scripted error
@@ -160,7 +160,6 @@ impl World {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::Rerunnable,
                 ProcessProvenance::session(SessionScope::new(session)),
                 Lifetime::Detached,
             ))
@@ -192,7 +191,6 @@ impl World {
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::session(SessionScope::new(session)),
             Lifetime::Detached,
         );

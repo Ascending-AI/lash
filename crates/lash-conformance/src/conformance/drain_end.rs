@@ -54,8 +54,8 @@ use crate::testing::store_fixtures::bind_conformance_session;
 use crate::{
     EffectHost, LashRuntime, LeaseOwnerIdentity, Lifetime, PendingTurnInputDraft, PluginError,
     ProcessId, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessRegistry, QueuedTurnDrain, RecoveryContract, ScopeId, ScopedEffectController,
-    SessionCommitStore, SessionStoreFactory, TurnInput, TurnInputIngress, TurnOptions,
+    ProcessRegistry, QueuedTurnDrain, ScopeId, ScopedEffectController, SessionCommitStore,
+    SessionStoreFactory, TurnInput, TurnInputIngress, TurnOptions,
 };
 
 /// The session every drain-end law exercises.
@@ -151,7 +151,6 @@ async fn register_drain_child(
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryContract::ExternallyOwned,
         ProcessProvenance::session(crate::SessionScope::new(SESSION_ID)),
         Lifetime::Detached,
     );

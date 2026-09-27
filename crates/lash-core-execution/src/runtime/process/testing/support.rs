@@ -25,7 +25,7 @@ pub trait TestProcessRegistryWriteExt: ProcessRegistry {
                 &ProcessExecutionWriteAuthority::lease(lease.clone()),
             )
             .await
-            .and_then(ProcessStartOutcome::into_record);
+            .map(ProcessStartOutcome::into_record);
         finish_fixture_write(self, &lease, result).await
     }
 

@@ -52,8 +52,9 @@ pub struct StoreContractHandles {
 pub enum StoreContractOp {
     Register {
         process: u8,
-        disposition: u8,
-        max_attempts: u8,
+        /// An externally-owned row (lash never executes it) rather than one
+        /// the engine runs.
+        external: bool,
         wake_target: Option<u8>,
     },
     FirstStart {
@@ -468,7 +469,7 @@ where
         make,
         seed,
         &SessionId::from("prop-runtime-session"),
-        |handles| async move { assert_attempt_monotonicity_and_budget(&handles.registry).await },
+        |handles| async move { assert_attempt_monotonicity(&handles.registry).await },
     )
     .await?;
     assert_on_fresh_handles(
@@ -545,52 +546,54 @@ fn session_id(index: u8) -> SessionId {
     SessionId::from(format!("prop-session-{}", index % SESSION_COUNT))
 }
 
-fn disposition(index: u8) -> RecoveryContract {
-    match index % 3 {
-        0 => RecoveryContract::Rerunnable,
-        1 => RecoveryContract::OwnerBound,
-        _ => RecoveryContract::ExternallyOwned,
-    }
-}
-
+/// A generated process: externally owned (an `External` input lash never
+/// executes) or one the engine runs (an `Engine` input with its execution env).
 fn registration(
     label: &str,
-    disposition: RecoveryContract,
-    max_attempts: u32,
+    external: bool,
     wake_target: Option<SessionId>,
 ) -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::Engine {
-            kind: "store-contract-property".to_string(),
-            payload: serde_json::Value::Null,
-        },
-        disposition,
-        ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
-    )
-    .with_max_attempts(Some(max_attempts))
-    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-        "process-env:{label}"
-    ))))
-    .with_extra_event_types([
-        ProcessEventType {
-            name: "property.signal".to_string(),
-            payload_schema: LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "property.wake".to_string(),
-            payload_schema: LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec {
-                wake: Some(ProcessWakeSpec {
-                    when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
-                    input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                }),
-                ..ProcessEventSemanticsSpec::default()
+    let registration = if external {
+        ProcessRegistration::new(
+            ProcessInput::External {
+                metadata: serde_json::json!({ "label": label }),
             },
-        },
-    ])
-    .with_wake_session_id(wake_target)
+            ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        )
+    } else {
+        ProcessRegistration::new(
+            ProcessInput::Engine {
+                kind: "store-contract-property".to_string(),
+                payload: serde_json::Value::Null,
+            },
+            ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        )
+        .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
+            "process-env:{label}"
+        ))))
+    };
+    registration
+        .with_extra_event_types([
+            ProcessEventType {
+                name: "property.signal".to_string(),
+                payload_schema: LashSchema::any(),
+                semantics: ProcessEventSemanticsSpec::default(),
+            },
+            ProcessEventType {
+                name: "property.wake".to_string(),
+                payload_schema: LashSchema::any(),
+                semantics: ProcessEventSemanticsSpec {
+                    wake: Some(ProcessWakeSpec {
+                        when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
+                        input: ProcessValueSelector::Pointer("/wake_input".to_string()),
+                    }),
+                    ..ProcessEventSemanticsSpec::default()
+                },
+            },
+        ])
+        .with_wake_session_id(wake_target)
 }
 
 fn invocation_authority(
@@ -635,8 +638,7 @@ async fn apply_operation(
     match operation {
         StoreContractOp::Register {
             process,
-            disposition: d,
-            max_attempts,
+            external,
             wake_target,
         } => {
             let slot = *process % PROCESS_COUNT;
@@ -644,13 +646,8 @@ async fn apply_operation(
             let result = handles
                 .registry
                 .register_process(
-                    registration(
-                        &format!("prop-process-{slot}"),
-                        disposition(*d),
-                        u32::from(*max_attempts),
-                        target.clone(),
-                    )
-                    .with_start_key(Some(slot_start_key(slot))),
+                    registration(&format!("prop-process-{slot}"), *external, target.clone())
+                        .with_start_key(Some(slot_start_key(slot))),
                 )
                 .await;
             if let Ok(record) = result {
@@ -863,11 +860,10 @@ async fn apply_operation(
             let id = model.slot_id(*process);
             let output = terminal_output(*terminal);
             if let Ok(Some(record)) = handles.registry.get_process(&id).await {
-                let authority = match record.disposition {
-                    RecoveryContract::ExternallyOwned => {
-                        ProcessCompletionAuthority::external_owner()
-                    }
-                    _ => ProcessCompletionAuthority::workflow_key(format!("property:{id}")),
+                let authority = if record.input.is_externally_owned() {
+                    ProcessCompletionAuthority::external_owner()
+                } else {
+                    ProcessCompletionAuthority::workflow_key(format!("property:{id}"))
                 };
                 if let Ok(ProcessCompletionOutcome::Committed(_)) = handles
                     .registry
@@ -1282,7 +1278,7 @@ fn terminal_output(index: u8) -> ProcessAwaitOutput {
         )),
         _ => ProcessAwaitOutput::Abandoned {
             evidence: Box::new(crate::AbandonEvidence {
-                writer: crate::AbandonWriter::EngineGaveUp,
+                writer: crate::AbandonWriter::Producer,
                 owner: None,
                 epoch_ms: 1,
             }),
@@ -1462,12 +1458,7 @@ async fn assert_replay_key_idempotency(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let id = registry
-        .register_process(registration(
-            "law-replay-key",
-            RecoveryContract::ExternallyOwned,
-            1,
-            None,
-        ))
+        .register_process(registration("law-replay-key", true, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1519,88 +1510,73 @@ async fn assert_replay_key_idempotency(
     Ok(())
 }
 
+/// The registry keeps the execution-started fact consistent; the engine alone
+/// decides whether a start may run (ADR 0110). The same execution is
+/// idempotent, a successor execution takes exactly the next attempt, and an
+/// externally-owned row never starts at all.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn assert_attempt_monotonicity_and_budget(
+async fn assert_attempt_monotonicity(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let rerunnable = registry
-        .register_process(registration(
-            "law-attempt-budget",
-            RecoveryContract::Rerunnable,
-            2,
-            None,
-        ))
+    let executed = registry
+        .register_process(registration("law-attempt-monotonicity", false, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
     for attempt in 1..=2 {
-        let authority = invocation_authority(&rerunnable, attempt as u8, attempt);
+        let authority = invocation_authority(&executed, attempt as u8, attempt);
         let started = authority.invocation_started().expect("bound invocation");
         let outcome = registry
-            .record_first_started_with_authority(&rerunnable, started, &authority)
+            .record_first_started_with_authority(&executed, started, &authority)
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?;
         prop_assert!(matches!(outcome, ProcessStartOutcome::Started(_)));
     }
-    let authority = invocation_authority(&rerunnable, 3, 3);
-    let exhausted = registry
+    let current = invocation_authority(&executed, 2, 2);
+    let repeated = registry
         .record_first_started_with_authority(
-            &rerunnable,
-            authority.invocation_started().expect("bound invocation"),
-            &authority,
+            &executed,
+            current.invocation_started().expect("bound invocation"),
+            &current,
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
-        matches!(
-            exhausted,
-            ProcessStartOutcome::AttemptsExhausted {
-                attempts: 2,
-                max_attempts: 2,
-                ..
-            }
-        ),
-        "Attempt monotonicity / budget: max_attempts was not honored"
+        matches!(repeated, ProcessStartOutcome::AlreadyApplied(_)),
+        "Attempt monotonicity: the current execution's start was not idempotent"
+    );
+    let skipped = invocation_authority(&executed, 3, 4);
+    prop_assert!(
+        registry
+            .record_first_started_with_authority(
+                &executed,
+                skipped.invocation_started().expect("bound invocation"),
+                &skipped,
+            )
+            .await
+            .is_err(),
+        "Attempt monotonicity: a start that skipped an attempt was accepted"
     );
 
-    let owner_bound = registry
-        .register_process(registration(
-            "law-resume-only",
-            RecoveryContract::OwnerBound,
-            3,
-            None,
-        ))
+    let external = registry
+        .register_process(registration("law-external-never-starts", true, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
-    let first_authority = invocation_authority(&owner_bound, 1, 1);
-    registry
-        .record_first_started_with_authority(
-            &owner_bound,
-            first_authority
-                .invocation_started()
-                .expect("bound invocation"),
-            &first_authority,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let second_authority = invocation_authority(&owner_bound, 2, 2);
-    let second = registry
-        .record_first_started_with_authority(
-            &owner_bound,
-            second_authority
-                .invocation_started()
-                .expect("bound invocation"),
-            &second_authority,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let authority = invocation_authority(&external, 1, 1);
     prop_assert!(
-        matches!(second, ProcessStartOutcome::AlreadyStarted { .. }),
-        "Attempt monotonicity / budget: OwnerBound second execution was accepted"
+        registry
+            .record_first_started_with_authority(
+                &external,
+                authority.invocation_started().expect("bound invocation"),
+                &authority,
+            )
+            .await
+            .is_err(),
+        "Attempt monotonicity: an externally-owned row started an execution"
     );
     Ok(())
 }
@@ -1613,12 +1589,7 @@ async fn assert_stale_authority_non_mutation(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let id = registry
-        .register_process(registration(
-            "law-stale-authority",
-            RecoveryContract::Rerunnable,
-            3,
-            None,
-        ))
+        .register_process(registration("law-stale-authority", false, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1671,8 +1642,7 @@ async fn assert_wake_group_order_and_claim_ownership(
     let id = registry
         .register_process(registration(
             "law-wake-order",
-            RecoveryContract::ExternallyOwned,
-            1,
+            true,
             Some(SessionId::from("law-wake-session")),
         ))
         .await
@@ -1943,8 +1913,7 @@ async fn assert_prune_reregister_wake_fence(
         .register_process(
             registration(
                 "law-prune-reregister-wake-process",
-                RecoveryContract::ExternallyOwned,
-                1,
+                true,
                 Some(session.clone()),
             )
             .with_start_key(Some(start_key.clone())),
@@ -2060,8 +2029,7 @@ async fn assert_prune_reregister_wake_fence(
         .register_process(
             registration(
                 "law-prune-reregister-wake-process",
-                RecoveryContract::ExternallyOwned,
-                1,
+                true,
                 Some(session.clone()),
             )
             .with_start_key(Some(start_key)),
@@ -2109,12 +2077,7 @@ async fn assert_prune_tombstone_watermark_safety(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let live_id = registry
-        .register_process(registration(
-            "law-prune-live-must-survive",
-            RecoveryContract::Rerunnable,
-            3,
-            None,
-        ))
+        .register_process(registration("law-prune-live-must-survive", false, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -2127,12 +2090,7 @@ async fn assert_prune_tombstone_watermark_safety(
         "Prune/tombstone/watermark safety: live process was pruned"
     );
     let eligible_id = registry
-        .register_process(registration(
-            "law-prune-watermark-eligible",
-            RecoveryContract::ExternallyOwned,
-            1,
-            None,
-        ))
+        .register_process(registration("law-prune-watermark-eligible", true, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -2147,12 +2105,7 @@ async fn assert_prune_tombstone_watermark_safety(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let id = registry
-        .register_process(registration(
-            "law-prune-watermark",
-            RecoveryContract::ExternallyOwned,
-            1,
-            None,
-        ))
+        .register_process(registration("law-prune-watermark", true, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -2261,8 +2214,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .register_process(
             registration(
                 "law-prune-reregister",
-                RecoveryContract::ExternallyOwned,
-                1,
+                true,
                 Some(SessionId::from("law-prune-reregister-old")),
             )
             .with_start_key(Some(start_key.clone())),
@@ -2316,8 +2268,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .register_process(
             registration(
                 "law-prune-reregister",
-                RecoveryContract::Rerunnable,
-                3,
+                false,
                 Some(SessionId::from("law-prune-reregister-new")),
             )
             .with_start_key(Some(start_key)),

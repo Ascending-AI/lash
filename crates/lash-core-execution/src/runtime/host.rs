@@ -8,23 +8,6 @@ use super::{
     SessionWorkEngine, TerminationPolicy,
 };
 
-/// Default attempt bound stamped onto children started by the engine that runs
-/// a script, rather than by a host that states its own budget.
-///
-/// A registration with no bound asks the engine to pace retries indefinitely,
-/// so a child that fails the same way every attempt never reaches a terminal
-/// fact and its awaiters never resolve. Five attempts absorb the transient
-/// owner losses a durable child is expected to survive — a worker crash, a
-/// lapsed lease, a redrive — and then hand the deterministic failure to the
-/// host as an Abandoned fact written by the engine, per ADR 0019. Hosts that
-/// want a different budget set one; the value is resolved once and recorded on
-/// the child's row, so changing it never rewrites a child already registered.
-pub const DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS: std::num::NonZeroU32 =
-    match std::num::NonZeroU32::new(5) {
-        Some(value) => value,
-        None => unreachable!(),
-    };
-
 /// Required host configuration for all runtimes.
 ///
 /// A config is built over exactly one [`Backend`](crate::Backend) (ADR 0102,
@@ -124,13 +107,6 @@ pub struct RuntimeControlConfig {
     /// persisted tools (FIG-3353). Carried on the host config so every
     /// construction below the facade sees the same choice.
     pub tool_surface_open_mode: crate::ToolSurfaceOpenMode,
-    /// Attempt bound stamped onto every child a script engine starts on the
-    /// model's behalf, where no host or tool author is present to state one.
-    /// Resolved once per execution segment and recorded on the child's record,
-    /// so it is hashed by the registration fingerprint and a redrive across a
-    /// config change re-registers the recorded value instead of conflicting.
-    /// Defaults to [`DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS`].
-    pub engine_child_max_attempts: std::num::NonZeroU32,
     /// How much effect-group work one logical opener may retain at once
     /// (ADR 0099 §9). Read when an opener's state is created; a group already
     /// accepted is never refused by a later change to it.
@@ -236,7 +212,6 @@ impl RuntimeHostConfig {
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
-                engine_child_max_attempts: DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
                 opener_work_bound: crate::session::OpenerWorkBound::default(),
                 tool_children,
                 open_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
@@ -420,16 +395,6 @@ impl RuntimeHostConfig {
     /// independent from the wake merge key and all batching safety gates.
     pub fn with_process_wake_delivery_policy(mut self, policy: crate::DeliveryPolicy) -> Self {
         self.control.process_wake_delivery_policy = policy;
-        self
-    }
-
-    /// Set the attempt bound stamped onto children a script engine starts.
-    ///
-    /// The bound is resolved when an execution segment begins and recorded on
-    /// each child it registers, so a change takes effect for children started
-    /// after it and never for one already on the registry.
-    pub fn with_engine_child_max_attempts(mut self, max_attempts: std::num::NonZeroU32) -> Self {
-        self.control.engine_child_max_attempts = max_attempts;
         self
     }
 

@@ -20,7 +20,6 @@ use super::*;
 use std::sync::Mutex;
 
 mod binding_drift;
-mod child_attempt_bound;
 mod deferred_and_processes;
 mod lifecycle_and_diagnostics;
 mod per_process_surface;

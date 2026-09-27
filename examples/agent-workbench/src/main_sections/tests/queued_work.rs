@@ -230,7 +230,6 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
-                    lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -355,7 +354,6 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
-                    lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -453,7 +451,6 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
-                    lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -555,7 +552,6 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
-                    lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -776,7 +772,6 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
-                    lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )

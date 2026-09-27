@@ -10,14 +10,19 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::Engine {
+                    kind: "test-engine".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+                "process-env:test-engine",
+            ))),
+        )
         .await
         .expect("register waiting process")
         .id;
@@ -171,14 +176,19 @@ async fn parked_work_merges_parked_turns_and_processes() {
     .expect("build core");
 
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::Engine {
+                    kind: "test-engine".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+                "process-env:test-engine",
+            ))),
+        )
         .await
         .expect("register the process")
         .id;
@@ -439,14 +449,19 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     assert!(refused.is_terminal() && !refused.is_retryable());
 
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::Engine {
+                    kind: "test-engine".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+                "process-env:test-engine",
+            ))),
+        )
         .await
         .expect("register the retired generation's process")
         .id;

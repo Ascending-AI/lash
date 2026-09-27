@@ -29,7 +29,6 @@ async fn a_pruned_process_cleanup_cannot_release_its_successor_owner() -> Result
                     kind: engine.kind().to_string(),
                     payload: serde_json::json!({"artifact_ref": "reused-process-owner"}),
                 },
-                lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -71,7 +70,6 @@ async fn a_pruned_process_cleanup_cannot_release_its_successor_owner() -> Result
                     kind: engine.kind().to_string(),
                     payload: serde_json::json!({"artifact_ref": "reused-process-owner"}),
                 },
-                lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

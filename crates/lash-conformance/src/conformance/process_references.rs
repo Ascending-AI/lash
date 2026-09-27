@@ -93,7 +93,6 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
                         kind: "reference-test".to_string(),
                         payload: serde_json::Value::Null,
                     },
-                    RecoveryContract::Rerunnable,
                     ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )

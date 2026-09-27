@@ -629,7 +629,6 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

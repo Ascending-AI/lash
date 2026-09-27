@@ -180,7 +180,6 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         crate::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        crate::RecoveryContract::ExternallyOwned,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     );
@@ -319,7 +318,6 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
             turn_input: Box::new(crate::TurnInput::text("must not run")),
             output_contract: crate::ToolOutputContract::Static,
         },
-        crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     );
@@ -1330,7 +1328,6 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         crate::ProcessInput::External {
             metadata: serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
         },
-        crate::RecoveryContract::ExternallyOwned,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     );
@@ -1456,7 +1453,6 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
         crate::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::session(crate::SessionScope::new(parent.as_str())),
         crate::Lifetime::Detached,
     );
@@ -1526,7 +1522,6 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
         crate::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        crate::RecoveryContract::Rerunnable,
         crate::ProcessOriginator::session(crate::SessionScope::new(owned.as_str())),
         crate::Lifetime::Detached,
     )

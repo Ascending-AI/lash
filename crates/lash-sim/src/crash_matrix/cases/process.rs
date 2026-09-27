@@ -120,7 +120,6 @@ pub(crate) async fn publish_process(
     .map_err(|error| format!("the process input: {error}"))?;
     Ok(lash_core::ProcessStartRequest::new(
         input,
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )

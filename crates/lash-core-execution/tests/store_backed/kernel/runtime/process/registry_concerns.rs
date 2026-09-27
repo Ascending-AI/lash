@@ -154,7 +154,6 @@ mod concern_isolation_tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             ))

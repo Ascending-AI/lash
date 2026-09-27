@@ -372,10 +372,7 @@
       "oneOf": [
         {
           "enum": [
-            "owner_drain",
-            "sweep",
-            "reconciled_request",
-            "engine_gave_up"
+            "producer"
           ],
           "type": "string"
         },

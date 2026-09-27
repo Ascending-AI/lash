@@ -5,7 +5,7 @@ use serde_json::json;
 use super::super::model::{
     ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessIdentity, ProcessInput,
     ProcessListFilter, ProcessListMode, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessStatus, RecoveryContract, WaitKind, WaitState,
+    ProcessStatus, WaitKind, WaitState,
 };
 
 #[test]
@@ -114,7 +114,6 @@ fn engine_entry(
                     "label": process_name,
                 }),
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )

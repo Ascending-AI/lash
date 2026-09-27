@@ -194,7 +194,6 @@ fn start_request(start_key: &str, payload: serde_json::Value) -> lash_core::Proc
             kind: ENGINE_KIND.to_string(),
             payload,
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )

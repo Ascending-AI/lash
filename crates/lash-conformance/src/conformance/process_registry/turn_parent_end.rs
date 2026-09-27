@@ -38,7 +38,6 @@ async fn register_child(
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryContract::Rerunnable,
         ProcessProvenance::session(originator.clone()),
         lash_core::Lifetime::Detached,
     );
@@ -339,7 +338,6 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ))

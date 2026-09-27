@@ -68,7 +68,6 @@ pub(super) async fn compare_bounded_process_event_pages(
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
@@ -186,7 +185,6 @@ pub(super) async fn compare_bounded_process_event_pages(
                 kind: "effect-differential".to_string(),
                 payload: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )

@@ -493,13 +493,6 @@ fn processes_area_witnesses_b() {
             let _ = process_id;
         }
     });
-    // W0487: lash::process::ProcessExecutionWriteAuthority::Invocation::resume_from [field]
-    field_witness(|value: &lash::process::ProcessExecutionWriteAuthority| {
-        if let lash::process::ProcessExecutionWriteAuthority::Invocation { resume_from, .. } = value
-        {
-            let _ = resume_from;
-        }
-    });
     // W0488: lash::process::ProcessExecutionWriteAuthority::Lease [variant]
     variant_witness(|value: &lash::process::ProcessExecutionWriteAuthority| {
         matches!(
@@ -518,8 +511,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::process::ProcessExecutionWriteAuthority::invocation_started;
     // W0494: lash::process::ProcessExecutionWriteAuthority::lease [function]
     let _ = lash::process::ProcessExecutionWriteAuthority::lease;
-    // W0495: lash::process::ProcessExecutionWriteAuthority::permits_owner_bound_resume [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::permits_owner_bound_resume;
     // W0496: lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_start [function]
     let _ = lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_start;
     // W0497: lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_write [function]
@@ -579,50 +570,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::process::ProcessStartOutcome| {
         if let lash::process::ProcessStartOutcome::AlreadyApplied(f0) = value {
             let _ = f0;
-        }
-    });
-    // W0515: lash::process::ProcessStartOutcome::AlreadyStarted [variant]
-    variant_witness(|value: &lash::process::ProcessStartOutcome| {
-        matches!(
-            value,
-            lash::process::ProcessStartOutcome::AlreadyStarted { .. }
-        )
-    });
-    // W0516: lash::process::ProcessStartOutcome::AlreadyStarted::by [field]
-    field_witness(|value: &lash::process::ProcessStartOutcome| {
-        if let lash::process::ProcessStartOutcome::AlreadyStarted { by, .. } = value {
-            let _ = by;
-        }
-    });
-    // W0517: lash::process::ProcessStartOutcome::AlreadyStarted::current [field]
-    field_witness(|value: &lash::process::ProcessStartOutcome| {
-        if let lash::process::ProcessStartOutcome::AlreadyStarted { current, .. } = value {
-            let _ = current;
-        }
-    });
-    // W0518: lash::process::ProcessStartOutcome::AttemptsExhausted [variant]
-    variant_witness(|value: &lash::process::ProcessStartOutcome| {
-        matches!(
-            value,
-            lash::process::ProcessStartOutcome::AttemptsExhausted { .. }
-        )
-    });
-    // W0519: lash::process::ProcessStartOutcome::AttemptsExhausted::attempts [field]
-    field_witness(|value: &lash::process::ProcessStartOutcome| {
-        if let lash::process::ProcessStartOutcome::AttemptsExhausted { attempts, .. } = value {
-            let _ = attempts;
-        }
-    });
-    // W0520: lash::process::ProcessStartOutcome::AttemptsExhausted::current [field]
-    field_witness(|value: &lash::process::ProcessStartOutcome| {
-        if let lash::process::ProcessStartOutcome::AttemptsExhausted { current, .. } = value {
-            let _ = current;
-        }
-    });
-    // W0521: lash::process::ProcessStartOutcome::AttemptsExhausted::max_attempts [field]
-    field_witness(|value: &lash::process::ProcessStartOutcome| {
-        if let lash::process::ProcessStartOutcome::AttemptsExhausted { max_attempts, .. } = value {
-            let _ = max_attempts;
         }
     });
     // W0522: lash::process::ProcessStartOutcome::Started [variant]

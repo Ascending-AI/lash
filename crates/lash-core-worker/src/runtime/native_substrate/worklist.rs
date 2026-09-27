@@ -12,12 +12,12 @@ impl DurableProcessWorker {
         let mut report = ProcessAdmissionReport::default();
         let mut state = self.execution_scheduler.state.lock_recover();
         for record in page.records {
-            // ADR 0019: Lash never executes an externally-owned row, so it is
+            // ADR 0110: Lash never executes an externally-owned row, so it is
             // never an admission and never contends with one. The row's own
-            // declared disposition decides this, not whether some earlier pass
+            // input class decides this, not whether some earlier pass
             // already queued it — a second pass over the same row must not
             // relabel it as `Busy`.
-            let externally_owned = record.disposition == RecoveryContract::ExternallyOwned;
+            let externally_owned = record.input.is_externally_owned();
             let process_id = record.id.clone();
             // A newer page's record replaces a retained rerun: the row may have
             // gained an Abandon Request or other execution-relevant state while

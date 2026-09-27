@@ -174,7 +174,6 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
                     serde_json::Value::Null,
                 ),
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )

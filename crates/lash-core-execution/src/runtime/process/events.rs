@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::effect_summary::{
     PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
 };
-use super::model::{ProcessId, ProcessObserverBy, RecoveryContract};
+use super::model::{ProcessId, ProcessObserverBy};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {
@@ -61,23 +61,19 @@ pub struct ProcessEventSemantics {
     pub wake: Option<ProcessWake>,
 }
 
-/// Who wrote an [`ProcessStatus::Abandoned`] terminal — the exactly-one
-/// legitimate writer per path (ADR 0019).
+/// Who wrote an [`ProcessStatus::Abandoned`] terminal (ADR 0110).
+///
+/// The engine owns recovery, so lash itself writes an abandonment only when
+/// it refuses to resume work it cannot replay. Every other abandonment is the
+/// producer's own recorded outcome.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbandonWriter {
-    /// The owner abandoned its own OwnerBound work during native graceful drain,
-    /// under its own live lease.
-    OwnerDrain,
-    /// The recovery substrate abandoned an OwnerBound, started row after
-    /// detecting that a different execution had already started it.
-    Sweep,
-    /// The sweep reconciled a durable Abandon Request into Abandoned once the
-    /// row's lease had lapsed.
-    ReconciledRequest,
-    /// The execution engine exhausted the producer-declared attempt budget or
-    /// otherwise gave up retrying a managed process.
-    EngineGaveUp,
+    /// The process's producer recorded that its work was lost: the external
+    /// owner of a process lash never executes (an operator closing one whose
+    /// owner is gone included), or a producer-declared `Abandoned` terminal
+    /// event.
+    Producer,
     /// The resume fence refused to run a started process, before any effect,
     /// because it cannot be resumed safely (FIG-3588). `reason` says why.
     ResumeRefused { reason: ProcessResumeRefusal },
@@ -125,8 +121,8 @@ pub struct AbandonEvidence {
 /// lease. In-process Rust cannot make such a token unforgeable; the value of
 /// this type is instead **explicitness + a single validation choke point per
 /// backend + audit evidence** on the terminal write. Every backend calls
-/// [`validate`](Self::validate) against the row's declared
-/// [`RecoveryContract`] inside its completion operation, and records the
+/// [`validate`](Self::validate) against the row's ownership (its input class)
+/// inside its completion operation, and records the
 /// authority on the durable terminal event (see [`terminal_append_request`]).
 ///
 /// There is deliberately no `Default`: a caller must name its authority, the
@@ -134,20 +130,18 @@ pub struct AbandonEvidence {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "authority", rename_all = "snake_case")]
 pub enum ProcessCompletionAuthority {
-    /// An external actor closes an [`RecoveryContract::ExternallyOwned`] row
-    /// it observes: a host that launched work outside lash records that
-    /// work's launch identity as the terminal outcome (ADR 0019).
-    /// Rejected on any lash-executed disposition: those have a lease-fenced
-    /// single writer.
+    /// An external actor closes an externally-owned process
+    /// ([`ProcessInput::External`](super::ProcessInput::External)) it
+    /// observes: a host that launched work outside lash records that work's
+    /// outcome, `Abandoned` included when the work was lost (ADR 0110).
+    /// Rejected on a process lash executes: its engine is its single writer.
     ExternalOwner,
     /// A workflow-key-coalesced substrate (e.g. Restate keyed by `process_id`)
     /// completes a row it ran itself. Its single-writer discipline is the
     /// engine's per-key coalescing, not a Lash lease; `workflow_key` records the
-    /// key that served as that discipline. Valid for the lash-executed
-    /// dispositions ([`RecoveryContract::Rerunnable`] and
-    /// [`RecoveryContract::OwnerBound`], which Restate runs), and rejected on
-    /// [`RecoveryContract::ExternallyOwned`] rows — a substrate never runs
-    /// one, so it may not close one.
+    /// key that served as that discipline. Valid for every process lash
+    /// executes, and rejected on an externally-owned process: an engine never
+    /// runs one, so it may not close one.
     WorkflowKey { workflow_key: String },
     /// A workflow-key substrate ends a row that segment `segment_ordinal`
     /// could not resume (a recovery that found the segment's journal lost).
@@ -160,13 +154,6 @@ pub enum ProcessCompletionAuthority {
         workflow_key: String,
         segment_ordinal: u64,
     },
-    /// The sweep reconciled a durable Abandon Request on an
-    /// [`RecoveryContract::ExternallyOwned`] row (whose lease had lapsed, or
-    /// which Lash never leased) into an
-    /// [`ProcessStatus::Abandoned`] terminal. Carries no owner: the
-    /// closure is authorized by the recorded request, not a live writer. Only
-    /// ever writes an `Abandoned` terminal.
-    ReconciledAbandon,
 }
 
 impl ProcessCompletionAuthority {
@@ -186,23 +173,17 @@ impl ProcessCompletionAuthority {
             Self::ExternalOwner => "external-owner",
             Self::WorkflowKey { .. } => "workflow-key",
             Self::WorkflowKeyRecovery { .. } => "workflow-key-recovery",
-            Self::ReconciledAbandon => "reconciled-abandon",
         }
     }
 
-    /// Validate this authority against the row's declared recovery disposition
-    /// and the terminal outcome being written. This is the single per-backend
-    /// choke point that keeps unleased completion honest: each `complete_process`
+    /// Validate this authority against the row's ownership. This is the single per-backend choke point that
+    /// keeps unleased completion honest: each `complete_process`
     /// implementation calls it before appending the terminal event, so the
-    /// disposition×authority contract is enforced uniformly across memory,
+    /// ownership×authority contract is enforced uniformly across memory,
     /// SQLite, and Postgres rather than at each scattered caller.
-    pub fn validate(
-        &self,
-        record: &super::ProcessRecord,
-        await_output: &ProcessAwaitOutput,
-    ) -> Result<(), crate::PluginError> {
+    pub fn validate(&self, record: &super::ProcessRecord) -> Result<(), crate::PluginError> {
         let process_id = &record.id;
-        let disposition = record.disposition;
+        let externally_owned = record.input.is_externally_owned();
         let reject = |reason: &str| {
             Err(crate::PluginError::Session(format!(
                 "process `{process_id}` cannot be completed with {} authority: {reason}",
@@ -211,18 +192,18 @@ impl ProcessCompletionAuthority {
         };
         match self {
             Self::ExternalOwner => {
-                if disposition != RecoveryContract::ExternallyOwned {
+                if !externally_owned {
                     return reject(
                         "only externally-owned rows may be completed by an external owner; a \
-                         lash-executed row has a lease-fenced single writer",
+                         lash-executed row has its engine as its single writer",
                     );
                 }
             }
             Self::WorkflowKey { .. } | Self::WorkflowKeyRecovery { .. } => {
-                if disposition == RecoveryContract::ExternallyOwned {
+                if externally_owned {
                     return reject(
                         "externally-owned rows are never executed by a workflow substrate; they \
-                         close through their external owner or a reconciled abandon request",
+                         close through their external owner",
                     );
                 }
                 if let Self::WorkflowKeyRecovery {
@@ -238,17 +219,6 @@ impl ProcessCompletionAuthority {
                         process_id: process_id.clone(),
                         segment_ordinal: carrier,
                     });
-                }
-            }
-            Self::ReconciledAbandon => {
-                if disposition != RecoveryContract::ExternallyOwned {
-                    return reject(
-                        "reconciled-abandon closes only externally-owned rows; a lash-executed \
-                         row is abandoned under its lease",
-                    );
-                }
-                if await_output.terminal_status() != Some(ProcessStatus::Abandoned) {
-                    return reject("reconciled-abandon writes only an Abandoned terminal");
                 }
             }
         }
@@ -483,25 +453,14 @@ impl ProcessAwaitOutput {
             // it. To a caller awaiting the result it surfaces one-directionally as
             // an external failure whose raw payload names it abandoned and carries
             // the evidence, while the process layer keeps `Abandoned` a distinct
-            // terminal (ADR 0019). `from_tool_output` therefore never reverses this.
+            // terminal (ADR 0110). `from_tool_output` therefore never reverses this.
             Self::Abandoned { evidence, control } => {
                 let raw = serde_json::to_value(&evidence)
                     .ok()
                     .map(crate::ToolValue::untrusted_json);
                 let message = match evidence.writer {
-                    AbandonWriter::OwnerDrain => {
-                        "process abandoned: owner drained without recording an outcome".to_string()
-                    }
-                    AbandonWriter::Sweep => {
-                        "process abandoned: recovery observed a prior owner-bound execution"
-                            .to_string()
-                    }
-                    AbandonWriter::ReconciledRequest => {
-                        "process abandoned: reconciled abandon request after the lease lapsed"
-                            .to_string()
-                    }
-                    AbandonWriter::EngineGaveUp => {
-                        "process abandoned: execution engine exhausted its retry budget".to_string()
+                    AbandonWriter::Producer => {
+                        "process abandoned: its producer recorded the work as lost".to_string()
                     }
                     AbandonWriter::ResumeRefused {
                         reason: ProcessResumeRefusal::RetiredGeneration { found },
@@ -844,17 +803,10 @@ impl ProcessEventAppendRequest {
 
     /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
     /// cannot alias the preceding execution attempt.
-    pub fn first_started(
-        process_id: &ProcessId,
-        started: &super::model::ProcessStarted,
-        resumed_from_handover: bool,
-    ) -> Self {
+    pub fn first_started(process_id: &ProcessId, started: &super::model::ProcessStarted) -> Self {
         Self::new(
             "process.first_started",
-            serde_json::json!({
-                "started": started,
-                "resumed_from_handover": resumed_from_handover,
-            }),
+            serde_json::json!({ "started": started }),
         )
         .with_replay_key(format!(
             "process:{process_id}:first-started:attempt:{}",
@@ -952,19 +904,6 @@ impl ProcessEventAppendRequest {
             0 => format!("process:{process_id}:external-ref"),
             ordinal => format!("process:{process_id}:external-ref:{ordinal}"),
         })
-    }
-
-    /// Builds the replay-stable abandon-request event for process-store implementors; repeated
-    /// requests for the process converge on the same append identity.
-    pub fn abandon_requested(
-        process_id: &ProcessId,
-        request: &super::model::AbandonRequest,
-    ) -> Self {
-        Self::new(
-            "process.abandon_requested",
-            serde_json::json!({ "request": request }),
-        )
-        .with_replay_key(format!("process:{process_id}:abandon-requested"))
     }
 
     /// Builds the replay-stable caller-departure event for process-store
@@ -1065,7 +1004,6 @@ pub(super) enum ProcessEventKind {
     Waiting,
     Resumed,
     ExternalRefSet,
-    AbandonRequested,
     CancelRequested,
     CallerDeparted,
     Parked,
@@ -1086,7 +1024,6 @@ impl ProcessEventKind {
             "process.waiting" => Self::Waiting,
             "process.resumed" => Self::Resumed,
             "process.external_ref_set" => Self::ExternalRefSet,
-            "process.abandon_requested" => Self::AbandonRequested,
             "process.cancel_requested" => Self::CancelRequested,
             "process.caller_departed" => Self::CallerDeparted,
             "process.parked" => Self::Parked,
@@ -1119,7 +1056,6 @@ pub fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
         | ProcessEventKind::Waiting
         | ProcessEventKind::Resumed
         | ProcessEventKind::ExternalRefSet
-        | ProcessEventKind::AbandonRequested
         | ProcessEventKind::CancelRequested
         | ProcessEventKind::CallerDeparted
         | ProcessEventKind::Parked
@@ -1147,7 +1083,6 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
         "process.waiting",
         "process.resumed",
         "process.external_ref_set",
-        "process.abandon_requested",
         "process.caller_departed",
         "process.observer_added",
         "process.observer_removed",

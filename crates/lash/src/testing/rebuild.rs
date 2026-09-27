@@ -312,7 +312,6 @@ fn worker_registration(input: lash_core::ProcessInput) -> lash_core::ProcessRegi
     lash_core::ProcessRegistration::new(
         input,
         // Worker-rebuild recovery tests need the row to be re-executable.
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION_ID)),
         lash_core::Lifetime::Detached,
     )

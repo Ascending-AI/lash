@@ -93,7 +93,6 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
                     kind: "test-engine".to_string(),
                     payload: serde_json::json!({"module_ref": "module-postgres"}),
                 },
-                lash_core_execution::RecoveryContract::Rerunnable,
                 lash_core_execution::ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )
@@ -164,7 +163,6 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core_execution::RecoveryContract::ExternallyOwned,
             lash_core_execution::ProcessProvenance::host(),
             lash_core_execution::Lifetime::Detached,
         ))

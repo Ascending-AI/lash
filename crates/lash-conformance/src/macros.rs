@@ -384,8 +384,6 @@ macro_rules! process_registry_tests {
                 (process_lease_batch_read_matches_point_reads, "lease-batch-read"),
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (refolded_process_record_matches_hot_projection, "hot-refold"),
-                (process_attempt_budget_is_typed, "attempt-budget"),
-                (redriven_child_reregisters_with_the_recorded_attempt_bound, "redriven-attempt-bound"),
                 (tombstones_make_pruned_processes_distinguishable, "tombstones"),
                 (a_start_key_after_prune_starts_a_new_process, "start-key-after-prune"),
                 (watched_process_registry_start_key_after_prune_starts_a_new_process, "watched-start-key-after-prune"),
@@ -410,7 +408,6 @@ macro_rules! process_registry_tests {
                 (a_process_re_park_keeps_its_park_and_counts_attempts, "process-re-park"),
                 (progress_after_a_rerun_clears_the_park_once, "process-park-progress"),
                 (a_parked_process_that_ends_closes_its_park_by_how_it_ended, "process-park-terminal"),
-                (only_a_refusing_park_exempts_a_start_from_the_attempt_budget, "process-park-budget"),
                 (a_compacted_process_park_feed_cursor_is_refused_typed, "process-park-feed-compaction"),
             ]
         }

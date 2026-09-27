@@ -837,8 +837,6 @@ pub async fn prepare_lashlang_process_start(
     start: lashlang::ProcessStart,
     originator: lash_core::ProcessOriginator,
     lifetime: lash_core::LifetimeDecision,
-    disposition: lash_core::RecoveryContract,
-    max_attempts: std::num::NonZeroU32,
 ) -> Result<PreparedLashlangProcessStart, LashlangRuntimeError> {
     let display_name = Some(start.process_name.clone());
     let artifact = artifact_store
@@ -914,15 +912,13 @@ pub async fn prepare_lashlang_process_start(
     let process_input = process_input
         .into_process_input()
         .map_err(|source| LashlangRuntimeError::EncodeProcessInput { source })?;
-    let request =
-        lash_core::ProcessStartRequest::new(process_input, disposition, originator, lifetime)
-            .with_start_key(start_key)
-            .with_max_attempts(Some(max_attempts.get()))
-            .with_extra_event_types(
-                lashlang_process_event_types()
-                    .into_iter()
-                    .chain(signal_event_types),
-            );
+    let request = lash_core::ProcessStartRequest::new(process_input, originator, lifetime)
+        .with_start_key(start_key)
+        .with_extra_event_types(
+            lashlang_process_event_types()
+                .into_iter()
+                .chain(signal_event_types),
+        );
     Ok(PreparedLashlangProcessStart {
         request,
         label: display_name,

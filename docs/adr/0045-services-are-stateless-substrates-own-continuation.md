@@ -1,5 +1,13 @@
 # Services are stateless; substrates own continuation
 
+Amended 2026-09-27 (FIG-3588, [ADR 0110](0110-the-engine-owns-process-recovery.md)):
+"lash never re-drives engine-owned work" is absolute. Lash never re-runs started
+work from scratch on any tier: a started process resumes only by its engine
+replaying its journal, or ends `Abandoned` with `ResumeRefused { SubstrateLost }`
+before any effect. The amendment at the end of this ADR is the Restate
+mechanism, and ADR 0110 states it for the effect interface. There is no
+lash-side attempt budget; the engine's retry policy bounds retries.
+
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR
@@ -135,7 +143,10 @@ document's floor.
 
 ## Amendment (FIG-3588, 2026-09-24): a Restate segment never restarts started work
 
-"Lash never re-drives engine-owned work" is absolute on the Restate tier. A
+"Lash never re-drives engine-owned work" is absolute on the Restate tier, and
+since [ADR 0110](0110-the-engine-owns-process-recovery.md) on every tier: the
+recovery disposition that once distinguished rerunnable from owner-bound work
+is deleted, and this admission applies to every process lash executes. A
 Restate workflow's invocation id is a function of its key (Restate v1.7.0,
 `InvocationUuid::generate`), so a retry of the invocation that started a
 segment and a fresh invocation of the same key after its journal was lost

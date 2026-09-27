@@ -314,18 +314,10 @@ pub async fn execute_process_start_tool_call(
             kind: engine_kind(args),
             payload,
         },
-        lash_core::RecoveryContract::Rerunnable,
         originator,
         lifetime,
     )
     .with_wake_session_id(wake_session_id)
-    // The attempt bound this host stamps onto a child. It lives on the runtime
-    // execution context, which only the in-attempt start path could read before
-    // FIG-2999; a leaf start that could not reach it registered its child with
-    // no bound, and a child failing the same way every attempt retried forever.
-    // A redrive that re-registers the same deterministic id still takes the
-    // bound recorded on the row, not this one.
-    .with_max_attempts(context.engine_child_max_attempts().map(|bound| bound.get()))
     // An engine start is admitted against the execution env its own record
     // carries, never against the live session env, so the declaration captures
     // the attempt's env spec here rather than leaving realization to substitute

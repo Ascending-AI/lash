@@ -302,7 +302,6 @@ mod tests {
                 lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core_execution::RecoveryContract::ExternallyOwned,
                 lash_core_execution::ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             ))

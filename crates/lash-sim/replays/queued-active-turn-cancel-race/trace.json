@@ -4162,7 +4162,6 @@
                 {
                   "intent": {
                     "declaration": {
-                      "disposition": "externally_owned",
                       "event_types": [
                         {
                           "name": "process.effect_outcome",
@@ -4296,13 +4295,6 @@
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
-                          "semantics": {}
-                        },
-                        {
-                          "name": "process.abandon_requested",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -6746,7 +6738,6 @@
                 {
                   "intent": {
                     "declaration": {
-                      "disposition": "externally_owned",
                       "event_types": [
                         {
                           "name": "process.effect_outcome",
@@ -6880,13 +6871,6 @@
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
-                          "semantics": {}
-                        },
-                        {
-                          "name": "process.abandon_requested",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -8304,7 +8288,6 @@
                 {
                   "intent": {
                     "declaration": {
-                      "disposition": "externally_owned",
                       "event_types": [
                         {
                           "name": "process.effect_outcome",
@@ -8438,13 +8421,6 @@
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
-                          "semantics": {}
-                        },
-                        {
-                          "name": "process.abandon_requested",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -9568,7 +9544,6 @@
                 {
                   "intent": {
                     "declaration": {
-                      "disposition": "externally_owned",
                       "event_types": [
                         {
                           "name": "process.effect_outcome",
@@ -9702,13 +9677,6 @@
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
-                          "semantics": {}
-                        },
-                        {
-                          "name": "process.abandon_requested",
                           "payload_schema": {
                             "schema": {}
                           },

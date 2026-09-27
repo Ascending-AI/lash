@@ -495,7 +495,6 @@ async fn measure_process_prune(
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({"index": index}),
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     &prune_scope,
                 )),
@@ -599,7 +598,6 @@ mod store_hardening_tests {
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({}),
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     "unrelated",
                 )),

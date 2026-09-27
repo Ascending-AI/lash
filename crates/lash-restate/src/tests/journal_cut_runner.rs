@@ -373,7 +373,6 @@ mod served_only_outside_a_run {
                     lash_core::ProcessInput::External {
                         metadata: serde_json::json!({ "fixture": "served-only" }),
                     },
-                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )

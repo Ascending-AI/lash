@@ -76,7 +76,6 @@ pub(super) async fn counting_lashlang_registration() -> ProcessRegistration {
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -207,7 +206,6 @@ async fn looping_waiting_registration() -> ProcessRegistration {
             process_name: worker,
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

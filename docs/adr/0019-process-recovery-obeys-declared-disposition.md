@@ -2,7 +2,15 @@
 
 ## Status
 
-accepted
+Superseded by [ADR 0110](0110-the-engine-owns-process-recovery.md) (FIG-3588,
+2026-09-27). Every host journals and Restate is the only effect engine, so the
+engine owns recovery: a started process resumes only by replaying its journal or
+ends `Abandoned` with `ResumeRefused { SubstrateLost }`. The Recovery
+Disposition, the attempt budget, the owner-drain lever and the Abandon Request
+below are deleted; "lash never executes this process" is the
+`ProcessInput::External` input class. `Abandoned` as a terminal peer of
+`Completed | Failed | Cancelled`, and `CallerDeparted`, stand. The text below
+is the history.
 
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)

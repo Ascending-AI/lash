@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{ProcessLease, ProcessRecord};
 
-/// Durable execution-attempt fact. The fold retains the latest attempt so the
-/// sweep can apply the producer's recovery disposition and attempt budget.
+/// Durable execution-attempt fact. The fold retains the latest attempt, so a
+/// successor execution the engine resumes takes exactly the next attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessStarted {
     pub owner: crate::LeaseOwnerIdentity,
@@ -59,7 +59,6 @@ pub enum ProcessExecutionWriteAuthority {
         process_id: ProcessId,
         execution_id: String,
         attempt: Option<u32>,
-        resume_from: Option<ProcessStarted>,
     },
 }
 
@@ -80,7 +79,6 @@ impl ProcessExecutionWriteAuthority {
             process_id: process_id.into(),
             execution_id: execution_id.into(),
             attempt: None,
-            resume_from: None,
         }
     }
 
@@ -95,13 +93,11 @@ impl ProcessExecutionWriteAuthority {
             Self::Invocation {
                 process_id,
                 execution_id,
-                resume_from,
                 ..
             } => Self::Invocation {
                 process_id: process_id.clone(),
                 execution_id: execution_id.clone(),
                 attempt: Some(attempt),
-                resume_from: resume_from.clone(),
             },
         }
     }
@@ -163,44 +159,6 @@ impl ProcessExecutionWriteAuthority {
             } if authority_process_id == process_id => Some(execution_id),
             Self::Lease { .. } | Self::Invocation { .. } => None,
         }
-    }
-
-    /// Permits durable handover only when the retained owner incarnation, fencing token, and
-    /// attempt exactly match the predecessor captured by invocation authority.
-    pub fn permits_owner_bound_resume(&self, retained: &ProcessStarted) -> bool {
-        matches!(
-            self,
-            Self::Invocation {
-                resume_from: Some(expected),
-                ..
-            } if expected.same_execution(retained)
-        )
-    }
-
-    pub(crate) fn validate_resume_predecessor(
-        &self,
-        process_id: &ProcessId,
-        retained: Option<&ProcessStarted>,
-    ) -> Result<(), crate::PluginError> {
-        let Self::Invocation {
-            resume_from: Some(expected),
-            ..
-        } = self
-        else {
-            return Ok(());
-        };
-        if retained.is_some_and(|retained| retained.same_execution(expected)) {
-            return Ok(());
-        }
-        self.trace_invocation_denial(
-            process_id,
-            None,
-            retained,
-            "durable handover predecessor does not match retained execution",
-        );
-        Err(crate::PluginError::ProcessLeaseSuperseded {
-            process_id: process_id.clone(),
-        })
     }
 
     fn trace_invocation_denial(
@@ -315,15 +273,6 @@ impl ProcessExecutionWriteAuthority {
 pub enum ProcessStartOutcome {
     Started(ProcessRecord),
     AlreadyApplied(ProcessRecord),
-    AlreadyStarted {
-        current: ProcessRecord,
-        by: crate::LeaseOwnerIdentity,
-    },
-    AttemptsExhausted {
-        current: ProcessRecord,
-        attempts: u32,
-        max_attempts: u32,
-    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -372,24 +321,9 @@ impl std::ops::Deref for ProcessCompletionOutcome {
 }
 
 impl ProcessStartOutcome {
-    pub fn into_record(self) -> Result<ProcessRecord, crate::PluginError> {
+    pub fn into_record(self) -> ProcessRecord {
         match self {
-            Self::Started(record) | Self::AlreadyApplied(record) => Ok(record),
-            Self::AlreadyStarted { current, by } => {
-                Err(crate::PluginError::ProcessAlreadyStarted {
-                    process_id: current.id,
-                    by: Box::new(by),
-                })
-            }
-            Self::AttemptsExhausted {
-                current,
-                attempts,
-                max_attempts,
-            } => Err(crate::PluginError::ProcessAttemptsExhausted {
-                process_id: current.id,
-                attempts,
-                max_attempts,
-            }),
+            Self::Started(record) | Self::AlreadyApplied(record) => record,
         }
     }
 }

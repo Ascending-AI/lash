@@ -8,9 +8,8 @@ use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{
     ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType, ProcessIdentity,
     ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
-    ProcessWakeDelivery, ProcessWakeSpec, RecoveryContract, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory as _, WakeDeliveryConfig, WakeDeliveryState,
-    WakeDiscardReason,
+    ProcessWakeDelivery, ProcessWakeSpec, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory as _, WakeDeliveryConfig, WakeDeliveryState, WakeDiscardReason,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::json;
@@ -59,7 +58,6 @@ fn registration() -> ProcessRegistration {
         ProcessInput::External {
             metadata: json!({"runbook": "process-operations"}),
         },
-        RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -173,7 +171,6 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                 ProcessInput::External {
                     metadata: json!({"runbook": "process-operations"}),
                 },
-                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

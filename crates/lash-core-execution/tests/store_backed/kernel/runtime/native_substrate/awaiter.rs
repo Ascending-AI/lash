@@ -10,8 +10,8 @@ mod tests {
     use crate::runtime::process::*;
     use crate::support::prelude::*;
     use crate::{
-        AbandonRequest, ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef,
-        ProcessInput, ProcessProvenance, ProcessRegistration, ProcessStarted, ProjectionWatermark,
+        ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef, ProcessInput,
+        ProcessProvenance, ProcessRegistration, ProcessStarted, ProjectionWatermark,
         TestProcessRegistryWriteExt, WaitState, WatchedRegistry, watch_process_registry,
         watch_process_registry_with_sink,
     };
@@ -30,7 +30,6 @@ mod tests {
             ProcessInput::External {
                 metadata: serde_json::json!({}),
             },
-            crate::RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
@@ -475,7 +474,6 @@ mod tests {
                 kind: "test".to_string(),
                 payload: serde_json::json!({}),
             },
-            crate::RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         );
@@ -529,17 +527,6 @@ mod tests {
             )
             .await
             .expect("set external ref");
-        registry
-            .request_process_abandon(
-                &lifecycle_id,
-                AbandonRequest {
-                    requested_by: "test".to_string(),
-                    requested_at_ms: 3,
-                    reason: None,
-                },
-            )
-            .await
-            .expect("request abandon");
 
         let process_id = registry
             .require_process_id(&lifecycle_id)
@@ -594,7 +581,6 @@ mod tests {
                 "process.waiting",
                 "process.resumed",
                 "process.external_ref_set",
-                "process.abandon_requested",
                 "process.cancel_requested",
             ],
             "the sink must observe every runtime lifecycle append"

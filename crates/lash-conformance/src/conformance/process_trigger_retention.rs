@@ -9,9 +9,8 @@ use std::sync::Arc;
 use crate::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessId, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProjectionWatermark, RecoveryContract, SessionScope, TriggerCommand, TriggerCommandOutcome,
-    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
-    acknowledge_pending_process_artifact_cleanup,
+    ProjectionWatermark, SessionScope, TriggerCommand, TriggerCommandOutcome, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft, acknowledge_pending_process_artifact_cleanup,
 };
 
 /// Fresh paired process and trigger stores for retention conformance.
@@ -514,7 +513,6 @@ async fn start_and_bind_delivery(
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

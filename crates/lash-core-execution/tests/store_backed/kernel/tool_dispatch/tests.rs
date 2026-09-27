@@ -2143,7 +2143,6 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )

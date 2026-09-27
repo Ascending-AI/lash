@@ -318,7 +318,6 @@ async fn renewal_failure_mid_turn(through_drive: bool) {
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -757,7 +756,6 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
                 lash_core::Lifetime::Detached,
@@ -967,7 +965,6 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(lash_core::SessionScope::new("root")),
                 lash_core::Lifetime::Detached,
             )
@@ -1072,7 +1069,6 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(lash_core::SessionScope::new("root")),
                 lash_core::Lifetime::Detached,
             )
@@ -1175,7 +1171,6 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(lash_core::SessionScope::new("root")),
                 lash_core::Lifetime::Detached,
             )

@@ -539,7 +539,6 @@ async fn register_intent_target(
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

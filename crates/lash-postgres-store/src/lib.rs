@@ -59,7 +59,7 @@ use lash_core_execution::store_backend_support::{
     SessionExecutionLeaseRow, lease_owner_from_columns, row_to_session_execution_lease,
 };
 use lash_core_execution::{
-    AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
+    AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,

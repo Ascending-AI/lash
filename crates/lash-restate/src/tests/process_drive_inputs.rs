@@ -45,7 +45,7 @@ impl RestateProcessRunner for BoundaryPolicyProbeRunner {
 #[tokio::test]
 pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_recorded_cut() {
     let registry = process_registry();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await

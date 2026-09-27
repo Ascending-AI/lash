@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::{
     BoundaryReason, PersistedSegmentHandover, ProcessAwaitOutput, ProcessCompletionAuthority,
     ProcessContinuationStore, ProcessInput, ProcessProvenance, ProcessRegistration,
-    ProcessRegistry, ProjectionWatermark, RecoveryContract, SegmentHandover,
+    ProcessRegistry, ProjectionWatermark, SegmentHandover,
 };
 
 #[expect(
@@ -22,7 +22,6 @@ pub async fn process_continuation_store(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -212,7 +211,6 @@ pub async fn process_continuation_store(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))

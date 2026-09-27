@@ -95,7 +95,7 @@ async fn process_feed(
 pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restored() {
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -295,7 +295,7 @@ pub(super) async fn a_segment_retried_under_another_generation_parks_before_its_
     ] {
         let stores = memory_process_stores().await;
         let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
-        let registration = rerunnable_registration();
+        let registration = executed_registration();
         let process_id = registry
             .register_process(registration.clone())
             .await

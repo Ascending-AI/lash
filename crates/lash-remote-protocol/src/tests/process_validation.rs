@@ -157,7 +157,7 @@ fn settled_failed() -> RemoteProcessAwaitOutput {
 fn abandoned_outcome() -> RemoteProcessAwaitOutput {
     RemoteProcessAwaitOutput::Abandoned {
         evidence: RemoteAbandonEvidence {
-            writer: RemoteAbandonWriter::OwnerDrain,
+            writer: RemoteAbandonWriter::Producer,
             owner: None,
             epoch_ms: 1,
         },

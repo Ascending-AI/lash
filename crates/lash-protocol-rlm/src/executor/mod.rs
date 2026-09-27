@@ -630,7 +630,6 @@ async fn execute_code_inner(
         deferred_execution_grants,
         cell_bindings,
         artifact_store: artifact_store.clone(),
-        child_max_attempts: state.child_max_attempts(),
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()
@@ -646,7 +645,6 @@ async fn execute_code_inner(
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_finished(trace, &result, runtime_failure.as_ref());
     }
-    state.adopt_child_max_attempts(host.pinned_child_max_attempts());
     drop(env);
     let terminal_finish = match result {
         Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value).await),

@@ -12,6 +12,15 @@ process lease and unleased completion. Those passages stay as written until the
 PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session lease)
 rewrites them.
 
+Amended 2026-09-27 (FIG-3588, [ADR 0110](0110-the-engine-owns-process-recovery.md)):
+the recovery disposition is deleted, so the matrix below has two columns: a
+process lash executes, and an externally-owned one (a `ProcessInput::External`
+input). `ExternalOwner` accepts only an externally-owned process, and may write
+`Abandoned` with the `Producer` writer when the external work was lost;
+`WorkflowKey` and `WorkflowKeyRecovery` accept only an executed one.
+`ReconciledAbandon` is deleted with the Abandon Request, and the Restate run
+handler's `Abandoned{Sweep}` path is deleted with `OwnerBound`.
+
 ## Decision
 
 `ProcessRegistry::complete_process` — the terminal-write path that does **not**

@@ -9,7 +9,6 @@ fn owned_registration(id: &str) -> ProcessRegistration {
             kind: "cancel-conformance".to_string(),
             payload: serde_json::Value::Null,
         },
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

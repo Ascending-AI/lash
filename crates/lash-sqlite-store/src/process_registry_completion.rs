@@ -49,7 +49,7 @@ pub(super) async fn complete_process(
                 // *inside* the transaction that appends, so a concurrent
                 // complete→prune→re-register with a different disposition cannot
                 // slip between the check and the append.
-                authority.validate(&record, &await_output)?;
+                authority.validate(&record)?;
                 let mut batch = ProcessEventBatch::for_fleet(fleet_format);
                 for request in prelude {
                     batch.stage(tx, &mut record, request, now, wake_delivery_config)?;

@@ -24,7 +24,6 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "label": "External" }),
         },
-        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host().with_caused_by(Some(
             lash_core::CausalRef::TriggerOccurrence {
                 occurrence_id: "trigger:1".to_string(),
@@ -97,7 +96,6 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         lifecycle: lash_core::ProcessStatus::Running,
         lifetime: lash_core::LifetimeDecision::Detached,
         ancestry: lash_core::Ancestry::root(),
-        disposition: lash_core::RecoveryContract::ExternallyOwned,
         error: None,
         error_code: None,
         created_at_ms: 1,
@@ -105,7 +103,6 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         first_started: None,
         lease_holder: None,
         lease_expires_at_ms: None,
-        abandon_request: None,
         cancel_request: None,
         input: lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "label": "External" }),

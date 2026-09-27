@@ -23,11 +23,10 @@ pub(crate) use stamped_requests::attach::StampedAttachRequest;
 use std::sync::Arc;
 
 use lash_core::{
-    AbandonEvidence, AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope,
-    PluginError, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionContext,
-    ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, RecoveryContract, Resolution,
-    RuntimeError, RuntimeErrorCode, ScopedEffectController,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, PluginError, ProcessAwaitOutput,
+    ProcessCompletionAuthority, ProcessExecutionContext, ProcessExternalRef, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessTerminalWait, ProcessWorkSubstrate,
+    ProcessWorkWiring, Resolution, RuntimeError, RuntimeErrorCode, ScopedEffectController,
     facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionReport,
     facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptOutcome,
     facade_support::ProcessRecoveryOperation, facade_support::ProcessWorkerFault,
@@ -72,7 +71,7 @@ pub(crate) fn process_hand_over_verdict(
         .is_ok_and(|generation| &generation == own)
 }
 /// Wall-clock epoch milliseconds for terminal evidence written at the Restate
-/// tier (ADR 0019 recovery enforcement). The Restate boundary carries no
+/// tier (ADR 0110). The Restate boundary carries no
 /// injected Lash clock — its durability comes from the engine and workflow-key
 /// coalescing rather than a Lash lease — so it reads the system clock directly,
 /// and only inside a journaled step or before the handler's first command
@@ -569,12 +568,11 @@ impl RestateProcessIngressRunner {
         record: ProcessRecord,
     ) -> Result<IngressSubmitOutcome, PluginError> {
         let process_id = record.id.clone();
-        // ExternallyOwned rows are never executed by Lash (ADR 0019). Defensively
-        // refuse to POST a run for one even when reached directly, so both the
-        // sweep and any direct caller are safe; their closure comes from an
-        // external actor calling `complete_process` or a reconciled Abandon
-        // Request (see `claim_and_run_pending`).
-        if record.disposition == RecoveryContract::ExternallyOwned {
+        // Externally-owned rows are never executed by Lash (ADR 0110).
+        // Defensively refuse to POST a run for one even when reached directly,
+        // so both the sweep and any direct caller are safe; their closure comes
+        // from their external owner calling `complete_process`.
+        if record.input.is_externally_owned() {
             return Ok(IngressSubmitOutcome::ExternallyOwned);
         }
         // Re-read before submitting: the worklist page is a snapshot, and the
@@ -628,11 +626,9 @@ impl RestateProcessIngressRunner {
         let registration = ProcessRegistration {
             start_key: record.start_key,
             input: record.input,
-            disposition: record.disposition,
             lifetime: record.lifetime,
             ancestry: record.ancestry,
             session_capability: record.session_capability,
-            max_attempts: record.max_attempts,
             identity: record.identity,
             event_types: record.event_types,
             provenance: record.provenance.clone(),
@@ -670,45 +666,6 @@ impl RestateProcessIngressRunner {
             )
             .await
             .map(|_| IngressSubmitOutcome::Submitted)
-    }
-
-    /// Reconcile a pending Abandon Request on an externally-owned row into an
-    /// `Abandoned{ReconciledRequest}` terminal, mirroring the core sweep's
-    /// `reconcile_externally_owned_abandon`.
-    ///
-    /// Lash never executed the row, so there is no execution owner to name
-    /// (`owner: None`). The Restate tier holds no Lash lease — workflow-key
-    /// coalescing is its single-writer discipline — so the terminal is written
-    /// directly after re-checking the row is still non-terminal (it may have
-    /// been completed between the worklist scan and here). The decorated
-    /// registry emits the resulting terminal append through the event sink.
-    async fn reconcile_externally_owned_abandon(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError> {
-        if self
-            .registry
-            .get_process(process_id)
-            .await?
-            .is_some_and(|current| current.is_terminal())
-        {
-            return Ok(());
-        }
-        self.registry
-            .complete_process(
-                process_id,
-                ProcessAwaitOutput::Abandoned {
-                    evidence: Box::new(AbandonEvidence {
-                        writer: AbandonWriter::ReconciledRequest,
-                        owner: None,
-                        epoch_ms: restate_now_ms(),
-                    }),
-                    control: None,
-                },
-                ProcessCompletionAuthority::ReconciledAbandon,
-            )
-            .await
-            .map(|_| ())
     }
 }
 
@@ -753,40 +710,13 @@ impl RestateProcessIngressRunner {
             };
             let next = page.continuation;
             for record in page.records {
-                // ExternallyOwned rows are never submitted to ingress (ADR 0019):
-                // Lash does not execute them at the Restate tier either. A pending
-                // Abandon Request on such a row is reconciled into an Abandoned
-                // terminal here, mirroring the core sweep's
-                // `reconcile_externally_owned_abandon`; rows without a request are
-                // left untouched for their external owner to complete.
-                if record.disposition == RecoveryContract::ExternallyOwned {
-                    let process_id = record.id.clone();
-                    if record.abandon_request.is_some()
-                        && let Err(error) =
-                            self.reconcile_externally_owned_abandon(&process_id).await
-                    {
-                        // A failed reconcile is this row's outcome, not the
-                        // whole pass's: rows already submitted to the ingress
-                        // stay in the report instead of being discarded by `?`.
-                        report.deferred.push(ProcessAdmissionDeferred {
-                            process_id: process_id.clone(),
-                            disposition: ProcessRecoveryAttemptOutcome::BackendError {
-                                operation: ProcessRecoveryOperation::WriteTerminal,
-                                error: error.to_string(),
-                            },
-                        });
-                        self.emit_worker_fault(
-                            &process_id,
-                            ProcessRecoveryOperation::WriteTerminal,
-                            &error,
-                        )
-                        .await;
-                        continue;
-                    }
-                    // Lash never executes an externally-owned row on any tier;
-                    // the native worker reports the same typed deferral.
+                // Externally-owned rows are never submitted to ingress (ADR
+                // 0110): Lash does not execute them on any tier, and their
+                // external owner closes them. The pass reports each as
+                // deferred, as the native worker does.
+                if record.input.is_externally_owned() {
                     report.deferred.push(ProcessAdmissionDeferred {
-                        process_id,
+                        process_id: record.id.clone(),
                         disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
                     });
                     continue;

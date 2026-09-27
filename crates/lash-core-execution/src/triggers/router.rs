@@ -635,9 +635,6 @@ impl TriggerRouter {
         // must stay deterministic.
         let registration = crate::ProcessRegistration::new(
             target.clone(),
-            // Trigger targets are journaled engine/tool rows, idempotent by
-            // process id, so recovery may re-execute them (ADR 0019).
-            crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::new(subscription.registrant.clone())
                 .with_caused_by(Some(trigger_causal_ref.clone())),
             crate::Lifetime::Detached,

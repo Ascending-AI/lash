@@ -255,7 +255,6 @@ pub(super) fn engine_registration(
             kind: kind.to_string(),
             payload,
         },
-        RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )

@@ -9,7 +9,7 @@ use lash_core::{
     AdmittedProcessIdentity, ArtifactOwner, CommitBudget, Lifetime, NativeProcessWork,
     NoSessionWork, PluginError, PluginOptions, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
     ProcessProvenance, ProcessRegistration, ProcessRegistry, QueuedWorkBatchingConfig,
-    RecoveryContract, SessionPolicy, TurnBudget,
+    SessionPolicy, TurnBudget,
 };
 use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use lashlang::testing::ast_builders as b;
@@ -206,7 +206,6 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
         process_input
             .into_process_input()
             .expect("process input encodes"),
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         Lifetime::Detached,
     )
@@ -461,7 +460,6 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
         .register_process(
             ProcessRegistration::new(
                 process_input.into_process_input().expect("process input"),
-                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
                 Lifetime::Detached,
             )
@@ -692,15 +690,11 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         .register_process(
             ProcessRegistration::new(
                 process_input.into_process_input().expect("process input"),
-                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
                 Lifetime::Detached,
             )
             .with_admitted_identity(AdmittedProcessIdentity::for_testing(process_identity))
-            .with_execution_env_ref(Some(env_ref))
-            // The crashed attempt spends one of two; every refused sweep
-            // after it runs past the budget, which a park does not spend.
-            .with_max_attempts(Some(2)),
+            .with_execution_env_ref(Some(env_ref)),
         )
         .await
         .expect("register recovery process")
@@ -914,7 +908,6 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
             .register_process(
                 ProcessRegistration::new(
                     input.into_process_input().expect("process input"),
-                    RecoveryContract::Rerunnable,
                     ProcessProvenance::host(),
                     Lifetime::Detached,
                 )

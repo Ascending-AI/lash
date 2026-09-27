@@ -652,7 +652,6 @@
         "fixture": "process"
       }
     },
-    "disposition": "rerunnable",
     "lifetime": {
       "lifetime": "detached"
     },

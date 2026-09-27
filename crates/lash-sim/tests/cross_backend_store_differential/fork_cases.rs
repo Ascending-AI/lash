@@ -347,7 +347,6 @@ pub(super) async fn selected_observer_intents(
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );

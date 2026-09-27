@@ -245,9 +245,8 @@ pub use error::{
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
-    DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS, EmbeddedRuntimeHost, ProcessRuntimeHost,
-    RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeHostConfig, RuntimePromptConfig,
-    RuntimeProviderConfig, RuntimeTracingConfig,
+    EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
+    RuntimeHostConfig, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
 };
 use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
@@ -281,21 +280,21 @@ pub use observation_publisher::{ObservationSource, drive_with_observations};
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, Ancestry,
-    ArtifactOwner, DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId,
-    InvalidStartKey, Lifetime, LifetimeDecision, LifetimePolicy, ObservedProcess,
-    ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
-    ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndPlan,
-    PersistedSegmentHandover, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
-    ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
-    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectNodeSummary,
-    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArtifactOwner,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime,
+    LifetimeDecision, LifetimePolicy, ObservedProcess, ObservedProcessEvent,
+    ObservedProcessEventLite, ObservedProcessEventPage, ObservedProcessEventReadOutcome,
+    ObservedWorkItem, ObservedWorkItemState, PROCESS_EFFECT_OCCURRENCE_CAP,
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_LEASE_SCHEMA_VERSION,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndPlan, PersistedSegmentHandover,
+    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
+    ProcessChange, ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+    ProcessDefinitionValue, ProcessEffectNodeSummary, ProcessEffectOmissions,
+    ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectSummary,
+    ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineProcessContext,
     ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEvent, ProcessEventAppendPlan,
@@ -321,10 +320,10 @@ pub use process::{
     ProcessToolIntents, ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan,
     ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
     ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot,
-    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryContract,
-    RegistryScopeClose, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-    ScopeStorageError, SegmentHandover, SegmentStartMarker, SessionId, SessionObserverIntentSource,
-    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
+    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RegistryScopeClose,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
+    SegmentHandover, SegmentStartMarker, SessionId, SessionObserverIntentSource, SessionScope,
+    SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
     UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,

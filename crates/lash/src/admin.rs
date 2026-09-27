@@ -345,12 +345,6 @@ impl SessionAdmin {
             })
     }
 
-    fn process_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
-        Ok(lash_core::facade_support::ProcessWorkObserver::new(
-            self.process_registry()?,
-        ))
-    }
-
     /// An observer over the session's process registry, or `None` when this
     /// runtime has no registry. Session-scoped reads use this so a registry-less
     /// runtime observes an empty process set rather than erroring, matching the
@@ -438,31 +432,6 @@ impl SessionAdmin {
                 lash_core::ProcessTerminalWait::Reattach => {}
             }
         }
-    }
-
-    async fn request_process_abandon(
-        &self,
-        process_id: &ProcessId,
-        reason: Option<String>,
-    ) -> Result<lash_core::facade_support::ObservedProcess> {
-        let session_id = SessionId::from(self.runtime.observe().session_id());
-        let request = lash_core::AbandonRequest {
-            requested_by: format!("session:{session_id}"),
-            requested_at_ms: crate::process_admin::now_epoch_ms(),
-            reason,
-        };
-        self.process_registry()?
-            .request_process_abandon(process_id, request)
-            .await?;
-        self.process_observer()?
-            .process(process_id)
-            .await
-            .map_err(EmbedError::from)?
-            .ok_or_else(|| {
-                EmbedError::Plugin(lash_core::PluginError::Session(format!(
-                    "process `{process_id}` vanished after recording its abandon request"
-                )))
-            })
     }
 
     async fn refresh_tool_catalog(&self) -> Result<()> {
@@ -1309,19 +1278,6 @@ impl SessionProcessAdmin {
     ) -> Result<()> {
         self.control
             .transfer_process_handles(to_session_id, process_ids, scoped_effect_controller)
-            .await
-    }
-
-    /// Record an Abandon Request (ADR 0019) against a process this session
-    /// owns: an authorization the recovery sweep reconciles into `Abandoned`
-    /// once the owner's lease lapses. Returns the process as observed after.
-    pub async fn request_abandon(
-        &self,
-        process_id: &ProcessId,
-        reason: Option<String>,
-    ) -> Result<lash_core::facade_support::ObservedProcess> {
-        self.control
-            .request_process_abandon(process_id, reason)
             .await
     }
 }

@@ -408,8 +408,6 @@ pub mod facade_support {
     pub use lash_core_execution::runtime::process::ProcessAdmissionDeferred;
     pub use lash_core_execution::runtime::process::ProcessAdmissionIntake;
     pub use lash_core_execution::runtime::process::ProcessAdmissionReport;
-    pub use lash_core_execution::runtime::process::ProcessDrainDeferred;
-    pub use lash_core_execution::runtime::process::ProcessDrainReport;
     pub use lash_core_execution::runtime::process::ProcessRecoveryAttemptOutcome;
     pub use lash_core_execution::runtime::process::ProcessRecoveryOperation;
     pub use lash_core_execution::runtime::process::ProcessWorkerFault;
@@ -741,12 +739,12 @@ pub use process_registry::{
     ProcessDefinitionRegistration, ProcessDefinitionRegistry,
 };
 pub use runtime::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AcceptedTurnInputDrive,
-    AcceptedTurnInputRefusal, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope, Ancestry,
-    ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
-    AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef,
-    CausalRef, ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock,
-    ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
+    AbandonEvidence, AbandonWriter, AcceptedTurnInputDrive, AcceptedTurnInputRefusal,
+    ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope, Ancestry, ArtifactOwner,
+    AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey, AwaitEventResolver,
+    AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef, CausalRef,
+    ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
+    CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
     DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DrainMode, DrainModePolicy,
     DrainedChild, EffectAddress, EffectCommitState, EffectGroupDrainBudget, EffectGroupHandle,
     EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,
@@ -800,9 +798,9 @@ pub use runtime::{
     QueuedDrainRequest, QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt,
     QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority,
     QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind, RankedGroupSettlement,
-    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecoveryContract,
-    RefusedWriteRange, RegistryScopeClose, Resolution, ResolveOutcome, ResolvedRun, RunDefinition,
-    RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution,
+    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange,
+    RegistryScopeClose, Resolution, ResolveOutcome, ResolvedRun, RunDefinition, RunDefinitions,
+    RunOverrides, RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,

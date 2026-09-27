@@ -69,7 +69,7 @@ fn failure_and_abandoned_outputs_are_rejected() {
     );
     let abandoned = lash_core::ProcessAwaitOutput::Abandoned {
         evidence: Box::new(lash_core::AbandonEvidence {
-            writer: lash_core::AbandonWriter::EngineGaveUp,
+            writer: lash_core::AbandonWriter::Producer,
             owner: None,
             epoch_ms: 1,
         }),

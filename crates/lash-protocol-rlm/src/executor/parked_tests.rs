@@ -129,7 +129,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
         deferred_execution_grants: BTreeMap::new(),
         cell_bindings: lash_lashlang_runtime::CellToolBindings::default(),
         artifact_store: crate::testing::memory_artifact_store().await,
-        child_max_attempts: state.child_max_attempts(),
     });
     let host = ParkedCellHost { bridge };
     let mut vm = Vm::from_state(cached_program.compiled_program(), &mut state.rlm, &host)

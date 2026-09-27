@@ -169,41 +169,15 @@ impl ProcessInput {
             _ => None,
         }
     }
-}
 
-/// Producer-declared contract stating what recovery may do with a process row
-/// after owner loss. Required at registration and applied mechanically by the
-/// sweep; never inferred at runtime. See ADR 0019.
-///
-/// There is deliberately no `Default` and no serde default: a producer that
-/// forgets to declare a disposition must fail to compile rather than silently
-/// inherit re-execution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecoveryContract {
-    /// Another owner may re-execute the work — the contract for journaled,
-    /// idempotent inputs (engine rows, session-turn rows).
-    Rerunnable,
-    /// The contract binds at first start: before any owner has begun execution
-    /// any worker may claim the row; once execution has started, no other owner
-    /// may ever re-execute it — abandonment is the only recovery.
-    OwnerBound,
-    /// Lash never executes the row at all. Closure comes from an external actor
-    /// calling `complete_process`, or from a reconciled Abandon Request.
-    ExternallyOwned,
-}
-
-/// Durable, non-terminal marker recording that a non-owner authorized
-/// abandonment without proof the owner is gone. The sweep reconciles it into
-/// [`ProcessStatus::Abandoned`]
-/// only once the row's lease has lapsed; the marker never terminates anything
-/// by itself and is visible to observers while pending. See ADR 0019.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AbandonRequest {
-    pub requested_by: String,
-    pub requested_at_ms: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    /// Whether lash never executes a process of this input. An `External`
+    /// input names work an actor outside lash runs and closes; every other
+    /// input is executed by the effect engine, which owns its recovery
+    /// (ADR 0110). The input class is the whole fact: there is no separate
+    /// declaration that could contradict it.
+    pub fn is_externally_owned(&self) -> bool {
+        matches!(self, Self::External { .. })
+    }
 }
 
 /// Exact authority retaining immutable module or process-environment bytes.
@@ -764,7 +738,6 @@ pub struct ProcessRegistration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_key: Option<StartKey>,
     pub input: Arc<ProcessInput>,
-    pub disposition: RecoveryContract,
     /// What ends the process: the recorded decision (FIG-3607 R4b).
     pub lifetime: LifetimeDecision,
     /// Where the start came from, nearest first; empty for a root start. A
@@ -775,12 +748,6 @@ pub struct ProcessRegistration {
     /// `Until` and `Detached` alike (FIG-3607 R10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_capability: Option<SessionId>,
-    /// Maximum execution attempts, or `None` for engine-paced indefinite
-    /// retry. A deterministic failure with `None` can remain non-terminal
-    /// indefinitely; producers with deterministic failure modes should set an
-    /// explicit budget.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
     pub identity: ProcessIdentity,
     #[serde(default)]
     pub event_types: Vec<ProcessEventType>,
@@ -796,11 +763,9 @@ impl Clone for ProcessRegistration {
         Self {
             start_key: self.start_key.clone(),
             input: Arc::clone(&self.input),
-            disposition: self.disposition,
             lifetime: self.lifetime.clone(),
             ancestry: self.ancestry.clone(),
             session_capability: self.session_capability.clone(),
-            max_attempts: self.max_attempts,
             identity: self.identity.clone(),
             event_types: self.event_types.clone(),
             provenance: self.provenance.clone(),
@@ -818,7 +783,6 @@ impl ProcessRegistration {
     /// start that must be idempotent adds its key with [`Self::with_start_key`].
     pub fn new(
         input: ProcessInput,
-        disposition: RecoveryContract,
         provenance: ProcessProvenance,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
@@ -835,11 +799,9 @@ impl ProcessRegistration {
         Self {
             start_key: None,
             input: Arc::new(input),
-            disposition,
             lifetime,
             ancestry: Ancestry::root(),
             session_capability,
-            max_attempts: None,
             identity,
             event_types: default_process_event_types(),
             provenance,
@@ -849,13 +811,8 @@ impl ProcessRegistration {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn session_start_draft(input: ProcessInput, disposition: RecoveryContract) -> Self {
-        Self::new(
-            input,
-            disposition,
-            ProcessProvenance::host(),
-            Lifetime::Detached,
-        )
+    pub(crate) fn session_start_draft(input: ProcessInput) -> Self {
+        Self::new(input, ProcessProvenance::host(), Lifetime::Detached)
     }
 
     /// Sets the start's idempotency key.
@@ -900,13 +857,6 @@ impl ProcessRegistration {
     /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_process_provenance(mut self, provenance: ProcessProvenance) -> Self {
         self.provenance = provenance;
-        self
-    }
-
-    /// Sets the max attempts carried by a `ProcessRegistration` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
-        self.max_attempts = max_attempts;
         self
     }
 
@@ -1570,10 +1520,6 @@ pub struct ProcessRecord {
     /// transaction that persists the event and projected record.
     pub last_event_sequence: u64,
     pub input: Arc<ProcessInput>,
-    /// Declared recovery contract. Required with no serde default: pre-column
-    /// durable rows cannot deserialize and are handled by each store's schema
-    /// version bump (reject-and-recreate), never by an API/serde default.
-    pub disposition: RecoveryContract,
     /// The recorded lifetime decision: never updated after registration.
     pub lifetime: LifetimeDecision,
     /// The recorded ancestry, nearest first; empty for a root.
@@ -1581,9 +1527,6 @@ pub struct ProcessRecord {
     /// The session capability descendants inherit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_capability: Option<SessionId>,
-    /// Persisted attempt budget; `None` retains engine-paced indefinite retry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
     pub identity: ProcessIdentity,
     #[serde(default)]
     pub event_types: Vec<ProcessEventType>,
@@ -1596,16 +1539,13 @@ pub struct ProcessRecord {
     pub updated_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ref: Option<ProcessExternalRef>,
-    /// Durable, lease-fenced execution-started fact (ADR 0019). `None` until a
+    /// Durable execution-started fact (ADR 0110). `None` until a
     /// runner records it immediately before executing. Boxed so these
     /// usually-absent facts do not enlarge the pervasive `ProcessRecord` that
     /// flows through the runtime; serde treats `Option<Box<T>>` identically to
     /// `Option<T>`, so the persisted JSON is unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_started: Option<Box<ProcessStarted>>,
-    /// Pending Abandon Request the sweep reconciles once the lease lapses.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abandon_request: Option<Box<AbandonRequest>>,
     /// The first accepted cancellation request, retained across retries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<Box<CancelRequest>>,
@@ -1696,11 +1636,9 @@ impl ProcessRecord {
             start_key: registration.start_key,
             last_event_sequence: 0,
             input: registration.input,
-            disposition: registration.disposition,
             lifetime: registration.lifetime,
             ancestry: registration.ancestry,
             session_capability: registration.session_capability,
-            max_attempts: registration.max_attempts,
             identity: registration.identity,
             event_types: registration.event_types,
             provenance: registration.provenance,
@@ -1709,7 +1647,6 @@ impl ProcessRecord {
             updated_at_ms: now_ms,
             external_ref: None,
             first_started: None,
-            abandon_request: None,
             cancel_request: None,
             wait: None,
             park: None,

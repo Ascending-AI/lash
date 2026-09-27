@@ -308,7 +308,6 @@ mod walk {
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core_execution::RecoveryContract::ExternallyOwned,
             lash_core_execution::ProcessProvenance::session(
                 lash_core_execution::SessionScope::new("session"),
             ),

@@ -26,7 +26,6 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
                     lash::process::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 ),

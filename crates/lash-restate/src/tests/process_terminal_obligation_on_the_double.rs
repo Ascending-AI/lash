@@ -135,7 +135,7 @@ impl World {
 
     async fn register(&self) -> ProcessId {
         self.registry
-            .register_process(rerunnable_registration())
+            .register_process(executed_registration())
             .await
             .expect("register the process")
             .id

@@ -206,17 +206,6 @@ pub enum PluginError {
     },
     #[error(transparent)]
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
-    #[error("process `{process_id}` execution was already started by {by:?}")]
-    ProcessAlreadyStarted {
-        process_id: ProcessId,
-        by: Box<crate::LeaseOwnerIdentity>,
-    },
-    #[error("process `{process_id}` exhausted its execution attempts ({attempts}/{max_attempts})")]
-    ProcessAttemptsExhausted {
-        process_id: ProcessId,
-        attempts: u32,
-        max_attempts: u32,
-    },
     #[error("process lease for `{process_id}` is missing or expired (superseded)")]
     ProcessLeaseSuperseded { process_id: ProcessId },
     #[error("monotonic counter `{counter}` cannot advance past {current}")]
@@ -334,8 +323,6 @@ impl PluginError {
             | Self::ProcessUnknown { .. }
             | Self::ProcessChangeCursorPruned { .. }
             | Self::ProcessParkFeedCursorCompacted { .. }
-            | Self::ProcessAlreadyStarted { .. }
-            | Self::ProcessAttemptsExhausted { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }

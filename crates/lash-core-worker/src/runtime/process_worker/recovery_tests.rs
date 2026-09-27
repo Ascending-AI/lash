@@ -8,13 +8,12 @@ use super::test_backend::*;
 use super::*;
 use crate::TestProcessRegistryWriteExt;
 use crate::{
-    AbandonRequest, LeaseOwnerIdentity, ProcessExecutionEnvRef, ProcessInput, ProcessListFilter,
+    LeaseOwnerIdentity, ProcessExecutionEnvRef, ProcessInput, ProcessListFilter,
     ProcessRegistration, ProcessStarted, ProcessStatus, TriggerStore,
 };
 use lash_core::testing::trace_capture::{CapturedFieldKind, EventCapture, capturing};
 
 mod attachment_owner_tests;
-mod drain_report_tests;
 mod fault_surface_tests;
 mod generation_fence_tests;
 mod pagination_tests;
@@ -55,7 +54,6 @@ fn session_turn_registration(child_session_id: &SessionId) -> ProcessRegistratio
             turn_input: Box::new(crate::TurnInput::text("run recovered child turn")),
             output_contract: crate::ToolOutputContract::Static,
         },
-        RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
@@ -421,32 +419,14 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
 /// A registration with an explicit disposition; the disposition-driven sweep keys off the
 /// declared disposition, not the input kind, so these unit tests exercise the
 /// verdict without standing up execution infrastructure.
-fn registration_with_disposition(disposition: crate::RecoveryContract) -> ProcessRegistration {
+fn external_registration() -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::External {
             metadata: serde_json::json!({}),
         },
-        disposition,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
-}
-
-async fn abandoned_evidence(
-    registry: &Arc<dyn ProcessRegistry>,
-    process_id: &ProcessId,
-) -> crate::AbandonEvidence {
-    let record = registry
-        .get_process(process_id)
-        .await
-        .expect("read process")
-        .expect("process exists");
-    match (record.status, record.outcome) {
-        (ProcessStatus::Abandoned, Some(ProcessAwaitOutput::Abandoned { evidence, .. })) => {
-            *evidence
-        }
-        other => panic!("expected an Abandoned terminal, got {other:?}"),
-    }
 }
 
 fn assert_recovery_backend_error_event(
@@ -819,7 +799,6 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
                 kind: "nested-process-test".to_string(),
                 payload: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             crate::ProcessOriginator::host(),
             crate::Lifetime::Detached,
         )
@@ -909,7 +888,6 @@ impl crate::ProcessEngine for ProductionChainEngine {
                             "nested_wait_task": nested_wait_task,
                         }),
                     },
-                    RecoveryContract::Rerunnable,
                     runtime.trigger_actor(),
                     crate::Lifetime::Detached,
                 )
@@ -980,7 +958,6 @@ impl crate::ProcessEngine for ProductionChainEngine {
                         "nested_wait_task": nested_wait_task,
                     }),
                 },
-                RecoveryContract::Rerunnable,
                 runtime.trigger_actor(),
                 crate::Lifetime::Detached,
             )
@@ -1252,7 +1229,6 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
                 turn_input: Box::new(crate::TurnInput::text("await nested process")),
                 output_contract: crate::ToolOutputContract::Static,
             },
-            RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         ))
@@ -1327,7 +1303,6 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
                     kind: "boundary-test".to_string(),
                     payload: serde_json::json!({}),
                 },
-                RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
@@ -1707,7 +1682,6 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
                 ProcessInput::External {
                     metadata: serde_json::json!({ "already": "registered" }),
                 },
-                RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
@@ -1745,15 +1719,13 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
 }
 
 /// ExternallyOwned rows are never claimed and never run: lash does not own
-/// their execution (ADR 0019).
+/// their execution (ADR 0110).
 #[tokio::test]
 async fn sweep_never_claims_externally_owned_rows() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let proc_ext_record = registry
-        .register_process(registration_with_disposition(
-            RecoveryContract::ExternallyOwned,
-        ))
+        .register_process(external_registration())
         .await
         .expect("register");
 
@@ -1809,287 +1781,6 @@ async fn sweep_never_claims_externally_owned_rows() {
             .is_none(),
         "the sweep must not claim a lease on an externally-owned row"
     );
-}
-
-/// A rerunnable process whose declared attempt budget is already consumed is
-/// terminalized by recovery without invoking the engine again.
-#[tokio::test]
-async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let proc_attempts_exhausted_record = registry
-        .register_process(
-            registration_with_disposition(RecoveryContract::Rerunnable).with_max_attempts(Some(1)),
-        )
-        .await
-        .expect("register attempt-exhausted process");
-    let exhausted_owner = LeaseOwnerIdentity::opaque("exhausted-owner", "exhausted-incarnation");
-    registry
-        .record_first_started(
-            &proc_attempts_exhausted_record.id,
-            ProcessStarted {
-                owner: exhausted_owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record exhausted attempt");
-
-    let worker = native_worker(
-        &backend,
-        local_owner("recovery-worker", "host-b", "recovery-start"),
-    )
-    .await;
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("sweep dispatches exhausted process");
-    await_terminal(&registry, &proc_attempts_exhausted_record.id).await;
-
-    let evidence = abandoned_evidence(&registry, &proc_attempts_exhausted_record.id).await;
-    assert_eq!(evidence.writer, AbandonWriter::EngineGaveUp);
-    assert_eq!(
-        evidence.owner,
-        Some(exhausted_owner),
-        "engine-gave-up evidence must retain the exhausted attempt owner"
-    );
-}
-
-/// A pending Abandon Request on an externally-owned row is reconciled into
-/// `Abandoned{reconciled_request}` — there is no owner lease to wait out.
-#[tokio::test]
-async fn sweep_reconciles_externally_owned_abandon_request() {
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let proc_ext_abandon_record = registry
-        .register_process(registration_with_disposition(
-            RecoveryContract::ExternallyOwned,
-        ))
-        .await
-        .expect("register");
-    registry
-        .request_process_abandon(
-            &proc_ext_abandon_record.id,
-            AbandonRequest {
-                requested_by: "operator".to_string(),
-                requested_at_ms: 1,
-                reason: Some("host retired".to_string()),
-            },
-        )
-        .await
-        .expect("request abandon");
-
-    let worker = native_worker(
-        &backend,
-        local_owner("live-worker", "host-a", "claimant-start"),
-    )
-    .await;
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("sweep dispatches");
-    await_terminal(&registry, &proc_ext_abandon_record.id).await;
-
-    let evidence = abandoned_evidence(&registry, &proc_ext_abandon_record.id).await;
-    assert_eq!(evidence.writer, AbandonWriter::ReconciledRequest);
-    assert!(
-        evidence.owner.is_none(),
-        "externally-owned work names no lash execution owner"
-    );
-}
-
-/// A started OwnerBound row with no Abandon Request is left non-terminal —
-/// elapsed time alone never terminalizes.
-#[tokio::test]
-async fn sweep_skips_started_owner_bound_with_silent_holder() {
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let proc_ob_silent_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
-        .await
-        .expect("register");
-    registry
-        .record_first_started(
-            &proc_ob_silent_record.id,
-            ProcessStarted {
-                owner: LeaseOwnerIdentity::opaque("started-worker", "started-incarnation"),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record started");
-    // A live holder keeps the row unavailable until its TTL expires.
-    registry
-        .claim_process_lease(
-            &proc_ob_silent_record.id,
-            &LeaseOwnerIdentity::opaque("other-worker", "other-incarnation"),
-            60_000,
-        )
-        .await
-        .expect("live holder claims")
-        .acquired()
-        .expect("live holder lease acquired");
-
-    let worker = native_worker(
-        &backend,
-        local_owner("live-worker", "host-a", "claimant-start"),
-    )
-    .await;
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("sweep dispatches");
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let record = registry
-        .get_process(&proc_ob_silent_record.id)
-        .await
-        .expect("read process")
-        .expect("process");
-    assert!(
-        !record.is_terminal(),
-        "a holder with no abandon request stays non-terminal"
-    );
-}
-
-/// A started OwnerBound row with a lapsed lease and a pending Abandon Request
-/// is reconciled into `Abandoned{reconciled_request}`, naming the started
-/// owner as the lapsed owner.
-#[tokio::test]
-async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let proc_ob_lapse_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
-        .await
-        .expect("register");
-    registry
-        .record_first_started(
-            &proc_ob_lapse_record.id,
-            ProcessStarted {
-                owner: LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation"),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record started");
-    registry
-        .request_process_abandon(
-            &proc_ob_lapse_record.id,
-            AbandonRequest {
-                requested_by: "operator".to_string(),
-                requested_at_ms: 2,
-                reason: None,
-            },
-        )
-        .await
-        .expect("request abandon");
-    // No live lease held: the row's owner lease has lapsed.
-
-    let worker = native_worker(
-        &backend,
-        local_owner("live-worker", "host-a", "claimant-start"),
-    )
-    .await;
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("sweep dispatches");
-    await_terminal(&registry, &proc_ob_lapse_record.id).await;
-
-    let evidence = abandoned_evidence(&registry, &proc_ob_lapse_record.id).await;
-    assert_eq!(evidence.writer, AbandonWriter::ReconciledRequest);
-    assert_eq!(
-        evidence.owner.as_ref().map(|owner| owner.owner_id.as_str()),
-        Some("lapsed-owner"),
-        "the reconciled abandonment names the started owner as the lapsed owner"
-    );
-}
-
-/// An OwnerBound row that has never started is claimable and runnable by any
-/// worker (first execution is not re-execution): the runner records
-/// `first_started`. If execution infrastructure is unavailable, the row stays
-/// non-terminal and becomes claimable again rather than recording a failure.
-#[tokio::test]
-async fn owner_bound_unstarted_infra_failure_stays_claimable() {
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let proc_ob_unstarted_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
-        .await
-        .expect("register");
-
-    let worker = native_worker(
-        &backend,
-        local_owner("live-worker", "host-a", "claimant-start"),
-    )
-    .await;
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("sweep dispatches");
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if registry
-                .get_process(&proc_ob_unstarted_record.id)
-                .await
-                .expect("read process")
-                .expect("process")
-                .first_started
-                .is_some()
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("runner records first_started before infrastructure fails");
-    let next_owner = local_owner("next-worker", "host-b", "claimant-next");
-    let reclaimed = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            match registry
-                .claim_process_lease(&proc_ob_unstarted_record.id, &next_owner, 60_000)
-                .await
-                .expect("claim after infrastructure failure")
-            {
-                crate::ProcessLeaseClaimOutcome::Acquired(lease) => break lease,
-                crate::ProcessLeaseClaimOutcome::Busy { .. } => tokio::task::yield_now().await,
-            }
-        }
-    })
-    .await
-    .expect("infrastructure failure releases its lease");
-    let record = registry
-        .get_process(&proc_ob_unstarted_record.id)
-        .await
-        .expect("read process")
-        .expect("process");
-    assert!(
-        record.first_started.is_some(),
-        "the runner must record first_started before executing an unstarted OwnerBound row"
-    );
-    assert!(
-        !record.is_terminal(),
-        "infrastructure failure must not write a terminal, got {:?}",
-        record.status
-    );
-    registry
-        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&reclaimed))
-        .await
-        .expect("release verification claim");
 }
 
 #[tokio::test]
@@ -2221,236 +1912,4 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
         Some(2)
     );
     assert_eq!(reads.load(Ordering::SeqCst), 2);
-}
-
-/// Owner drain (ADR 0019): a host closing gracefully terminalizes its own
-/// started OwnerBound work natively as `Abandoned{OwnerDrain}` under a live lease,
-/// while leaving rerunnable, not-yet-started, and other-owner rows untouched.
-#[tokio::test]
-async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let owner = local_owner("drain-host", "host-a", "start-a");
-    let worker = native_worker(&backend, owner.clone()).await;
-
-    // (a) OwnerBound row this worker started -> drained.
-    let mine_started_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
-        .await
-        .expect("register mine-started");
-    registry
-        .record_first_started(
-            &mine_started_record.id,
-            ProcessStarted {
-                owner: owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record first_started for mine-started");
-
-    // (b) OwnerBound row a DIFFERENT owner started -> not ours to drain.
-    let theirs_started_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
-        .await
-        .expect("register theirs-started");
-    registry
-        .record_first_started(
-            &theirs_started_record.id,
-            ProcessStarted {
-                owner: local_owner("other-host", "host-b", "start-b"),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record first_started for theirs-started");
-
-    // (c) OwnerBound row never started -> still claimable by anyone.
-    let mine_unstarted_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
-        .await
-        .expect("register mine-unstarted");
-
-    // (d) Rerunnable in-flight row this worker started -> left non-terminal for
-    // the next worker (its contract; drain never terminalizes rerunnable work).
-    let rerunnable_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::Rerunnable))
-        .await
-        .expect("register rerunnable");
-    registry
-        .record_first_started(
-            &rerunnable_record.id,
-            ProcessStarted {
-                owner: owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record first_started for rerunnable");
-
-    let report = worker.drain_owner_bound_work().await.expect("drain");
-    assert_eq!(report.abandoned, vec![mine_started_record.id.clone()]);
-    assert!(report.deferred.is_empty());
-
-    let evidence = abandoned_evidence(&registry, &mine_started_record.id).await;
-    assert_eq!(evidence.writer, AbandonWriter::OwnerDrain);
-    assert_eq!(evidence.owner.as_ref(), Some(&owner));
-
-    for (untouched, process_id) in [
-        ("theirs-started", &theirs_started_record.id),
-        ("mine-unstarted", &mine_unstarted_record.id),
-        ("rerunnable", &rerunnable_record.id),
-    ] {
-        assert!(
-            !registry
-                .get_process(process_id)
-                .await
-                .expect("read process")
-                .expect("row exists")
-                .is_terminal(),
-            "{untouched} must be left non-terminal by owner drain",
-        );
-    }
-}
-
-#[tokio::test]
-async fn native_start_records_stable_owner_that_owner_drain_can_match() {
-    let started = Arc::new(tokio::sync::Notify::new());
-    let fail = Arc::new(tokio::sync::Notify::new());
-    let run_handle = Arc::new(LateBoundProcessWork::default());
-    let (worker, registry, run_handle, env_ref) = worker_with_engine(
-        1,
-        Arc::new(PausedInfraEngine {
-            started: Arc::clone(&started),
-            fail: Arc::clone(&fail),
-        }),
-        run_handle,
-    )
-    .await;
-    let mut registration = engine_registration("paused-infra", env_ref, serde_json::Value::Null);
-    registration.disposition = RecoveryContract::OwnerBound;
-    let process_id = registry
-        .register_process(registration)
-        .await
-        .expect("register owner-bound engine")
-        .id;
-    let _ = run_handle
-        .enable_and_drive()
-        .await
-        .expect("drive owner-bound engine");
-    tokio::time::timeout(Duration::from_secs(1), started.notified())
-        .await
-        .expect("engine starts");
-
-    let record = registry
-        .get_process(&process_id)
-        .await
-        .expect("read process")
-        .expect("started record");
-    assert_eq!(
-        record.first_started.as_deref().map(|start| &start.owner),
-        Some(&worker.config().lease_owner),
-        "durable start fact uses the stable worker owner"
-    );
-
-    fail.notify_one();
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while registry
-            .get_process_lease(&process_id)
-            .await
-            .expect("lease read")
-            .is_some()
-        {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("infrastructure failure releases the execution lease");
-
-    let report = worker.drain_owner_bound_work().await.expect("owner drain");
-    assert_eq!(report.abandoned, vec![process_id.to_string()]);
-    assert!(report.deferred.is_empty());
-}
-
-#[tokio::test]
-async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
-    let (backend, registry) = faulted_memory_backend().await;
-    let owner = local_owner("drain-write-failure", "host-a", "start-a");
-    let _process_id = "owner-bound-terminal-write-failure";
-    let owner_bound_terminal_write_failure_record = registry
-        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
-        .await
-        .expect("register owner-bound row");
-    let process_id = owner_bound_terminal_write_failure_record.id.clone();
-    registry
-        .record_first_started(
-            &process_id,
-            ProcessStarted {
-                owner: owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record first start");
-    registry.set_process_terminal_write_error(Some(PluginError::Session(
-        "injected terminal-write failure".to_string(),
-    )));
-
-    let worker = native_worker(&backend, owner).await;
-    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
-    let report = report.expect("owner drain");
-
-    assert!(
-        report.abandoned.is_empty(),
-        "abandoned evidence requires an acknowledged terminal write"
-    );
-    assert_eq!(
-        report.deferred,
-        vec![ProcessDrainDeferred {
-            process_id: process_id.clone(),
-            disposition: ProcessRecoveryAttemptOutcome::BackendError {
-                operation: ProcessRecoveryOperation::WriteTerminal,
-                error: "plugin session error: injected terminal-write failure".to_string(),
-            },
-        }]
-    );
-    assert_recovery_backend_error_event(
-        &capture,
-        &process_id,
-        "write_terminal",
-        "plugin session error: injected terminal-write failure",
-    );
-    assert!(
-        !registry
-            .get_process(&process_id)
-            .await
-            .expect("read process")
-            .expect("process exists")
-            .is_terminal(),
-        "the injected store failure is fail-closed"
-    );
-
-    registry.set_process_terminal_write_error(None);
-    let retry = worker
-        .drain_owner_bound_work()
-        .await
-        .expect("retry owner drain");
-    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
-    assert!(retry.deferred.is_empty());
 }

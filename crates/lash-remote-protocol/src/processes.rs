@@ -577,7 +577,6 @@ pub struct RemoteProcessRecord {
     pub start_key_digest: Option<String>,
     pub last_event_sequence: u64,
     pub input: RemoteProcessInput,
-    pub disposition: RemoteRecoveryContract,
     /// The recorded lifetime decision: what ends the process.
     pub lifetime: RemoteLifetimeDecision,
     /// The recorded ancestry, nearest first; empty for a root start.
@@ -586,8 +585,6 @@ pub struct RemoteProcessRecord {
     /// The session capability the process's descendants inherit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_capability: Option<SessionId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
     pub identity: RemoteProcessIdentity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_types: Vec<RemoteProcessEventType>,
@@ -600,8 +597,6 @@ pub struct RemoteProcessRecord {
     pub external_ref: Option<RemoteProcessExternalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_started: Option<RemoteProcessStarted>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abandon_request: Option<RemoteAbandonRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<lash_sansio::CancelRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -661,12 +656,6 @@ impl RemoteProcessRecord {
             }
         }
         self.provenance.validate(type_name)?;
-        if self.max_attempts == Some(0) {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: "max_attempts must be greater than zero".to_string(),
-            });
-        }
         match (self.input.requires_execution_env(), self.env_ref.is_some()) {
             (true, false) => {
                 return Err(RemoteProtocolError::InvalidEnvelope {
@@ -788,7 +777,6 @@ pub struct RemoteObservedProcess {
     /// The recorded ancestry, nearest first; empty for a root start.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ancestry: Vec<RemoteScopeId>,
-    pub disposition: RemoteRecoveryContract,
     /// Human-readable summary of the terminal failure, for display only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -804,8 +792,6 @@ pub struct RemoteObservedProcess {
     pub lease_holder: Option<RemoteLeaseOwnerIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_expires_at_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abandon_request: Option<RemoteAbandonRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<lash_sansio::CancelRequest>,
     pub input: RemoteProcessInput,
@@ -1007,23 +993,11 @@ impl RemoteProcessEventSemantics {
     }
 }
 
-/// Wire mirror of the producer-declared recovery contract (ADR 0019).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteRecoveryContract {
-    Rerunnable,
-    OwnerBound,
-    ExternallyOwned,
-}
-
 /// Wire mirror of the writer that established an Abandoned terminal.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteAbandonWriter {
-    OwnerDrain,
-    Sweep,
-    ReconciledRequest,
-    EngineGaveUp,
+    Producer,
     ResumeRefused { reason: RemoteProcessResumeRefusal },
 }
 
@@ -1085,15 +1059,6 @@ pub struct RemoteProcessStarted {
 
 const fn remote_first_process_attempt() -> u32 {
     1
-}
-
-/// Wire mirror of the pending Abandon Request marker.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteAbandonRequest {
-    pub requested_by: String,
-    pub requested_at_ms: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

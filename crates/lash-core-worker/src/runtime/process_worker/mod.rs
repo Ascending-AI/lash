@@ -16,7 +16,6 @@ use self::recovery::{RecoveryBackendError, RecoveryReadDisposition};
 use self::registration::registration_from_record;
 use self::worklist::{ProcessPassBegin, ProcessWorklistScan};
 
-mod drain;
 mod parent_end;
 mod park;
 mod recovery;
@@ -32,18 +31,17 @@ use crate::{
 };
 
 pub use self::recovery::{
-    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
-    ProcessDrainReport, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
-    ProcessWorkerFault,
+    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport,
+    ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation, ProcessWorkerFault,
 };
 pub use crate::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
 
 use crate::RuntimeHostConfig;
 use crate::runtime::EmbeddedRuntimeBuilder;
 use crate::{
-    AbandonEvidence, AbandonWriter, LashRuntime, PluginError, PluginFactory, PluginHost,
-    PluginStack, ProcessAwaitOutput, ProcessExecutionContext, ProcessInput, ProcessLease,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, RecoveryContract, SessionStoreFactory,
+    LashRuntime, PluginError, PluginFactory, PluginHost, PluginStack, ProcessAwaitOutput,
+    ProcessExecutionContext, ProcessInput, ProcessLease, ProcessRecord, ProcessRegistration,
+    ProcessRegistry, SessionStoreFactory,
 };
 use lash_core::core_internal::RuntimeSessionServices;
 use lash_core::core_internal::{
@@ -510,10 +508,9 @@ impl DurableProcessWorker {
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
-        // Externally-owned rows are never executed by lash (ADR 0019). Reject the
-        // disposition before touching a runtime — the old fabricated-success path
-        // for External inputs is deleted.
-        if registration.disposition == RecoveryContract::ExternallyOwned {
+        // Externally-owned rows are never executed by lash (ADR 0110): refuse
+        // before touching a runtime.
+        if registration.input.is_externally_owned() {
             return Err(PluginError::Session(format!(
                 "process `{}` is externally-owned and must not be executed by lash",
                 process_id
@@ -616,7 +613,7 @@ impl DurableProcessWorker {
                     &execution_write_authority,
                 )
                 .await?
-                .into_record()?,
+                .into_record(),
         };
         // The authority CAS above is the admission: the controller must
         // already be admitted for the process it returned (ADR 0099 §1).
@@ -1015,34 +1012,6 @@ impl DurableProcessWorker {
         Ok(None)
     }
 
-    /// Terminalize one of this host's started OwnerBound rows as
-    /// `Abandoned{OwnerDrain}` under a freshly claimed drain lease. Returns
-    /// `Ok(())` for an acknowledged terminal write and the attempt outcome —
-    /// contention, absence, peer settlement, lease loss, or backend failure —
-    /// for anything else.
-    async fn drain_one_owner_bound(
-        &self,
-        process_id: &ProcessId,
-        owner: crate::LeaseOwnerIdentity,
-    ) -> Result<(), ProcessRecoveryAttemptOutcome> {
-        let (lease, _current) = self.claim_live_row_for_recovery(process_id).await?;
-        let evidence = AbandonEvidence {
-            writer: AbandonWriter::OwnerDrain,
-            owner: Some(owner),
-            epoch_ms: self.now_ms(),
-        };
-        self.complete_and_release(
-            &lease,
-            process_id,
-            ProcessAwaitOutput::Abandoned {
-                evidence: Box::new(evidence),
-                control: None,
-            },
-            Vec::new(),
-        )
-        .await
-    }
-
     /// Unique lease owner for one recovery attempt.
     ///
     /// Derived from [`DurableProcessWorkerConfig::lease_owner`]: a fresh
@@ -1057,117 +1026,26 @@ impl DurableProcessWorker {
         }
     }
 
-    /// Recover one non-terminal row, obeying its declared recovery disposition
-    /// (ADR 0019). The verdict per disposition:
+    /// Recover one non-terminal row (ADR 0110).
     ///
-    /// - **ExternallyOwned**: never claimed, never run. If a pending Abandon
-    ///   Request is present it is reconciled into `Abandoned{reconciled_request}`.
-    /// - **Rerunnable**: exactly today's behavior — claim, (re-)run, complete.
-    /// - **OwnerBound, never started**: any worker may run it (first execution is
-    ///   not re-execution); the runner records `first_started` before executing.
-    /// - **OwnerBound, started**: never re-run. A silent or expired holder is
-    ///   left non-terminal unless an Abandon Request is present and the lease
-    ///   has lapsed, which yields `Abandoned{reconciled_request}`. Elapsed time
-    ///   alone never terminalizes.
-    ///
-    /// Every Abandoned write goes through `complete_process_with_lease`, which
-    /// atomically validates this sweep's fence, appends the terminal, and clears
-    /// the lease so a revenant's stale token is rejected.
+    /// An externally-owned row is never claimed and never run: lash does not
+    /// execute it on any tier. Every other row is claimed and resumed through
+    /// the replay rows this native substrate journals, so a started row
+    /// replays its recorded effects rather than re-running them. This worker
+    /// is the SQL reference substrate FIG-3668 deletes.
     ///
     /// Returns the typed outcome of the attempt rather than swallowing it: the
     /// dispatcher reports the fault-worthy ones on the worker's fault surface.
     async fn recover_process(&self, record: ProcessRecord) -> ProcessRecoveryOutcome {
         let process_id = record.id.clone();
-        // ExternallyOwned: lash never executes the row. The only recovery action
-        // is reconciling a pending Abandon Request; there is no owner lease to
-        // wait out.
-        if record.disposition == RecoveryContract::ExternallyOwned {
-            if record.abandon_request.is_some() {
-                return self.reconcile_externally_owned_abandon(&process_id).await;
-            }
+        if record.input.is_externally_owned() {
             return ProcessRecoveryOutcome::LeftToOwner;
         }
-
         let (lease, record) = match self.claim_live_row_for_recovery(&process_id).await {
             Ok(claimed) => claimed,
             Err(disposition) => return ProcessRecoveryOutcome::Deferred(disposition),
         };
-        if record.disposition == RecoveryContract::Rerunnable
-            && !record.is_refusing_park()
-            && let (Some(max_attempts), Some(started)) =
-                (record.max_attempts, record.first_started.as_deref())
-            && started.attempt >= max_attempts
-        {
-            return ProcessRecoveryOutcome::from_completion(
-                self.complete_and_release(
-                    &lease,
-                    &process_id,
-                    ProcessAwaitOutput::Abandoned {
-                        evidence: Box::new(AbandonEvidence {
-                            writer: AbandonWriter::EngineGaveUp,
-                            owner: Some(started.owner.clone()),
-                            epoch_ms: self.now_ms(),
-                        }),
-                        control: None,
-                    },
-                    Vec::new(),
-                )
-                .await,
-            );
-        }
-
-        match record.disposition {
-            // Rerunnable: claim, (re-)run, complete — exactly today's behavior.
-            RecoveryContract::Rerunnable => Box::pin(self.run_and_complete(record, lease)).await,
-            RecoveryContract::OwnerBound if record.first_started.is_some() => {
-                // Started OwnerBound work is NEVER re-run — abandonment is the
-                // only recovery. `first_started`'s owner is the lapsed owner the
-                // reconciled-request evidence names.
-                let lapsed_owner = record
-                    .first_started
-                    .as_ref()
-                    .map(|started| started.owner.clone());
-                let evidence = if record.abandon_request.is_some() {
-                    // Silent/expired holder, with an
-                    // operator authorized abandonment and the lease has lapsed
-                    // (we acquired a free/expired lease) ⇒ Abandoned{reconciled}.
-                    Some(AbandonEvidence {
-                        writer: AbandonWriter::ReconciledRequest,
-                        owner: lapsed_owner,
-                        epoch_ms: self.now_ms(),
-                    })
-                } else {
-                    // No authorization: elapsed time alone never terminalizes.
-                    None
-                };
-                match evidence {
-                    Some(evidence) => ProcessRecoveryOutcome::from_completion(
-                        self.complete_and_release(
-                            &lease,
-                            &process_id,
-                            ProcessAwaitOutput::Abandoned {
-                                evidence: Box::new(evidence),
-                                control: None,
-                            },
-                            Vec::new(),
-                        )
-                        .await,
-                    ),
-                    None => {
-                        self.release_or_outcome(&lease, ProcessRecoveryOutcome::LeftToOwner)
-                            .await
-                    }
-                }
-            }
-            // OwnerBound, never started: first execution is not re-execution, so
-            // any worker may run it; the runner records first_started first.
-            RecoveryContract::OwnerBound => Box::pin(self.run_and_complete(record, lease)).await,
-            // Filtered above; releasing keeps the lease honest if reached.
-            RecoveryContract::ExternallyOwned => {
-                self.release_or_outcome(&lease, ProcessRecoveryOutcome::LeftToOwner)
-                    .await
-            }
-        }
+        Box::pin(self.run_and_complete(record, lease)).await
     }
 
     /// Wall-clock epoch ms from the worker's configured clock.
@@ -1175,40 +1053,8 @@ impl DurableProcessWorker {
         self.config.runtime_host.clock.timestamp_ms()
     }
 
-    /// Reconcile a pending Abandon Request on an externally-owned row into an
-    /// `Abandoned{reconciled_request}` terminal. Lash never executed the row, so
-    /// there is no owner lease to wait out — but the sweep claims its own lease
-    /// and completes through the atomic fenced path so it stays the single writer.
-    async fn reconcile_externally_owned_abandon(
-        &self,
-        process_id: &ProcessId,
-    ) -> ProcessRecoveryOutcome {
-        let (lease, _current) = match self.claim_live_row_for_recovery(process_id).await {
-            Ok(claimed) => claimed,
-            Err(disposition) => return ProcessRecoveryOutcome::Deferred(disposition),
-        };
-        let evidence = AbandonEvidence {
-            writer: AbandonWriter::ReconciledRequest,
-            // Externally-owned work has no lash execution owner to name.
-            owner: None,
-            epoch_ms: self.now_ms(),
-        };
-        ProcessRecoveryOutcome::from_completion(
-            self.complete_and_release(
-                &lease,
-                process_id,
-                ProcessAwaitOutput::Abandoned {
-                    evidence: Box::new(evidence),
-                    control: None,
-                },
-                Vec::new(),
-            )
-            .await,
-        )
-    }
-
-    /// (Re-)run a claimed row under its renewed lease and write the terminal
-    /// outcome, the same live-owner-is-single-writer path used before ADR 0019.
+    /// Resume a claimed row under its renewed lease, replaying its journaled
+    /// effects, and write the terminal outcome as the live owner.
     async fn run_and_complete(
         &self,
         record: ProcessRecord,
@@ -1293,7 +1139,7 @@ impl DurableProcessWorker {
             registration.input.as_ref(),
             ProcessInput::SessionTurn { .. }
         );
-        if registration.disposition == RecoveryContract::ExternallyOwned {
+        if registration.input.is_externally_owned() {
             return Err(RecoverFailure::Run(PluginError::Session(format!(
                 "process `{}` is externally-owned and must not be executed by lash",
                 process_id
@@ -1542,7 +1388,7 @@ impl DurableProcessWorker {
             ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. } => {
                 Box::pin(self.runtime_for_process_env(process_id, registration)).await
             }
-            // Externally-owned rows are rejected before dispatch (ADR 0019), so an
+            // Externally-owned rows are rejected before dispatch (ADR 0110), so an
             // External input has no execution runtime; fail loudly rather than
             // fabricate one.
             ProcessInput::External { .. } => Err(PluginError::Session(format!(

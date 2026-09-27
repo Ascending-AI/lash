@@ -1229,7 +1229,6 @@ async fn register_turn_child(
         lash::process::ProcessInput::External {
             metadata: json!({ "awaited": true }),
         },
-        lash::process::RecoveryContract::ExternallyOwned,
         lash::process::ProcessProvenance::session(lash::process::SessionScope::new(session_id)),
         lash::process::Lifetime::Detached,
     );

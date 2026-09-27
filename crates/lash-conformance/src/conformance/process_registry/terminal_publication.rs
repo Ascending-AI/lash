@@ -18,13 +18,16 @@ async fn publication(
 
 fn registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
+        ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::Value::Null,
         },
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
+    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+        "process-env:test-engine",
+    )))
 }
 
 #[expect(

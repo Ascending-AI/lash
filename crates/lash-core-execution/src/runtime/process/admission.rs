@@ -182,27 +182,7 @@ impl ProcessRecoveryAttemptOutcome {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ProcessDrainReport {
-    /// Process ids this host's own started `OwnerBound` work was terminalized as
-    /// `Abandoned{OwnerDrain}` on, in the order they were drained.
-    pub abandoned: Vec<String>,
-    /// Rows the drain could not terminalize in this pass, in inspection order.
-    /// Each entry preserves the typed reason so a host can distinguish ordinary
-    /// lease contention or disappearance from a backend failure.
-    pub deferred: Vec<ProcessDrainDeferred>,
-}
-
-/// One process deferred by a graceful owner drain.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessDrainDeferred {
-    /// Durable process id deferred by this drain pass.
-    pub process_id: ProcessId,
-    /// Typed reason the row did not produce confirmed terminal evidence.
-    pub disposition: ProcessRecoveryAttemptOutcome,
-}
-
-/// Why a process recovery or drain attempt did not act on a row.
+/// Why a process recovery attempt did not act on a row.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessRecoveryAttemptOutcome {
@@ -225,7 +205,7 @@ pub enum ProcessRecoveryAttemptOutcome {
         /// Operation at which the superseded fence was observed.
         operation: ProcessRecoveryOperation,
     },
-    /// The row is externally owned (ADR 0019): Lash never executes it, on any
+    /// The row is externally owned (ADR 0110): Lash never executes it, on any
     /// tier. An admission pass reports it as deferred rather than admitted, so
     /// one registry reads the same whichever tier drove it.
     ExternallyOwned,
@@ -239,7 +219,7 @@ pub enum ProcessRecoveryAttemptOutcome {
     },
 }
 
-/// Registry operation that failed during process recovery or owner drain.
+/// Registry operation that failed during process recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessRecoveryOperation {
     ClaimLease,

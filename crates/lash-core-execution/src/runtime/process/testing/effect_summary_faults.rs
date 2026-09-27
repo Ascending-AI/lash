@@ -20,10 +20,10 @@ use crate::runtime::process::registry_delegate::{
     delegate_process_wake_outbox,
 };
 use crate::{
-    AbandonRequest, CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessId, ProcessLease, ProcessRecord, ProcessStartOutcome,
-    ProcessStarted, RuntimeReplayAttribution, ScopeId, SessionId, StoreRealization, WaitState,
+    CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessId,
+    ProcessLease, ProcessRecord, ProcessStartOutcome, ProcessStarted, RuntimeReplayAttribution,
+    ScopeId, SessionId, StoreRealization, WaitState,
 };
 
 /// Refuses the next `failures` registry writes that carry a runtime append of
@@ -347,16 +347,6 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
                 requester,
                 attribution,
             )
-            .await
-    }
-
-    async fn request_process_abandon(
-        &self,
-        process_id: &ProcessId,
-        request: AbandonRequest,
-    ) -> Result<ProcessRecord, PluginError> {
-        self.inner
-            .request_process_abandon(process_id, request)
             .await
     }
 

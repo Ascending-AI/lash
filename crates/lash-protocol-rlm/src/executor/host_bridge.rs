@@ -41,10 +41,6 @@ pub(super) struct HostBridge<'run> {
     /// The cell's journaled binding set, against the live registry (FIG-3587).
     cell_bindings: lash_lashlang_runtime::CellToolBindings,
     artifact_store: lashlang::LashlangArtifacts,
-    /// Attempt bound stamped onto children this execution starts. `None` until
-    /// this execution actually starts a child: an execution that never starts
-    /// one pins nothing and leaves the durable snapshot root alone.
-    child_max_attempts: Mutex<Option<std::num::NonZeroU32>>,
     /// This cell's own cancellation scope, beside the turn's. A cancelled tool
     /// call ends the cell here, so `is_cancelled` refuses its next effect
     /// instead of the guest catching the cancellation as a rejected call. A
@@ -61,8 +57,6 @@ pub(super) struct HostBridgeConfig<'run> {
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
     pub artifact_store: lashlang::LashlangArtifacts,
-    /// Bound already pinned by an earlier cell of this execution, if any.
-    pub child_max_attempts: Option<std::num::NonZeroU32>,
 }
 
 type HostAbilityFuture<'a> =
@@ -83,14 +77,8 @@ impl<'run> HostBridge<'run> {
             deferred_execution_grants: config.deferred_execution_grants,
             cell_bindings: config.cell_bindings,
             artifact_store: config.artifact_store,
-            child_max_attempts: Mutex::new(config.child_max_attempts),
             cancellation: ExecutionCancellation::new(),
         }
-    }
-
-    /// The bound this execution has pinned, if it started a child at all.
-    pub(super) fn pinned_child_max_attempts(&self) -> Option<std::num::NonZeroU32> {
-        *self.child_max_attempts.lock_recover()
     }
 
     fn next_index(&self) -> usize {

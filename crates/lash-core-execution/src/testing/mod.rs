@@ -968,20 +968,6 @@ pub fn code_execution_context<'run>(
         .into_runtime()
 }
 
-/// Restate a context's engine child attempt bound, the way a runtime wires it
-/// from [`RuntimeControlConfig::engine_child_max_attempts`](crate::RuntimeControlConfig).
-///
-/// Tests that drive a child to its attempt ceiling need a smaller bound than
-/// the host default; production has no reason to set it per execution, so the
-/// setter itself stays crate-private.
-#[cfg(any(test, feature = "testing"))]
-pub fn with_engine_child_max_attempts(
-    context: crate::RuntimeExecutionContext<'_>,
-    max_attempts: std::num::NonZeroU32,
-) -> crate::RuntimeExecutionContext<'_> {
-    context.with_engine_child_max_attempts(max_attempts)
-}
-
 /// Build an empty code-execution context for a specific durable process.
 #[cfg(any(test, feature = "testing"))]
 pub fn code_execution_context_for_process<'run>(
@@ -2260,7 +2246,7 @@ impl crate::ProcessService for MockSessionManager {
         // This mock stands in as the executor, so it completes the row under the
         // authority its declared disposition permits: externally-owned rows close
         // via their external owner, lash-executed rows via the workflow-key path.
-        let externally_owned = registration.disposition == crate::RecoveryContract::ExternallyOwned;
+        let externally_owned = registration.input.is_externally_owned();
         let observers = options.initial_observers;
         let id = self
             .registry()?

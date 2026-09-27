@@ -87,9 +87,8 @@ pub use effect::{
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
-    DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS, EmbeddedRuntimeHost, ProcessRuntimeHost,
-    RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeHostConfig, RuntimePromptConfig,
-    RuntimeProviderConfig, RuntimeTracingConfig,
+    EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
+    RuntimeHostConfig, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
 };
 pub use lash_core_ids::execution_permit::{
     ensure_process_execution_permit, release_process_execution_permit_while,
@@ -104,13 +103,13 @@ pub use native_substrate::{
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, Ancestry,
-    ArtifactOwner, DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId,
-    InvalidStartKey, Lifetime, LifetimeDecision, LifetimePolicy, ObservedProcess,
-    ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
-    ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
-    PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndApplication,
-    ParentEndPlan, PersistedSegmentHandover, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArtifactOwner,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime,
+    LifetimeDecision, LifetimePolicy, ObservedProcess, ObservedProcessEvent,
+    ObservedProcessEventLite, ObservedProcessEventPage, ObservedProcessEventReadOutcome,
+    ObservedWorkItem, ObservedWorkItemState, PROCESS_LEASE_SCHEMA_VERSION,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndApplication, ParentEndPlan,
+    PersistedSegmentHandover, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
     ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
     ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
     ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
@@ -140,10 +139,10 @@ pub use process::{
     ProcessToolIntents, ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan,
     ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
     ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot,
-    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryContract,
-    RegistryScopeClose, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-    ScopeStorageError, SegmentHandover, SegmentStartMarker, SessionId, SessionObserverIntentSource,
-    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
+    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RegistryScopeClose,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
+    SegmentHandover, SegmentStartMarker, SessionId, SessionObserverIntentSource, SessionScope,
+    SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
     UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
@@ -172,9 +171,8 @@ pub use process::{
     refused_process_registrations,
 };
 pub use process::{
-    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
-    ProcessDrainReport, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
-    ProcessWorkerFault,
+    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport,
+    ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation, ProcessWorkerFault,
 };
 pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;

@@ -51,7 +51,7 @@ fn is_cancelled(outcome: &Result<lash_core::ProcessRunOutcome, PluginError>) -> 
 #[tokio::test]
 pub(super) async fn a_session_turn_cancel_is_its_recorded_peek_not_its_lent_stop() {
     let registry = process_registry();
-    let registration = rerunnable_session_turn_registration();
+    let registration = session_turn_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await

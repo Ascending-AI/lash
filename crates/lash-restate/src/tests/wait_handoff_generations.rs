@@ -217,7 +217,7 @@ async fn l10_shared_wait_journals_suspended_on_n_resume_on_n_plus_1() {
     // An attach on N, for a process whose terminal is still to come.
     let registry: Arc<dyn ProcessRegistry> = roll.stores.process_registry();
     let process_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the attached process")
         .id;
@@ -337,7 +337,6 @@ async fn signal_waiting_registration() -> ProcessRegistration {
             process_name: worker,
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -1182,7 +1181,7 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     }
     let start = async |stamp: Option<&lash_core::engine::BuildGeneration>| {
         let process_id = registry
-            .register_process(rerunnable_registration())
+            .register_process(executed_registration())
             .await
             .expect("register")
             .id;

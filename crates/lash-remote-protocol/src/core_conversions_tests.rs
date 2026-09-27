@@ -676,7 +676,6 @@ fn process_start_requests_round_trip_core_values() {
 
     let lashlang = lash_core::ProcessStartRequest::new(
         engine_process_input("main", serde_json::json!({ "event": true })),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a")),
         lash_core::Lifetime::Detached,
     )
@@ -725,7 +724,6 @@ fn process_start_requests_round_trip_core_values() {
                 Some(serde_json::json!({ "type": "object" })),
             ),
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     );
@@ -1426,7 +1424,6 @@ fn journaled_process_lifecycle_kinds_keep_their_sequence_on_the_wire() {
         "process.waiting",
         "process.resumed",
         "process.cancel_requested",
-        "process.abandon_requested",
         "process.caller_departed",
         "process.completed",
         "process.failed",

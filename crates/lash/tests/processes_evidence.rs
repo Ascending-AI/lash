@@ -69,8 +69,6 @@ fn processes_area_witnesses() {
     type_witness::<lash::durability::DurableProcessWorker>();
     // W0014: lash::durability::DurableProcessWorker::config [function]
     let _ = lash::durability::DurableProcessWorker::config;
-    // W0015: lash::durability::DurableProcessWorker::drain_owner_bound_work [function]
-    let _ = lash::durability::DurableProcessWorker::drain_owner_bound_work;
     // W0016: lash::durability::DurableProcessWorker::drive_pending_processes [function]
     let _ = lash::durability::DurableProcessWorker::drive_pending_processes;
     // W0017: lash::durability::DurableProcessWorker::from_shared_config [function]
@@ -123,26 +121,6 @@ fn processes_area_witnesses() {
     let _ = lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency;
     // W0040: lash::durability::DurableProcessWorkerConfig::with_session_policy [function]
     let _ = lash::durability::DurableProcessWorkerConfig::with_session_policy;
-    // W0041: lash::durability::ProcessDrainDeferred [struct]
-    type_witness::<lash::durability::ProcessDrainDeferred>();
-    // W0042: lash::durability::ProcessDrainDeferred::disposition [field]
-    field_witness(|value: &lash::durability::ProcessDrainDeferred| {
-        let _ = &value.disposition;
-    });
-    // W0043: lash::durability::ProcessDrainDeferred::process_id [field]
-    field_witness(|value: &lash::durability::ProcessDrainDeferred| {
-        let _ = &value.process_id;
-    });
-    // W0044: lash::durability::ProcessDrainReport [struct]
-    type_witness::<lash::durability::ProcessDrainReport>();
-    // W0045: lash::durability::ProcessDrainReport::abandoned [field]
-    field_witness(|value: &lash::durability::ProcessDrainReport| {
-        let _ = &value.abandoned;
-    });
-    // W0046: lash::durability::ProcessDrainReport::deferred [field]
-    field_witness(|value: &lash::durability::ProcessDrainReport| {
-        let _ = &value.deferred;
-    });
     // W0047: lash::durability::DurableProcessWorkerConfig::process_event_sink [field]
     field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
         let _ = &value.process_event_sink;
@@ -444,25 +422,6 @@ fn processes_area_witnesses() {
             let _ = session_id;
         }
     });
-    // W0108: lash::plugins::PluginError::ProcessAlreadyStarted [variant]
-    variant_witness(|value: &lash::plugins::PluginError| {
-        matches!(
-            value,
-            lash::plugins::PluginError::ProcessAlreadyStarted { .. }
-        )
-    });
-    // W0109: lash::plugins::PluginError::ProcessAlreadyStarted::by [field]
-    field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessAlreadyStarted { by, .. } = value {
-            let _ = by;
-        }
-    });
-    // W0110: lash::plugins::PluginError::ProcessAlreadyStarted::process_id [field]
-    field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessAlreadyStarted { process_id, .. } = value {
-            let _ = process_id;
-        }
-    });
     // W0111: lash::plugins::PluginError::ProcessAlreadyTerminal [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(
@@ -480,31 +439,6 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::plugins::PluginError| {
         if let lash::plugins::PluginError::ProcessAlreadyTerminal { status, .. } = value {
             let _ = status;
-        }
-    });
-    // W0116: lash::plugins::PluginError::ProcessAttemptsExhausted [variant]
-    variant_witness(|value: &lash::plugins::PluginError| {
-        matches!(
-            value,
-            lash::plugins::PluginError::ProcessAttemptsExhausted { .. }
-        )
-    });
-    // W0117: lash::plugins::PluginError::ProcessAttemptsExhausted::attempts [field]
-    field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessAttemptsExhausted { attempts, .. } = value {
-            let _ = attempts;
-        }
-    });
-    // W0118: lash::plugins::PluginError::ProcessAttemptsExhausted::max_attempts [field]
-    field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessAttemptsExhausted { max_attempts, .. } = value {
-            let _ = max_attempts;
-        }
-    });
-    // W0119: lash::plugins::PluginError::ProcessAttemptsExhausted::process_id [field]
-    field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessAttemptsExhausted { process_id, .. } = value {
-            let _ = process_id;
         }
     });
     // W0120: lash::plugins::PluginError::ProcessLeaseSuperseded [variant]
@@ -619,8 +553,6 @@ fn processes_area_witnesses() {
     >(todo!(), todo!(), todo!());
     // W0136: lash::process::AbandonEvidence [struct]
     type_witness::<lash::process::AbandonEvidence>();
-    // W0137: lash::process::AbandonRequest [struct]
-    type_witness::<lash::process::AbandonRequest>();
     // W0138: lash::process::AbandonWriter [enum]
     type_witness::<lash::process::AbandonWriter>();
     // W0139: lash::process::CausalRef::ProcessEvent [variant]
@@ -705,13 +637,6 @@ fn processes_area_witnesses() {
             lash::process::ProcessCompletionAuthority::ExternalOwner
         )
     });
-    // W0158: lash::process::ProcessCompletionAuthority::ReconciledAbandon [variant]
-    variant_witness(|value: &lash::process::ProcessCompletionAuthority| {
-        matches!(
-            value,
-            lash::process::ProcessCompletionAuthority::ReconciledAbandon
-        )
-    });
     // W0159: lash::process::ProcessCompletionAuthority::WorkflowKey [variant]
     variant_witness(|value: &lash::process::ProcessCompletionAuthority| {
         matches!(
@@ -775,8 +700,6 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::process::ProcessEvent| {
         let _ = &value.sequence;
     });
-    // W0175: lash::process::ProcessEventAppendRequest::abandon_requested [function]
-    let _ = lash::process::ProcessEventAppendRequest::abandon_requested;
     // W0176: lash::process::ProcessEventAppendRequest::cancel_requested [function]
     let _ = lash::process::ProcessEventAppendRequest::cancel_requested;
     // W0177: lash::process::ProcessEventAppendRequest::event_type [field]
@@ -1050,10 +973,6 @@ fn processes_area_witnesses() {
     fn meth_0253<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::redrive_wake_delivery;
     }
-    // W0254: lash::process::ProcessRegistry::request_process_abandon [function]
-    fn meth_0254<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::request_process_abandon;
-    }
     // W0255: lash::process::ProcessRegistry::set_process_wait_with_authority [function]
     fn meth_0255<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::set_process_wait_with_authority;
@@ -1170,10 +1089,6 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessStartOptions::with_spawn_provenance;
     // W0286: lash::process::ProcessStartRequest [struct]
     type_witness::<lash::process::ProcessStartRequest>();
-    // W0287: lash::process::ProcessStartRequest::disposition [field]
-    field_witness(|value: &lash::process::ProcessStartRequest| {
-        let _ = &value.disposition;
-    });
     // W0288: lash::process::ProcessStartRequest::env_spec [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.env_spec;
@@ -1198,13 +1113,8 @@ fn processes_area_witnesses() {
     });
     // W0294: lash::process::ProcessStartRequest::into_registration [function]
     let _ = lash::process::ProcessStartRequest::into_registration;
-    // W0295: lash::process::ProcessStartRequest::max_attempts [field]
-    field_witness(|value: &lash::process::ProcessStartRequest| {
-        let _ = &value.max_attempts;
-    });
     // W0296: lash::process::ProcessStartRequest::new [function]
     let _ = lash::process::ProcessStartRequest::new(
-        todo!(),
         todo!(),
         todo!(),
         lash::process::LifetimeDecision::Detached,
@@ -1233,8 +1143,6 @@ fn processes_area_witnesses() {
         todo!(),
         std::iter::empty::<lash::process::ProcessEventType>(),
     );
-    // W0304: lash::process::ProcessStartRequest::with_max_attempts [function]
-    let _ = lash::process::ProcessStartRequest::with_max_attempts;
     // W0305: lash::process::ProcessStartRequest::with_observers [function]
     let _ = lash::process::ProcessStartRequest::with_observers(
         todo!(),

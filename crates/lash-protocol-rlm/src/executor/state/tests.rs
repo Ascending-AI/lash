@@ -127,9 +127,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         ]),
         deferred_resolutions: deferred_resolutions.clone(),
         deferred_trigger_resolutions: deferred_trigger_resolutions.clone(),
-        child_max_attempts: Some(
-            std::num::NonZeroU32::new(5).expect("the witness attempt bound is non-zero"),
-        ),
     };
 
     assert_field_schema(
@@ -141,7 +138,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             "globals",
             "deferred_resolutions",
             "deferred_trigger_resolutions",
-            "child_max_attempts",
         ],
         &[serialized_fields(&root)],
     );
@@ -442,14 +438,13 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     // so the retained snapshot carries the heap form's counters and roots.
     assert_eq!(retained_bytes, 5_122_708);
     // Snapshot v19's separate empty trigger-resolution record adds 43 fixed
-    // root bytes, and v20's pinned child attempt bound adds 20 more, without
-    // retaining any additional session payload. The single-language cutover
+    // root bytes without retaining any additional session payload. The single-language cutover
     // added the last two: the checkpoint carries the engine id, and
     // `typescript` is two bytes longer than the retired `lashlang`. Snapshot
     // v23 (FIG-3605) adds the durable heap header, with the heap's counters,
     // to the root and writes the changed binding as a durable fragment instead
     // of a one-binding snapshot.
-    assert_eq!(changed_bytes, 118_080);
+    assert_eq!(changed_bytes, 118_060);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }
@@ -755,65 +750,6 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 }
 
 #[test]
-fn previous_snapshot_version_is_typed_rejection_for_missing_child_attempt_bound() {
-    // v19 is the last envelope written without the child attempt bound; v20
-    // added it. v21 is the single-language cutover (ADR 0096), v22 the
-    // nested-tool-definition cutover (FIG-1210), v23 the durable-heap
-    // cutover (FIG-3605), v24 the closure-metadata bump (FIG-3655), v25 the
-    // built-in method value bump (FIG-3701) and v26 the binding-cell bump
-    // (FIG-3707), which sit on top without touching this envelope's other
-    // fields, so the gap to the reader is seven rather than one. The
-    // rejection asserted below is unchanged.
-    const PREVIOUS_SNAPSHOT_VERSION: u32 = 19;
-    assert_eq!(
-        RLM_SNAPSHOT_VERSION,
-        PREVIOUS_SNAPSHOT_VERSION + 7,
-        "the child attempt-bound snapshot bump, the single-language cutover, \
-         the tool-definition nesting, the durable-heap cutover, the \
-         closure-metadata bump, the built-in method value bump and the \
-         binding-cell bump are the only versions between this envelope and \
-         the current reader"
-    );
-
-    #[derive(Serialize)]
-    struct PreviousEnvelope {
-        version: u32,
-        engine: &'static str,
-        globals: BTreeMap<String, PersistedValue>,
-        deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
-        deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
-    }
-
-    let hydration = lash_core::plugin::HydratedExecutionState {
-        root: rmp_serde::to_vec_named(&PreviousEnvelope {
-            version: PREVIOUS_SNAPSHOT_VERSION,
-            engine: "lashlang",
-            globals: BTreeMap::new(),
-            deferred_resolutions: Default::default(),
-            deferred_trigger_resolutions: Default::default(),
-        })
-        .expect("encode version-19 root")
-        .into(),
-        components: BTreeMap::new(),
-    };
-    let mut target = RlmExecutionState::for_engine("lashlang");
-    let error = target
-        .restore_execution_state(&hydration, lash_core::FleetFormat::current())
-        .expect_err("version 19 must fail closed rather than drop the pinned attempt bound");
-
-    assert!(matches!(
-        &error,
-        RlmSnapshotError::VersionMismatch {
-            expected: RLM_SNAPSHOT_VERSION,
-            found: PREVIOUS_SNAPSHOT_VERSION
-        }
-    ));
-    let message = error.to_string();
-    assert!(message.contains("drain in-flight sessions on the old build"));
-    assert!(message.contains("recreate development/test stores"));
-}
-
-#[test]
 fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
     const EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION: u32 = 17;
     const { assert!(RLM_SNAPSHOT_VERSION > EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION) };
@@ -956,7 +892,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 #[test]
 fn version_26_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "87a776657273696f6e1aa6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "86a776657273696f6e1aa6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
         "0ea7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
         "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
         "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
@@ -970,8 +906,7 @@ fn version_26_root_encodes_to_golden_bytes() {
         "a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e",
         "6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e",
         "5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61",
-        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380b2636869",
-        "6c645f6d61785f617474656d70747305",
+        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380",
     );
 
     let mut resolutions = BTreeMap::new();
@@ -1034,9 +969,6 @@ fn version_26_root_encodes_to_golden_bytes() {
         },
         deferred_trigger_resolutions:
             lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
-        child_max_attempts: Some(
-            std::num::NonZeroU32::new(5).expect("the golden attempt bound is non-zero"),
-        ),
     };
 
     let encoded = rmp_serde::to_vec_named(&root).expect("encode the golden root");
@@ -1481,38 +1413,4 @@ fn the_dialect_pins_snapshot_engine_id() {
         rmp_serde::from_slice(snapshot.root.as_deref().expect("fresh snapshot has a root"))
             .expect("decode snapshot root");
     assert_eq!(root.engine, "typescript");
-}
-
-#[test]
-fn the_first_child_start_pins_the_attempt_bound_and_later_host_changes_do_not_move_it() {
-    let mut state = RlmExecutionState::for_engine("lashlang");
-    assert_eq!(state.child_max_attempts(), None);
-
-    // A cell that starts no child pins nothing, so the snapshot root stays as
-    // clean as it was before the cell ran.
-    state.adopt_child_max_attempts(None);
-    assert_eq!(state.child_max_attempts(), None);
-
-    let first = std::num::NonZeroU32::new(5).expect("non-zero host default");
-    state.adopt_child_max_attempts(Some(first));
-    assert_eq!(state.child_max_attempts(), Some(first));
-
-    // A later cell on a reconfigured host reports the bound it resolved from
-    // the already-pinned value, and a stale higher default never displaces it.
-    let changed = std::num::NonZeroU32::new(11).expect("non-zero changed default");
-    state.adopt_child_max_attempts(Some(changed));
-    assert_eq!(state.child_max_attempts(), Some(first));
-
-    // The pin survives a snapshot round trip, which is what carries it across
-    // the process boundary a redrive crosses.
-    let snapshot = hydrate(
-        state
-            .snapshot_execution_state(lash_core::FleetFormat::current())
-            .expect("capture a pinned snapshot"),
-    );
-    let mut restored = RlmExecutionState::for_engine("lashlang");
-    restored
-        .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
-        .expect("restore the pinned snapshot");
-    assert_eq!(restored.child_max_attempts(), Some(first));
 }

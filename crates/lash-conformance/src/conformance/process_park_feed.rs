@@ -36,16 +36,19 @@ fn cell_divergence() -> ParkReason {
     }
 }
 
-fn parkable(max_attempts: Option<u32>) -> ProcessRegistration {
+/// A process lash executes, so its runs can start and park.
+fn parkable() -> ProcessRegistration {
     ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
+        ProcessInput::Engine {
+            kind: "park-feed-conformance".to_string(),
+            payload: serde_json::Value::Null,
         },
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_max_attempts(max_attempts)
+    .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+        "process-env:park-feed",
+    )))
 }
 
 /// Claim `id`'s lease and record execution attempt `attempt` under it,
@@ -98,14 +101,14 @@ async fn release(registry: &Arc<dyn ProcessRegistry>, lease: &ProcessLease) {
         .expect("release the attempt's lease");
 }
 
-/// Register a parkable process with `max_attempts`, returning its minted id.
+/// Register a parkable process, returning its minted id.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn register(registry: &Arc<dyn ProcessRegistry>, max_attempts: Option<u32>) -> ProcessId {
+async fn register(registry: &Arc<dyn ProcessRegistry>) -> ProcessId {
     registry
-        .register_process(parkable(max_attempts))
+        .register_process(parkable())
         .await
         .expect("register the parkable process")
         .id
@@ -121,7 +124,7 @@ async fn parked(
     registry: &Arc<dyn ProcessRegistry>,
     reason: ParkReason,
 ) -> (ProcessId, ProcessLease, ProcessRecord) {
-    let id = register(registry, None).await;
+    let id = register(registry).await;
     let (lease, _) = start_attempt(registry, &id, 1).await;
     let record = registry
         .park_process_with_authority(
@@ -189,7 +192,7 @@ pub async fn parked_processes_list_by_since_with_filters_and_keyset_pages(
     let (a, _, park_a) = parked(&registry, cell_divergence()).await;
     let (b, _, park_b) = parked(&registry, divergence("llm_call")).await;
     let (c, _, park_c) = parked(&registry, divergence("tool_call")).await;
-    register(&registry, None).await;
+    register(&registry).await;
 
     let since = |record: &ProcessRecord| {
         record
@@ -287,7 +290,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
 ) {
     // S8: a park whose writer knows the checkpoint's build generation records
     // it on the park and stamps the `Parked` feed event it opens.
-    let id = register(&registry, None).await;
+    let id = register(&registry).await;
     let (lease, _) = start_attempt(&registry, &id, 1).await;
     let checkpoint_generation = lash_core::engine::BuildGeneration::for_test("f3795c");
     let first = registry
@@ -535,58 +538,6 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
         ))
     );
     assert!(list(&registry, query(10)).await.is_empty());
-}
-
-/// P5: only a refusing park exempts a start from the attempt budget: the
-/// rerun of a parked process starts past its budget, and once that rerun has
-/// begun — past replay, no longer refusing — the next start is refused
-/// typed.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn only_a_refusing_park_exempts_a_start_from_the_attempt_budget(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    let id = register(&registry, Some(1)).await;
-    let (lease, outcome) = start_attempt(&registry, &id, 1).await;
-    assert!(matches!(outcome, crate::ProcessStartOutcome::Started(_)));
-    registry
-        .park_process_with_authority(
-            &id,
-            cell_divergence().into(),
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
-        )
-        .await
-        .expect("the first attempt refuses and parks");
-    release(&registry, &lease).await;
-
-    let (lease, outcome) = start_attempt(&registry, &id, 2).await;
-    assert!(
-        matches!(outcome, crate::ProcessStartOutcome::Started(_)),
-        "a refusing park's rerun starts past the budget: {outcome:?}"
-    );
-    registry
-        .begin_parked_rerun_with_authority(
-            &id,
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
-        )
-        .await
-        .expect("the rerun begins");
-    release(&registry, &lease).await;
-
-    let (lease, outcome) = start_attempt(&registry, &id, 3).await;
-    assert!(
-        matches!(
-            outcome,
-            crate::ProcessStartOutcome::AttemptsExhausted {
-                max_attempts: 1,
-                ..
-            }
-        ),
-        "a rerun that got past replay spends the budget: {outcome:?}"
-    );
-    release(&registry, &lease).await;
 }
 
 /// P6: compacting the process park feed raises its horizon; a read from a

@@ -6,9 +6,7 @@ use lash::persistence::{
     LeaseOwnerIdentity, RuntimeCommit, RuntimeSessionState, SessionRelation,
     SessionStoreCreateRequest,
 };
-use lash::process::{
-    ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, RecoveryContract,
-};
+use lash::process::{ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration};
 use lash::provider::LlmResponse;
 use lash::runtime::SessionPolicy;
 use lash::{CommitBudget, LashCore, ModelSpec, QueuedWorkBatchingConfig, TurnBudget};
@@ -110,7 +108,6 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
             lash::process::Lifetime::Detached,
         ))
@@ -205,7 +202,6 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
             lash::process::Lifetime::Detached,
         ))

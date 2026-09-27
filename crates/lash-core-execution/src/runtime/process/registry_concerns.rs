@@ -20,11 +20,10 @@ use super::events::{
     ProcessEventAppendRequest, ProcessEventPage, ProcessEventQueryMode, ProcessEventReadOutcome,
 };
 use super::model::{
-    AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessId, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
-    ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
-    SessionId, WaitState,
+    ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessId, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
+    ProcessObserverBy, ProcessRecord, ProcessRegistration, ProcessRegistrationOutcome,
+    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
@@ -512,13 +511,11 @@ pub trait ProcessLifecycle: Send + Sync {
     ///
     /// This path is reserved for writers whose single-writer discipline lives
     /// *outside* the Lash lease: an external actor closing an externally-owned
-    /// row, a workflow-key-coalesced substrate completing a row it ran, or the
-    /// sweep reconciling an abandon request. The
+    /// row, or a workflow-key-coalesced substrate completing a row it ran. The
     /// [`ProcessCompletionAuthority`] names which of these applies; the
     /// implementation MUST call
     /// [`authority.validate`](ProcessCompletionAuthority::validate) against the
-    /// row's declared [`RecoveryContract`](super::model::RecoveryContract)
-    /// inside this operation, so a mismatched authority is rejected with a typed
+    /// row's ownership (its input class) inside this operation, so a mismatched authority is rejected with a typed
     /// error before any terminal event is appended, and MUST record the
     /// authority on the terminal event as audit evidence (via
     /// [`terminal_append_request`](super::events::terminal_append_request)).
@@ -663,11 +660,14 @@ pub trait ProcessLifecycle: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
+    /// Record the durable "execution started" fact (ADR 0110).
     ///
     /// The first attempt stores `started`. An identical replay is idempotent.
-    /// Rerunnable recovery replaces the retained fact with the next consecutive
-    /// attempt; OwnerBound recovery rejects a distinct execution.
+    /// A successor execution the engine resumes from its journal replaces the
+    /// retained fact with the next consecutive attempt; any other attempt is
+    /// refused. Whether a start may run at all is the engine's decision, made
+    /// before this write: lash never re-runs started work from scratch.
+    /// An externally-owned row never starts.
     async fn record_first_started_with_authority(
         &self,
         process_id: &ProcessId,
@@ -715,20 +715,6 @@ pub trait ProcessLifecycle: Send + Sync {
             .await?;
         Ok((record, crate::StoreRealization::Realized))
     }
-
-    /// Set the durable, non-terminal Abandon Request marker (ADR 0019).
-    ///
-    /// First-writer-wins: a repeat with the same requester and reason is an
-    /// idempotent no-op returning the existing record unchanged, preserving the
-    /// original request timestamp. A different requester or reason is a conflict
-    /// and cannot clobber the recorded authorization. Setting it on a terminal
-    /// row is a model error — a terminal process has already recorded its outcome,
-    /// so there is nothing to abandon.
-    async fn request_process_abandon(
-        &self,
-        process_id: &ProcessId,
-        request: AbandonRequest,
-    ) -> Result<ProcessRecord, PluginError>;
 
     /// Record that the caller which registered an Externally-Owned row
     /// departed before any outcome could be written (FIG-1383).

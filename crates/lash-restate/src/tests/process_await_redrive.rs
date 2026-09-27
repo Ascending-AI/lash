@@ -202,7 +202,7 @@ pub(super) fn fig790_cancelled_process_output(process_id: &ProcessId) -> Process
 /// for the workflow to await.
 pub(super) async fn fig790_process_await_endpoint()
 -> (Endpoint, Arc<dyn ProcessRegistry>, ProcessId) {
-    process_await_endpoint(rerunnable_registration()).await
+    process_await_endpoint(executed_registration()).await
 }
 
 /// The process-await fixture over an externally owned process, which a test

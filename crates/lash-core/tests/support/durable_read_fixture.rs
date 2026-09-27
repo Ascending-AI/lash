@@ -245,12 +245,12 @@ use lash_core::{
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ProtocolTurnOptions, RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit,
-    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState,
-    SegmentHandover, SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation,
-    SessionScope, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    TextProjectionMetadata, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    ProtocolTurnOptions, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState, SegmentHandover,
+    SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TextProjectionMetadata,
+    TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
     TriggerDeliveryReservation, TriggerDeliveryReservationOutcome, TriggerInputBinding,
     TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
     TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
@@ -1026,7 +1026,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "wake"}),
                 },
-                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1068,7 +1067,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             ProcessInput::External {
                 metadata: serde_json::json!({"fixture": "tombstone"}),
             },
-            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -2326,7 +2324,6 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
             kind: "durable-read-engine".to_string(),
             payload: serde_json::json!({"fixture": "process"}),
         },
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

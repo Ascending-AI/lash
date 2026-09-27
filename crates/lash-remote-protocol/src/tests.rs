@@ -1134,8 +1134,6 @@ fn remote_process_dtos_json_round_trip() {
         input: RemoteProcessInput::External {
             metadata: serde_json::json!({ "label": "Import" }),
         },
-        disposition: RemoteRecoveryContract::ExternallyOwned,
-        max_attempts: None,
         env_spec: Some(RemoteProcessExecutionEnvSpec {
             plugin_options: RemoteProcessPluginOptions {
                 plugins: BTreeMap::from([(
@@ -1193,12 +1191,6 @@ fn remote_process_dtos_json_round_trip() {
         matches!(empty_session.validate(), Err(RemoteProtocolError::MissingRequiredField { field, .. }) if field == "lifetime.session_id")
     );
 
-    let mut invalid_max_attempts = start.clone();
-    invalid_max_attempts.max_attempts = Some(0);
-    assert!(matches!(
-        invalid_max_attempts.validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { .. })
-    ));
     let decoded: RemoteProcessStartRequest =
         serde_json::from_value(serde_json::to_value(&start).expect("serialize start"))
             .expect("deserialize start");
@@ -1242,7 +1234,6 @@ fn remote_process_dtos_json_round_trip() {
                 lifecycle: RemoteProcessStatus::Running,
                 lifetime: RemoteLifetimeDecision::Detached,
                 ancestry: Vec::new(),
-                disposition: RemoteRecoveryContract::ExternallyOwned,
                 error: None,
                 error_code: None,
                 created_at_ms: 1,
@@ -1250,7 +1241,6 @@ fn remote_process_dtos_json_round_trip() {
                 first_started: None,
                 lease_holder: None,
                 lease_expires_at_ms: None,
-                abandon_request: None,
                 cancel_request: None,
                 input: RemoteProcessInput::External {
                     metadata: serde_json::json!({ "label": "Import" }),
@@ -2132,8 +2122,6 @@ fn remote_process_record() -> RemoteProcessRecord {
             kind: "import".to_string(),
             payload: serde_json::json!({ "label": "Import" }),
         },
-        disposition: RemoteRecoveryContract::ExternallyOwned,
-        max_attempts: None,
         identity: RemoteProcessIdentity {
             kind: "engine".to_string(),
             label: Some("Import".to_string()),
@@ -2158,7 +2146,6 @@ fn remote_process_record() -> RemoteProcessRecord {
             segment_ordinal: None,
         }),
         first_started: None,
-        abandon_request: None,
         cancel_request: None,
         wait: Some(RemoteProcessWaitState {
             kind: RemoteProcessWaitKind::Signal {

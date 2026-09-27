@@ -1793,7 +1793,6 @@ async fn register_intent_target(
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )

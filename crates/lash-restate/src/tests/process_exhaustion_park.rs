@@ -143,7 +143,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
     deployment.install_park_reconciler(admin.clone());
 
     let process_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the process")
         .id;

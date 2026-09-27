@@ -21,10 +21,10 @@ use crate::runtime::process::registry_delegate::{
     delegate_process_tool_intents, delegate_process_wake_outbox,
 };
 use crate::{
-    AbandonRequest, CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
-    ProcessId, ProcessLease, ProcessRecord, ProcessStartOutcome, ProcessStarted,
-    RuntimeReplayAttribution, ScopeId, SessionId, StoreRealization, WaitState,
+    CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessId, ProcessLease,
+    ProcessRecord, ProcessStartOutcome, ProcessStarted, RuntimeReplayAttribution, ScopeId,
+    SessionId, StoreRealization, WaitState,
 };
 
 /// The decorated registry: one armed fault for `target`, everything else
@@ -230,16 +230,6 @@ impl ProcessLifecycle for ParentEndFault {
                 requester,
                 attribution,
             )
-            .await
-    }
-
-    async fn request_process_abandon(
-        &self,
-        process_id: &ProcessId,
-        request: AbandonRequest,
-    ) -> Result<ProcessRecord, PluginError> {
-        self.inner
-            .request_process_abandon(process_id, request)
             .await
     }
 

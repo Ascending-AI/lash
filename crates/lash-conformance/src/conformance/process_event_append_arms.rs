@@ -347,7 +347,6 @@ async fn durable_effect_outcome_event_crash_windows(
                     kind: "conformance-effect-engine".to_string(),
                     payload: serde_json::Value::Null,
                 },
-                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

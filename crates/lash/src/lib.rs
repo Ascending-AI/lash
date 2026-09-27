@@ -698,13 +698,12 @@ pub mod remote {
     /// environments.
     pub mod processes {
         pub use lash_remote_protocol::processes::{
-            RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
-            RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
-            RemoteLifetimeDecision, RemoteObservedProcess, RemoteObservedProcessEvent,
-            RemoteObservedProcessFailure, RemoteObservedWorkItemState, RemoteParkReason,
-            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
-            RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
-            RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
+            RemoteAbandonEvidence, RemoteAbandonWriter, RemoteDeclaredProcessIdentity,
+            RemoteEffectOpener, RemoteLeaseOwnerIdentity, RemoteLifetimeDecision,
+            RemoteObservedProcess, RemoteObservedProcessEvent, RemoteObservedProcessFailure,
+            RemoteObservedWorkItemState, RemoteParkReason, RemotePersistProcessEnvReceipt,
+            RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
+            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
             RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
             RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
@@ -723,10 +722,10 @@ pub mod remote {
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
             RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-            RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeAttribution,
-            RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
-            RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
-            RemoteStartLifetime, RemoteToolFailureClass, RemoteTurnBudget,
+            RemoteProcessWorkSnapshot, RemoteRuntimeAttribution, RemoteRuntimeInvocation,
+            RemoteRuntimeReplay, RemoteRuntimeReplayAttribution, RemoteRuntimeSubject,
+            RemoteScopeGrant, RemoteScopeId, RemoteSessionScope, RemoteStartLifetime,
+            RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 
@@ -828,9 +827,9 @@ pub mod process {
         WakeDiscardReason,
     };
     pub use lash_core::{
-        AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, Ancestry,
-        ArtifactOwner, CausalRef, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime,
-        LifetimeDecision, LifetimePolicy, NativeProcessWork, PROCESS_EFFECT_OCCURRENCE_CAP,
+        AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArtifactOwner,
+        CausalRef, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime, LifetimeDecision,
+        LifetimePolicy, NativeProcessWork, PROCESS_EFFECT_OCCURRENCE_CAP,
         PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
         PROCESS_EVENT_VOCABULARY_VERSION, ProcessArtifactCleanupAck, ProcessAwaitOutput,
         ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
@@ -854,9 +853,9 @@ pub mod process {
         ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalWait, ProcessToolIntents,
         ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate,
         ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark,
-        RecoveryContract, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-        ScopeStorageError, SessionScope, StartCx, StartCxError, StartKey, StartKeyOwner,
-        WatchedRegistry, facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
+        SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
+        SessionScope, StartCx, StartCxError, StartKey, StartKeyOwner, WatchedRegistry,
+        facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
         facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
         facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
         facade_support::ObservedWorkItemState, facade_support::ProcessAdmissionDeferred,
@@ -904,9 +903,7 @@ pub mod durability {
     /// itself; a host that accepts turn input at its own edge calls it there to
     /// fail the request instead of the turn.
     pub use lash_core::facade_support::ensure_durable_effect_input;
-    pub use lash_core::facade_support::{
-        ProcessDrainDeferred, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
-    };
+    pub use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
         BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,
@@ -917,9 +914,8 @@ pub mod durability {
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
-        facade_support::LeaseTimingsError, facade_support::ProcessDrainReport,
-        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
-        facade_support::TerminationPolicy,
+        facade_support::LeaseTimingsError, facade_support::RuntimeEnvironment,
+        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
     };
     pub use lash_core_worker::{
         DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork,

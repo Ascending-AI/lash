@@ -1068,7 +1068,6 @@ pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessR
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "endpoint-corpus"}),
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

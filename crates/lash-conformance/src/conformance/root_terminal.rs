@@ -581,7 +581,6 @@ async fn until_root(
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::session(crate::SessionScope::new(session_id.as_str())),
                 lash_core::Lifetime::Detached,
             ),
@@ -927,7 +926,6 @@ pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::session(crate::SessionScope::new(parts.session_id.as_str())),
             lash_core::Lifetime::Detached,
         )

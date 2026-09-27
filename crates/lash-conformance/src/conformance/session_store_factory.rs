@@ -778,7 +778,6 @@ pub async fn process_prune_deletes_owned_session_stores(
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -998,7 +997,6 @@ pub async fn process_prune_deletes_owned_session_stores(
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))

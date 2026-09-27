@@ -12,9 +12,9 @@
 #![allow(unused_imports)]
 
 use lash::process::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, Ancestry,
-    ArtifactOwner, CausalRef, DeclaredProcessIdentity, HandleId, Lifetime, LifetimeDecision,
-    LifetimePolicy, NativeProcessWork, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
+    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArtifactOwner, CausalRef,
+    DeclaredProcessIdentity, HandleId, Lifetime, LifetimeDecision, LifetimePolicy,
+    NativeProcessWork, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
     ObservedWorkItemState, ParentEndPlan, ProcessAdmissionDeferred, ProcessAdmissionIntake,
     ProcessAdmissionReport, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
     ProcessChange, ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind,
@@ -40,12 +40,12 @@ use lash::process::{
     ProcessToolIntents, ProcessToolVisibilityFilter, ProcessValueSelector, ProcessWake,
     ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver,
     ProcessWorkSnapshot, ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorkerFault,
-    ProcessWorklistCursor, ProcessWorklistPage, Processes, ProjectionWatermark, RecoveryContract,
-    ScopeGrant, ScopeId, ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx,
-    StartCxError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryDriveReport,
-    WakeDeliveryDriver, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WatchedRegistry,
-    lifetime, process_wake_source_key, publish_process_execution_env, watch_process_registry,
+    ProcessWorklistCursor, ProcessWorklistPage, Processes, ProjectionWatermark, ScopeGrant,
+    ScopeId, ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx, StartCxError,
+    WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryDriveReport, WakeDeliveryDriver,
+    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WatchedRegistry, lifetime,
+    process_wake_source_key, publish_process_execution_env, watch_process_registry,
     watch_process_registry_with_sink,
 };
 

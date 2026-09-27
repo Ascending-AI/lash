@@ -48,7 +48,7 @@ async fn record_cancel(
 #[tokio::test]
 pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successor_hands_over() {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -191,7 +191,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
 #[tokio::test]
 pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let record = registry
         .register_process(registration)
         .await
@@ -314,7 +314,7 @@ pub(super) async fn a_retired_cancel_request_is_refused_before_any_command() {
     for handler in ["cancel", "deliver_cancel"] {
         let registry = process_registry();
         let record = registry
-            .register_process(rerunnable_registration())
+            .register_process(executed_registration())
             .await
             .expect("register the process");
         let process_id = record.id.clone();

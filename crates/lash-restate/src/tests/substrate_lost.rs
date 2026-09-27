@@ -83,7 +83,6 @@ async fn two_segment_tool_registration() -> ProcessRegistration {
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -178,7 +177,7 @@ struct HandedOverSegment {
 impl HandedOverSegment {
     async fn new() -> Self {
         let (registry, continuations) = process_stores();
-        let registration = rerunnable_registration();
+        let registration = executed_registration();
         let process_id = registry
             .register_process(registration.clone())
             .await
@@ -677,7 +676,7 @@ pub(super) async fn a_completed_segment_is_superseded_not_refused() {
 pub(super) async fn root_segment_admits_only_rows_that_never_started() {
     let registry = process_registry();
     let started_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the started row")
         .id;
@@ -697,7 +696,7 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
             .serve(),
         )
         .build();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let _ = invoke_process_workflow_endpoint(
         &endpoint,
         "run",
@@ -719,7 +718,7 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
         .expect("the refusal is a stored terminal");
     assert!(substrate_lost(started.owner)(&outcome), "got {outcome:?}");
 
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let fresh_id = registry
         .register_process(registration.clone())
         .await
@@ -800,7 +799,7 @@ pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let continuations = Arc::clone(&stores.continuations);
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -901,7 +900,7 @@ pub(super) async fn a_failed_handover_write_ends_the_process_failed_typed() {
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let continuations = Arc::clone(&stores.continuations);
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -977,7 +976,7 @@ pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let continuations = Arc::clone(&stores.continuations);
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1101,7 +1100,7 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
 pub(super) async fn an_undecodable_input_is_refused_after_the_sentinel_not_by_its_shape() {
     for generation in [2_u32, 3] {
         let registry = process_registry();
-        let registration = rerunnable_registration();
+        let registration = executed_registration();
         let runner = Arc::new(EffectRunner::default());
         let endpoint = Endpoint::builder()
             .bind(
@@ -1297,7 +1296,7 @@ struct ZombieRoot {
 impl ZombieRoot {
     async fn new() -> Self {
         let (registry, continuations) = process_stores();
-        let registration = rerunnable_registration();
+        let registration = executed_registration();
         let process_id = registry
             .register_process(registration.clone())
             .await

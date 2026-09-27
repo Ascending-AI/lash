@@ -342,7 +342,6 @@ async fn a_started_definition_is_the_definition_processes_list_filters_by() {
 
     let mut registration = lash_core::ProcessRegistration::new(
         start.declaration.input.clone(),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

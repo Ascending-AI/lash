@@ -460,7 +460,6 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
                         &case.session_id,
                     )),
@@ -896,7 +895,6 @@ impl AgentSessionTurnProcessScenario {
                 turn_input: Box::new(TurnInput::text("run child session turn")),
                 output_contract: lash_core::ToolOutputContract::Static,
             },
-            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )

@@ -324,7 +324,6 @@ pub(super) async fn trigger_lashlang_registration(resource: &str) -> ProcessRegi
             process_name: "notify".to_string(),
             args,
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("root")).with_caused_by(
             Some(lash_core::CausalRef::SessionNode {
                 session_id: SessionId::from("root"),
@@ -401,7 +400,6 @@ pub(super) async fn typescript_process_registration() -> ProcessRegistration {
             process_name: worker.clone(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -449,7 +447,6 @@ pub(super) async fn sleeping_process_registration() -> ProcessRegistration {
             process_name: worker,
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -524,7 +521,6 @@ pub(super) async fn sleeping_then_tool_process_registration() -> ProcessRegistra
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -1005,7 +1001,6 @@ pub(super) fn counting_tool_plugin(
 
 pub(super) fn counting_tool_registration(
     label: &str,
-    disposition: lash_core::RecoveryContract,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
     ProcessRegistration::new(
@@ -1019,7 +1014,6 @@ pub(super) fn counting_tool_registration(
                 serde_json::Value::Null,
             ),
         },
-        disposition,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -1291,10 +1285,10 @@ pub(super) async fn process_workflow_impl_runs_through_runner() {
         continuation_store(),
     );
     // The workflow only ever runs lash-executed rows: `submit_record` refuses to
-    // POST an ExternallyOwned row, and the registry rejects a workflow-key
-    // completion of one (ADR 0027) — so the fixture is Rerunnable.
+    // POST an externally-owned row, and the registry rejects a workflow-key
+    // completion of one (ADR 0027) — so the fixture is a lash-executed row.
     let registration =
-        rerunnable_registration().with_wake_session_id(Some(SessionId::from("wake-session")));
+        executed_registration().with_wake_session_id(Some(SessionId::from("wake-session")));
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1350,7 +1344,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
     let workflow =
         LashProcessWorkflowImpl::new_for_test(runner, registry.clone(), continuation_store());
     let terminal_retry_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register process")
         .id;
@@ -1412,9 +1406,9 @@ pub(super) fn invocation_started(
 pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_execution() {
     let registry = process_registry();
     let invocation_rerun_id = registry
-        .register_process(rerunnable_registration().with_max_attempts(Some(2)))
+        .register_process(executed_registration())
         .await
-        .expect("register rerunnable")
+        .expect("register a lash-executed process")
         .id;
 
     let (first_authority, first_started) =
@@ -1455,38 +1449,21 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
             .expect("fresh invocation"),
         lash_core::ProcessStartOutcome::Started(_)
     ));
-    let (third_authority, third_started) =
-        invocation_started(&invocation_rerun_id, "invocation-3", 3);
-    assert!(matches!(
-        registry
-            .record_first_started_with_authority(
-                &invocation_rerun_id,
-                third_started,
-                &third_authority,
-            )
-            .await
-            .expect("attempt budget verdict"),
-        lash_core::ProcessStartOutcome::AttemptsExhausted {
-            attempts: 2,
-            max_attempts: 2,
-            ..
-        }
-    ));
 }
 
 #[tokio::test]
-pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
+pub(super) async fn segment_continuation_reuses_root_invocation_identity() {
     let registry = process_registry();
-    let owner_bound_segment_id = registry
-        .register_process(owner_bound_registration())
+    let segment_process_id = registry
+        .register_process(executed_registration())
         .await
-        .expect("register owner-bound")
+        .expect("register a lash-executed process")
         .id;
     let (root_authority, root_started) =
-        invocation_started(&owner_bound_segment_id, "root-invocation", 1);
+        invocation_started(&segment_process_id, "root-invocation", 1);
     registry
         .record_first_started_with_authority(
-            &owner_bound_segment_id,
+            &segment_process_id,
             root_started.clone(),
             &root_authority,
         )
@@ -1497,7 +1474,7 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
     // lifecycle facts under the root's execution id (FIG-3588 admission binds
     // it from the retained start).
     let successor_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        owner_bound_segment_id.clone(),
+        segment_process_id.clone(),
         "root-invocation",
     )
     .bind_attempt(1);
@@ -1508,7 +1485,7 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                &owner_bound_segment_id,
+                &segment_process_id,
                 successor_started,
                 &successor_authority,
             )
@@ -1516,102 +1493,11 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
             .expect("mid-chain continuation"),
         lash_core::ProcessStartOutcome::AlreadyApplied(_)
     ));
-    let (fresh_authority, fresh_started) =
-        invocation_started(&owner_bound_segment_id, "fresh-invocation", 2);
-    assert!(matches!(
-        registry
-            .record_first_started_with_authority(
-                &owner_bound_segment_id,
-                fresh_started,
-                &fresh_authority,
-            )
-            .await
-            .expect("fresh owner-bound invocation verdict"),
-        lash_core::ProcessStartOutcome::AlreadyStarted { .. }
-    ));
 }
 
 #[tokio::test]
-pub(super) async fn run_registration_abandons_restarted_owner_bound_without_running() {
-    // When the engine re-invokes the workflow for an OwnerBound row whose prior
-    // incarnation already recorded `first_started` but left no outcome, the run
-    // handler must not re-execute it. The workflow-key recovery path records an
-    // Abandoned{Sweep} terminal so durable awaiters resolve.
-    let started_owner = lash_core::LeaseOwnerIdentity::opaque("owner-a", "incarnation-1");
-    let runner = Arc::new(AlreadyStartedRunner {
-        calls: Mutex::new(0),
-        winner: started_owner.clone(),
-    });
-    let registry = process_registry();
-    let workflow = LashProcessWorkflowImpl::new_for_test(
-        runner.clone(),
-        registry.clone(),
-        continuation_store(),
-    );
-    let registration = owner_bound_registration();
-    let process_id = registry
-        .register_process(registration.clone())
-        .await
-        .expect("register owner-bound process")
-        .id;
-    // Simulate the prior incarnation that began executing but never completed.
-    registry
-        .record_first_started(
-            &process_id,
-            lash_core::ProcessStarted {
-                owner: started_owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 42,
-                build_generation: None,
-                generation: None,
-            },
-        )
-        .await
-        .expect("record prior incarnation start");
-
-    let output = workflow
-        .run_registration_for_test(
-            process_id.clone(),
-            registration,
-            ProcessExecutionContext::default(),
-            lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process(process_id.clone())),
-            )
-            .expect("process scope"),
-            0,
-            None,
-        )
-        .await
-        .expect("run_registration");
-
-    // The real runner rejects this before user-code execution when its atomic
-    // start write observes the prior OwnerBound attempt.
-    assert_eq!(*runner.calls.lock_recover(), 1);
-    let lash_core::ProcessRunOutcome::Terminal { output, .. } = &output else {
-        panic!("expected terminal output, got {output:?}");
-    };
-    let ProcessAwaitOutput::Abandoned { evidence, .. } = output.as_ref() else {
-        panic!("expected Abandoned output, got {output:?}");
-    };
-    assert_eq!(evidence.writer, AbandonWriter::Sweep);
-    assert_eq!(evidence.owner.as_ref(), Some(&started_owner));
-    let record = registry
-        .get_process(&process_id)
-        .await
-        .expect("read process")
-        .expect("get abandoned row");
-    assert!(record.is_terminal(), "the row is completed as terminal");
-    assert!(matches!(
-        record.outcome,
-        Some(ProcessAwaitOutput::Abandoned { .. })
-    ));
-}
-
-#[tokio::test]
-pub(super) async fn run_registration_runs_fresh_owner_bound() {
-    // A fresh OwnerBound row has no `first_started` (the runner records it inside
+pub(super) async fn run_registration_runs_a_fresh_process() {
+    // A fresh row has no `first_started` (the runner records it inside
     // run_process, during execution), so the re-invocation guard must NOT fire:
     // the runner executes normally on the first invocation.
     let runner = Arc::new(RecordingRunner::default());
@@ -1621,11 +1507,11 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
         registry.clone(),
         continuation_store(),
     );
-    let registration = owner_bound_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register fresh owner-bound process")
+        .expect("register a fresh process")
         .id;
 
     let output = workflow
@@ -1657,7 +1543,7 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
             .map(|run| run.process_id.clone())
             .collect::<Vec<_>>(),
         vec![process_id.clone()],
-        "a fresh OwnerBound row runs through the runner on first invocation"
+        "a fresh row runs through the runner on first invocation"
     );
 }
 
@@ -1671,12 +1557,12 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
 /// a lost workflow whose reference still names it.
 #[tokio::test]
 pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_the_repeat_scan() {
-    // A non-terminal, Lash-executed (Rerunnable) process is the durable
-    // worklist row the ingress runner must submit. ExternallyOwned rows are
-    // never submitted (ADR 0019), so the submittable case uses a Rerunnable row.
+    // A non-terminal, Lash-executed process is the durable worklist row the
+    // ingress runner must submit. Externally-owned rows are never submitted
+    // (ADR 0110), so the submittable case uses a lash-executed row.
     let registry = process_registry();
     let task_1_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register")
         .id;
@@ -1762,12 +1648,12 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
 pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_cancelling_row() {
     let registry = process_registry();
     let crashed_before_submit_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the row whose host died before it submitted")
         .id;
     let cancelling = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the row that carries a standing cancel request");
     registry

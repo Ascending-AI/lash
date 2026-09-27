@@ -212,7 +212,6 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
     .expect("the process input serializes");
     lash_core::ProcessStartRequest::new(
         input,
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )

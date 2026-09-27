@@ -66,9 +66,6 @@ impl RlmSubagentToolsProvider {
                 turn_input: Box::new(prepared.turn_input),
                 output_contract: lash_core::ToolOutputContract::Static,
             },
-            // Subagent session-turn rows are journaled child sessions, so
-            // recovery may re-execute them (ADR 0019).
-            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
             // The host's policy, resolved against the spawn's admitted start
             // context. The decision rides the journaled start; a redrive

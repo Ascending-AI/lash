@@ -77,14 +77,19 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
         ("p4", None),
     ] {
         let process_id = registry
-            .register_process(lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                lash_core::RecoveryContract::Rerunnable,
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            ))
+            .register_process(
+                lash_core::ProcessRegistration::new(
+                    lash_core::ProcessInput::Engine {
+                        kind: "test-engine".to_string(),
+                        payload: serde_json::Value::Null,
+                    },
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(
+                    lash_core::ProcessExecutionEnvRef::new("process-env:test-engine"),
+                )),
+            )
             .await
             .expect("register a drain process")
             .id;

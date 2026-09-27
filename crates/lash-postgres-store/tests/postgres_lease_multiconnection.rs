@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 use lash_core_execution::TestProcessRegistryWriteExt;
 use lash_core_execution::{
     LeaseOwnerIdentity, ProcessAwaitOutput, ProcessInput, ProcessLeaseClaimOutcome,
-    ProcessProvenance, ProcessRegistration, ProcessStarted, RecoveryContract,
+    ProcessProvenance, ProcessRegistration, ProcessStarted,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -55,17 +55,20 @@ async fn connect() -> PostgresStorage {
         .expect("connect postgres")
 }
 
-/// An external placeholder row whose rerunnable disposition permits the two
-/// simulated hosts to record and fence local execution attempts.
+/// An executed row, so the two simulated hosts may record and fence local
+/// execution attempts on it.
 fn registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
+        ProcessInput::Engine {
+            kind: "postgres-lease-test".to_string(),
+            payload: serde_json::Value::Null,
         },
-        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
         lash_core_execution::Lifetime::Detached,
     )
+    .with_execution_env_ref(Some(lash_core_execution::ProcessExecutionEnvRef::new(
+        "process-env:postgres-lease-test",
+    )))
 }
 
 fn owner(owner_id: &str) -> LeaseOwnerIdentity {

@@ -96,7 +96,6 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
             process_name: "scan".to_string(),
             args: args.clone(),
         }),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
         lash_core::Lifetime::Detached,
     )
@@ -796,11 +795,6 @@ impl RestateProcessRunner for RecordingRunner {
     }
 }
 
-pub(super) struct AlreadyStartedRunner {
-    pub(super) calls: Mutex<usize>,
-    pub(super) winner: lash_core::LeaseOwnerIdentity,
-}
-
 pub(super) struct TerminalFailureRunner;
 
 pub(super) struct DivergenceThenSuccessRunner {
@@ -898,33 +892,6 @@ impl RestateProcessRunner for TerminalFailureRunner {
             lash_core::RuntimeErrorCode::EngineServiceUnregistered,
             "no deployment binds the child worker",
         )))
-    }
-}
-
-#[async_trait::async_trait]
-impl RestateProcessRunner for AlreadyStartedRunner {
-    fn executable_generation(
-        &self,
-        _registration: &ProcessRegistration,
-    ) -> Option<lash_core::ExecutableGeneration> {
-        None
-    }
-
-    async fn run_process_segment(
-        &self,
-        _started: &SegmentStarted,
-        process_id: ProcessId,
-        _registration: ProcessRegistration,
-        _execution_context: ProcessExecutionContext,
-        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
-        _handover: Option<lash_core::SegmentHandover>,
-        _cancellation: tokio_util::sync::CancellationToken,
-    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        *self.calls.lock_recover() += 1;
-        Err(PluginError::ProcessAlreadyStarted {
-            process_id,
-            by: Box::new(self.winner.clone()),
-        })
     }
 }
 
@@ -1145,7 +1112,7 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     ));
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1228,7 +1195,7 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     ));
-    let registration = rerunnable_session_turn_registration();
+    let registration = session_turn_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1302,7 +1269,7 @@ pub(super) async fn session_turn_runner_failure_after_completion_stays_recoverab
         Arc::clone(&registry),
         continuation_store(),
     ));
-    let registration = rerunnable_session_turn_registration();
+    let registration = session_turn_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1371,7 +1338,7 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     ));
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1449,7 +1416,7 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     );
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1518,7 +1485,7 @@ pub(super) async fn a_broken_cancel_watch_fails_the_attempt_after_its_retries() 
         Duration::from_secs(10),
         workflow.run_registration_for_test(
             ProcessId::fixture("broken-cancel-watch"),
-            rerunnable_registration(),
+            executed_registration(),
             ProcessExecutionContext::default(),
             process_scope(&ProcessId::fixture("broken-cancel-watch")),
             0,
@@ -1561,7 +1528,7 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
     let error = workflow
         .run_registration_for_test(
             ProcessId::fixture("unregistered-cancel-watch"),
-            rerunnable_registration(),
+            executed_registration(),
             ProcessExecutionContext::default(),
             process_scope(&ProcessId::fixture("unregistered-cancel-watch")),
             0,
@@ -1666,7 +1633,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         registry.clone(),
         Arc::clone(&continuations),
     );
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let _record = registry
         .register_process(registration.clone())
         .await
@@ -1794,7 +1761,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
         RestateSegmentReplayPoint::CancelCheck,
     ] {
         let (registry, continuations) = process_stores();
-        let registration = rerunnable_registration();
+        let registration = executed_registration();
         let process_id = registry
             .register_process(registration.clone())
             .await

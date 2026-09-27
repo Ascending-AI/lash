@@ -618,7 +618,6 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
                 serde_json::Value::Null,
             ),
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
@@ -711,7 +710,6 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
@@ -799,7 +797,6 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
@@ -832,21 +829,19 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         )
         .await?
         .id;
-    core.processes()
-        .request_abandon(&abandoned_id, "test operator", None)
-        .await?;
+    // The external owner records that its work was lost.
     registry_port
         .complete_process(
             &abandoned_id,
             lash_core::ProcessAwaitOutput::Abandoned {
                 evidence: Box::new(lash_core::AbandonEvidence {
-                    writer: lash_core::AbandonWriter::ReconciledRequest,
+                    writer: lash_core::AbandonWriter::Producer,
                     owner: None,
-                    epoch_ms: crate::process_admin::now_epoch_ms(),
+                    epoch_ms: 1,
                 }),
                 control: None,
             },
-            lash_core::ProcessCompletionAuthority::ReconciledAbandon,
+            lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await?;
     let departed_id = registry_port
@@ -883,10 +878,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
                 ),
                 "abandoned" => matches!(
                     expected.as_slice(),
-                    [
-                        SessionProcessEventKind::AbandonRequested { .. },
-                        SessionProcessEventKind::Abandoned { .. },
-                    ]
+                    [SessionProcessEventKind::Abandoned { .. }]
                 ),
                 "caller_departed" => matches!(
                     expected.as_slice(),
@@ -1441,7 +1433,6 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ))

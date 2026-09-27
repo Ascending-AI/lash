@@ -37,7 +37,6 @@ pub(super) async fn register_until_child(
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "crash_matrix": "child" }),
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.as_str())),
         lash_core::Lifetime::Detached,
     );

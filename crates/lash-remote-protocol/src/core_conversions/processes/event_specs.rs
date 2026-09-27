@@ -120,33 +120,10 @@ impl TryFrom<RemoteProcessEventSemantics> for lash_core::runtime::ProcessEventSe
     }
 }
 
-impl From<lash_core::RecoveryContract> for RemoteRecoveryContract {
-    fn from(value: lash_core::RecoveryContract) -> Self {
-        match value {
-            lash_core::RecoveryContract::Rerunnable => Self::Rerunnable,
-            lash_core::RecoveryContract::OwnerBound => Self::OwnerBound,
-            lash_core::RecoveryContract::ExternallyOwned => Self::ExternallyOwned,
-        }
-    }
-}
-
-impl From<RemoteRecoveryContract> for lash_core::RecoveryContract {
-    fn from(value: RemoteRecoveryContract) -> Self {
-        match value {
-            RemoteRecoveryContract::Rerunnable => Self::Rerunnable,
-            RemoteRecoveryContract::OwnerBound => Self::OwnerBound,
-            RemoteRecoveryContract::ExternallyOwned => Self::ExternallyOwned,
-        }
-    }
-}
-
 impl From<lash_core::AbandonWriter> for RemoteAbandonWriter {
     fn from(value: lash_core::AbandonWriter) -> Self {
         match value {
-            lash_core::AbandonWriter::OwnerDrain => Self::OwnerDrain,
-            lash_core::AbandonWriter::Sweep => Self::Sweep,
-            lash_core::AbandonWriter::ReconciledRequest => Self::ReconciledRequest,
-            lash_core::AbandonWriter::EngineGaveUp => Self::EngineGaveUp,
+            lash_core::AbandonWriter::Producer => Self::Producer,
             lash_core::AbandonWriter::ResumeRefused { reason } => Self::ResumeRefused {
                 reason: reason.into(),
             },
@@ -157,10 +134,7 @@ impl From<lash_core::AbandonWriter> for RemoteAbandonWriter {
 impl From<RemoteAbandonWriter> for lash_core::AbandonWriter {
     fn from(value: RemoteAbandonWriter) -> Self {
         match value {
-            RemoteAbandonWriter::OwnerDrain => Self::OwnerDrain,
-            RemoteAbandonWriter::Sweep => Self::Sweep,
-            RemoteAbandonWriter::ReconciledRequest => Self::ReconciledRequest,
-            RemoteAbandonWriter::EngineGaveUp => Self::EngineGaveUp,
+            RemoteAbandonWriter::Producer => Self::Producer,
             RemoteAbandonWriter::ResumeRefused { reason } => Self::ResumeRefused {
                 reason: reason.into(),
             },
@@ -296,35 +270,5 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             generation: generation.map(lash_core::ExecutableGeneration::new),
             build_generation,
         })
-    }
-}
-
-impl From<lash_core::AbandonRequest> for RemoteAbandonRequest {
-    fn from(value: lash_core::AbandonRequest) -> Self {
-        let lash_core::AbandonRequest {
-            requested_by,
-            requested_at_ms,
-            reason,
-        } = value;
-        Self {
-            requested_by,
-            requested_at_ms,
-            reason,
-        }
-    }
-}
-
-impl From<RemoteAbandonRequest> for lash_core::AbandonRequest {
-    fn from(value: RemoteAbandonRequest) -> Self {
-        let RemoteAbandonRequest {
-            requested_by,
-            requested_at_ms,
-            reason,
-        } = value;
-        Self {
-            requested_by,
-            requested_at_ms,
-            reason,
-        }
     }
 }

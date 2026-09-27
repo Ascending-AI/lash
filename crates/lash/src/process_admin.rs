@@ -1008,44 +1008,6 @@ impl Processes {
         let ports = self.core.substrate_slot.ports().await;
         ports.queued.drive_wake().await.map_err(Into::into)
     }
-
-    /// Record a durable, non-terminal **Abandon Request** on a process (ADR
-    /// 0019): a third party's authorization to accept uncertainty about an
-    /// owner. This never terminalizes anything itself — the recovery sweep
-    /// reconciles it into `Abandoned` only once the owner's lease has lapsed;
-    /// the marker stays visible to observers while pending. Returns the process
-    /// as observed after the marker is written.
-    pub async fn request_abandon(
-        &self,
-        process_id: &ProcessId,
-        requested_by: impl Into<String>,
-        reason: Option<String>,
-    ) -> Result<lash_core::facade_support::ObservedProcess> {
-        let request = lash_core::AbandonRequest {
-            requested_by: requested_by.into(),
-            requested_at_ms: now_epoch_ms(),
-            reason,
-        };
-        self.registry()
-            .request_process_abandon(process_id, request)
-            .await?;
-        self.get(process_id).await?.ok_or_else(|| {
-            EmbedError::Plugin(lash_core::PluginError::Session(format!(
-                "process `{process_id}` vanished after recording its abandon request"
-            )))
-        })
-    }
-}
-
-/// Host wall-clock epoch milliseconds for facade-issued markers (e.g. the
-/// Abandon Request timestamp). The registry stays state-only, so the facade
-/// stamps the request time itself. Shared with the session-scoped abandon lever
-/// in [`crate::admin`].
-pub(crate) fn now_epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

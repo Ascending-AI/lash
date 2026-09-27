@@ -615,12 +615,13 @@ impl ProcessCapability {
     }
 
     /// Write the terminal outcome for an Externally-Owned process the session
-    /// observes (ADR 0019). This is the "external actor calling
+    /// observes (ADR 0110). This is the "external actor calling
     /// `complete_process`" closure path: a host that launches work outside
     /// lash registers it as an Externally-Owned row and completes it here with
-    /// the launch identity. Only Externally-Owned rows may be completed this
-    /// way — an OwnerBound or Rerunnable row has a lash execution owner as its
-    /// single terminal writer, so completing it out of band is rejected.
+    /// the launch identity, or with `Abandoned` when the work was lost. Only
+    /// Externally-Owned rows may be completed this way — a row lash executes
+    /// has its engine as its single terminal writer, so completing it out of
+    /// band is rejected.
     pub(in crate::runtime::session_manager) async fn complete_external_process(
         &self,
         current: &CurrentSessionCapability,

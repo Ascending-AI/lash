@@ -196,7 +196,6 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"program": "parent"}),
         },
-        crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
@@ -212,7 +211,6 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"program": "child"}),
         },
-        crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     );

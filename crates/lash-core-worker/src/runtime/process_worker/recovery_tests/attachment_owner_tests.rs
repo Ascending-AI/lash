@@ -413,7 +413,6 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
                     kind: "attachment-writing-engine".to_string(),
                     payload: serde_json::Value::Null,
                 },
-                RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
@@ -531,7 +530,6 @@ async fn a_start_after_prune_binds_attachments_to_its_own_process() {
                 kind: "attachment-writing-engine".to_string(),
                 payload: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )

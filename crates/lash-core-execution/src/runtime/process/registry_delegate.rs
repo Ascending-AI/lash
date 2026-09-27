@@ -446,17 +446,6 @@ macro_rules! delegate_process_lifecycle {
                 $event_hook
             }
 
-            async fn request_process_abandon(
-                &self,
-                process_id: &$crate::ProcessId,
-                request: $crate::AbandonRequest,
-            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.request_process_abandon(process_id, request);
-                $event_hook
-            }
-
             async fn record_caller_departure(
                 &self,
                 process_id: &$crate::ProcessId,

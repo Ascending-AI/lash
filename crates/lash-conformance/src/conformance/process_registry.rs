@@ -108,7 +108,6 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -409,10 +408,34 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        ProcessIdentity::for_definition(
+            lash_core::ProcessDefinitionRef::unclaimed(
+                "conformance",
+                serde_json::json!({"suite": "process_registry"}),
+            ),
+            Some(id),
+        ),
+    ))
+}
+
+/// A process lash executes: an engine input with its captured execution env.
+/// [`registration`] is an externally-owned row lash never executes.
+pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
+    ProcessRegistration::new(
+        ProcessInput::Engine {
+            kind: "conformance".to_string(),
+            payload: serde_json::json!({"suite": "process_registry", "id": id}),
+        },
+        ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
+        "process-env:{id}"
+    ))))
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         ProcessIdentity::for_definition(
             lash_core::ProcessDefinitionRef::unclaimed(
@@ -542,71 +565,6 @@ pub async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn Proc
 pub async fn lifecycle_transition_refusals_are_backend_invariant(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let abandon_id = "transition-refusal-abandon";
-    let transition_refusal_abandon_record = registry
-        .register_process(registration(abandon_id))
-        .await
-        .expect("register abandon-refusal process");
-    let abandon_id = transition_refusal_abandon_record.id.clone();
-    let first = registry
-        .request_process_abandon(
-            &abandon_id,
-            crate::AbandonRequest {
-                requested_by: "first-requester".to_string(),
-                requested_at_ms: 1,
-                reason: Some("first request".to_string()),
-            },
-        )
-        .await
-        .expect("record first abandon request");
-    let repeated = registry
-        .request_process_abandon(
-            &abandon_id,
-            crate::AbandonRequest {
-                requested_by: "first-requester".to_string(),
-                requested_at_ms: 2,
-                reason: Some("first request".to_string()),
-            },
-        )
-        .await
-        .expect("repeat identical abandon request");
-    assert_eq!(repeated, first);
-    assert_eq!(
-        repeated
-            .abandon_request
-            .as_deref()
-            .expect("repeated request preserves first abandon request")
-            .requested_at_ms,
-        1,
-        "first-writer abandon timestamp must be preserved"
-    );
-    assert_session_refusal(
-        registry
-            .request_process_abandon(
-                &abandon_id,
-                crate::AbandonRequest {
-                    requested_by: "first-requester".to_string(),
-                    requested_at_ms: 3,
-                    reason: Some("conflicting request".to_string()),
-                },
-            )
-            .await,
-        &format!("process `{abandon_id}` already has a different abandon request"),
-    );
-    assert_session_refusal(
-        registry
-            .request_process_abandon(
-                &abandon_id,
-                crate::AbandonRequest {
-                    requested_by: "second-requester".to_string(),
-                    requested_at_ms: 4,
-                    reason: Some("first request".to_string()),
-                },
-            )
-            .await,
-        &format!("process `{abandon_id}` already has a different abandon request"),
-    );
-
     let departed_id = "transition-refusal-departed-wait";
     let departed = registry
         .register_process(registration(departed_id))
@@ -972,7 +930,6 @@ async fn refolded_process_record_matches_stored_projection(
                     kind: "refold-conformance".to_string(),
                     payload: serde_json::json!({"case": case}),
                 },
-                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1111,170 +1068,6 @@ async fn assert_refold_matches_stored_projection(
     );
 }
 
-/// A redrive that re-registers the same child under its start key gets the
-/// recorded row back, attempt bound included, whatever bound the redriving
-/// host resolved now.
-///
-/// A run that starts a child, loses its lease before the uncommitted tail
-/// commits, and is then redriven on a reconfigured host re-registers with a
-/// different bound. The start key is trusted (ADR 0107): the registrar returns
-/// the retained process without comparing content, so the row stays the
-/// durable truth and the redrive never forks a second child.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn redriven_child_reregisters_with_the_recorded_attempt_bound(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    // A run's child is keyed by its orchestrating call, a lash-derived key.
-    let start_key = crate::StartKey::for_orchestration_call(
-        &crate::ExecutionScope::runtime_operation("process-redriven-attempt-bound"),
-        "spawn-child",
-        0,
-    );
-    let registration = |max_attempts: u32| {
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            RecoveryContract::Rerunnable,
-            ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        )
-        .with_max_attempts(Some(max_attempts))
-        .with_start_key(Some(start_key.clone()))
-    };
-
-    // The first run pins 5 and the row lands with it.
-    let first = registry
-        .register_process(registration(5))
-        .await
-        .expect("register the child with the pinned bound");
-    assert_eq!(
-        first.max_attempts,
-        Some(5),
-        "the row records the bound it registered"
-    );
-
-    // The uncommitted tail is dropped and the host default moves to 10. The
-    // redrive presents the same key and gets the recorded row back.
-    let redriven = registry
-        .register_process(registration(10))
-        .await
-        .expect("the redrive re-registers under its start key");
-    assert_eq!(
-        redriven.id, first.id,
-        "the redrive names the recorded child"
-    );
-    let after = registry
-        .get_process(&first.id)
-        .await
-        .expect("read the redriven child")
-        .expect("the child row survives the redrive");
-    assert_eq!(
-        after.max_attempts,
-        Some(5),
-        "the redrive must not move the recorded bound"
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = registry
-        .register_process(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                RecoveryContract::Rerunnable,
-                ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_max_attempts(Some(1)),
-        )
-        .await
-        .expect("register attempt-budget process")
-        .id;
-
-    let first_owner = crate::LeaseOwnerIdentity::opaque("attempt-owner-1", "attempt-owner-1:i");
-    let first_lease = registry
-        .claim_process_lease(&process_id, &first_owner, 60_000)
-        .await
-        .expect("claim first attempt lease")
-        .acquired()
-        .expect("first attempt lease acquired");
-    let first_started = crate::ProcessStarted {
-        owner: first_owner,
-        fencing_token: first_lease.fencing_token,
-        attempt: 1,
-        started_at_ms: first_lease.claimed_at_epoch_ms,
-        generation: None,
-        build_generation: None,
-    };
-    assert!(matches!(
-        registry
-            .record_first_started_with_authority(
-                &process_id,
-                first_started,
-                &crate::ProcessExecutionWriteAuthority::lease(first_lease.clone()),
-            )
-            .await
-            .expect("record first attempt"),
-        crate::ProcessStartOutcome::Started(_)
-    ));
-    registry
-        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&first_lease))
-        .await
-        .expect("release first attempt lease");
-
-    let next_owner = crate::LeaseOwnerIdentity::opaque("attempt-owner-2", "attempt-owner-2:i");
-    let next_lease = registry
-        .claim_process_lease(&process_id, &next_owner, 60_000)
-        .await
-        .expect("claim next attempt lease")
-        .acquired()
-        .expect("next attempt lease acquired");
-    let outcome = registry
-        .record_first_started_with_authority(
-            &process_id,
-            crate::ProcessStarted {
-                owner: next_owner,
-                fencing_token: next_lease.fencing_token,
-                attempt: 2,
-                started_at_ms: next_lease.claimed_at_epoch_ms,
-                build_generation: None,
-                generation: None,
-            },
-            &crate::ProcessExecutionWriteAuthority::lease(next_lease.clone()),
-        )
-        .await
-        .expect("attempt exhaustion is a typed start outcome");
-    match outcome {
-        crate::ProcessStartOutcome::AttemptsExhausted {
-            current,
-            attempts,
-            max_attempts,
-        } => {
-            assert_eq!(attempts, 1);
-            assert_eq!(max_attempts, 1);
-            assert_eq!(
-                current.first_started.as_deref().map(|start| start.attempt),
-                Some(1)
-            );
-            assert!(!current.is_terminal());
-        }
-        other => panic!("expected AttemptsExhausted, got {other:?}"),
-    }
-    registry
-        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&next_lease))
-        .await
-        .expect("release exhausted-attempt lease");
-}
-
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1399,7 +1192,6 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
                     kind: "waiting-recovery-worklist".to_string(),
                     payload: serde_json::Value::Null,
                 },
-                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -2316,16 +2108,14 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
     );
 
     // Illegal: departures belong to rows lash never executes.
-    let mut owner_bound = registration("caller-departure-owner-bound");
-    owner_bound.disposition = RecoveryContract::OwnerBound;
-    let owner_bound_id = registry
-        .register_process(owner_bound)
+    let executed_id = registry
+        .register_process(executed_registration("caller-departure-executed"))
         .await
-        .expect("register owner-bound row")
+        .expect("register a lash-executed row")
         .id;
-    let disposition_refusal = registry.record_caller_departure(&owner_bound_id).await;
+    let ownership_refusal = registry.record_caller_departure(&executed_id).await;
     assert!(
-        disposition_refusal.is_err(),
+        ownership_refusal.is_err(),
         "only an externally-owned row can record a caller departure"
     );
 

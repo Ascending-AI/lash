@@ -39,8 +39,8 @@ use lash_core::tool_dispatch::ToolDispatchOutcome;
 use lash_core::{
     Ancestry, EffectOpener, Lifetime, LifetimeDecision, PluginOptions, ProcessExecutionEnvSpec,
     ProcessId, ProcessInput, ProcessListFilter, ProcessOriginator, ProcessProvenance,
-    ProcessRegistration, ProcessStartRequest, RecoveryContract, RuntimeExecutionContext,
-    ScopeGrant, ScopeId, SessionId, SessionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ProcessRegistration, ProcessStartRequest, RuntimeExecutionContext, ScopeGrant, ScopeId,
+    SessionId, SessionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
     ToolIntents, TurnBudget, TurnId,
 };
@@ -184,7 +184,6 @@ impl PossessionWorld {
                                 kind: "sim-child".to_string(),
                                 payload: serde_json::Value::Null,
                             },
-                            RecoveryContract::Rerunnable,
                             ProcessOriginator::Session {
                                 session_id: session.clone(),
                                 agent_frame_id: None,
@@ -397,7 +396,6 @@ impl PossessionWorld {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 Lifetime::Detached,
             ))
@@ -459,7 +457,6 @@ impl PossessionWorld {
                 kind: "sim-child".to_string(),
                 payload: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::new(ProcessOriginator::Session {
                 session_id: session.clone(),
                 agent_frame_id: None,

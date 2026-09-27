@@ -157,11 +157,9 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             start_key,
             last_event_sequence,
             input,
-            disposition,
             lifetime,
             ancestry,
             session_capability,
-            max_attempts,
             identity,
             event_types,
             provenance,
@@ -170,7 +168,6 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             updated_at_ms,
             external_ref,
             first_started,
-            abandon_request,
             cancel_request,
             wait,
             park,
@@ -182,11 +179,9 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             start_key_digest: start_key.map(|start_key| start_key.as_str().to_string()),
             last_event_sequence,
             input: input.as_ref().clone().try_into()?,
-            disposition: disposition.into(),
             lifetime: lifetime.into(),
             ancestry: ancestry.scopes().iter().cloned().map(Into::into).collect(),
             session_capability,
-            max_attempts,
             identity: identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),
             provenance: provenance.into(),
@@ -199,7 +194,6 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             first_started: first_started
                 .map(|started| (*started).try_into())
                 .transpose()?,
-            abandon_request: abandon_request.map(|request| (*request).into()),
             cancel_request: cancel_request.map(|request| *request),
             wait: wait.map(Into::into),
             park: park.map(|park| (*park).try_into()).transpose()?,
@@ -219,11 +213,9 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             start_key_digest,
             last_event_sequence,
             input,
-            disposition,
             lifetime,
             ancestry,
             session_capability,
-            max_attempts,
             identity,
             event_types,
             provenance,
@@ -232,7 +224,6 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             updated_at_ms,
             external_ref,
             first_started,
-            abandon_request,
             cancel_request,
             wait,
             park,
@@ -252,12 +243,10 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         let mut registration =
             lash_core::ProcessRegistration::new(
                 input.try_into()?,
-                disposition.into(),
                 provenance.try_into()?,
                 lash_core::LifetimeDecision::from(lifetime),
             )
             .with_start_key(start_key)
-            .with_max_attempts(max_attempts)
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(identity.into()))
             .with_event_types(event_types.into_iter().map(Into::into))
             .with_execution_env_ref(env_ref.map(|env_ref| {
@@ -288,7 +277,6 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         record.first_started = first_started
             .map(|started| started.try_into().map(Box::new))
             .transpose()?;
-        record.abandon_request = abandon_request.map(|request| Box::new(request.into()));
         record.cancel_request = cancel_request.map(Box::new);
         record.wait = wait.map(Into::into);
         record.park = park.map(|park| park.try_into().map(Box::new)).transpose()?;
@@ -309,7 +297,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             lifecycle,
             lifetime,
             ancestry,
-            disposition,
             error,
             error_code,
             created_at_ms,
@@ -317,7 +304,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             first_started,
             lease_holder,
             lease_expires_at_ms,
-            abandon_request,
             cancel_request,
             input,
             originator,
@@ -335,7 +321,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             lifecycle: lifecycle.into(),
             lifetime: lifetime.into(),
             ancestry: ancestry.scopes().iter().cloned().map(Into::into).collect(),
-            disposition: disposition.into(),
             error,
             error_code: error_code.map(Into::into),
             created_at_ms,
@@ -343,7 +328,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             first_started: first_started.map(TryInto::try_into).transpose()?,
             lease_holder: lease_holder.map(Into::into),
             lease_expires_at_ms,
-            abandon_request: abandon_request.map(Into::into),
             cancel_request,
             input: input.try_into()?,
             originator: originator.into(),
@@ -371,7 +355,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             lifecycle,
             lifetime,
             ancestry,
-            disposition,
             error,
             error_code,
             created_at_ms,
@@ -379,7 +362,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             first_started,
             lease_holder,
             lease_expires_at_ms,
-            abandon_request,
             cancel_request,
             input,
             originator,
@@ -397,7 +379,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             lifecycle: lifecycle.into(),
             lifetime: lifetime.into(),
             ancestry: lash_core::Ancestry::from_scopes(ancestry.into_iter().map(Into::into)),
-            disposition: disposition.into(),
             error,
             error_code: error_code.map(Into::into),
             created_at_ms,
@@ -405,7 +386,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             first_started: first_started.map(TryInto::try_into).transpose()?,
             lease_holder: lease_holder.map(Into::into),
             lease_expires_at_ms,
-            abandon_request: abandon_request.map(Into::into),
             cancel_request,
             input: input.try_into()?,
             originator: originator.try_into()?,

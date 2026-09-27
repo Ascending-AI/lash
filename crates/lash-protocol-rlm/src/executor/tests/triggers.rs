@@ -1010,7 +1010,6 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );
@@ -1239,7 +1238,6 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );

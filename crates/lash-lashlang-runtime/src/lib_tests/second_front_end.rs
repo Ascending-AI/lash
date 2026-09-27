@@ -525,7 +525,6 @@ async fn run_worker(
     };
     let registration = lash_core::ProcessRegistration::new(
         input.to_process_input().expect("valid process input"),
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

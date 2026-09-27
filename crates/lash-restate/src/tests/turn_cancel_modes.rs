@@ -318,7 +318,7 @@ async fn after_step_during_a_parked_process_await_lets_the_process_finish() {
     let context = Arc::new(RecordingContext::default());
     let registry = process_registry();
     let process_id = registry
-        .register_process(rerunnable_registration())
+        .register_process(executed_registration())
         .await
         .expect("register the awaited process")
         .id;

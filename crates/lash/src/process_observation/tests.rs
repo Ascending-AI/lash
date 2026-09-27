@@ -91,25 +91,18 @@ fn tick_type() -> lash_core::ProcessEventType {
 /// An engine process with an execution lease (for runtime-owned summary
 /// events) or a host-owned one (so a test can complete and prune it).
 fn registration(label: &str, leased: bool) -> lash_core::ProcessRegistration {
-    let (input, contract) = if leased {
-        (
-            lash_core::ProcessInput::Engine {
-                kind: "l8-fixture".to_string(),
-                payload: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::Rerunnable,
-        )
+    let input = if leased {
+        lash_core::ProcessInput::Engine {
+            kind: "l8-fixture".to_string(),
+            payload: serde_json::Value::Null,
+        }
     } else {
-        (
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::ExternallyOwned,
-        )
+        lash_core::ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        }
     };
     let registration = lash_core::ProcessRegistration::new(
         input,
-        contract,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

@@ -416,8 +416,8 @@ mod tests {
     use lash_core::{
         PluginState, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
         ProcessEventSemanticsSpec, ProcessEventType, ProcessValueSelector, ProcessWakeSpec,
-        ProjectionWatermark, RecoveryContract, RuntimeSessionState, SessionRelation,
-        SessionStoreCreateRequest, SessionStoreFactory as _, ToolState,
+        ProjectionWatermark, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
+        SessionStoreFactory as _, ToolState,
     };
 
     use super::*;
@@ -512,7 +512,6 @@ mod tests {
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )

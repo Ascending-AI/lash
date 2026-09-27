@@ -1795,24 +1795,29 @@ pub(super) fn external_registration() -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
 }
 
-pub(super) fn rerunnable_registration() -> ProcessRegistration {
+/// A process lash executes: an engine input with its captured execution env.
+/// The engine kind is never resolved; the tests run it through their own
+/// runner.
+pub(super) fn executed_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
+        ProcessInput::Engine {
+            kind: "restate-test".to_string(),
+            payload: serde_json::Value::Null,
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
+    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+        "process-env:restate-test",
+    )))
 }
 
-pub(super) fn rerunnable_session_turn_registration() -> ProcessRegistration {
+pub(super) fn session_turn_registration() -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::SessionTurn {
             definition_key: "test-session-turn:v1".to_string(),
@@ -1824,18 +1829,6 @@ pub(super) fn rerunnable_session_turn_registration() -> ProcessRegistration {
             turn_input: Box::new(lash_core::TurnInput::text("test child turn")),
             output_contract: lash_core::ToolOutputContract::Static,
         },
-        lash_core::RecoveryContract::Rerunnable,
-        lash_core::ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
-    )
-}
-
-pub(super) fn owner_bound_registration() -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
-        lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

@@ -29,17 +29,16 @@ use crate::process::{
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use lash_core::ProcessWorkSubstrate as _;
-use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
 use lash_core::testing::store_fixtures::{durable_admission, recorded_process_admission};
 use lash_core::{
-    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress,
-    EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
-    ProcessEffectOutcome, ProcessExecutionContext, ProcessExecutionEnvStore, ProcessExternalRef,
-    ProcessRegistry, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    facade_support::TurnAddress, facade_support::TurnAttach,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress, EffectHost,
+    ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome,
+    ProcessExecutionContext, ProcessExecutionEnvStore, ProcessExternalRef, ProcessRegistry,
+    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, ScopedEffectController, facade_support::TurnAddress,
+    facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_core_worker::DurableProcessWorker;

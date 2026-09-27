@@ -848,7 +848,7 @@ fn trigger_journal_completion(
 #[tokio::test]
 pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
     let registry = process_registry();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registered(registry.as_ref(), &registration).await;
     let endpoint = Endpoint::builder()
         .bind(
@@ -922,7 +922,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
 #[tokio::test]
 pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix() {
     let registry = process_registry();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registered(registry.as_ref(), &registration).await;
     let endpoint = Endpoint::builder()
         .bind(
@@ -981,7 +981,7 @@ pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_comm
 #[tokio::test]
 pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_handover() {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registered(registry.as_ref(), &registration).await;
     let (execution_authority, started) =
         invocation_started(&process_id, "fig788-ordinal-one-execution", 1);
@@ -1094,7 +1094,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
 pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_its_journaled_handover()
  {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registered(registry.as_ref(), &registration).await;
     let (execution_authority, started) =
         invocation_started(&process_id, "fig2083-missing-terminal-execution", 1);
@@ -1240,7 +1240,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
 #[tokio::test]
 pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registered(registry.as_ref(), &registration).await;
     let (execution_authority, started) =
         invocation_started(&process_id, "fig811-effectful-terminal-execution", 1);
@@ -1401,7 +1401,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
 #[tokio::test]
 pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deployed_prefix() {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registered(registry.as_ref(), &registration).await;
     let endpoint = Endpoint::builder()
         .bind(
@@ -2284,7 +2284,7 @@ pub(super) async fn drive_to_live_segment_boundary() -> (
     LiveSegmentBoundary,
 ) {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration();
+    let registration = executed_registration();
     let process_id = registered(registry.as_ref(), &registration).await;
     registry
         .set_external_ref(

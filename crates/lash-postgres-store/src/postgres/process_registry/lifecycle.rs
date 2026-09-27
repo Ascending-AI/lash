@@ -33,7 +33,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 &await_output,
             ));
         }
-        authority.validate(&record, &await_output)?;
+        authority.validate(&record)?;
         let occurred_at_ms = self.clock.timestamp_ms();
         let mut batch = ProcessEventBatch::for_fleet(self.fleet_format);
         for request in prelude {
@@ -224,37 +224,14 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             self.fleet_format,
         )
         .await?;
-        match lash_core_execution::runtime::prepare_process_start(&record, &started, authority)? {
+        match lash_core_execution::runtime::prepare_process_start(&record, &started)? {
             ProcessStartPlan::AlreadyApplied => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(ProcessStartOutcome::AlreadyApplied(record));
             }
-            ProcessStartPlan::AlreadyStarted { by } => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(ProcessStartOutcome::AlreadyStarted {
-                    current: record,
-                    by,
-                });
-            }
-            ProcessStartPlan::AttemptsExhausted {
-                attempts,
-                max_attempts,
-            } => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(ProcessStartOutcome::AttemptsExhausted {
-                    current: record,
-                    attempts,
-                    max_attempts,
-                });
-            }
             ProcessStartPlan::Append => {}
         }
-        let resumed_from_handover = record
-            .first_started
-            .as_deref()
-            .is_some_and(|retained| authority.permits_owner_bound_resume(retained));
-        let request =
-            ProcessEventAppendRequest::first_started(process_id, &started, resumed_from_handover);
+        let request = ProcessEventAppendRequest::first_started(process_id, &started);
         append_process_event_tx(
             &mut tx,
             &mut record,
@@ -335,37 +312,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok((record, lash_core_execution::StoreRealization::Realized))
-    }
-
-    async fn request_process_abandon(
-        &self,
-        process_id: &ProcessId,
-        request: AbandonRequest,
-    ) -> Result<ProcessRecord, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        match lash_core_execution::runtime::prepare_process_transition(
-            &record,
-            ProcessTransition::RequestAbandon(request),
-        )? {
-            ProcessTransitionPlan::Unchanged => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(record);
-            }
-            ProcessTransitionPlan::Append(append) => {
-                append_process_event_tx(
-                    &mut tx,
-                    &mut record,
-                    *append,
-                    self.clock.timestamp_ms(),
-                    self.wake_delivery_config,
-                    self.fleet_format,
-                )
-                .await?;
-            }
-        }
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
     }
 
     async fn record_caller_departure(

@@ -109,15 +109,18 @@ impl World {
     async fn register_child(&self, name: &str, parent: &ScopeId, until: bool) -> ProcessId {
         let _ = name;
         let mut registration = lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::json!({ "law": "parent-end" }),
+            lash_core::ProcessInput::Engine {
+                kind: "test-engine".to_string(),
+                payload: serde_json::json!({ "law": "parent-end" }),
             },
-            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
                 self.session_id.as_str(),
             )),
             lash_core::Lifetime::Detached,
-        );
+        )
+        .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+            "process-env:test-engine",
+        )));
         registration.ancestry = lash_core::Ancestry::from_scopes([parent.clone()]);
         if until {
             registration.lifetime = lash_core::LifetimeDecision::Until {
@@ -498,13 +501,16 @@ async fn a_process_end_cancels_its_cancel_children_on_restate() {
         format!("process-cancel-parent-{}", world.nonce),
     );
     let registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({ "law": "parent-end-process" }),
+        lash_core::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::json!({ "law": "parent-end-process" }),
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
+    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+        "process-env:test-engine",
+    )))
     .with_start_key(Some(parent_key.clone()));
     let parent_record = world
         .registry

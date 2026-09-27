@@ -343,7 +343,6 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(session.observe().process_scope()),
                 lash_core::Lifetime::Detached,
             ),

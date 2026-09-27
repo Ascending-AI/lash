@@ -7,7 +7,7 @@ use super::*;
 #[tokio::test]
 pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run() {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_session_turn_registration();
+    let registration = session_turn_registration();
     let process_id = registry
         .register_process(registration.clone())
         .await

@@ -4,8 +4,7 @@ pub(super) fn generated_prefix() -> Vec<StoreContractOp> {
     let operations = vec![
         StoreContractOp::Register {
             process: 0,
-            disposition: 0,
-            max_attempts: 3,
+            external: false,
             wake_target: Some(0),
         },
         StoreContractOp::FirstStart {
@@ -31,8 +30,7 @@ pub(super) fn generated_prefix() -> Vec<StoreContractOp> {
         },
         StoreContractOp::Register {
             process: 1,
-            disposition: 0,
-            max_attempts: 3,
+            external: false,
             wake_target: None,
         },
         StoreContractOp::Terminal {

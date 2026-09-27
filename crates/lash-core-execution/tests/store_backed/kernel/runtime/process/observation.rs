@@ -7,7 +7,7 @@ mod tests {
 
     use crate::runtime::process::{
         ObservedWorkItemState, ProcessAwaitOutput, ProcessInput, ProcessListFilter,
-        ProcessRegistryFaults, ProcessWorkObserver, RecoveryContract, WaitState,
+        ProcessRegistryFaults, ProcessWorkObserver, WaitState,
     };
     use crate::{
         InputItem, PluginOptions, PreparedToolCall, ProcessEventAppendRequest,
@@ -30,7 +30,6 @@ mod tests {
             ProcessInput::External {
                 metadata: json!({ "label": label }),
             },
-            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
@@ -518,13 +517,8 @@ mod tests {
                 input,
                 ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. }
             );
-            let disposition = match input {
-                ProcessInput::External { .. } => RecoveryContract::ExternallyOwned,
-                _ => RecoveryContract::Rerunnable,
-            };
             let mut registration = ProcessRegistration::new(
                 input,
-                disposition,
                 ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )

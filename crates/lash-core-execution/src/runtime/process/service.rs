@@ -84,7 +84,7 @@ pub trait ProcessService: Send + Sync {
     ) -> Result<ProcessRecord, PluginError>;
 
     /// Write the terminal outcome for an Externally-Owned process the session
-    /// observes (ADR 0019). Closure for work lash never executes — a
+    /// observes (ADR 0110). Closure for work lash never executes — a
     /// detached command records its immediately-terminal launch fact here. Only
     /// Externally-Owned rows may be completed this way. The typed completion
     /// outcome tells the caller whether this write committed, replayed an
@@ -449,7 +449,6 @@ mod tests {
                             ProcessInput::External {
                                 metadata: json!(null),
                             },
-                            crate::RecoveryContract::ExternallyOwned,
                             ProcessProvenance::host(),
                             crate::Lifetime::Detached,
                         ),
@@ -626,7 +625,6 @@ mod tests {
                 ProcessInput::External {
                     metadata: json!(null),
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             ),

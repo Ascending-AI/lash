@@ -84,13 +84,16 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
         .expect("build the process worker"),
     );
     let registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::Value::Null,
+        lash_core::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::Value::Null,
         },
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
-    );
+    )
+    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+        "process-env:test-engine",
+    )));
     let registry = restate.lash_backend().process_registry();
     let process_id = registry
         .register_process(registration.clone())

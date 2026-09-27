@@ -58,7 +58,6 @@ async fn register_intent_law_target_observed_by(
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
@@ -530,7 +529,6 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         ))
@@ -706,7 +704,6 @@ async fn retry_drains_only_the_final_attempts_intents() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )

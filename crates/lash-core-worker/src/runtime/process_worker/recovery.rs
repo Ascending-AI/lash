@@ -4,9 +4,8 @@ use crate::{PluginError, ProcessAwaitOutput, ProcessLease, ProcessLeaseCompletio
 use super::DurableProcessWorker;
 
 pub use crate::runtime::process::{
-    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
-    ProcessDrainReport, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
-    ProcessWorkerFault,
+    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport,
+    ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation, ProcessWorkerFault,
 };
 
 pub(super) struct RecoveryBackendError {
@@ -43,8 +42,8 @@ pub(super) enum RecoveryReleaseDisposition {
 pub(super) enum ProcessRecoveryOutcome {
     /// The attempt wrote this row's terminal outcome under its lease.
     Committed,
-    /// Lash never executes this row (externally owned, or an owner-bound row a
-    /// re-run would violate) and it was deliberately left where it is.
+    /// Lash never executes this externally-owned row, so it was deliberately
+    /// left to its owner.
     LeftToOwner,
     /// The attempt did not write a terminal, for the typed reason given.
     Deferred(ProcessRecoveryAttemptOutcome),
@@ -57,8 +56,7 @@ impl ProcessRecoveryOutcome {
     /// `Ok(())` is the committed terminal write; an `Err` carries the typed
     /// deferral the fenced completion produced instead. This is the single
     /// projection between the completion vocabulary and the recovery
-    /// outcome — the drain report maps the same `Err` straight into its
-    /// `ProcessDrainDeferred`.
+    /// outcome.
     pub(super) fn from_completion(result: Result<(), ProcessRecoveryAttemptOutcome>) -> Self {
         match result {
             Ok(()) => Self::Committed,
@@ -221,7 +219,7 @@ impl DurableProcessWorker {
                 );
                 // Release is token-fenced, so it cannot clear a successor's lease.
                 // If the transient failure left our lease live, releasing it makes
-                // Rerunnable work immediately retryable instead of retaining the
+                // the work immediately retryable instead of retaining the
                 // lease TTL as an implicit backoff.
                 let _ = self.release_or_log(lease).await;
                 return Err(error.into_public());
@@ -301,7 +299,7 @@ impl DurableProcessWorker {
     /// Release this attempt's lease, returning the typed failure if the release
     /// itself failed. A release fault has no other trace, so callers that would
     /// otherwise report a clean outcome must prefer it — see
-    /// [`release_or_outcome`](Self::release_or_outcome).
+    /// [`release_or_attempt_outcome`](Self::release_or_attempt_outcome).
     pub(super) async fn release_or_log(
         &self,
         lease: &ProcessLease,
@@ -313,9 +311,7 @@ impl DurableProcessWorker {
     }
 
     /// Release the lease and report `otherwise`, unless the release failed — a
-    /// failed release is the fault worth reporting. The attempt-outcome twin
-    /// of [`release_or_outcome`](Self::release_or_outcome) for callers already
-    /// speaking `ProcessRecoveryAttemptOutcome`.
+    /// failed release is the fault worth reporting.
     pub(super) async fn release_or_attempt_outcome(
         &self,
         lease: &ProcessLease,
@@ -323,19 +319,6 @@ impl DurableProcessWorker {
     ) -> ProcessRecoveryAttemptOutcome {
         match self.release_or_log(lease).await {
             Some(error) => error.into_public(),
-            None => otherwise,
-        }
-    }
-
-    /// Release the lease and report `otherwise`, unless the release failed — a
-    /// failed release is the fault worth reporting.
-    pub(super) async fn release_or_outcome(
-        &self,
-        lease: &ProcessLease,
-        otherwise: ProcessRecoveryOutcome,
-    ) -> ProcessRecoveryOutcome {
-        match self.release_or_log(lease).await {
-            Some(error) => ProcessRecoveryOutcome::Deferred(error.into_public()),
             None => otherwise,
         }
     }

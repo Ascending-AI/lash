@@ -172,7 +172,6 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -453,7 +452,6 @@ async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -713,7 +711,6 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -867,7 +864,6 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -971,7 +967,6 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),
@@ -1133,7 +1128,6 @@ async fn duplicate_only_fork_intents_are_canonical(
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),
@@ -1208,7 +1202,6 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -1317,7 +1310,6 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 ))

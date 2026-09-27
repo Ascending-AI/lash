@@ -12,8 +12,8 @@ use super::events::{
 };
 use super::materialization::materialize_process_event_semantics;
 use super::model::{
-    AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessStarted,
-    ProcessStatus, RecoveryContract, WaitState,
+    ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus,
+    WaitState,
 };
 
 pub fn validate_generic_process_event_append(
@@ -66,8 +66,6 @@ pub enum ProcessEventAppendPlan {
 pub enum ProcessStartPlan {
     Append,
     AlreadyApplied,
-    AlreadyStarted { by: crate::LeaseOwnerIdentity },
-    AttemptsExhausted { attempts: u32, max_attempts: u32 },
 }
 
 /// A registry-owned lifecycle transition whose append disposition is shared
@@ -76,8 +74,6 @@ pub enum ProcessStartPlan {
 pub enum ProcessTransition {
     /// Bind the process to durable work owned by another backend.
     SetExternalRef(ProcessExternalRef),
-    /// Record a request for recovery to abandon the process.
-    RequestAbandon(AbandonRequest),
     /// Record a typed process cancellation request.
     RequestCancel(CancelRequest),
     /// Record that the caller of an externally-owned process departed.
@@ -91,9 +87,9 @@ pub enum ProcessTransition {
     /// run already refused is unchanged, so a retried write never counts one
     /// refusal twice.
     Park(crate::store::ProcessParkWrite),
-    /// A rerun of a parked process began: the park stays, and stops
-    /// exempting the process's starts from the attempt budget until the
-    /// rerun refuses again. Unchanged on a process with no refusing park.
+    /// A rerun of a parked process began: the park stays, no longer
+    /// refusing, until the rerun refuses again. Unchanged on a process with
+    /// no refusing park.
     BeginParkedRerun,
 }
 
@@ -139,10 +135,17 @@ pub fn allocate_process_event_sequence(
     Ok(sequence)
 }
 
+/// Plan the write of an execution-started fact.
+///
+/// The engine decides whether a start may run (ADR 0110): lash never re-runs
+/// started work from scratch, and an engine that cannot replay a started
+/// execution ends it `Abandoned` with `ResumeRefused { SubstrateLost }` before
+/// asking for this write. The registry only keeps the fact consistent: the
+/// same execution is idempotent, and a successor execution the engine
+/// resumes from its journal takes the next attempt.
 pub fn prepare_process_start(
     record: &ProcessRecord,
     started: &ProcessStarted,
-    authority: &super::model::ProcessExecutionWriteAuthority,
 ) -> Result<ProcessStartPlan, PluginError> {
     if record.is_terminal() {
         return Err(PluginError::Session(format!(
@@ -150,7 +153,7 @@ pub fn prepare_process_start(
             record.id
         )));
     }
-    if record.disposition == RecoveryContract::ExternallyOwned {
+    if record.input.is_externally_owned() {
         return Err(PluginError::Session(format!(
             "externally-owned process `{}` cannot start an execution attempt",
             record.id
@@ -163,38 +166,15 @@ pub fn prepare_process_start(
     {
         return Ok(ProcessStartPlan::AlreadyApplied);
     }
-    authority.validate_resume_predecessor(&record.id, record.first_started.as_deref())?;
-
-    let expected_attempt = match record.first_started.as_deref() {
-        None => 1,
-        Some(existing)
-            if record.disposition == RecoveryContract::OwnerBound
-                && !authority.permits_owner_bound_resume(existing) =>
-        {
-            return Ok(ProcessStartPlan::AlreadyStarted {
-                by: existing.owner.clone(),
-            });
-        }
-        Some(existing) => existing.attempt.saturating_add(1),
-    };
+    let expected_attempt = record
+        .first_started
+        .as_deref()
+        .map_or(1, |existing| existing.attempt.saturating_add(1));
     if started.attempt != expected_attempt {
         return Err(PluginError::Session(format!(
             "process `{}` execution attempt must be {}, got {}",
             record.id, expected_attempt, started.attempt
         )));
-    }
-    // A parked process (FIG-3586) re-runs to find out whether the build now
-    // serving it can replay its journal; those runs refuse with nothing
-    // dispatched, so they do not spend its attempt budget.
-    let parked = record.is_refusing_park();
-    if let Some(max_attempts) = record.max_attempts
-        && started.attempt > max_attempts
-        && !parked
-    {
-        return Ok(ProcessStartPlan::AttemptsExhausted {
-            attempts: started.attempt.saturating_sub(1),
-            max_attempts,
-        });
     }
     Ok(ProcessStartPlan::Append)
 }
@@ -268,21 +248,6 @@ pub fn prepare_process_transition(
             }
             append
         }
-        ProcessTransition::RequestAbandon(request) => {
-            if !record.is_terminal()
-                && record
-                    .abandon_request
-                    .as_deref()
-                    .is_some_and(|existing| abandon_requests_match(existing, &request))
-            {
-                return Ok(ProcessTransitionPlan::Unchanged);
-            }
-            let mut append = ProcessEventAppendRequest::abandon_requested(&record.id, &request);
-            if record.is_terminal() || record.abandon_request.is_some() {
-                route_transition_refusal_to_fold(&mut append)?;
-            }
-            append
-        }
         ProcessTransition::RecordCallerDeparture => {
             if record.status == ProcessStatus::CallerDeparted {
                 return Ok(ProcessTransitionPlan::Unchanged);
@@ -330,10 +295,6 @@ pub fn prepare_process_transition(
     Ok(ProcessTransitionPlan::Append(Box::new(append)))
 }
 
-fn abandon_requests_match(existing: &AbandonRequest, requested: &AbandonRequest) -> bool {
-    existing.requested_by == requested.requested_by && existing.reason == requested.reason
-}
-
 fn route_transition_refusal_to_fold(
     append: &mut ProcessEventAppendRequest,
 ) -> Result<(), PluginError> {
@@ -374,7 +335,7 @@ pub fn apply_process_status_projection(
 /// * a waiting row can never reach it, because waiting is an execution state
 ///   an externally-owned row never enters.
 pub(super) fn apply_caller_departure(record: &mut ProcessRecord) -> Result<(), PluginError> {
-    if record.disposition != crate::RecoveryContract::ExternallyOwned {
+    if !record.input.is_externally_owned() {
         return Err(PluginError::Session(format!(
             "process `{}` is not externally-owned and cannot record a caller departure",
             record.id
@@ -418,19 +379,10 @@ pub fn apply_process_event_projection(
     match kind {
         ProcessEventKind::FirstStarted => {
             let started = lifecycle_payload(event, "started")?;
-            let resumed_from_handover = event
-                .payload
-                .get("resumed_from_handover")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
             match record.first_started.as_deref() {
                 None => record.first_started = Some(Box::new(started)),
                 Some(existing) if existing.same_execution(&started) => {}
-                Some(existing)
-                    if (record.disposition == RecoveryContract::Rerunnable
-                        || resumed_from_handover)
-                        && started.attempt == existing.attempt.saturating_add(1) =>
-                {
+                Some(existing) if started.attempt == existing.attempt.saturating_add(1) => {
                     record.first_started = Some(Box::new(started));
                 }
                 Some(_) => {
@@ -523,25 +475,6 @@ pub fn apply_process_event_projection(
                         existing: Box::new(existing.clone()),
                         requested: Box::new(request),
                     });
-                }
-            }
-        }
-        ProcessEventKind::AbandonRequested => {
-            if record.is_terminal() {
-                return Err(PluginError::Session(format!(
-                    "terminal process `{}` cannot accept an abandon request",
-                    record.id
-                )));
-            }
-            let request = lifecycle_payload(event, "request")?;
-            match record.abandon_request.as_deref() {
-                None => record.abandon_request = Some(Box::new(request)),
-                Some(existing) if existing == &request => {}
-                Some(_) => {
-                    return Err(PluginError::Session(format!(
-                        "process `{}` already has a different abandon request",
-                        record.id
-                    )));
                 }
             }
         }
@@ -1058,11 +991,9 @@ pub fn check_retained_start(
     }
     let submitted = prepare_process_registration(registration.clone())?;
     let same = submitted.input == retained.input
-        && submitted.disposition == retained.disposition
         && submitted.lifetime == retained.lifetime
         && submitted.ancestry == retained.ancestry
         && submitted.session_capability == retained.session_capability
-        && submitted.max_attempts == retained.max_attempts
         && submitted.identity == retained.identity
         && submitted.event_types == retained.event_types
         && submitted.provenance == retained.provenance
@@ -1090,7 +1021,6 @@ pub fn require_event_replay(
                 | "process.waiting"
                 | "process.resumed"
                 | "process.external_ref_set"
-                | "process.abandon_requested"
                 | "process.parked"
                 | "process.park_rerun_began"
                 | "process.observer_added"
@@ -1140,7 +1070,6 @@ pub enum ProcessRegistrationRefusal {
     LifetimeScopeUnreachable,
     HostGrantOutsideRoot,
     SessionCapabilityUnreachable,
-    ZeroMaxAttempts,
     ToolCallWithoutCallId,
     ToolCallWithoutToolName,
     ExecutionEnvMissing,
@@ -1159,7 +1088,6 @@ impl ProcessRegistrationRefusal {
         Self::LifetimeScopeUnreachable,
         Self::HostGrantOutsideRoot,
         Self::SessionCapabilityUnreachable,
-        Self::ZeroMaxAttempts,
         Self::ToolCallWithoutCallId,
         Self::ToolCallWithoutToolName,
         Self::ExecutionEnvMissing,
@@ -1248,15 +1176,6 @@ pub(crate) fn classify_process_registration(
                 ),
             ));
         }
-    }
-    if registration.max_attempts == Some(0) {
-        return Err(refuse(
-            ProcessRegistrationRefusal::ZeroMaxAttempts,
-            format!(
-                "process `{}` max_attempts must be greater than zero",
-                registration_name(registration)
-            ),
-        ));
     }
     match registration.input.as_ref() {
         super::model::ProcessInput::ToolCall { call } => {

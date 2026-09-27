@@ -8,9 +8,9 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
-    AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
-    ProcessInput, ProcessLease, ProcessListFilter, ProcessOriginator, ProcessOriginatorFilter,
-    ProcessRecord, ProcessStarted, ProcessStatus, RecoveryContract, SessionScope, WaitState,
+    ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity, ProcessInput,
+    ProcessLease, ProcessListFilter, ProcessOriginator, ProcessOriginatorFilter, ProcessRecord,
+    ProcessStarted, ProcessStatus, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -58,8 +58,6 @@ pub struct ObservedProcess {
     /// The recorded ancestry, nearest first; empty for a root start.
     pub ancestry: crate::Ancestry,
     pub identity: ProcessIdentity,
-    /// Declared recovery contract (ADR 0019). Raw fact; hosts classify.
-    pub disposition: RecoveryContract,
     /// Human-readable summary of the terminal failure, for display only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -80,9 +78,6 @@ pub struct ObservedProcess {
     /// Current lease expiry, paired with `lease_holder`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_expires_at_ms: Option<u64>,
-    /// Pending Abandon Request the sweep reconciles once the lease lapses.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abandon_request: Option<AbandonRequest>,
     /// The first accepted process cancellation request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<CancelRequest>,
@@ -438,7 +433,6 @@ impl ObservedProcess {
             lifetime: record.lifetime,
             ancestry: record.ancestry,
             identity,
-            disposition: record.disposition,
             error: terminal_error(record.outcome.as_ref()),
             error_code: terminal_error_code(record.outcome.as_ref()),
             created_at_ms: record.created_at_ms,
@@ -446,7 +440,6 @@ impl ObservedProcess {
             first_started: record.first_started.map(|started| *started),
             lease_holder,
             lease_expires_at_ms,
-            abandon_request: record.abandon_request.map(|request| *request),
             cancel_request: record.cancel_request.map(|request| *request),
             originator: record.provenance.originator,
             env_ref: record.env_ref,

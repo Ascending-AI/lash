@@ -17,7 +17,6 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ))
@@ -30,7 +29,6 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ),
@@ -146,7 +144,6 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ),
@@ -242,7 +239,6 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ))
@@ -255,7 +251,6 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryContract::Rerunnable,
                 ProcessProvenance::session(originator.clone()),
                 lash_core::Lifetime::Detached,
             ),
@@ -362,7 +357,6 @@ pub(super) async fn a_session_scope_closes_only_through_its_close_row(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         )

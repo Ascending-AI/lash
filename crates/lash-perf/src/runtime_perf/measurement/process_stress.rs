@@ -60,7 +60,6 @@ pub(super) async fn run_once_process_list_stress(
                         lash_core::ProcessInput::External {
                             metadata: serde_json::json!({ "label": "signal stress" }),
                         },
-                        lash_core::RecoveryContract::ExternallyOwned,
                         lash_core::ProcessProvenance::host(),
                         lash_core::Lifetime::Detached,
                     )
@@ -342,7 +341,6 @@ fn process_list_stress_registration(
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "index": index }),
         },
-        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::session(session_scope),
         lash_core::Lifetime::Detached,
     )

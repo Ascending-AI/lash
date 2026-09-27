@@ -74,7 +74,6 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -2149,7 +2148,6 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
                 lash_core::Lifetime::Detached,

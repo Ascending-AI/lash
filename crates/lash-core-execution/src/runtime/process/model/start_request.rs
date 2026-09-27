@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::super::events::{ProcessEventType, default_process_event_types};
 use super::{
     LifetimeDecision, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance, ProcessRegistration,
-    RecoveryContract, SessionId,
+    SessionId,
 };
 
 /// A start request as a leaf tool attempt declares it: everything a process
@@ -17,15 +17,10 @@ use super::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessStartDeclaration {
     pub input: ProcessInput,
-    pub disposition: RecoveryContract,
     /// The lifetime the declaring attempt chose from its start context,
     /// journaled with the declaration: realization never re-runs the policy
     /// (FIG-3607 R4b).
     pub lifetime: LifetimeDecision,
-    /// `None` delegates pacing indefinitely to the engine; deterministic failures then require
-    /// host cancellation or abandonment to resolve awaiters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_spec: Option<super::ProcessExecutionEnvSpec>,
     pub originator: super::ProcessOriginator,
@@ -44,15 +39,12 @@ impl ProcessStartDeclaration {
     /// The key is absent by construction; realization derives it.
     pub fn new(
         input: ProcessInput,
-        disposition: RecoveryContract,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         Self {
             input,
-            disposition,
             lifetime: lifetime.into(),
-            max_attempts: None,
             env_spec: None,
             originator,
             identity: None,
@@ -62,28 +54,18 @@ impl ProcessStartDeclaration {
         }
     }
 
-    /// External placeholder declaration: `ProcessInput::External` is always
-    /// [`RecoveryContract::ExternallyOwned`] — lash never executes it.
+    /// External placeholder declaration: lash never executes an
+    /// `ProcessInput::External` process.
     pub fn external(
         originator: super::ProcessOriginator,
         metadata: serde_json::Value,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
-        Self::new(
-            ProcessInput::External { metadata },
-            RecoveryContract::ExternallyOwned,
-            originator,
-            lifetime,
-        )
+        Self::new(ProcessInput::External { metadata }, originator, lifetime)
     }
 
     pub fn with_env_spec(mut self, env_spec: super::ProcessExecutionEnvSpec) -> Self {
         self.env_spec = Some(env_spec);
-        self
-    }
-
-    pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
-        self.max_attempts = max_attempts;
         self
     }
 
@@ -129,9 +111,7 @@ impl ProcessStartDeclaration {
         ProcessStartRequest {
             start_key: Some(start_key),
             input: self.input,
-            disposition: self.disposition,
             lifetime: self.lifetime,
-            max_attempts: self.max_attempts,
             env_spec: self.env_spec,
             originator: self.originator,
             identity: self.identity,
@@ -149,14 +129,9 @@ pub struct ProcessStartRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_key: Option<crate::StartKey>,
     pub input: ProcessInput,
-    pub disposition: RecoveryContract,
     /// What ends the process. A host start is a root: `Detached`, or `Until`
     /// a session the host looked up.
     pub lifetime: LifetimeDecision,
-    /// `None` delegates pacing indefinitely to the engine; deterministic failures then require
-    /// host cancellation or abandonment to resolve awaiters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_spec: Option<super::ProcessExecutionEnvSpec>,
     pub originator: super::ProcessOriginator,
@@ -178,16 +153,13 @@ impl ProcessStartRequest {
     /// idempotent start adds a key with [`Self::with_start_key`].
     pub fn new(
         input: ProcessInput,
-        disposition: RecoveryContract,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         Self {
             start_key: None,
             input,
-            disposition,
             lifetime: lifetime.into(),
-            max_attempts: None,
             env_spec: None,
             originator,
             identity: None,
@@ -197,19 +169,14 @@ impl ProcessStartRequest {
         }
     }
 
-    /// External placeholder start: `ProcessInput::External` is always
-    /// [`RecoveryContract::ExternallyOwned`] — lash never executes it.
+    /// External placeholder start: lash never executes an
+    /// `ProcessInput::External` process.
     pub fn external(
         originator: super::ProcessOriginator,
         metadata: serde_json::Value,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
-        Self::new(
-            ProcessInput::External { metadata },
-            RecoveryContract::ExternallyOwned,
-            originator,
-            lifetime,
-        )
+        Self::new(ProcessInput::External { metadata }, originator, lifetime)
     }
 
     /// Sets the start's idempotency key.
@@ -246,13 +213,6 @@ impl ProcessStartRequest {
     /// implementors while persisting and coordinating durable process execution.
     pub fn with_env_spec(mut self, env_spec: super::ProcessExecutionEnvSpec) -> Self {
         self.env_spec = Some(env_spec);
-        self
-    }
-
-    /// Sets the max attempts carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
-        self.max_attempts = max_attempts;
         self
     }
 
@@ -306,9 +266,7 @@ impl ProcessStartRequest {
     pub fn into_declaration(self) -> ProcessStartDeclaration {
         ProcessStartDeclaration {
             input: self.input,
-            disposition: self.disposition,
             lifetime: self.lifetime,
-            max_attempts: self.max_attempts,
             env_spec: self.env_spec,
             originator: self.originator,
             identity: self.identity,
@@ -323,12 +281,10 @@ impl ProcessStartRequest {
     pub fn into_registration(self, env_ref: Option<ProcessExecutionEnvRef>) -> ProcessRegistration {
         let mut registration = ProcessRegistration::new(
             self.input,
-            self.disposition,
             ProcessProvenance::new(self.originator),
             self.lifetime,
         )
         .with_start_key(self.start_key)
-        .with_max_attempts(self.max_attempts)
         .with_event_types(self.event_types)
         .with_execution_env_ref(env_ref)
         .with_wake_session_id(self.wake_session_id);

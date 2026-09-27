@@ -38,7 +38,6 @@ async fn ingress_core_over(
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -842,7 +841,6 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
                     serde_json::Value::Null,
                 ),
             },
-            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
@@ -1651,7 +1649,6 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
                 kind: kind.to_string(),
                 payload,
             },
-            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )

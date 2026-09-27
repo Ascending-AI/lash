@@ -89,8 +89,8 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 )?;
                 engine.run(engine_context, payload.clone()).await
             }
-            // Externally-owned rows are never executed by lash (ADR 0019): the
-            // worker's run path rejects the disposition before dispatch, so this
+            // Externally-owned rows are never executed by lash (ADR 0110): the
+            // worker's run path rejects them before dispatch, so this
             // is defensively unreachable. Never fabricate a success outcome for
             // work lash did not observe completing — surface a loud failure.
             crate::ProcessInput::External { .. } => {
@@ -180,9 +180,6 @@ impl RuntimeSessionServices {
                 crate::TurnContext::default(),
             )
             .with_execution_env_spec(current_execution_env_spec(&services.current))
-            .with_engine_child_max_attempts(
-                services.current.host.core.control.engine_child_max_attempts,
-            )
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
             .with_process_execution(
                 process_id_for_runtime.clone(),

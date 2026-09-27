@@ -283,22 +283,32 @@ async fn fixtures() -> Fixtures {
     })
     .collect::<Vec<_>>();
     let mut matrix = Vec::new();
-    for disposition in [
-        lash_core::RecoveryContract::Rerunnable,
-        lash_core::RecoveryContract::ExternallyOwned,
-        lash_core::RecoveryContract::ExternallyOwned,
-    ] {
+    // One process lash executes, then two externally-owned ones.
+    for external in [false, true, true] {
+        let registration = if external {
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+        } else {
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::Engine {
+                    kind: "attempt-atomicity".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+                "process-env:attempt-atomicity",
+            )))
+        };
         let process_id = registry
             .register_process_with_observers(
-                lash_core::ProcessRegistration::new(
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
-                    disposition,
-                    lash_core::ProcessProvenance::host(),
-                    lash_core::Lifetime::Detached,
-                )
-                .with_extra_event_types(event_types.clone()),
+                registration.with_extra_event_types(event_types.clone()),
                 &[SessionId::from(SESSION.to_string())],
             )
             .await
@@ -1054,7 +1064,6 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )

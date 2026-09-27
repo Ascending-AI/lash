@@ -83,7 +83,6 @@ mod tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             ))
@@ -345,7 +344,6 @@ mod tests {
                 kind: "test-engine".to_string(),
                 payload: serde_json::json!({"program": "parent"}),
             },
-            crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
@@ -471,7 +469,6 @@ mod tests {
                     ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
                     crate::Lifetime::Detached,
                 )
@@ -742,7 +739,6 @@ mod tests {
                     ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
                     crate::Lifetime::Detached,
                 )
@@ -867,7 +863,6 @@ mod tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             );
@@ -1097,7 +1092,6 @@ mod tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             ))

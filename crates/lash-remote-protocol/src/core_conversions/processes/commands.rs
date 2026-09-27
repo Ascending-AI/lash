@@ -8,9 +8,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
         let RemoteProcessStartRequest {
             start_key,
             input,
-            disposition,
             lifetime,
-            max_attempts,
             env_spec,
             originator,
             identity,
@@ -20,7 +18,6 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
         } = value;
         let mut request = lash_core::ProcessStartRequest::new(
             input.try_into()?,
-            disposition.into(),
             originator.try_into()?,
             lash_core::LifetimeDecision::from(lifetime),
         );
@@ -43,7 +40,6 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             request = request.with_host_start_key(start_key);
         }
         let mut request = request
-            .with_max_attempts(max_attempts)
             .with_wake_session_id(wake_session_id)
             .with_observers(observers)
             .with_event_types(event_types.into_iter().map(Into::into));
@@ -62,9 +58,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
         let lash_core::ProcessStartRequest {
             start_key,
             input,
-            disposition,
             lifetime,
-            max_attempts,
             env_spec,
             originator,
             identity,
@@ -85,9 +79,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
         Ok(Self {
             start_key: None,
             input: input.try_into()?,
-            disposition: disposition.into(),
             lifetime: lifetime.try_into()?,
-            max_attempts,
             env_spec: env_spec.map(Into::into),
             originator: originator.into(),
             identity: identity.map(Into::into),

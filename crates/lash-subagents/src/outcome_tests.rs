@@ -22,7 +22,6 @@ async fn registry_result(
             lash_core::ProcessInput::External {
                 metadata: Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -84,7 +83,7 @@ async fn cancelled_child_preserves_cancellation_reason() {
 async fn abandoned_child_reports_missing_outcome() {
     let output = ProcessAwaitOutput::Abandoned {
         evidence: Box::new(lash_core::AbandonEvidence {
-            writer: lash_core::AbandonWriter::ReconciledRequest,
+            writer: lash_core::AbandonWriter::Producer,
             owner: None,
             epoch_ms: 1,
         }),

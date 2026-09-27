@@ -4,7 +4,6 @@ use lashlang::testing::ast_builders as b;
 
 use lash_core::{
     ProcessEngine as _, ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRetention as _,
-    TestProcessRegistryWriteExt,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
@@ -209,7 +208,6 @@ impl LinkedTestProcess {
     fn start_request(&self, start_key: &str) -> lash_core::ProcessStartRequest {
         lash_core::ProcessStartRequest::new(
             self.process_input(),
-            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
@@ -485,7 +483,6 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
                     kind: engine.kind().to_string(),
                     payload: serde_json::json!({"artifact_ref": "shared-bytes"}),
                 },
-                lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -603,7 +600,6 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -894,7 +890,6 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -990,7 +985,6 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1583,7 +1577,10 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
         .expect("child exists")
         .process_id;
     let child = registry.get_process(child_id).await?.expect("child record");
-    assert_eq!(child.disposition, lash_core::RecoveryContract::Rerunnable);
+    assert!(
+        !child.input.is_externally_owned(),
+        "a body-started child is a process lash executes"
+    );
     // Started by the parent's body; with no session above it, the host's
     // `session_or_starter` policy keeps it only until its starter.
     let parent_scope = lash_core::ScopeId::process(parent.id);
@@ -2032,7 +2029,6 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     .expect("durable witness input serializes");
     let start_request = lash_core::ProcessStartRequest::new(
         process_input,
-        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
@@ -2295,10 +2291,10 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
 }
 
 mod artifact_cleanup_round4;
+mod caller_departure;
 mod effect_summary;
 mod event_pages;
 mod lifecycle_observation;
 mod native_process_await;
 mod programs;
-mod recovery_dispositions;
 mod rlm_artifacts_restart;

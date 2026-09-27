@@ -1,5 +1,5 @@
 use super::*;
-use lash_core_execution::{ProcessInput, ProcessProvenance, ProcessRegistration, RecoveryContract};
+use lash_core_execution::{ProcessInput, ProcessProvenance, ProcessRegistration};
 
 const REGISTERED: usize = 10;
 
@@ -14,7 +14,6 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
                     ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    RecoveryContract::ExternallyOwned,
                     ProcessProvenance::host(),
                     lash_core_execution::Lifetime::Detached,
                 ))

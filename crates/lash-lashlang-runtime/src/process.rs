@@ -192,10 +192,6 @@ struct LashlangSegmentState {
     #[serde(flatten)]
     ordinals: ReplayOrdinalsState,
     started_process_ids: Vec<ProcessId>,
-    /// Attempt bound resolved from the host config when this run's first
-    /// segment began. Carried forward so every segment of the run, and every
-    /// redrive of it, registers children with the same recorded value.
-    child_max_attempts: std::num::NonZeroU32,
     /// The once-only settlement incorporation ledger (FIG-3411): a successor
     /// segment incorporates against the same set so a redrive cannot
     /// re-apply a settlement or re-charge a usage delta.
@@ -217,17 +213,6 @@ struct LashlangSegmentState {
     /// unsettled; the successor segment reattaches these cursors and the
     /// process terminal closes them.
     outstanding_groups: Vec<lash_core::EffectGroupHandle>,
-}
-
-/// A segment that resumes carries the bound its first segment recorded, so a
-/// redrive after the host's default changes re-registers every child with the
-/// value already hashed into its registration fingerprint rather than
-/// conflicting against it. Only a first segment reads the live host default.
-fn resolve_child_max_attempts(
-    segment_state: Option<&LashlangSegmentState>,
-    host_default: std::num::NonZeroU32,
-) -> std::num::NonZeroU32 {
-    segment_state.map_or(host_default, |state| state.child_max_attempts)
 }
 
 #[cfg(test)]
@@ -591,8 +576,6 @@ pub async fn run_lashlang_process(
         identities.namespace(),
         ReplayOrdinals::restore_commands(segment_state.as_ref()),
     );
-    let child_max_attempts =
-        resolve_child_max_attempts(segment_state.as_ref(), ctx.engine_child_max_attempts());
     let host = LashlangProcessHost {
         ctx,
         host_environment,
@@ -608,7 +591,6 @@ pub async fn run_lashlang_process(
         }),
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         ordinals,
-        child_max_attempts,
         cancellation: cancellation.clone(),
         effect_summary: segment_state
             .as_ref()
@@ -823,7 +805,6 @@ fn capture_segment(
         vm: continuation,
         ordinals: host.ordinals.snapshot(&host.run),
         started_process_ids: host.ctx.started_process_ids(),
-        child_max_attempts: host.child_max_attempts,
         incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
         pending_summary: host.effect_summary.pending(),
         effect_omissions: host.effect_summary.omissions(),
@@ -864,9 +845,6 @@ struct LashlangProcessHost<'run> {
     /// handover that resumed the run (or zeroed for a first segment) and
     /// snapshotted into the next boundary's envelope.
     ordinals: ReplayOrdinals,
-    /// Attempt bound stamped onto every child this run starts, resolved once
-    /// at the run's first segment and replayed from segment state afterwards.
-    child_max_attempts: std::num::NonZeroU32,
     /// This run's recorded cancellation fact, read by the VM's cooperative
     /// cancellation probe so a cancelled process terminates as an uncatchable
     /// host terminal instead of running to completion inside a guest handler.

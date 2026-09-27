@@ -5,6 +5,14 @@ Status: accepted, superseded in part by [ADR 0094](0094-child-lifecycle-is-a-reg
 ADR 0094 replaces the parent-end policy and settlement design described below.
 The atomic-attempt and recorded-intent decisions remain accepted.
 
+Amended 2026-09-27 (FIG-3588, [ADR 0110](0110-the-engine-owns-process-recovery.md)):
+the at-least-once rule below stands, and it is the effect implementor's
+contract. The engine owns retries and replays recorded outcomes; the one window
+no journal covers, an effect that ran without its result being recorded, is made
+safe by the implementor's idempotency keyed by lash's stable call id.
+`ToolRetryPolicy::Never` means no retry after a reported failure; there is no
+at-most-once marker.
+
 Amended 2026-09-21 (FIG-3392): the phase between "final attempt recorded" and
 "declarations drained" is named as a protected lifecycle phase, with the final
 record and the cancel disposition arbitrated at **one** durable linearization
