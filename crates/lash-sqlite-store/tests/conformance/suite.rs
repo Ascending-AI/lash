@@ -60,6 +60,8 @@ mod effect_group_drain;
 mod lineage;
 #[path = "lock_order.rs"]
 mod lock_order;
+#[path = "obligation_relay.rs"]
+mod obligation_relay;
 #[path = "pre_frame_key.rs"]
 mod pre_frame_key;
 #[path = "pre_sleep_spec.rs"]

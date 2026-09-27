@@ -39,8 +39,9 @@ crate::statements! {
              WHERE name = ?1 AND holder_id = ?2 AND term = ?3 AND expires_at_ms >= ?4
              RETURNING holder_id, generation_rank, term, elected_at_ms, expires_at_ms";
 
-        /// Give up holder `?2`'s unexpired lease `?1` of term `?3` at `?4`.
-        resign = "DELETE FROM recovery_leader
+        /// Give up holder `?2`'s unexpired lease `?1` of term `?3` at `?4`:
+        /// expire it now, so the next claimant takes it with the term bumped.
+        resign = "UPDATE recovery_leader SET expires_at_ms = ?4 - 1
              WHERE name = ?1 AND holder_id = ?2 AND term = ?3 AND expires_at_ms >= ?4";
 
         /// Lease `?1`'s row.

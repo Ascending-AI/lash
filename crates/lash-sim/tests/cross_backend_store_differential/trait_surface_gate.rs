@@ -19,6 +19,11 @@ const ATTACHMENT_MANIFEST_SOURCE: &str =
 /// none is excluded.
 const CONTROL_INTENT_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/control_intent.rs");
+/// The obligation ledgers and the recovery leader lease (ADR 0109 §1): every
+/// method is driven by `obligation_cases`, none is excluded.
+const OBLIGATION_SOURCE: &str = include_str!("../../../lash-core-store/src/store/obligation.rs");
+const RECOVERY_LEADER_SOURCE: &str =
+    include_str!("../../../lash-core-store/src/store/recovery_leader.rs");
 
 /// Every source file that makes up this test binary. A method counts as
 /// covered when the harness calls it from one of these.
@@ -31,6 +36,7 @@ const HARNESS_SOURCES: &[&str] = &[
     include_str!("corrupt_input_cases.rs"),
     include_str!("fork_cases.rs"),
     include_str!("generated_surface.rs"),
+    include_str!("obligation_cases.rs"),
     include_str!("observations.rs"),
     include_str!("plugin_state_case.rs"),
     include_str!("process_event_pages.rs"),
@@ -326,6 +332,19 @@ fn store_trait_surface_is_fully_gated() {
             covered += 1;
         } else {
             missing.push(format!("ControlIntentStore::{method}"));
+        }
+    }
+
+    for (source, trait_name) in [
+        (OBLIGATION_SOURCE, "ObligationLedger"),
+        (RECOVERY_LEADER_SOURCE, "RecoveryLeaderStore"),
+    ] {
+        for method in fallible_trait_methods(source, trait_name) {
+            if harness_drives(&method) {
+                covered += 1;
+            } else {
+                missing.push(format!("{trait_name}::{method}"));
+            }
         }
     }
 

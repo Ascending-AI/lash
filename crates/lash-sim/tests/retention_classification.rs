@@ -263,6 +263,12 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "recovery_leader",
+        PermanentlyExempt {
+            reason: "one row per engine authority naming the recovery leader (ADR 0109 §1.6); a resign expires it in place so the term stays monotone",
+        },
+    ),
+    (
         "fleet_format",
         PermanentlyExempt {
             reason: "singleton record of the durable-format generation the fleet writes (ADR 0106 §1 F)",

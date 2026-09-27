@@ -491,6 +491,14 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          either; owned by the release-stamp conformance law (FIG-3092)",
     ),
     (
+        "recovery_leader",
+        "deployment load control, not session state: one row per engine authority naming the \
+         recovery leader (ADR 0109 §1.6), written on the database clock by the recovery lease \
+         rather than by any session operation, and keyed by lease name, so a session-scoped \
+         digest query could not read it; its operations are compared by the obligation cases \
+         and owned by the recovery-leader conformance laws",
+    ),
+    (
         "process_definitions",
         "definition-registry surface: this fixture wires no ProcessDefinitionRegistry, so no \
          driven operation can write it, and the row is keyed by its owner scope rather than by a \

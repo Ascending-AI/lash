@@ -258,7 +258,174 @@ pub fn relay_kind(relay: &dyn ObligationRelay) -> ObligationKind {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use lash_sansio::SessionId;
+
     use super::*;
+    use crate::store::{ClaimToken, ObligationState, StalledObligation, UndecodableObligation};
+    use crate::testing::TestClock;
+
+    /// A ledger that hands out one scripted page and records every
+    /// settlement, so the relay's own handling of a page is observable.
+    struct PageLedger {
+        page: Mutex<Vec<ClaimedObligation>>,
+        settled: Mutex<Vec<(ObligationId, ObligationSettlement)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ObligationLedger for PageLedger {
+        fn kind(&self) -> ObligationKind {
+            ObligationKind::SessionDelete
+        }
+
+        async fn arm(
+            &self,
+            _key: &ObligationKey,
+            _now_ms: u64,
+        ) -> Result<Option<ObligationId>, StoreError> {
+            Ok(None)
+        }
+
+        async fn claim_due(
+            &self,
+            _now_ms: u64,
+            _claim_ttl_ms: u64,
+            _limit: NonZeroUsize,
+        ) -> Result<Vec<ClaimedObligation>, StoreError> {
+            Ok(std::mem::take(
+                &mut *self
+                    .page
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            ))
+        }
+
+        async fn claim(
+            &self,
+            _id: &ObligationId,
+            _now_ms: u64,
+            _claim_ttl_ms: u64,
+        ) -> Result<Option<ClaimedObligation>, StoreError> {
+            Ok(None)
+        }
+
+        async fn settle(
+            &self,
+            id: &ObligationId,
+            _token: &ClaimToken,
+            settlement: ObligationSettlement,
+            _now_ms: u64,
+        ) -> Result<SettleOutcome, StoreError> {
+            self.settled
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((id.clone(), settlement));
+            Ok(SettleOutcome::Applied)
+        }
+
+        async fn rearm(&self, _id: &ObligationId, _now_ms: u64) -> Result<bool, StoreError> {
+            Ok(false)
+        }
+
+        async fn list_stalled(
+            &self,
+            _after: Option<&ObligationId>,
+            _limit: NonZeroUsize,
+        ) -> Result<Vec<StalledObligation>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn count_stalled(&self) -> Result<u64, StoreError> {
+            Ok(0)
+        }
+
+        async fn state(&self, _id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
+            Ok(None)
+        }
+    }
+
+    struct AlwaysDelivers(PageLedger);
+
+    #[async_trait::async_trait]
+    impl ObligationRelay for AlwaysDelivers {
+        fn ledger(&self) -> &dyn ObligationLedger {
+            &self.0
+        }
+
+        async fn deliver(
+            &self,
+            _id: &ObligationId,
+            _key: &ObligationKey,
+        ) -> Result<(), DeliveryFailure> {
+            Ok(())
+        }
+    }
+
+    fn claimed(id: &str, key: Result<ObligationKey, UndecodableObligation>) -> ClaimedObligation {
+        ClaimedObligation {
+            id: ObligationId::new(id),
+            token: ClaimToken::new(format!("token-{id}")),
+            attempts: 1,
+            key,
+        }
+    }
+
+    fn session_delete(session: &str) -> Result<ObligationKey, UndecodableObligation> {
+        Ok(ObligationKey::SessionDelete {
+            session_id: SessionId::from(session),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_row_whose_key_does_not_decode_stalls_and_the_page_goes_on() {
+        let relay = AlwaysDelivers(PageLedger {
+            page: Mutex::new(vec![
+                claimed("before", session_delete("s-before")),
+                claimed(
+                    "poison",
+                    Err(UndecodableObligation {
+                        detail: "key column `session_id` is Integer(7), not text".to_owned(),
+                    }),
+                ),
+                claimed("after", session_delete("s-after")),
+            ]),
+            settled: Mutex::new(Vec::new()),
+        });
+        let clock = TestClock::new(1_000);
+        let pass = relay_due(&relay, &clock, NonZeroUsize::MIN)
+            .await
+            .expect("a pass over a page with an undecodable row");
+        assert_eq!(
+            pass,
+            RelayPass {
+                claimed: 3,
+                delivered: 2,
+                stalled: 1,
+                ..RelayPass::default()
+            }
+        );
+        let settled = relay
+            .0
+            .settled
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            settled,
+            vec![
+                (ObligationId::new("before"), ObligationSettlement::Delivered),
+                (
+                    ObligationId::new("poison"),
+                    ObligationSettlement::Stall {
+                        reason: StallReason::Undecodable,
+                        error: "key column `session_id` is Integer(7), not text".to_owned(),
+                    }
+                ),
+                (ObligationId::new("after"), ObligationSettlement::Delivered),
+            ]
+        );
+    }
 
     #[test]
     fn backoff_doubles_from_the_base_and_caps_at_fifteen_minutes() {
