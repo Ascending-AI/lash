@@ -1,6 +1,9 @@
 mod tests {
     use std::sync::Arc;
 
+    /// The driver laws' server-double seed.
+    const SEED: u64 = 0xc4_11d;
+
     use crate::runtime::effect::*;
     use crate::runtime::{ToolChildAdmission, ToolChildCompletionRouting, ToolChildScope};
     use crate::tool_dispatch::{ToolAttemptEffectIdentity, ToolDispatchContext};
@@ -170,23 +173,149 @@ mod tests {
         request
     }
 
-    /// A resolver that hands the group the one runner the test already resolved,
-    /// once. The host's dispatch then claims the child's replay row and runs
-    /// that runner under the claim, which is the only way production runs a
-    /// tool child: a runner's nested admissions mint under the child's own row,
-    /// so the row must exist before the runner starts.
-    struct StagedGroupExecutor(std::sync::Mutex<Option<RuntimeEffectLocalExecutor<'static>>>);
+    /// A resolver that asks `tool_children` first and, once the registry no
+    /// longer has the opener, hands the group the runners the test resolved
+    /// while it did. An in-process host runs the one executor `executor_for`
+    /// hands it; a handler-driven engine resolves again inside the child's own
+    /// invocation — after the test's opener guard is gone — which is where the
+    /// staged runner answers for the child. Every `routes` probe delegates: a
+    /// tool child is routed wherever its opener is live.
+    struct StagedGroupExecutor {
+        live: Arc<ToolChildHost>,
+        captured: std::sync::Mutex<std::collections::VecDeque<RuntimeEffectLocalExecutor<'static>>>,
+    }
 
     impl crate::GroupExecutors for StagedGroupExecutor {
         fn executor_for(
             &self,
-            _envelope: &RuntimeEffectEnvelope,
+            envelope: &RuntimeEffectEnvelope,
         ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-            self.0
-                .lock()
-                .expect("the staged executor lock is never poisoned")
-                .take()
+            crate::GroupExecutors::executor_for(self.live.as_ref(), envelope).or_else(|| {
+                self.captured
+                    .lock()
+                    .expect("the staged executor lock is never poisoned")
+                    .pop_front()
+            })
         }
+
+        fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+            crate::GroupExecutors::routes(self.live.as_ref(), envelope)
+        }
+
+        fn live_generation(&self, opener: &crate::EffectOpener) -> Option<u64> {
+            self.live.live_generation(opener)
+        }
+
+        fn route_handler_child_controller<'run>(
+            &self,
+            controller: ScopedEffectController<'run>,
+        ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
+            self.live.route_handler_child_controller(controller)
+        }
+    }
+
+    /// Records the scope the endpoint's dispatch bound the child's controller
+    /// to, once, when the child's invocation routed its handler controller
+    /// through this resolver. On a handler-driven host the bound controller is
+    /// minted inside the child's own invocation — `scoped_for_group_child` is
+    /// the in-process mint — so this seam is where the claim pin is observed.
+    struct ChildPinProbe {
+        live: Arc<ToolChildHost>,
+        scope: std::sync::Mutex<Option<ExecutionScope>>,
+        process: std::sync::Mutex<Option<crate::ProcessId>>,
+    }
+
+    impl ChildPinProbe {
+        fn scope(&self) -> Option<ExecutionScope> {
+            self.scope
+                .lock()
+                .expect("the pin probe lock is never poisoned")
+                .clone()
+        }
+
+        fn process(&self) -> Option<crate::ProcessId> {
+            self.process
+                .lock()
+                .expect("the pin probe lock is never poisoned")
+                .clone()
+        }
+    }
+
+    impl crate::GroupExecutors for ChildPinProbe {
+        fn executor_for(
+            &self,
+            envelope: &RuntimeEffectEnvelope,
+        ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+            crate::GroupExecutors::executor_for(self.live.as_ref(), envelope)
+        }
+
+        fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+            crate::GroupExecutors::routes(self.live.as_ref(), envelope)
+        }
+
+        fn live_generation(&self, opener: &crate::EffectOpener) -> Option<u64> {
+            self.live.live_generation(opener)
+        }
+
+        fn route_handler_child_controller<'run>(
+            &self,
+            controller: ScopedEffectController<'run>,
+        ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
+            *self
+                .scope
+                .lock()
+                .expect("the pin probe lock is never poisoned") =
+                Some(controller.execution_scope().clone());
+            *self
+                .process
+                .lock()
+                .expect("the pin probe lock is never poisoned") =
+                controller.admitted_process().cloned();
+            self.live.route_handler_child_controller(controller)
+        }
+    }
+
+    /// Opens the one-child group of `envelope` on `controller` and returns its
+    /// first settlement.
+    async fn open_and_settle(
+        controller: &Arc<dyn crate::RuntimeEffectController>,
+        group_key: &str,
+        envelope: crate::RuntimeEffectEnvelope,
+    ) -> crate::GroupSettlement {
+        let mut handle = crate::RuntimeEffectController::open_effect_group(
+            controller.as_ref(),
+            crate::RuntimeEffectGroup::try_new(
+                crate::RuntimeEffectInvocation::new(
+                    crate::EffectAddress::new(
+                        ExecutionScope::turn("child-session", "turn"),
+                        format!("group:{group_key}"),
+                    )
+                    .expect("a valid group address"),
+                    crate::RuntimeAttribution::none(),
+                    group_key,
+                ),
+                group_key.to_string(),
+                vec![envelope],
+                crate::GroupWakePolicy::All,
+                crate::LoserPolicy::Cancel,
+            )
+            .expect("the one-child group assembles"),
+        )
+        .await
+        .expect("the group opens and dispatches");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            crate::RuntimeEffectController::await_next_settlement(
+                controller.as_ref(),
+                &mut handle,
+                crate::runtime::TurnCancelWait::unobserved(
+                    tokio_util::sync::CancellationToken::new(),
+                ),
+            ),
+        )
+        .await
+        .expect("the child settles in time")
+        .expect("the group settles its one child")
     }
 
     /// The claim pin is the recorded `AdmittedScope`, never `enclosing_process`.
@@ -195,43 +324,96 @@ mod tests {
     /// turn scope, the controller must stay that turn's controller. The retired
     /// post-admission pin block would have pinned P#7 onto it instead, making
     /// the execution context the claim pin.
-    #[tokio::test]
+    ///
+    /// On the double the bound controller is minted inside the child's own
+    /// invocation and routed through the registered resolver once — the pin
+    /// the probe records is the one the dispatch mints.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
-        let mut request = request();
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let controller = host
+            .scoped_static(crate::AdmittedScope::turn("child-session", "turn"))
+            .expect("the backend host admits the scope")
+            .expect("the backend host lends a static controller")
+            .owned_controller()
+            .expect("a static controller is shared");
+        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
+            double.lash_backend().process_env_store();
+        let tool_children = ToolChildHost::new(&host, Arc::clone(&env_store));
+        let mut request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
         let opener_ref = crate::ProcessId::fixture("worker");
         request.scope.opener = crate::EffectOpener::process(opener_ref.clone());
-        request.enclosing_process = Some(opener_ref.clone());
+        request.enclosing_process = Some(opener_ref);
         request
             .validate()
             .expect("a process opener enclosing its own incarnation is a legal request");
-
-        let backend = crate::support::memory_backend().await;
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let tool_children = ToolChildHost::new(&host, backend.process_env_store());
-        let binding = crate::GroupChildBinding {
-            child: crate::EffectAddress::new(
-                ExecutionScope::turn("child-session", "turn"),
+        request.execution_env = crate::publish_process_execution_env(
+            env_store.as_ref(),
+            &crate::ArtifactOwner::host("tool-child-driver-tests"),
+            &spec(3),
+        )
+        .await
+        .expect("the recorded environment publishes");
+        let opener = request.scope.opener.clone();
+        let envelope = crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
+                    .expect("a valid effect address"),
+                crate::RuntimeAttribution::for_session("child-session"),
                 "child",
-            )
-            .expect("a valid child address"),
-            membership: crate::EffectGroupMembership {
-                group_key: "group".to_string(),
-                position: 0,
-                wake: crate::GroupWakePolicy::All,
-                loser_disposition: crate::LoserPolicy::RunToCompletion,
+            ),
+            RuntimeEffectCommand::ToolInvocation {
+                request: Box::new(request),
             },
-        };
-        let controller =
-            crate::tool_child_controller(&tool_children, &request.scope.admitted_scope, binding)
-                .expect("the admitted pair constructs the child's controller");
+        )
+        .in_effect_group(
+            "group",
+            0,
+            crate::GroupWakePolicy::All,
+            crate::LoserPolicy::Cancel,
+        );
+        let lent_dispatch = lent();
+        let lent_controller = lent_dispatch
+            .effect_controller
+            .scoped()
+            .to_static()
+            .expect("the lent dispatch's controller is 'static");
+        let live = LiveOpenerContext::capture(
+            &lent_dispatch,
+            lent_controller,
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let _guard = tool_children.openers().register(opener, live);
+        let probe = Arc::new(ChildPinProbe {
+            live: Arc::clone(&tool_children),
+            scope: std::sync::Mutex::new(None),
+            process: std::sync::Mutex::new(None),
+        });
+        crate::RuntimeEffectController::register_group_executors(
+            controller.as_ref(),
+            Arc::clone(&probe) as Arc<dyn crate::GroupExecutors>,
+        )
+        .expect("the probe registers once");
+
+        let settlement = open_and_settle(&controller, "group", envelope).await;
+
         assert_eq!(
-            controller.execution_scope(),
-            &ExecutionScope::turn("child-session", "turn"),
-            "the controller is the recorded claim's, a turn scope"
+            probe.scope().as_ref(),
+            Some(&ExecutionScope::turn("child-session", "turn")),
+            "the bound controller is the recorded claim's, a turn scope"
         );
         assert!(
-            controller.admitted_process().is_none(),
+            probe.process().is_none(),
             "the opener's incarnation never became the claim pin"
+        );
+        let outcome = settlement
+            .outcome
+            .expect("the child settles its own recorded work");
+        assert!(
+            matches!(outcome, crate::RuntimeEffectOutcome::ToolInvocation { .. }),
+            "the child settles its own recorded work"
         );
     }
     /// §1 and the registry's key rule, at the driver's door: a child whose opener
@@ -240,9 +422,10 @@ mod tests {
     /// opener is live runs it.
     #[tokio::test]
     async fn a_child_whose_opener_is_not_registered_here_is_not_routed() {
-        let backend = crate::support::memory_backend().await;
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let tool_children = ToolChildHost::new(&host, backend.process_env_store());
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
@@ -295,9 +478,10 @@ mod tests {
     /// probe uses `SyncExecutionEnvironment` — a kind no group child can be.
     #[tokio::test]
     async fn the_resolver_answers_only_for_tool_children() {
-        let backend = crate::support::memory_backend().await;
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let tool_children = ToolChildHost::new(&host, backend.process_env_store());
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
@@ -321,9 +505,10 @@ mod tests {
     /// signal it would honour is not the one this opener sends.
     #[tokio::test]
     async fn a_foreign_cancellation_binding_is_refused() {
-        let backend = crate::support::memory_backend().await;
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let tool_children = ToolChildHost::new(&host, backend.process_env_store());
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
         let mut request = request();
         request.cancellation_authority =
             crate::TurnControlBindingId::new("a-binding-this-host-did-not-mint")
@@ -341,9 +526,10 @@ mod tests {
     /// host derives for the admitted scope.
     #[tokio::test]
     async fn the_recorded_cancellation_binding_is_accepted() {
-        let backend = crate::support::memory_backend().await;
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let tool_children = ToolChildHost::new(&host, backend.process_env_store());
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
         let controller = durable_child_controller(&host);
         let request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
         crate::validate_recorded_authorities(&tool_children, &controller, &request)
@@ -354,9 +540,10 @@ mod tests {
     /// await-event authority.
     #[tokio::test]
     async fn durable_routing_with_a_durable_authority_is_accepted() {
-        let backend = crate::support::memory_backend().await;
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let tool_children = ToolChildHost::new(&host, backend.process_env_store());
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let tool_children = ToolChildHost::new(&host, double.lash_backend().process_env_store());
         let controller = durable_child_controller(&host);
         let request = durably_admitted_request(&host, ToolChildCompletionRouting::Durable);
         crate::validate_recorded_authorities(&tool_children, &controller, &request)
@@ -374,13 +561,17 @@ mod tests {
     /// the child's nested admissions find the row they mint under.
     #[tokio::test]
     async fn a_resolved_child_executes_on_the_captured_opener_context() {
-        let backend = crate::support::memory_backend().await;
-        let controller = crate::support::scoped_controller(
-            &backend,
-            crate::AdmittedScope::turn("child-session", "turn"),
-        );
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let controller = host
+            .scoped_static(crate::AdmittedScope::turn("child-session", "turn"))
+            .expect("the backend host admits the scope")
+            .expect("the backend host lends a static controller")
+            .owned_controller()
+            .expect("a static controller is shared");
+        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
+            double.lash_backend().process_env_store();
         let tool_children = ToolChildHost::new(&host, Arc::clone(&env_store));
         // A journaled host's child is a durable participant, so its recorded
         // request carries the cancellation binding the host derives for its scope.
@@ -422,8 +613,16 @@ mod tests {
             tokio_util::sync::CancellationToken::new(),
         );
         let guard = tool_children.openers().register(opener, live);
-        let executor = crate::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
-            .expect("the live opener routes the child");
+        // Two runners, both resolved while the opener is live: the dispatch's
+        // own resolution inside the child's invocation asks once, after the
+        // guard is gone, and whichever staged runner it draws is the one
+        // resolution captured this context for.
+        let captured = std::collections::VecDeque::from([
+            crate::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
+                .expect("the live opener routes the child"),
+            crate::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
+                .expect("the same child routes again while the opener lives"),
+        ]);
 
         // The opener's registration ends between resolution and execution: the
         // runner must still complete on the context it captured rather than wait
@@ -431,45 +630,14 @@ mod tests {
         drop(guard);
         crate::RuntimeEffectController::register_group_executors(
             controller.as_ref(),
-            Arc::new(StagedGroupExecutor(std::sync::Mutex::new(Some(executor)))),
+            Arc::new(StagedGroupExecutor {
+                live: Arc::clone(&tool_children),
+                captured: std::sync::Mutex::new(captured),
+            }),
         )
         .expect("the staged resolver registers once");
-        let mut handle = crate::RuntimeEffectController::open_effect_group(
-            controller.as_ref(),
-            crate::RuntimeEffectGroup::try_new(
-                crate::RuntimeEffectInvocation::new(
-                    crate::EffectAddress::new(
-                        ExecutionScope::turn("child-session", "turn"),
-                        "group:group",
-                    )
-                    .expect("a valid group address"),
-                    crate::RuntimeAttribution::none(),
-                    "group",
-                ),
-                "group",
-                vec![envelope],
-                crate::GroupWakePolicy::All,
-                crate::LoserPolicy::Cancel,
-            )
-            .expect("the one-child group assembles"),
-        )
-        .await
-        .expect("the group opens and dispatches the resolved runner");
-        // The timeout is what makes a wait-for-reregistration regression a
-        // failure and not a hang.
-        let settlement = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            crate::RuntimeEffectController::await_next_settlement(
-                controller.as_ref(),
-                &mut handle,
-                crate::runtime::TurnCancelWait::unobserved(
-                    tokio_util::sync::CancellationToken::new(),
-                ),
-            ),
-        )
-        .await
-        .expect("a resolved child never waits for the opener to re-register")
-        .expect("the group settles its one child");
+
+        let settlement = open_and_settle(&controller, "group", envelope).await;
         let outcome = settlement
             .outcome
             .expect("the captured context executes the child");

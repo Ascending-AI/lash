@@ -1,6 +1,6 @@
 //! A group tool child whose opener is not live where it runs builds its
 //! context from the deployment's source (FIG-3712), driven end to end through
-//! a group on a SQLite memory backend.
+//! a group on the Restate server double.
 
 mod tests {
     use std::sync::Arc;
@@ -18,6 +18,7 @@ mod tests {
     const SESSION: &str = "child-session";
     const TURN: &str = "turn";
     const TOOL: &str = "search";
+    const SEED: u64 = 0xcc_b1d;
 
     fn scope() -> ExecutionScope {
         ExecutionScope::turn(SESSION, TURN)
@@ -164,18 +165,21 @@ mod tests {
     }
 
     struct Backend {
-        backend: lash_sqlite_store::SqliteBackend,
+        double: lash_restate_test::RestateTestBackend,
         env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
         host: Arc<dyn EffectHost>,
     }
 
     impl Backend {
         async fn new() -> Self {
-            let backend = crate::support::memory_backend().await;
-            let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
-            let host: Arc<dyn EffectHost> = backend.effect_host();
+            let double =
+                crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
+                double.lash_backend().process_env_store();
+            let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
             Self {
-                backend,
+                double,
                 env_store,
                 host,
             }
@@ -258,50 +262,39 @@ mod tests {
         )
     }
 
-    /// Hands the group the one runner the test resolved, once.
-    struct StagedGroupExecutor(
-        std::sync::Mutex<Option<crate::RuntimeEffectLocalExecutor<'static>>>,
-    );
-
-    impl crate::GroupExecutors for StagedGroupExecutor {
-        fn executor_for(
-            &self,
-            _envelope: &crate::RuntimeEffectEnvelope,
-        ) -> Option<crate::RuntimeEffectLocalExecutor<'static>> {
-            self.0
-                .lock()
-                .expect("the staged executor lock is never poisoned")
-                .take()
-        }
-    }
-
-    /// Runs `envelope`'s child on the runner `worker` resolves for it, in a
-    /// one-child group on the child's own controller, and returns its
-    /// outcome.
-    async fn run_child(
+    /// Opens `envelope`'s one-child group on the child's own controller, with
+    /// `worker`'s tool-child host installed the way production installs it —
+    /// `install_tool_child_host`, the one resolver a deployment has — so the
+    /// dispatch's own resolution inside the child's invocation answers what
+    /// this worker answers.
+    async fn open_group(
         backend: &Backend,
         worker: &Worker,
         envelope: crate::RuntimeEffectEnvelope,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let executor =
-            crate::GroupExecutors::executor_for(worker.tool_children.as_ref(), &envelope)
-                .expect("the worker routes the child");
-        let controller = crate::support::scoped_controller(
-            &backend.backend,
-            crate::AdmittedScope::turn(SESSION, TURN),
-        );
-        crate::RuntimeEffectController::register_group_executors(
-            controller.as_ref(),
-            Arc::new(StagedGroupExecutor(std::sync::Mutex::new(Some(executor)))),
-        )
-        .expect("the staged resolver registers once");
+    ) -> (
+        Arc<dyn crate::RuntimeEffectController>,
+        crate::EffectGroupHandle,
+    ) {
+        crate::GroupExecutors::executor_for(worker.tool_children.as_ref(), &envelope)
+            .expect("the worker routes the child");
+        backend
+            .host
+            .install_tool_child_host(Arc::clone(&worker.tool_children))
+            .expect("the backend host takes its first tool-child host");
+        let controller = backend
+            .host
+            .scoped_static(crate::AdmittedScope::turn(SESSION, TURN))
+            .expect("the backend host admits the scope")
+            .expect("the backend host lends a static controller")
+            .owned_controller()
+            .expect("a static controller is shared");
         let group_key = envelope
             .group
             .as_ref()
             .expect("the child is grouped")
             .group_key
             .clone();
-        let mut handle = crate::RuntimeEffectController::open_effect_group(
+        let handle = crate::RuntimeEffectController::open_effect_group(
             controller.as_ref(),
             crate::RuntimeEffectGroup::try_new(
                 crate::RuntimeEffectInvocation::new(
@@ -319,6 +312,17 @@ mod tests {
         )
         .await
         .expect("the group opens and dispatches the resolved runner");
+        (controller, handle)
+    }
+
+    /// Runs `envelope`'s child in a one-child group on the child's own
+    /// controller and returns its settlement outcome.
+    async fn run_child(
+        backend: &Backend,
+        worker: &Worker,
+        envelope: crate::RuntimeEffectEnvelope,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let (controller, mut handle) = open_group(backend, worker, envelope).await;
         let settlement = tokio::time::timeout(
             Duration::from_secs(10),
             crate::RuntimeEffectController::await_next_settlement(
@@ -333,6 +337,32 @@ mod tests {
         .expect("the child settles in time")
         .expect("the group settles its one child");
         settlement.outcome
+    }
+
+    /// Waits until the child's dispatch invocation reports `needle` as the
+    /// live fault it keeps retrying, and returns that failure. A refused
+    /// child settles nothing on the double — "the engine keeps it for its
+    /// opener" is the invocation retrying its drive — so the typed refusal
+    /// is observed in the invocation's `last_failure` rather than an outcome.
+    async fn await_child_retry(backend: &Backend, group_key: &str, needle: &str) -> (u32, String) {
+        let target = format!("EffectGroupDispatch/{group_key}/child");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            for view in backend.double.server().invocations() {
+                if view.target == target
+                    && let Some(failure) = &view.last_failure
+                    && failure.1.contains(needle)
+                {
+                    return failure.clone();
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the child invocation never retried the typed refusal `{needle}`: {:?}",
+                backend.double.server().invocations()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// Registers `tools` as the opener's live context on `worker`.
@@ -392,7 +422,8 @@ mod tests {
     /// live opener here is refused, typed and retryable, and neither source
     /// builds anything, so no child runs under whichever deployment was built
     /// last. Installing the same source again is not a second one, and once
-    /// the other is dropped the remaining source builds again.
+    /// the other is dropped the kept child's next retry builds the sole
+    /// remaining source and settles.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn two_live_sources_leave_the_host_ambiguous() {
         let backend = Backend::new().await;
@@ -415,41 +446,52 @@ mod tests {
             ContextSourceInstall::Ambiguous { live: 2 }
         );
 
-        let error = run_child(
+        let child_envelope = envelope(backend.request(ToolRetryPolicy::Never).await, "ambiguous");
+        let group_key = child_envelope
+            .group
+            .as_ref()
+            .expect("the child is grouped")
+            .group_key
+            .clone();
+        let (controller, mut handle) = open_group(&backend, &worker, child_envelope).await;
+        let (_, failure) = await_child_retry(
             &backend,
-            &worker,
-            envelope(backend.request(ToolRetryPolicy::Never).await, "ambiguous"),
+            &group_key,
+            &ToolChildRebuildRefusal::AmbiguousDeployment.to_string(),
         )
-        .await
-        .expect_err("an ambiguous host refuses the child");
-        assert_eq!(error.code, crate::RuntimeErrorCode::PluginSessionManager);
+        .await;
         assert!(
-            error
-                .message
-                .contains(&ToolChildRebuildRefusal::AmbiguousDeployment.to_string()),
-            "{error}"
+            failure.contains("waits for it"),
+            "the refusal says why the child waits: {failure}"
         );
         assert_eq!(first_fixed.builds.load(Ordering::SeqCst), 0);
         assert_eq!(second_fixed.builds.load(Ordering::SeqCst), 0);
         assert_eq!(first_tools.executions.load(Ordering::SeqCst), 0);
         assert_eq!(second_tools.executions.load(Ordering::SeqCst), 0);
 
+        // The ambiguity died with the second source: the kept child's next
+        // retry sees `first` as the sole live source, builds its context and
+        // runs the child the group was holding.
         drop(second);
         drop(second_fixed);
-        let backend = Backend::new().await;
-        let worker = backend.worker();
-        assert_eq!(
-            worker.tool_children.install_context_source(&first),
-            ContextSourceInstall::Sole
-        );
-        run_child(
-            &backend,
-            &worker,
-            envelope(backend.request(ToolRetryPolicy::Never).await, "sole"),
+        let settlement = tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::RuntimeEffectController::await_next_settlement(
+                controller.as_ref(),
+                &mut handle,
+                crate::runtime::TurnCancelWait::unobserved(
+                    tokio_util::sync::CancellationToken::new(),
+                ),
+            ),
         )
         .await
-        .expect("the sole source builds the child's context");
+        .expect("the kept child's retry settles once a sole source remains")
+        .expect("the group settles its one child");
+        settlement
+            .outcome
+            .expect("the sole source builds the child's context");
         assert_eq!(first_fixed.builds.load(Ordering::SeqCst), 1);
+        assert_eq!(first_tools.executions.load(Ordering::SeqCst), 1);
     }
 
     /// The #2106 cross-worker path: the child lands on a worker where its
@@ -587,19 +629,19 @@ mod tests {
             let mut request = backend.request(ToolRetryPolicy::Never).await;
             request.session.unrecorded = unrecorded;
 
-            let error = run_child(
-                &backend,
-                &worker,
-                envelope(request, &format!("refused-{index}")),
-            )
-            .await
-            .expect_err("the built path refuses the child");
-
-            assert_eq!(error.code, crate::RuntimeErrorCode::PluginSessionManager);
+            let child = format!("refused-{index}");
+            let child_envelope = envelope(request, &child);
+            let group_key = child_envelope
+                .group
+                .as_ref()
+                .expect("the child is grouped")
+                .group_key
+                .clone();
+            open_group(&backend, &worker, child_envelope).await;
+            let (_, failure) = await_child_retry(&backend, &group_key, &refusal.to_string()).await;
             assert!(
-                error.message.contains(&refusal.to_string())
-                    && error.message.contains("waits for it"),
-                "the refusal says why the child waits: {error}"
+                failure.contains("waits for it"),
+                "the refusal says why the child waits: {failure}"
             );
             assert_eq!(fixed.builds.load(Ordering::SeqCst), 0, "nothing is built");
             assert_eq!(built.executions.load(Ordering::SeqCst), 0, "nothing runs");
@@ -643,18 +685,24 @@ mod tests {
         );
         let request = backend.request(ToolRetryPolicy::Never).await;
 
-        let error = run_child(&backend, &worker, envelope(request, "child"))
-            .await
-            .expect_err("the session read refuses the child");
-
-        assert_eq!(error.code, crate::RuntimeErrorCode::PluginSessionManager);
-        assert!(
-            error
-                .message
-                .contains(&ToolChildRebuildRefusal::SessionServices.to_string()),
-            "{error}"
-        );
-        assert_eq!(fixed.builds.load(Ordering::SeqCst), 1);
-        assert_eq!(built.executions.load(Ordering::SeqCst), 1);
+        let child_envelope = envelope(request, "child");
+        let group_key = child_envelope
+            .group
+            .as_ref()
+            .expect("the child is grouped")
+            .group_key
+            .clone();
+        open_group(&backend, &worker, child_envelope).await;
+        await_child_retry(
+            &backend,
+            &group_key,
+            &ToolChildRebuildRefusal::SessionServices.to_string(),
+        )
+        .await;
+        // The child retries its drive, so the counts are floors, not exact:
+        // each retry rebuilds the context and re-runs the journaled tool
+        // attempt that the refused read abandoned.
+        assert!(fixed.builds.load(Ordering::SeqCst) >= 1);
+        assert!(built.executions.load(Ordering::SeqCst) >= 1);
     }
 }

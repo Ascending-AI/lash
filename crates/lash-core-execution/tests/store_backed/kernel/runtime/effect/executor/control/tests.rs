@@ -8,23 +8,26 @@ use crate::support::prelude::*;
 use crate::{
     AdmittedScope, AwaitEventResolver, CancellationToken, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, SessionId,
+    RuntimeEffectOutcome, RuntimeError, SessionId, StoreSet as _,
 };
 
-/// A memory backend on a test clock at the epoch the holder fixtures use.
-async fn queued_lane_backend() -> lash_sqlite_store::SqliteBackend {
-    lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::new(crate::testing::TestClock::new(
-        1_000,
-    )))
-    .await
-    .expect("open a SQLite memory backend")
+/// A memory store set on a test clock at the epoch the holder fixtures use:
+/// storage only — the queued-lane laws need a real session execution lease,
+/// never an engine.
+async fn queued_lane_stores() -> Arc<lash_sqlite_store::SqliteStoreSet> {
+    Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory_with_clock(Arc::new(
+            crate::testing::TestClock::new(1_000),
+        ))
+        .await
+        .expect("open a SQLite memory store set"),
+    )
 }
 
-/// A guard over a fresh session's execution lane, claimed in the backend's
-/// store.
-async fn queued_lane_guard(backend: &lash_sqlite_store::SqliteBackend) -> QueuedLaneGuard {
+/// A guard over a fresh session's execution lane, claimed in the store set.
+async fn queued_lane_guard(stores: &Arc<lash_sqlite_store::SqliteStoreSet>) -> QueuedLaneGuard {
     let session_id = SessionId::from("queued-lane-test");
-    let store = backend
+    let store = stores
         .session_store_factory()
         .create_store(&crate::testing::store_fixtures::session_store_request(
             &session_id,
@@ -39,7 +42,7 @@ async fn queued_lane_guard(backend: &lash_sqlite_store::SqliteBackend) -> Queued
         &crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation"),
         "queued-lane-test-executor",
         crate::LeaseTimings::default(),
-        crate::Backend::from(backend.clone()).clock(),
+        stores.clock(),
     )
     .await
     .expect("queued-lane test claim")
@@ -171,10 +174,10 @@ async fn acquire_through_task_controller(
 
 #[tokio::test]
 async fn provided_wait_retries_a_crashed_looking_holder_until_acquired() {
-    let backend = queued_lane_backend().await;
+    let stores = queued_lane_stores().await;
     let probe = Arc::new(FakeQueuedLaneProbe::new([
         QueuedLaneAttempt::Busy(queued_lane_holder(7_400)),
-        QueuedLaneAttempt::Acquired(queued_lane_guard(&backend).await),
+        QueuedLaneAttempt::Acquired(queued_lane_guard(&stores).await),
     ]));
 
     let result = TestResolver
@@ -197,7 +200,7 @@ async fn provided_wait_retries_a_crashed_looking_holder_until_acquired() {
 
 #[tokio::test]
 async fn queued_lane_acquisition_round_trips_through_the_task_controller() {
-    let backend = queued_lane_backend().await;
+    let stores = queued_lane_stores().await;
     let controller = TestResolver;
     let busy = acquire_through_task_controller(
         &controller,
@@ -212,7 +215,7 @@ async fn queued_lane_acquisition_round_trips_through_the_task_controller() {
     let acquired = acquire_through_task_controller(
         &controller,
         Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Acquired(
-            queued_lane_guard(&backend).await,
+            queued_lane_guard(&stores).await,
         )])),
     )
     .await

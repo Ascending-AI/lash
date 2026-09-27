@@ -1,5 +1,5 @@
-//! A redriven tool call replays its recorded presentation on the SQLite
-//! effect journal, however long the live call took.
+//! A redriven tool call replays its recorded presentation on the engine's
+//! journal, however long the live call took.
 //!
 //! `complete_tool_call` journals the settled call's presentation as a
 //! `PresentToolResult` effect keyed by `{call_id}:present`, and a redrive
@@ -12,27 +12,20 @@
 //! the model would be shown that conflict in place of the tool's result.
 
 use serde_json::json;
-
-use crate::support::prelude::*;
+use std::sync::{Arc, Mutex};
 
 const CALL_ID: &str = "slow-call";
+const SEED: u64 = 0x9e_5e_07;
 
-/// A context over the backend host's own controller for one turn: each call
-/// builds a fresh one, as a redrive does.
-fn turn_context(
-    backend: &lash_sqlite_store::SqliteBackend,
-) -> crate::RuntimeExecutionContext<'static> {
-    let controller = backend
-        .effect_host()
-        .scoped_static(crate::AdmittedScope::turn(
-            "presentation-session",
-            "presentation-turn",
-        ))
-        .expect("the turn scope validates")
-        .expect("the backend host lends a static controller");
-    crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
+/// A context over the handler's lent controller: each attempt builds a fresh
+/// one, as a redrive does.
+fn turn_context<'run>(
+    backend: &crate::Backend,
+    scoped: crate::ScopedEffectController<'run>,
+) -> crate::RuntimeExecutionContext<'run> {
+    crate::testing::TestExecutionContextBuilder::for_backend(backend)
         .session_id("presentation-session")
-        .borrowed_effect_controller(controller)
+        .borrowed_effect_controller(scoped)
         .build()
         .into_runtime()
 }
@@ -57,25 +50,65 @@ fn settled() -> crate::tool_dispatch::ToolDispatchOutcome {
 
 #[tokio::test]
 async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
-    let backend = crate::support::memory_backend().await;
+    let double =
+        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let live_return = Arc::new(Mutex::new(None));
 
-    // The live pass: the call took 46 ms.
-    let live = turn_context(&backend)
-        .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 46)
+    // The live pass: the call took 46 ms, then its turn crashed after the
+    // presentation was journaled.
+    let crashing: lash_restate_test::HandlerAttempt = {
+        let backend = backend.clone();
+        let live_return = Arc::clone(&live_return);
+        Arc::new(move |scoped| {
+            let backend = backend.clone();
+            let live_return = Arc::clone(&live_return);
+            Box::pin(async move {
+                let live = turn_context(&backend, scoped)
+                    .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 46)
+                    .await
+                    .expect("the live call presents");
+                *live_return.lock().expect("the live-return cell") =
+                    Some(live.completed.model_return);
+                panic!("the turn crashes after its presentation is journaled");
+            })
+        })
+    };
+    // The redrive: the journaled attempt is served at once, however long the
+    // live call took.
+    let redrive: lash_restate_test::HandlerAttempt = {
+        let backend = backend.clone();
+        let live_return = Arc::clone(&live_return);
+        Arc::new(move |scoped| {
+            let backend = backend.clone();
+            let live_return = Arc::clone(&live_return);
+            Box::pin(async move {
+                let redriven = turn_context(&backend, scoped)
+                    .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 2)
+                    .await
+                    .expect("the redriven call is served its recorded presentation");
+                assert_eq!(
+                    redriven.completed.model_return,
+                    live_return
+                        .lock()
+                        .expect("the live-return cell")
+                        .clone()
+                        .expect("the live attempt journaled its presentation"),
+                    "the redrive is served the recorded presentation"
+                );
+                assert!(
+                    redriven.completed.output.is_success(),
+                    "the redriven call keeps its settled output"
+                );
+            })
+        })
+    };
+    double
+        .run_crashed_then_redriven(
+            crate::AdmittedScope::turn("presentation-session", "presentation-turn"),
+            crashing,
+            redrive,
+        )
         .await
-        .expect("the live call presents");
-    // The redrive: the journaled attempt is served at once.
-    let redriven = turn_context(&backend)
-        .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 2)
-        .await
-        .expect("the redriven call is served its recorded presentation");
-
-    assert_eq!(
-        redriven.completed.model_return, live.completed.model_return,
-        "the redrive is served the recorded presentation"
-    );
-    assert!(
-        redriven.completed.output.is_success(),
-        "the redriven call keeps its settled output"
-    );
+        .expect("the live pass crashes and the redrive completes");
 }

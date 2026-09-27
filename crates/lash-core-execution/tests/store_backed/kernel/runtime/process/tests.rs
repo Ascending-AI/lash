@@ -12,7 +12,7 @@ use crate::runtime::process::{
 };
 use crate::{Lifetime, ProcessId, ProcessRegistry, SessionId};
 
-use crate::support::{memory_backend, memory_store_set};
+use crate::support::memory_store_set;
 
 async fn memory_registry() -> Arc<dyn ProcessRegistry> {
     memory_store_set().await.process_registry()
@@ -319,8 +319,9 @@ async fn a_pruned_process_tombstone_sits_beside_the_next_live_process() {
 
 #[tokio::test]
 async fn delete_session_process_command_revokes_only_observer_edges() {
-    let backend = memory_backend().await;
-    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
+    let double =
+        crate::support::kernel_double(0xde_1e7e, lash_restate_test::ServerConfig::default()).await;
+    let registry: Arc<dyn ProcessRegistry> = double.lash_backend().process_registry();
     let registry_dyn = Arc::clone(&registry);
     let mut ids = std::collections::BTreeMap::new();
     for label in ["sole", "shared"] {
@@ -361,10 +362,11 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
             .expect("shared events before delete"),
     )
     .expect("serialize shared events");
-    let host = backend.effect_host();
-    let scoped = host
-        .scoped(crate::AdmittedScope::session_delete("deleted"))
-        .expect("admit the session-delete scope");
+    let handler = double
+        .open_handler(crate::AdmittedScope::session_delete("deleted"))
+        .await
+        .expect("open the session-delete handler");
+    let scoped = handler.scoped();
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             crate::ExecutionScope::session_delete("deleted"),
@@ -375,21 +377,23 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
         "process:delete-session:deleted",
     );
 
-    let outcome = crate::RuntimeEffectController::execute_effect(
-        scoped.controller(),
-        crate::RuntimeEffectEnvelope::new(
-            invocation,
-            crate::RuntimeEffectCommand::process(crate::ProcessCommand::DeleteSession {
-                session_id: SessionId::from("deleted"),
-            }),
-        ),
-        crate::RuntimeEffectLocalExecutor::processes(
-            Arc::clone(&registry_dyn),
-            Arc::new(crate::NativeProcessWork::for_registry(registry_dyn)),
-        ),
-    )
-    .await
-    .expect("delete session process command");
+    let outcome = scoped
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::process(crate::ProcessCommand::DeleteSession {
+                    session_id: SessionId::from("deleted"),
+                }),
+            ),
+            crate::RuntimeEffectLocalExecutor::processes(
+                Arc::clone(&registry_dyn),
+                Arc::new(crate::NativeProcessWork::for_registry(registry_dyn)),
+            ),
+        )
+        .await
+        .expect("delete session process command");
+    drop(scoped);
+    handler.close().await.expect("close the handler");
 
     let crate::RuntimeEffectOutcome::Process {
         result: crate::ProcessEffectOutcome::DeleteSession { report },
