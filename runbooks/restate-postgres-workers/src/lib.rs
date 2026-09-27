@@ -266,7 +266,6 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
         "DELETE FROM lash_queued_work_batches",
         "DELETE FROM lash_wake_redelivery_fences",
         "DELETE FROM lash_wake_allocation_floors",
-        "DELETE FROM lash_process_leases",
         "DELETE FROM lash_process_observers",
         "DELETE FROM lash_process_tombstones",
         "DELETE FROM lash_process_segment_handovers",

@@ -891,7 +891,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     );
     assert_eq!(
         registry_b
-            .list_non_terminal_page(
+            .list_non_terminal_processes_page(
                 std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
                 None,
             )
@@ -902,7 +902,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
             .map(|record| record.id.as_str())
             .collect::<Vec<_>>(),
         vec![trigger_notify.as_str()],
-        "the trigger-started process must be on the recovery worklist after reopen"
+        "the trigger-started process must appear in the non-terminal registry scan after reopen"
     );
 
     let worker_b = recovery_worker(Arc::clone(&registry_b), Arc::clone(&store_factory)).await;
@@ -919,7 +919,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     );
     assert!(
         registry_b
-            .list_non_terminal_page(
+            .list_non_terminal_processes_page(
                 std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
                 None,
             )
@@ -1557,7 +1557,7 @@ pub(super) async fn run_registration_runs_a_fresh_process() {
 /// a lost workflow whose reference still names it.
 #[tokio::test]
 pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_the_repeat_scan() {
-    // A non-terminal, Lash-executed process is the durable worklist row the
+    // A non-terminal, Lash-executed process is the durable registry row the
     // ingress runner must submit. Externally-owned rows are never submitted
     // (ADR 0110), so the submittable case uses a lash-executed row.
     let registry = process_registry();

@@ -86,6 +86,8 @@ use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
 
 mod support;
 
+#[path = "conformance/non_terminal_page_collation.rs"]
+mod non_terminal_page_collation;
 #[path = "conformance/session_close.rs"]
 mod session_close;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
@@ -94,8 +96,6 @@ mod session_delete_blob_reclaim;
 mod session_ingress;
 #[path = "conformance/wake_delivery.rs"]
 mod wake_delivery;
-#[path = "conformance/worklist_collation.rs"]
-mod worklist_collation;
 
 use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
 use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;

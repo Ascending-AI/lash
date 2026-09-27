@@ -950,8 +950,8 @@ impl LashCoreBuilder {
     }
 
     /// Configure the lease timing capability for every durable single-writer
-    /// lease lane this deployment renews: session execution leases, process
-    /// leases, and durable effect-replay leases. Queued-work and turn-input
+    /// lease lane this deployment renews: session execution leases and durable
+    /// effect-replay leases. Queued-work and turn-input
     /// claims are not leases and carry no TTL.
     ///
     /// This is the failover-latency vs false-takeover-risk knob.
@@ -983,7 +983,7 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Build a core under the host's stable worker/process lease identity.
+    /// Build a core under the host's stable worker identity.
     ///
     /// The owner id is stable for the worker or process and never scoped to a
     /// turn. The incarnation id changes once per process boot.

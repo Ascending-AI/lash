@@ -195,7 +195,6 @@ and `scripts/check_upgrade_paths.py` keeps it exhaustive against
 | `DURABLE_WAIT_INDEX_IDENTITY_EPOCH` | Restate object state | Deleted (§3). |
 | `EFFECT_GROUP_INDEX_PROTOCOL_VERSION` | Restate object state, handler wire, dispatch journal | Split (§3): stored value **M**, handler wire **C**, dispatch journal **D**. |
 | `REMOTE_PROTOCOL_VERSION`, `PROCESS_CURSOR_VERSION`, `TRACE_SCHEMA_VERSION` | live wire, host cursor, trace readers | **C**. Peers negotiate or accept `[N-1, N]`. |
-| `PROCESS_LEASE_SCHEMA` | SQL engine lease | Deleted before the release (FIG-3667/3668). If it survives the release, it is **M**. |
 | Durable-read fixtures, `tool_intent_journals/`, replay corpus | tests | Frozen at each release into `fixtures/release/<tag>/` (§6). |
 
 Out of scope, because nothing durable carries them: `TOOL_CHILD_REBIND`,

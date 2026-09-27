@@ -401,7 +401,6 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
     ("turn_cancel_retired_scopes", TURN_CANCELLATION),
     ("processes", PROCESS_LIFECYCLE),
     ("process_events", PROCESS_LIFECYCLE),
-    ("process_leases", PROCESS_LIFECYCLE),
     ("process_observers", PROCESS_LIFECYCLE),
     ("process_segment_handovers", PROCESS_LIFECYCLE),
     ("process_tombstones", PROCESS_LIFECYCLE),

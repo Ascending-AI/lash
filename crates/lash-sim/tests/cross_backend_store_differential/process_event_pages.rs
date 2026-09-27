@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLogTestSupport as _, ProcessLeases as _};
+use lash_core::ProcessEventLogTestSupport as _;
 
 async fn read_all_event_metadata<R>(
     registry: &R,
@@ -214,20 +214,26 @@ pub(super) async fn compare_bounded_process_event_pages(
         "the paired mints name both effect rows alike"
     );
     let effect_id = sqlite_effect_record.id.clone();
-    let owner =
-        lash_core::LeaseOwnerIdentity::opaque("effect-differential", "effect-differential:1");
-    let sqlite_lease = sqlite
-        .claim_process_lease(&effect_id, &owner, 60_000)
-        .await
-        .expect("claim SQLite effect lease")
-        .acquired()
-        .expect("SQLite effect lease available");
-    let postgres_lease = postgres_registry
-        .claim_process_lease(&effect_id, &owner, 60_000)
-        .await
-        .expect("claim PostgreSQL effect lease")
-        .acquired()
-        .expect("PostgreSQL effect lease available");
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        effect_id.clone(),
+        "effect-differential:1",
+    )
+    .bind_attempt(1);
+    for registry in [
+        &sqlite as &dyn lash_core::ProcessRegistry,
+        &postgres_registry as &dyn lash_core::ProcessRegistry,
+    ] {
+        registry
+            .record_first_started_with_authority(
+                &effect_id,
+                authority
+                    .invocation_started()
+                    .expect("bound differential invocation has a started fact"),
+                &authority,
+            )
+            .await
+            .expect("record differential invocation start");
+    }
     // Ten occurrences of one node: the writer records the first
     // `PROCESS_EFFECT_OCCURRENCE_CAP` one by one and counts the rest, by
     // class, in one omission record.
@@ -287,14 +293,10 @@ pub(super) async fn compare_bounded_process_event_pages(
     let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!({ "summary": "committed" })),
     );
-    for (registry, lease) in [
-        (&sqlite as &dyn lash_core::ProcessRegistry, &sqlite_lease),
-        (
-            &postgres_registry as &dyn lash_core::ProcessRegistry,
-            &postgres_lease,
-        ),
+    for registry in [
+        &sqlite as &dyn lash_core::ProcessRegistry,
+        &postgres_registry as &dyn lash_core::ProcessRegistry,
     ] {
-        let authority = lash_core::ProcessExecutionWriteAuthority::lease(lease.clone());
         for _ in 0..2 {
             let receipts = registry
                 .append_events(&effect_id, recorded[..4].to_vec(), &authority)

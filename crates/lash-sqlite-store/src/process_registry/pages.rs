@@ -11,7 +11,10 @@ pub(super) async fn count_non_terminal_processes(
             Ok((|| {
                 let count: i64 = conn
                     .query_row(
-                        process_sql().process_sqlite.count_live_worklist.sql(),
+                        process_sql()
+                            .process_sqlite
+                            .count_non_terminal_processes
+                            .sql(),
                         [],
                         |row| row.get(0),
                     )
@@ -52,16 +55,19 @@ pub(super) async fn collect_non_terminal_records(
         .map_err(process_sqlite_error)?
 }
 
-pub(super) async fn list_non_terminal_page(
+pub(super) async fn list_non_terminal_processes_page(
     registry: &SqliteProcessRegistry,
     limit: std::num::NonZeroUsize,
-    continuation: Option<lash_core_execution::ProcessWorklistCursor>,
-) -> Result<lash_core_execution::ProcessWorklistPage, lash_core_execution::PluginError> {
+    continuation: Option<lash_core_execution::ProcessRegistryCursor>,
+) -> Result<lash_core_execution::NonTerminalProcessPage, lash_core_execution::PluginError> {
+    let page_size = limit
+        .get()
+        .min(lash_core_execution::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE);
     if let Some(cursor) = continuation.as_ref()
         && cursor.backend() != CURSOR_BACKEND
     {
         return Err(
-            lash_core_execution::PluginError::ProcessWorklistCursorBackendMismatch {
+            lash_core_execution::PluginError::ProcessRegistryCursorBackendMismatch {
                 expected: CURSOR_BACKEND.to_string(),
                 actual: cursor.backend().to_string(),
             },
@@ -77,7 +83,7 @@ pub(super) async fn list_non_terminal_page(
                         .query_row(
                             process_sql()
                                 .process_sqlite
-                                .select_max_worklist_process_id
+                                .select_max_non_terminal_process_id
                                 .sql(),
                             [],
                             |row| {
@@ -90,21 +96,21 @@ pub(super) async fn list_non_terminal_page(
                     {
                         Some(process_id) => process_id,
                         None => {
-                            return Ok(lash_core_execution::ProcessWorklistPage {
+                            return Ok(lash_core_execution::NonTerminalProcessPage {
                                 records: Vec::new(),
                                 continuation: None,
                             });
                         }
                     },
                 };
-                let row_limit = i64::try_from(limit.get().saturating_add(1)).unwrap_or(i64::MAX);
-                let worklist = &process_sql().process_sqlite;
+                let row_limit = i64::try_from(page_size + 1).unwrap_or(i64::MAX);
+                let process_queries = &process_sql().process_sqlite;
                 let (sql, after_process_id) = match continuation.as_ref() {
                     Some(cursor) => (
-                        worklist.list_next_worklist_page.sql(),
+                        process_queries.list_next_non_terminal_process_page.sql(),
                         Some(cursor.after_process_id().as_str()),
                     ),
-                    None => (worklist.list_first_worklist_page.sql(), None),
+                    None => (process_queries.list_first_non_terminal_process_page.sql(), None),
                 };
                 let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
                 let rows = stmt
@@ -120,20 +126,20 @@ pub(super) async fn list_non_terminal_page(
                             .map_err(process_decode_error)?;
                     records.push(record);
                 }
-                let has_more = records.len() > limit.get();
-                records.truncate(limit.get());
+                let has_more = records.len() > page_size;
+                records.truncate(page_size);
                 #[expect(
                     clippy::expect_used,
                     reason = "`has_more` is only true when `records` held more than `limit` rows, so the truncated page is non-empty"
                 )]
                 let continuation = has_more.then(|| {
-                    lash_core_execution::ProcessWorklistCursor::new(
+                    lash_core_execution::ProcessRegistryCursor::new(
                         CURSOR_BACKEND,
                         records.last().expect("non-empty bounded page").id.clone(),
                         through_process_id,
                     )
                 });
-                Ok(lash_core_execution::ProcessWorklistPage {
+                Ok(lash_core_execution::NonTerminalProcessPage {
                     records,
                     continuation,
                 })
@@ -148,7 +154,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn worklist_plans_use_the_partial_index_without_a_temp_sort() {
+    async fn non_terminal_page_plans_use_the_partial_index_without_a_temp_sort() {
         let registry = crate::SqliteStoreSet::memory()
             .await
             .expect("open in-memory process registry")
@@ -178,32 +184,36 @@ mod tests {
                     stmt.query_map(params, |row| row.get::<_, String>(3))?
                         .collect::<Result<Vec<_>, _>>()
                 };
-                let worklist = &process_sql().process_sqlite;
+                let process_queries = &process_sql().process_sqlite;
                 Ok([
-                    explain(worklist.count_live_worklist.sql(), &[])?.join(" | "),
-                    explain(worklist.select_max_worklist_process_id.sql(), &[])?.join(" | "),
+                    explain(process_queries.count_non_terminal_processes.sql(), &[])?.join(" | "),
                     explain(
-                        worklist.list_first_worklist_page.sql(),
+                        process_queries.select_max_non_terminal_process_id.sql(),
+                        &[],
+                    )?
+                    .join(" | "),
+                    explain(
+                        process_queries.list_first_non_terminal_process_page.sql(),
                         &[&"zz", &Option::<String>::None, &65_i64],
                     )?
                     .join(" | "),
                     explain(
-                        worklist.list_next_worklist_page.sql(),
+                        process_queries.list_next_non_terminal_process_page.sql(),
                         &[&"zz", &"aa", &65_i64],
                     )?
                     .join(" | "),
                 ])
             })
             .await
-            .expect("explain SQLite worklist queries");
+            .expect("explain SQLite non-terminal page queries");
         for plan in &plans {
             assert!(
-                plan.contains("idx_processes_live_worklist"),
-                "worklist query must use the partial index: {plan}"
+                plan.contains("idx_processes_non_terminal"),
+                "non-terminal page query must use the partial index: {plan}"
             );
             assert!(
                 !plan.contains("USE TEMP B-TREE"),
-                "worklist query must not sort through a temp B-tree: {plan}"
+                "non-terminal page query must not sort through a temp B-tree: {plan}"
             );
         }
         assert!(

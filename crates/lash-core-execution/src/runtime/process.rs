@@ -5,7 +5,6 @@ mod effect_summary;
 mod engine;
 mod events;
 pub(crate) mod identity_projection;
-mod lease_serde;
 mod materialization;
 pub(crate) mod model;
 #[cfg(test)]
@@ -69,26 +68,23 @@ pub use events::{
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
     Ancestry, ArtifactOwner, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime,
-    LifetimeDecision, LifetimePolicy, PROCESS_LEASE_SCHEMA_VERSION, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvLoadError,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
-    ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessLeaseSchemaVersionError, ProcessLineage, ProcessListFilter,
-    ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistrationDisposition,
-    ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessSpawnProvenance,
-    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
-    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
-    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
-    WaitKind, WaitState, artifact_destination_owner_retired_error,
+    LifetimeDecision, LifetimePolicy, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
+    ProcessExecutionContext, ProcessExecutionEnvLoadError, ProcessExecutionEnvRef,
+    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput,
+    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessObserverBy, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessRegistrationDisposition, ProcessRegistrationOutcome, ProcessSessionDeleteReport,
+    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTombstone, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
+    ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
+    StartKeyOwner, StoreRealization, WaitKind, WaitState, artifact_destination_owner_retired_error,
     artifact_owner_is_permanently_retired, artifact_owner_retired_error,
     artifact_staging_edge_missing_error, artifact_staging_owner_edge_is_missing,
-    artifact_store_plugin_error, ensure_process_lease_schema_version, lifetime,
-    load_process_execution_env, mint_process_id, process_child_session_id,
-    process_runtime_session_ids, publish_process_execution_env,
+    artifact_store_plugin_error, lifetime, load_process_execution_env, mint_process_id,
+    process_child_session_id, process_runtime_session_ids, publish_process_execution_env,
     settle_started_process_execution_env,
 };
 pub use observation::{
@@ -112,15 +108,15 @@ pub use registry::{
     ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
 };
 pub use registry::{
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ParentEndPlan, ProcessClockRebind, ProcessContinuationStore,
-    ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport,
-    ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistry,
-    ProcessRegistryBinding, ProcessRetention, ProcessScopeFenceHosts, ProcessSegmentKey,
-    ProcessTerminalPublication, ProcessToolIntents, ProcessWakeOutbox, ProcessWorklistCursor,
-    ProcessWorklistPage, ProjectionWatermark, SegmentStartMarker, WAKE_ENQUEUING_STALE_AFTER_MS,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    reconcile_pruned_trigger_deliveries,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage,
+    ParentEndPlan, ProcessClockRebind, ProcessContinuationStore, ProcessEventLog, ProcessLifecycle,
+    ProcessObserverRegistry, ProcessPruneReport, ProcessQuery, ProcessRegistrar,
+    ProcessRegistrationProbe, ProcessRegistry, ProcessRegistryBinding, ProcessRegistryCursor,
+    ProcessRetention, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessTerminalPublication,
+    ProcessToolIntents, ProcessWakeOutbox, ProjectionWatermark, SegmentStartMarker,
+    WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
+    WakeDeliveryState, WakeDiscardReason, reconcile_pruned_trigger_deliveries,
 };
 pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};

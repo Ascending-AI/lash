@@ -9,14 +9,14 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         prelude: Vec<ProcessEventAppendRequest>,
         authority: lash_core_execution::ProcessCompletionAuthority,
     ) -> Result<lash_core_execution::ProcessCompletionOutcome, PluginError> {
-        // Load (FOR UPDATE), validate the authority against the row's declared
-        // disposition, and append the run's terminal batch (`prelude`, then the
+        // Load (FOR UPDATE), validate the authority against the row's input
+        // class, and append the run's terminal batch (`prelude`, then the
         // terminal event, one process save; FIG-3571) as one transaction. The
         // `FOR UPDATE` row lock held from the load through the commit is the
         // guard: under READ COMMITTED a concurrent complete→prune→re-register
-        // would otherwise change the disposition between a separate read and the
-        // append. Locking the row means the disposition we validate is the
-        // disposition we append against — the re-registration serialises either
+        // would otherwise change the input class between a separate read and the
+        // append. Locking the row means the input class we validate is the one
+        // we append against — the re-registration serialises either
         // fully before our load or fully after our commit.
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
@@ -56,7 +56,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 request,
                 occurred_at_ms,
                 self.wake_delivery_config,
-                ProcessEventWriteAuthorization::Preauthorized,
             )
             .await?;
         batch.commit(&mut tx, &record).await?;
@@ -69,74 +68,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 lash_core_execution::ProcessCompletionOutcome::Committed(record)
             }
         })
-    }
-
-    async fn complete_process_with_lease(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-    ) -> Result<lash_core_execution::ProcessCompletionOutcome, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let process_id = &lease.process_id;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let await_output = await_output.with_cancel_origin(
-            record
-                .cancel_request
-                .as_deref()
-                .map(|request| request.origin),
-        );
-        if record.is_terminal() {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
-                record,
-                &await_output,
-            ));
-        }
-        let request = facade_support::terminal_append_request(process_id, &await_output, None);
-        // A successful prior terminal append is replay-idempotent even though
-        // that transaction already cleared the lease, so the lease fence is
-        // re-checked inside the append sequence on the insert arm only.
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let (_, arm) = apply_process_event_append_tx(
-            &mut tx,
-            &mut record,
-            request,
-            now,
-            self.wake_delivery_config,
-            ProcessEventWriteAuthorization::Lease(lease),
-            self.fleet_format,
-        )
-        .await?;
-        if arm == ProcessEventAppendArm::Replayed {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(
-                lash_core_execution::ProcessCompletionOutcome::AlreadyApplied { stored: record },
-            );
-        }
-        // The verdict inside the append sequence authorized this release; the
-        // statement's predicate is the backstop and `require_fenced_write_applied`
-        // returns this site's refusal if it and the locked read ever disagree.
-        let released = sqlx::query(process_sql().lease.release.sql())
-            .bind(process_id.as_str())
-            .bind(&lease.lease_token)
-            .bind(lease.fencing_token as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected();
-        lash_core_execution::store_backend_support::require_fenced_write_applied(
-            lash_core_execution::store_backend_support::FencedWrite::ProcessLeaseRelease,
-            crate::POSTGRES_BACKEND,
-            process_id,
-            released,
-            || PluginError::ProcessLeaseSuperseded {
-                process_id: process_id.clone(),
-            },
-        )?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core_execution::ProcessCompletionOutcome::Committed(
-            record,
-        ))
     }
 
     async fn record_parent_end(
@@ -213,17 +144,8 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     ) -> Result<ProcessStartOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            Some(&started),
-            now,
-            self.fleet_format,
-        )
-        .await?;
+        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority(process_id, &record, authority, Some(&started))?;
         match lash_core_execution::runtime::prepare_process_start(&record, &started)? {
             ProcessStartPlan::AlreadyApplied => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -352,17 +274,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let lease_now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            lease_now,
-            self.fleet_format,
-        )
-        .await?;
+        validate_process_execution_authority(process_id, &record, authority, None)?;
         let occurred_at_ms = self.clock.timestamp_ms();
         // The run's pending prelude commits ahead of the transition, in its
         // transaction (FIG-3571).
@@ -407,17 +319,8 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            now,
-            self.fleet_format,
-        )
-        .await?;
+        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority(process_id, &record, authority, None)?;
         // The run's pending prelude commits ahead of the transition, in its
         // transaction (FIG-3571).
         let mut batch = ProcessEventBatch::for_fleet(self.fleet_format);
@@ -461,17 +364,8 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            now,
-            self.fleet_format,
-        )
-        .await?;
+        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority(process_id, &record, authority, None)?;
         let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::Park(park),
@@ -502,17 +396,8 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            now,
-            self.fleet_format,
-        )
-        .await?;
+        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority(process_id, &record, authority, None)?;
         let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::BeginParkedRerun,

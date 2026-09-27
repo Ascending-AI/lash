@@ -220,7 +220,6 @@ fn prune_process_rows_conn(
         .map_err(process_sqlite_error)?;
     for dependent in [
         sql.observer_sqlite.delete_by_process_ids.sql(),
-        sql.lease_sqlite.delete_by_process_ids.sql(),
         sql.handover_sqlite.delete_by_process_ids.sql(),
     ] {
         conn.execute(dependent, params![process_ids_json])

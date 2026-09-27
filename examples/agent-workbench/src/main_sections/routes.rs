@@ -858,7 +858,7 @@ pub(crate) async fn reset_chat(
     }))
 }
 
-/// How long a row that has left the live worklist stays on the rail.
+/// How long a terminal process stays on the rail after leaving the live set.
 const WORK_RAIL_RETIRED_WINDOW_MS: u64 = 10_000;
 
 /// The runtime-wide work snapshot: every process whose outcome is still open,

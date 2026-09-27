@@ -219,16 +219,6 @@ table lash_process_events
   unique (process_id, idempotency_key) where idempotency_key is not null
   primary-key (process_id, sequence)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
-table lash_process_leases
-  column lease_claimed_at_ms bigint not-null default
-  column lease_expires_at_ms bigint not-null default
-  column lease_fencing_token bigint not-null default
-  column lease_owner_id text nullable
-  column lease_owner_incarnation_id text nullable
-  column lease_token text nullable
-  column process_id text not-null
-  primary-key (process_id)
-  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_observers
   column process_id text not-null
   column session_id text not-null

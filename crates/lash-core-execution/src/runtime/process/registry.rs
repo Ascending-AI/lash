@@ -6,10 +6,9 @@ pub use lash_core_store::process_identity::*;
 use super::engine::PersistedSegmentHandover;
 use super::model::{ProcessArtifactCleanupAck, ProcessChangeCursor, ProcessRecord};
 pub use super::registry_concerns::{
-    ProcessClockRebind, ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry,
-    ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistryBinding,
-    ProcessRetention, ProcessScopeFenceHosts, ProcessTerminalPublication, ProcessToolIntents,
-    ProcessWakeOutbox,
+    ProcessClockRebind, ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessQuery,
+    ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistryBinding, ProcessRetention,
+    ProcessScopeFenceHosts, ProcessTerminalPublication, ProcessToolIntents, ProcessWakeOutbox,
 };
 
 /// Outcome of process retention: how many terminal processes, events, and
@@ -37,18 +36,21 @@ pub enum ProjectionWatermark {
     NoProjector,
 }
 
-/// Opaque continuation for a bounded scan of the recovery worklist.
+/// Hard ceiling for a page of non-terminal process records.
+pub const MAX_NON_TERMINAL_PROCESS_PAGE_SIZE: usize = 256;
+
+/// Opaque continuation for a bounded scan of non-terminal process records.
 ///
 /// The cursor belongs to the registry that issued it. Hosts should pass it
-/// unchanged to [`ProcessQuery::list_non_terminal_page`].
+/// unchanged to [`ProcessQuery::list_non_terminal_processes_page`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessWorklistCursor {
+pub struct ProcessRegistryCursor {
     backend: String,
     after_process_id: ProcessId,
     through_process_id: ProcessId,
 }
 
-impl ProcessWorklistCursor {
+impl ProcessRegistryCursor {
     pub fn new(
         backend: impl Into<String>,
         after_process_id: ProcessId,
@@ -77,11 +79,11 @@ impl ProcessWorklistCursor {
     }
 }
 
-/// One bounded page from the registry recovery worklist.
+/// One bounded page of non-terminal process records.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ProcessWorklistPage {
+pub struct NonTerminalProcessPage {
     pub records: Vec<ProcessRecord>,
-    pub continuation: Option<ProcessWorklistCursor>,
+    pub continuation: Option<ProcessRegistryCursor>,
 }
 
 /// One durable ledger row recording that a parent scope has ended.
@@ -713,7 +715,6 @@ pub trait ProcessRegistry:
     + ProcessLifecycle
     + ProcessToolIntents
     + ProcessWakeOutbox
-    + ProcessLeases
     + ProcessRetention
     + ProcessClockRebind
 {
@@ -728,7 +729,6 @@ impl<T> ProcessRegistry for T where
         + ProcessLifecycle
         + ProcessToolIntents
         + ProcessWakeOutbox
-        + ProcessLeases
         + ProcessRetention
         + ProcessClockRebind
         + ?Sized
@@ -830,7 +830,7 @@ async fn apply_pruned_trigger_delivery_reconciliation(
     // replacement row from being swept into this stale decision. If the process
     // is re-registered after this revalidation, deleting the observed delivery
     // is still safe: the new live row is itself recovery evidence through
-    // `list_non_terminal_page`, so recovery cannot lose the re-registered process.
+    // `list_non_terminal_processes_page`, so recovery cannot lose the re-registered process.
     let process_ids = plan
         .candidates
         .iter()

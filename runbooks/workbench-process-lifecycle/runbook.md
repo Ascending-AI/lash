@@ -4,11 +4,12 @@
 > screenshot, polling, real-token, Abort/RCA, and teardown rules. This runbook adds only
 > the Runtime Process lifecycle scenario.
 
-**Purpose.** Prove the ADR 0019 boundary through the Agent Workbench: a Runtime Process
-is runtime-owned, survives deletion of the session that started it, remains visible in
-the host work rail, and persists its terminal state. Also prove the rail's Cancel control
-records `process.cancel_requested` and settles a second process as cancelled through the
-global work API.
+**Purpose.** Prove the ADR 0110 boundary through the Agent Workbench: a Runtime Process
+has a session-independent lifecycle, survives deletion of the session that started it,
+remains visible in the host work rail, and persists its terminal state. The engine journal
+owns recovery for started work. Also prove the rail's Cancel control records
+`process.cancel_requested` and settles a second process as cancelled through the global
+work API.
 
 **Real tokens.** The setup turn uses OpenRouter to define and start processes. Gate on
 named process cards, process ids, durable lifecycle/event rows, and API/UI agreement—not

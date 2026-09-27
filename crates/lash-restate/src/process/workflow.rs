@@ -860,7 +860,7 @@ where
             // Another owner carries the process, or no process is left to
             // end: this invocation stops without writing a terminal.
             Err(
-                err @ (PluginError::ProcessLeaseSuperseded { .. }
+                err @ (PluginError::ProcessExecutionSuperseded { .. }
                 | PluginError::SessionExecutionLeaseLost { .. }
                 | PluginError::ProcessUnknown { .. }
                 | PluginError::ProcessNotVisible { .. }),

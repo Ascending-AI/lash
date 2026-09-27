@@ -15,8 +15,8 @@ pub struct ProcessAdmissionReport {
     /// Whether this call took intake of its own, or coalesced onto a scan
     /// another caller already had in flight.
     ///
-    /// An empty report is ambiguous without this: "the worklist was empty" and
-    /// "this call never read the worklist" are different facts and a host that
+    /// An empty report is ambiguous without this: "the scan was empty" and
+    /// "this call never read the registry" are different facts and a host that
     /// polls until quiet needs to tell them apart.
     pub intake: ProcessAdmissionIntake,
     /// Process ids this call admitted to the worker's execution scheduler, in
@@ -31,11 +31,11 @@ pub struct ProcessAdmissionReport {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProcessAdmissionIntake {
-    /// This call read a worklist page and the report describes what it found.
-    /// An empty `Scanned` report means the worklist held nothing to admit.
+    /// This call read a non-terminal registry page and the report describes what it found.
+    /// An empty `Scanned` report means the page scan held nothing to admit.
     #[default]
     Scanned,
-    /// A worklist scan was already in flight, so this call requested a rescan
+    /// A registry scan was already in flight, so this call requested a rescan
     /// and took no intake of its own. Rows are being admitted by the in-flight
     /// scan; this report says nothing about them.
     Coalesced,
@@ -105,21 +105,21 @@ pub enum ProcessWorkerFault {
         error: String,
     },
     /// An admitted row could not be rebuilt or executed (a runtime rebuild or
-    /// store-facet failure). The lease was released, so the row stays claimable
-    /// by a later pass rather than terminal.
+    /// store-facet failure). The row stays non-terminal for later engine
+    /// reconciliation rather than being reported as terminal.
     RecoveryRunFailed {
         /// Durable process id whose execution could not be rebuilt.
         process_id: ProcessId,
         /// Display form of the execution failure for host diagnostics.
         error: String,
     },
-    /// The non-terminal worklist scan stopped short after its retry budget was
+    /// The non-terminal registry scan stopped short after its retry budget was
     /// exhausted: rows past the last cursor were never admitted by this worker.
     ///
     /// Pass-scoped, not row-scoped, and never attributed to a later call — the
     /// pass whose scan failed reports it.
-    WorklistScanIncomplete {
-        /// Display form of the worklist read error for host diagnostics.
+    NonTerminalScanIncomplete {
+        /// Display form of the registry page-read error for host diagnostics.
         error: String,
     },
 }
@@ -149,12 +149,12 @@ impl ProcessWorkerFault {
                 error = %error,
                 "process worker recovery run failed (no process event sink wired)"
             ),
-            Self::WorklistScanIncomplete { error } => tracing::error!(
+            Self::NonTerminalScanIncomplete { error } => tracing::error!(
                 target: "lash_core::process_recovery",
                 event = "process_worker.fault",
-                fault = "worklist_scan_incomplete",
+                fault = "non_terminal_scan_incomplete",
                 error = %error,
-                "process worklist scan incomplete (no process event sink wired)"
+                "process registry scan incomplete (no process event sink wired)"
             ),
         }
     }
@@ -168,7 +168,6 @@ impl ProcessRecoveryAttemptOutcome {
             | Self::Absent
             | Self::AlreadyApplied { .. }
             | Self::SettledByPeer { .. }
-            | Self::LeaseLost { .. }
             | Self::ExternallyOwned => None,
             Self::BackendError { operation, error } => {
                 Some(ProcessWorkerFault::RecoveryBackendError {
@@ -185,7 +184,7 @@ impl ProcessRecoveryAttemptOutcome {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessRecoveryAttemptOutcome {
-    /// Another live owner holds the process lease.
+    /// The process is already owned by another in-flight admission.
     Busy,
     /// The process is no longer a non-terminal candidate after enumeration.
     Absent,
@@ -198,11 +197,6 @@ pub enum ProcessRecoveryAttemptOutcome {
     AlreadyApplied {
         /// Durable terminal status retained by the registry.
         terminal_status: ProcessStatus,
-    },
-    /// This attempt's lease fence was superseded by a newer owner.
-    LeaseLost {
-        /// Operation at which the superseded fence was observed.
-        operation: ProcessRecoveryOperation,
     },
     /// The row is externally owned (ADR 0110): Lash never executes it, on any
     /// tier. An admission pass reports it as deferred rather than admitted, so
@@ -221,11 +215,8 @@ pub enum ProcessRecoveryAttemptOutcome {
 /// Registry operation that failed during process recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessRecoveryOperation {
-    ClaimLease,
     ReadProcess,
-    RenewLease,
     WriteTerminal,
-    ReleaseLease,
     /// Handing an admitted row to an external execution engine (the Restate
     /// tier's ingress submit).
     SubmitRun,
@@ -239,11 +230,8 @@ impl ProcessRecoveryOperation {
     /// `operation` value rather than a dialect of the same vocabulary.
     pub fn label(self) -> &'static str {
         match self {
-            Self::ClaimLease => "claim_lease",
             Self::ReadProcess => "read_process",
-            Self::RenewLease => "renew_lease",
             Self::WriteTerminal => "write_terminal",
-            Self::ReleaseLease => "release_lease",
             Self::SubmitRun => "submit_run",
         }
     }
@@ -254,7 +242,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recovery_fault_projection_distinguishes_all_existing_dispositions() {
+    fn recovery_fault_projection_distinguishes_all_existing_outcomes() {
         let process_id = crate::process_id_for_test("projection");
         for disposition in [
             ProcessRecoveryAttemptOutcome::Busy,
@@ -264,9 +252,6 @@ mod tests {
             },
             ProcessRecoveryAttemptOutcome::SettledByPeer {
                 terminal_status: ProcessStatus::Failed,
-            },
-            ProcessRecoveryAttemptOutcome::LeaseLost {
-                operation: ProcessRecoveryOperation::RenewLease,
             },
             ProcessRecoveryAttemptOutcome::ExternallyOwned,
         ] {
@@ -312,10 +297,10 @@ mod tests {
                 false,
             ),
             (
-                ProcessWorkerFault::WorklistScanIncomplete {
+                ProcessWorkerFault::NonTerminalScanIncomplete {
                     error: "scan".to_string(),
                 },
-                "worklist_scan_incomplete",
+                "non_terminal_scan_incomplete",
                 "scan",
                 false,
                 false,

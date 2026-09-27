@@ -15,15 +15,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::runtime::process::registry::ProcessRegistry;
 use crate::runtime::process::registry_concerns::{ProcessEventLog, ProcessLifecycle};
 use crate::runtime::process::registry_delegate::{
-    delegate_process_leases, delegate_process_observer_registry, delegate_process_query,
-    delegate_process_registrar, delegate_process_retention, delegate_process_tool_intents,
-    delegate_process_wake_outbox,
+    delegate_process_observer_registry, delegate_process_query, delegate_process_registrar,
+    delegate_process_retention, delegate_process_tool_intents, delegate_process_wake_outbox,
 };
 use crate::{
     CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput, ProcessCompletionAuthority,
     ProcessCompletionOutcome, ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessId,
-    ProcessLease, ProcessRecord, ProcessStartOutcome, ProcessStarted, RuntimeReplayAttribution,
-    ScopeId, SessionId, StoreRealization, WaitState,
+    ProcessRecord, ProcessStartOutcome, ProcessStarted, RuntimeReplayAttribution, ScopeId,
+    SessionId, StoreRealization, WaitState,
 };
 
 /// Refuses the next `failures` registry writes that carry a runtime append of
@@ -240,16 +239,6 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
             .await
     }
 
-    async fn complete_process_with_lease(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-    ) -> Result<ProcessCompletionOutcome, PluginError> {
-        self.inner
-            .complete_process_with_lease(lease, await_output)
-            .await
-    }
-
     async fn record_parent_end(&self, parent: &ScopeId) -> Result<(), PluginError> {
         self.inner.record_parent_end(parent).await
     }
@@ -407,8 +396,6 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
 delegate_process_tool_intents!(EffectSummaryAppendFaults, inner);
 
 delegate_process_wake_outbox!(EffectSummaryAppendFaults, inner);
-
-delegate_process_leases!(EffectSummaryAppendFaults, inner);
 
 delegate_process_retention!(EffectSummaryAppendFaults, inner);
 

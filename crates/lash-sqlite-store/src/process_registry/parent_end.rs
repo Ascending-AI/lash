@@ -287,7 +287,7 @@ pub(super) async fn list_unrecorded_opener_parents(
 ///
 /// The predicate is exactly the pending-cancel partial index: `Until` lifetime,
 /// no cancel request yet, and a live status. `caller_departed` is excluded for
-/// the reason it is excluded from every other worklist — lash may never act on
+/// the reason it is excluded from every non-terminal registry scan — lash may never act on
 /// such a row nor assert an outcome for it, and a cancel request is both.
 pub(super) fn children_conn(
     conn: &Connection,

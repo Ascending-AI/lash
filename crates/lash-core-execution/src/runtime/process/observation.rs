@@ -9,8 +9,8 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity, ProcessInput,
-    ProcessLease, ProcessListFilter, ProcessOriginator, ProcessOriginatorFilter, ProcessRecord,
-    ProcessStarted, ProcessStatus, SessionScope, WaitState,
+    ProcessListFilter, ProcessOriginator, ProcessOriginatorFilter, ProcessRecord, ProcessStarted,
+    ProcessStatus, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -71,13 +71,6 @@ pub struct ObservedProcess {
     /// Durable execution-started fact, if the row has begun executing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_started: Option<ProcessStarted>,
-    /// Current lease holder identity, if the row is leased (ADR 0019). Raw
-    /// fact for host-side staleness classification — no derived "stuck" verdict.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease_holder: Option<crate::LeaseOwnerIdentity>,
-    /// Current lease expiry, paired with `lease_holder`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease_expires_at_ms: Option<u64>,
     /// The first accepted process cancellation request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<CancelRequest>,
@@ -252,8 +245,7 @@ impl ProcessWorkObserver {
                 .into_iter()
                 .map(ObservedProcessEvent::from)
                 .collect();
-            let lease = self.registry.get_process_lease(&process_id).await?;
-            let process = ObservedProcess::from_record(record, lease);
+            let process = ObservedProcess::from_record(record);
             let item = ObservedWorkItem { process, events };
             if !item.has_mispaired_event_tail() || attempt + 1 == SNAPSHOT_READ_ATTEMPTS {
                 return Ok(item);
@@ -273,8 +265,7 @@ impl ProcessWorkObserver {
         let Some(record) = self.registry.get_process(process_id).await? else {
             return Ok(None);
         };
-        let lease = self.registry.get_process_lease(process_id).await?;
-        Ok(Some(ObservedProcess::from_record(record, lease)))
+        Ok(Some(ObservedProcess::from_record(record)))
     }
 
     pub async fn list(
@@ -331,22 +322,9 @@ impl ProcessWorkObserver {
         &self,
         records: Vec<ProcessRecord>,
     ) -> Result<Vec<ObservedProcess>, PluginError> {
-        let process_ids = records
-            .iter()
-            .map(|record| record.id.clone())
-            .collect::<Vec<_>>();
-        let leases = self.registry.get_process_leases(&process_ids).await?;
-        if records.len() != leases.len() {
-            return Err(PluginError::Session(format!(
-                "process registry batch lease read returned {} rows for {} process ids",
-                leases.len(),
-                records.len()
-            )));
-        }
         Ok(records
             .into_iter()
-            .zip(leases)
-            .map(|(record, lease)| ObservedProcess::from_record(record, lease))
+            .map(ObservedProcess::from_record)
             .collect())
     }
 
@@ -414,18 +392,12 @@ impl ProcessWorkObserver {
 }
 
 impl ObservedProcess {
-    /// `lease` is the current lease row (if any), read separately so the observer exposes
-    /// holder identity and expiry as raw facts — no derived "stuck" classification (ADR 0019).
-    fn from_record(record: ProcessRecord, lease: Option<ProcessLease>) -> Self {
+    fn from_record(record: ProcessRecord) -> Self {
         let lifecycle = record.status;
         let input = record.input.as_ref().clone();
         let identity = record.identity;
         let process_id = record.id;
         let last_event_sequence = record.last_event_sequence;
-        let (lease_holder, lease_expires_at_ms) = match lease {
-            Some(lease) => (Some(lease.owner), Some(lease.expires_at_epoch_ms)),
-            None => (None, None),
-        };
         Self {
             process_id,
             last_event_sequence,
@@ -438,8 +410,6 @@ impl ObservedProcess {
             created_at_ms: record.created_at_ms,
             updated_at_ms: record.updated_at_ms,
             first_started: record.first_started.map(|started| *started),
-            lease_holder,
-            lease_expires_at_ms,
             cancel_request: record.cancel_request.map(|request| *request),
             originator: record.provenance.originator,
             env_ref: record.env_ref,

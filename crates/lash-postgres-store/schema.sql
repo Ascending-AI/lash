@@ -692,7 +692,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_processes_start_key
     ON lash_processes(start_key) WHERE start_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_processes_status
     ON lash_processes(status);
-CREATE INDEX IF NOT EXISTS idx_lash_processes_live_worklist
+CREATE INDEX IF NOT EXISTS idx_lash_processes_non_terminal
     ON lash_processes(process_id) WHERE status IN ('running', 'waiting');
 CREATE INDEX IF NOT EXISTS idx_lash_processes_change_seq
     ON lash_processes(change_seq);
@@ -747,7 +747,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_park_build_generation
 -- (FIG-3795 S2): the drain routes a refused redrive to the build that wrote
 -- the segment's journal. Partial: a terminal segment's writer is no route,
 -- and a NULL stamp is no lookup key — the IS NOT NULL clause also keeps the
--- planner from preferring this index for the unprefixed live-worklist scans.
+-- planner from preferring this index for the unprefixed non-terminal scans.
 CREATE INDEX IF NOT EXISTS idx_lash_processes_live_generation
     ON lash_processes(segment_generation) WHERE status IN ('running', 'waiting') AND segment_generation IS NOT NULL;
 
@@ -838,16 +838,6 @@ CREATE TABLE IF NOT EXISTS lash_process_artifact_cleanup (
     process_id TEXT COLLATE "C" PRIMARY KEY,
     cleanup_json TEXT NOT NULL,
     FOREIGN KEY (process_id) REFERENCES lash_process_tombstones(process_id) ON DELETE RESTRICT
-);
-
-CREATE TABLE IF NOT EXISTS lash_process_leases (
-    process_id TEXT COLLATE "C" PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-    lease_owner_id TEXT,
-    lease_owner_incarnation_id TEXT,
-    lease_token TEXT,
-    lease_fencing_token BIGINT NOT NULL DEFAULT 0,
-    lease_claimed_at_ms BIGINT NOT NULL DEFAULT 0,
-    lease_expires_at_ms BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (

@@ -1,6 +1,5 @@
 //! Live behavioral checks for the PostgreSQL/server-clock boundary.
 
-use lash_core_execution::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::Arc;
 
@@ -9,10 +8,9 @@ use lash_core_execution::testing::TestClock;
 use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    ProcessAwaitOutput, ProcessCompletionOutcome, ProcessInput, ProcessLeaseClaimOutcome,
-    ProcessProvenance, ProcessRegistration, RuntimeCommit, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, TurnInput, TurnInputCheckpointBoundary,
-    TurnInputIngress, facade_support::SessionCommand,
+    RuntimeCommit, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress,
+    facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 use sqlx::Connection as _;
@@ -32,10 +30,6 @@ const RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/turn_input.rs");
 const RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/session_commit.rs");
-const PROCESS_REGISTRY_LIFECYCLE_SOURCE: &str =
-    include_str!("../src/postgres/process_registry/lifecycle.rs");
-const PROCESS_REGISTRY_LEASES_SOURCE: &str =
-    include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
 const CONNECTION_SQL_SOURCE: &str = include_str!("../src/postgres/connection_sql.rs");
 
@@ -84,7 +78,7 @@ fn source_region<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
 fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
     // This is deliberately a lexical fence, not a behavioral test: ADR-0044
     // recognizes that an in-process test cannot skew `SystemTime::now()`.
-    let lease_sensitive_regions = [
+    let clock_sensitive_regions = [
         (
             RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn claim_leading_ready_session_command(",
@@ -171,73 +165,16 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "pub(crate) async fn read_session_execution_lease_unlocked(",
         ),
         (
-            PROCESS_REGISTRY_LIFECYCLE_SOURCE,
-            "async fn complete_process_with_lease(",
-            "async fn record_first_started_with_authority(",
-        ),
-        // The `ProcessLeases` impl lives in its own submodule file, so the
-        // lease atoms are fenced through that source, not the registry root.
-        (
-            PROCESS_REGISTRY_LEASES_SOURCE,
-            "async fn claim_process_lease(",
-            "async fn reclaim_process_lease(",
-        ),
-        (
-            PROCESS_REGISTRY_LEASES_SOURCE,
-            "async fn reclaim_process_lease(",
-            "async fn renew_process_lease(",
-        ),
-        (
-            PROCESS_REGISTRY_LEASES_SOURCE,
-            "async fn renew_process_lease(",
-            "async fn get_process_lease(",
-        ),
-        (
             RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE,
             "async fn commit_runtime_state(",
             "async fn save_session_meta(",
         ),
-        // The PostgreSQL process-lease atoms. They read and write
-        // `lease_claimed_at_ms`/`lease_expires_at_ms` and compare a stored lease
-        // against `now`, so the server clock must reach all of them. The shared
-        // transition table (`lash_core_execution::facade_support::registry_transitions`)
-        // takes `now_ms` as an input and cannot verify which clock produced it;
-        // this fence is what fails if a host clock ever supplies it.
-        // `process_lease_now_epoch_ms_tx` — the one sanctioned clock read — is
-        // covered by a dedicated end-of-file region after this loop: it must
-        // read the SERVER clock, so the client-clock ban applies to its body
-        // too, and appending helpers after it cannot escape the fence.
-        // The one process-event append sequence. Every entry point routes
-        // through it, including the leased terminal append whose lease fence
-        // it re-checks, so the `now` it authorizes against must keep coming
-        // from its caller's clock parameter. It sits above the lease atoms and
-        // outside every region below, so without this entry the shared body
-        // that decides a lease write would be the only unfenced step on the
-        // leased path.
+        // The shared process-event append sequence stamps registry events
+        // under the caller's store clock.
         (
             PROCESS_HELPERS_SOURCE,
             "async fn apply_process_event_append_tx(",
             "async fn append_process_event_tx(",
-        ),
-        (
-            PROCESS_HELPERS_SOURCE,
-            "async fn load_process_lease_tx(",
-            "async fn acquire_process_lease_tx(",
-        ),
-        (
-            PROCESS_HELPERS_SOURCE,
-            "async fn acquire_process_lease_tx(",
-            "async fn retained_process_lease_fencing_token(",
-        ),
-        (
-            PROCESS_HELPERS_SOURCE,
-            "async fn retained_process_lease_fencing_token(",
-            "async fn validate_process_execution_authority_tx(",
-        ),
-        (
-            PROCESS_HELPERS_SOURCE,
-            "async fn validate_process_execution_authority_tx(",
-            "async fn process_lease_now_epoch_ms_tx(",
         ),
     ];
 
@@ -246,7 +183,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
     const CLIENT_CLOCK_READS: [&str; 3] =
         ["current_epoch_ms()", "SystemTime::now()", "SystemClock"];
 
-    for (source, start, end) in lease_sensitive_regions {
+    for (source, start, end) in clock_sensitive_regions {
         let region = source_region(source, start, end);
         for read in CLIENT_CLOCK_READS {
             assert!(
@@ -256,13 +193,13 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         }
     }
 
-    // The sanctioned clock read itself. It sits after every fenced region, so
+    // The process-registry clock read itself. It sits after every fenced region, so
     // without this tail check its body (and anything appended after it) would
     // be the one unfenced spot in the file: a client-clock body here passed the
     // fence before this assertion existed. The region runs to end-of-file,
     // which also self-enforces the "nothing after the sanctioned read"
     // convention — a helper appended below it lands inside this region.
-    let sanctioned_start = "async fn process_lease_now_epoch_ms_tx(";
+    let sanctioned_start = "async fn process_registry_now_epoch_ms_tx(";
     let sanctioned_index = PROCESS_HELPERS_SOURCE
         .find(sanctioned_start)
         .unwrap_or_else(|| panic!("missing source marker `{sanctioned_start}`"));
@@ -270,7 +207,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
     for read in CLIENT_CLOCK_READS {
         assert!(
             !sanctioned_tail.contains(read),
-            "lexical clock fence: the sanctioned lease clock read (and everything \
+            "lexical clock fence: the process-registry clock read (and everything \
              after it) must not use the client wall clock (`{read}`)"
         );
     }
@@ -281,7 +218,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
     // this test going red.
     assert!(
         sanctioned_tail.contains("select_statement_epoch_ms"),
-        "the sanctioned lease clock read must issue `select_statement_epoch_ms`"
+        "the process-registry clock read must issue `select_statement_epoch_ms`"
     );
     let declaration_start = CONNECTION_SQL_SOURCE
         .find("select_statement_epoch_ms =")
@@ -293,7 +230,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
                 .expect("unterminated statement declaration")];
     assert!(
         declaration.contains("clock_timestamp()"),
-        "the sanctioned lease clock read must sample the PostgreSQL server clock"
+        "the process-registry clock read must sample the PostgreSQL server clock"
     );
 }
 
@@ -528,85 +465,6 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .expect("input claim must validate against PostgreSQL time")
         .expect("pending input remains claimable despite future-skewed client clock");
     assert_eq!(input_claim.inputs[0].input_id, final_next_input.input_id);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn process_lease_decisions_follow_the_postgres_clock() {
-    let Some((_lock, storage)) =
-        configured_storage("process-lease PostgreSQL clock contract").await
-    else {
-        return;
-    };
-    let server_now = db_now_ms(&storage).await;
-    let clock = Arc::new(TestClock::new(server_now));
-    let registry = storage
-        .process_registry()
-        .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
-    let process_id = registry
-        .register_process(
-            ProcessRegistration::new(
-                ProcessInput::Engine {
-                    kind: "postgres-clock-test".to_string(),
-                    payload: serde_json::Value::Null,
-                },
-                ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(
-                lash_core_execution::ProcessExecutionEnvRef::new("process-env:postgres-clock-test"),
-            )),
-        )
-        .await
-        .expect("register process for clock contract")
-        .id;
-    let owner_a = LeaseOwnerIdentity::opaque("clock-process-a", "clock-process-a:i");
-    let lease = registry
-        .claim_process_lease(&process_id, &owner_a, 60_000)
-        .await
-        .expect("claim process lease")
-        .acquired()
-        .expect("process lease acquired");
-
-    clock.advance(CLOCK_SKEW_MS);
-    let owner_b = LeaseOwnerIdentity::opaque("clock-process-b", "clock-process-b:i");
-    let renewed = registry
-        .renew_process_lease(&lease, 60_000)
-        .await
-        .expect("future-skewed client clock must not invalidate process lease renewal");
-    assert_eq!(renewed.lease_token, lease.lease_token);
-    assert_eq!(renewed.fencing_token, lease.fencing_token);
-    assert!(
-        renewed.expires_at_epoch_ms >= lease.expires_at_epoch_ms,
-        "renewal must not shorten the live process lease"
-    );
-    assert!(matches!(
-        registry
-            .reclaim_process_lease(&process_id, &owner_b, &renewed, 60_000)
-            .await
-            .expect("competing process lease reclaim decision"),
-        ProcessLeaseClaimOutcome::Busy { holder }
-            if holder.lease_token == renewed.lease_token
-                && holder.fencing_token == renewed.fencing_token
-    ));
-    assert!(matches!(
-        registry
-            .claim_process_lease(&process_id, &owner_b, 60_000)
-            .await
-            .expect("competing process lease decision"),
-        ProcessLeaseClaimOutcome::Busy { holder }
-            if holder.lease_token == lease.lease_token
-                && holder.fencing_token == lease.fencing_token
-    ));
-    let completion = registry
-        .complete_process_with_lease(
-            &renewed,
-            ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
-                serde_json::json!({"clock": "postgres"}),
-            )),
-        )
-        .await
-        .expect("future-skewed client clock must not invalidate a live process lease");
-    assert!(matches!(completion, ProcessCompletionOutcome::Committed(_)));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -81,8 +81,8 @@ fn restate_now_ms() -> u64 {
     crate::system_clock().timestamp_ms()
 }
 
-/// Restate's single-writer discipline is per-`process_id` workflow-key coalescing, not a Lash
-/// lease (ADR 0027); the workflow key is that `process_id`.
+/// Restate's single-writer discipline is per-`process_id` workflow-key coalescing;
+/// the workflow key is that `process_id` (ADR 0027).
 pub(crate) fn workflow_key_authority(process_id: &ProcessId) -> ProcessCompletionAuthority {
     ProcessCompletionAuthority::WorkflowKey {
         workflow_key: process_id.to_string(),
@@ -597,7 +597,7 @@ impl RestateProcessIngressRunner {
         if record.input.is_externally_owned() {
             return Ok(IngressSubmitOutcome::ExternallyOwned);
         }
-        // Re-read before submitting: the worklist page is a snapshot, and the
+        // Re-read before submitting: the registry page is a snapshot, and the
         // row may have moved under it.
         let current = self.registry.get_process(&process_id).await?;
         // Idempotent by process id: never re-submit a finished process.
@@ -695,7 +695,7 @@ impl RestateProcessIngressRunner {
 impl RestateProcessIngressRunner {
     async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
         // Engine-paused segments become process parks before the pass reads
-        // its worklist (FIG-3675). A failed reconcile is reported and retried
+        // its registry page (FIG-3675). A failed reconcile is reported and retried
         // by the next pass; it never stops this one.
         if let Some(admin) = self.park_reconciler.get()
             && let Err(error) =
@@ -713,7 +713,7 @@ impl RestateProcessIngressRunner {
         loop {
             let page = match self
                 .registry
-                .list_non_terminal_page(limit, continuation)
+                .list_non_terminal_processes_page(limit, continuation)
                 .await
             {
                 Ok(page) => page,
@@ -726,7 +726,7 @@ impl RestateProcessIngressRunner {
                         tracing::error!(
                             admitted = report.admitted.len(),
                             error = %error,
-                            "restate process worklist scan failed after partial admission"
+                            "restate non-terminal registry scan failed after partial admission"
                         );
                     }
                     return Err(error);

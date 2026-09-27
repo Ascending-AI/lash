@@ -114,7 +114,7 @@
 //! | Session retention | `node_anchors`, `deleted_sessions` | `fork_points`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_manifest`, SQLite `artifact_refs`, PostgreSQL's artifact table | Manifest listing plus process-execution-environment reference recovery |
 //! | Receiver queue | `queued_work_batches`, `queued_work_items`, `pending_turn_inputs`, `wake_redelivery_fences`, `session_execution_leases` | Queue/input payloads, deterministic ids, typed wake-rewind refusal, and the raw expired lease generation |
-//! | Processes | `processes`, `process_events`, `process_change_clock`, `process_leases`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; expired raw lease; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
+//! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
 //! | Effects and awaits (SQLite only: PostgreSQL is storage and journals no effects) | `runtime_effect_replay`, `await_event_meta`, `await_event_waits`, `await_event_revoked_sessions` | Completed effect replay without a local executor, signed await key resolution, and typed late-resolution/revocation behavior |
 //! | Backend metadata | PostgreSQL `lash_schema_versions`; SQLite `user_version` | Exact component/store schema-version comparison before read-back |
@@ -127,9 +127,9 @@
 //! `fixtures/durable-read/v1/postgres/fixture.sql` and
 //! `fixtures/durable-read/v1/sqlite/durable-core.db`.
 //!
-//! The intentionally expired process and session leases are raw durable generation
-//! facts. Reading them proves decoding and identity continuity; it does not grant
-//! live execution authority. Transient WAL contents, PostgreSQL advisory locks,
+//! The intentionally expired session lease is a raw durable generation fact.
+//! Reading it proves decoding and identity continuity; it does not grant live
+//! execution authority. Transient WAL contents, PostgreSQL advisory locks,
 //! database indexes, and database-engine bookkeeping are outside this semantic-read
 //! contract. SQLite WAL files are checkpointed with `TRUNCATE`, required to report
 //! `busy = 0`, and required to be absent before artifact copying.
@@ -396,14 +396,6 @@ pub async fn assert_prior_component_encoding_is_refused(store: &dyn RuntimePersi
 
 pub struct FixtureHandles {
     pub clock: Arc<dyn Clock>,
-    /// The term the seed claims its process lease for. A backend whose process
-    /// leases run on `clock` claims the pinned term (`expected_process_lease`),
-    /// which its artifact records. PostgreSQL runs process leases on the
-    /// database clock and normalizes the row afterwards, so it claims a term a
-    /// slow runner cannot outlive while the seed writes under the lease: at
-    /// 100 ms of wall time, a loaded CI host saw the lease superseded between
-    /// the fixture's own writes.
-    pub process_lease_ttl_ms: u64,
     pub runtime: Arc<dyn RuntimePersistence>,
     pub session_factory: Arc<dyn SessionStoreFactory>,
     pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
@@ -974,24 +966,24 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         waiting_process_id(),
         "the seed's registry mints sequentially"
     );
-    let lease = handles
+    let authority =
+        ProcessExecutionWriteAuthority::invocation(waiting_process_id(), "durable-read-fixture")
+            .bind_attempt(1);
+    let started = authority
+        .invocation_started()
+        .expect("bound fixture invocation has a started fact");
+    handles
         .processes
-        .claim_process_lease(
-            &waiting_process_id(),
-            &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
-            handles.process_lease_ttl_ms,
-        )
+        .record_first_started_with_authority(&waiting_process_id(), started, &authority)
         .await
-        .expect("claim fixture process lease")
-        .acquired()
-        .expect("fixture process lease acquired");
+        .expect("record fixture invocation start");
     handles
         .processes
         .set_process_wait_with_authority(
             &waiting_process_id(),
             fixture_wait_state(),
             Vec::new(),
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            &authority,
         )
         .await
         .expect("persist fixture process wait state");
@@ -1000,7 +992,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .append_event_with_authority(
             &waiting_process_id(),
             fixture_effect_outcome().append_request(),
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            &authority,
         )
         .await
         .expect("persist fixture effect outcome");
@@ -1009,7 +1001,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .append_event_with_authority(
             &waiting_process_id(),
             fixture_effect_omissions().append_request(FIXTURE_EFFECT_OMISSIONS_KEY),
-            &ProcessExecutionWriteAuthority::lease(lease),
+            &authority,
         )
         .await
         .expect("persist fixture effect omissions");
@@ -1621,7 +1613,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .full_event_window(&waiting_process_id(), 0)
         .await
         .expect("durable fixture drift: waiting-process event read failed");
-    assert_eq!(process_events.len(), 4);
+    assert_eq!(process_events.len(), 5);
     assert_eq!(process_events[0].sequence, 1);
     assert_eq!(process_events[0].event_type, "process.observer_added");
     assert_eq!(
@@ -1633,31 +1625,33 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture semantic drift: observer-added event payload changed"
     );
     assert_eq!(process_events[1].sequence, 2);
-    assert_eq!(process_events[1].event_type, "process.waiting");
+    assert_eq!(process_events[1].event_type, "process.first_started");
+    assert_eq!(process_events[2].sequence, 3);
+    assert_eq!(process_events[2].event_type, "process.waiting");
     assert_eq!(
-        process_events[1].payload,
+        process_events[2].payload,
         serde_json::json!({"wait": fixture_wait_state()}),
         "durable fixture semantic drift: waiting-process event payload changed"
     );
     assert_eq!(
-        process_events[2].event_type,
+        process_events[3].event_type,
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
     assert_eq!(
         lash_core::ProcessEffectSummaryOccurrence::decode(
-            process_events[2].payload.clone(),
+            process_events[3].payload.clone(),
             lash_core::FleetFormat::current()
         )
         .expect("decode durable fixture effect outcome"),
         fixture_effect_outcome()
     );
     assert_eq!(
-        process_events[3].event_type,
+        process_events[4].event_type,
         lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
     );
     assert_eq!(
         lash_core::ProcessEffectOmissions::decode(
-            process_events[3].payload.clone(),
+            process_events[4].payload.clone(),
             lash_core::FleetFormat::current()
         )
         .expect("decode durable fixture effect omissions"),
@@ -1671,39 +1665,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             .expect("durable fixture drift: process-observer read failed"),
         vec![SESSION_ID.to_string()],
         "durable fixture semantic drift: process-observer edge changed"
-    );
-    let process_lease = handles
-        .processes
-        .get_process_lease(&waiting_process_id())
-        .await
-        .expect("durable fixture drift: process-lease read failed")
-        .expect("durable fixture drift: process lease disappeared");
-    let expected_process_lease = expected_process_lease();
-    assert_eq!(
-        process_lease.schema_version,
-        expected_process_lease.schema_version
-    );
-    assert_eq!(process_lease.process_id, expected_process_lease.process_id);
-    assert_eq!(process_lease.owner, expected_process_lease.owner);
-    assert_eq!(
-        process_lease.lease_token,
-        expected_process_lease.lease_token
-    );
-    assert_eq!(
-        process_lease.fencing_token,
-        expected_process_lease.fencing_token
-    );
-    assert_eq!(
-        process_lease.claimed_at_epoch_ms,
-        expected_process_lease.claimed_at_epoch_ms
-    );
-    assert_eq!(
-        process_lease.expires_at_epoch_ms,
-        expected_process_lease.expires_at_epoch_ms
-    );
-    assert!(
-        process_lease.expires_at_epoch_ms <= FIXTURE_READ_MS,
-        "fixture process lease is intentionally expired; get_process_lease must expose the raw row without treating it as live authority"
     );
     assert_eq!(
         handles
@@ -2303,20 +2264,6 @@ fn fixture_process_env() -> ProcessExecutionEnvSpec {
         SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     )
 }
-
-pub fn expected_process_lease() -> lash_core::ProcessLease {
-    lash_core::facade_support::registry_transitions::acquired_process_lease(
-        &waiting_process_id(),
-        &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
-        1,
-        FIXTURE_WRITE_MS,
-        PINNED_PROCESS_LEASE_TTL_MS,
-        lash_core::FleetFormat::current(),
-    )
-}
-
-/// The process-lease term the committed artifacts record.
-pub const PINNED_PROCESS_LEASE_TTL_MS: u64 = 100;
 
 fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegistration {
     ProcessRegistration::new(

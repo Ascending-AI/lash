@@ -25,8 +25,6 @@ mod parent_end_payload;
 mod parent_end_registration_race;
 #[path = "postgres_clock_contract.rs"]
 mod postgres_clock_contract;
-#[path = "postgres_lease_multiconnection.rs"]
-mod postgres_lease_multiconnection;
 #[path = "pre_submission_digest_cutover.rs"]
 mod pre_submission_digest_cutover;
 #[path = "process_prune_reclaim.rs"]

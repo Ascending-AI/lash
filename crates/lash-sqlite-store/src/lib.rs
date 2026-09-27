@@ -82,10 +82,10 @@ use lash_core_execution::{
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
-    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
-    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessListFilter,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
+    RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance,
@@ -442,19 +442,6 @@ fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreErro
 
 fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError> {
     sql_counter_value("session_lease_generation", value)
-}
-
-fn plugin_sql_monotonic_counter_value(
-    counter: &'static str,
-    current: u64,
-    value: u64,
-) -> Result<i64, lash_core_execution::PluginError> {
-    i64::try_from(value).map_err(
-        |_| lash_core_execution::PluginError::MonotonicCounterOverflow {
-            counter: counter.to_string(),
-            current,
-        },
-    )
 }
 
 fn plugin_sql_counter_value(

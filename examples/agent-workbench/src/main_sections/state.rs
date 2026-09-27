@@ -1030,9 +1030,9 @@ pub(crate) struct TurnCancelResponse {
 /// Host-visible notice the workbench renders when the durable-process worker
 /// reports a fault.
 ///
-/// Driving pending processes is an *admission* call: it hands claimable rows to
-/// execution and returns, so a claim, read, write, release, or worklist-scan
-/// failure that happens after admission has no return value left to ride. The
+/// Driving pending processes is an *admission* call: it submits eligible rows
+/// to the engine and returns, so a read, write, run-submission, or registry-page
+/// failure after a partial pass has no return value left to ride. The
 /// worker reports it as a typed
 /// [`ProcessWorkerFault`](lash::process::ProcessWorkerFault) on the same
 /// unconditional sink the workbench already installs for process events, and
@@ -1070,8 +1070,8 @@ impl WorkerFaultNotice {
             },
             // Pass-scoped: no row owns a scan that gave up part-way, so the
             // notice carries no process id rather than blaming one.
-            lash::process::ProcessWorkerFault::WorklistScanIncomplete { error } => Self {
-                kind: "worklist-scan-incomplete",
+            lash::process::ProcessWorkerFault::NonTerminalScanIncomplete { error } => Self {
+                kind: "non-terminal-scan-incomplete",
                 process_id: None,
                 operation: None,
                 error: error.clone(),

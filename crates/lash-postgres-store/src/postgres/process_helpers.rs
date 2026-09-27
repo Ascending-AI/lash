@@ -277,16 +277,9 @@ impl ProcessEventBatch {
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        self.stage_arm(
-            tx,
-            record,
-            request,
-            occurred_at_ms,
-            wake_delivery_config,
-            ProcessEventWriteAuthorization::Preauthorized,
-        )
-        .await
-        .map(|(receipt, _)| receipt)
+        self.stage_arm(tx, record, request, occurred_at_ms, wake_delivery_config)
+            .await
+            .map(|(receipt, _)| receipt)
     }
 
     /// Stage one append of the batch under `authorization`, answering its
@@ -298,7 +291,6 @@ impl ProcessEventBatch {
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-        authorization: ProcessEventWriteAuthorization<'_>,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
         let (receipt, arm, record_changed) = stage_process_event_append_tx(
             tx,
@@ -306,7 +298,6 @@ impl ProcessEventBatch {
             request,
             occurred_at_ms,
             wake_delivery_config,
-            authorization,
             self.fleet_format,
         )
         .await?;
@@ -352,15 +343,6 @@ pub(crate) async fn append_process_event_batch_tx(
     Ok(receipts)
 }
 
-/// Where the write authority for one process-event append is settled.
-pub(crate) enum ProcessEventWriteAuthorization<'a> {
-    /// The entry point authorized the write before the append sequence began.
-    Preauthorized,
-    /// Re-read the persisted lease and authorize against it after the
-    /// replay-or-insert decision and before the first row is written.
-    Lease(&'a ProcessLease),
-}
-
 /// One process-event append for the PostgreSQL store: the append sequence
 /// ([`stage_process_event_append_tx`]) followed by the process save when the
 /// append moved the projection.
@@ -370,7 +352,6 @@ pub(crate) async fn apply_process_event_append_tx(
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-    authorization: ProcessEventWriteAuthorization<'_>,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
     let (receipt, arm, record_changed) = stage_process_event_append_tx(
@@ -379,7 +360,6 @@ pub(crate) async fn apply_process_event_append_tx(
         request,
         occurred_at_ms,
         wake_delivery_config,
-        authorization,
         fleet_format,
     )
     .await?;
@@ -402,17 +382,14 @@ pub(crate) async fn apply_process_event_append_tx(
 /// mapping.
 ///
 /// `occurred_at_ms` is the caller's clock and the only clock this function
-/// sees: each entry point keeps its own source (the injected store clock, or
-/// the sanctioned PostgreSQL lease clock), and this function never reads one.
-/// The `Lease` authorization compares that same value against the stored lease,
-/// exactly as the leased entry point did inline.
+/// sees: each entry point keeps its own source (the injected store clock), and
+/// this function never reads one.
 async fn stage_process_event_append_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-    authorization: ProcessEventWriteAuthorization<'_>,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm, bool), PluginError> {
     let process_id = record.id.clone();
@@ -463,28 +440,6 @@ async fn stage_process_event_append_tx(
             projected_record,
             wake_delivery,
         } => {
-            match authorization {
-                ProcessEventWriteAuthorization::Preauthorized => {}
-                ProcessEventWriteAuthorization::Lease(lease) => {
-                    // The shared process-lease verdict is the decision here
-                    // (FIG-3388): the row is locked by `load_process_lease_row_tx`
-                    // and the release write's predicate backstops this call.
-                    let current = load_process_lease_row_tx(tx, &process_id).await?;
-                    let verdict = lash_core_execution::store_backend_support::process_lease_verdict(
-                        current
-                            .as_ref()
-                            .map(registry_transitions::ProcessLeaseRow::facts),
-                        lash_core_execution::store_backend_support::ProcessLeaseAuthority {
-                            lease_token: &lease.lease_token,
-                            fencing_token: lease.fencing_token,
-                        },
-                        occurred_at_ms,
-                    );
-                    if !verdict.is_current() {
-                        return Err(PluginError::ProcessLeaseSuperseded { process_id });
-                    }
-                }
-            }
             sqlx::query(process_sql().event.insert.sql())
                 .bind(process_id.as_str())
                 .bind(sequence as i64)
@@ -556,7 +511,6 @@ pub(crate) async fn append_process_event_tx(
         request,
         occurred_at_ms,
         wake_delivery_config,
-        ProcessEventWriteAuthorization::Preauthorized,
         fleet_format,
     )
     .await
@@ -605,155 +559,29 @@ pub(crate) async fn insert_wake_delivery_tx(
     Ok(())
 }
 
-/// The lease row under the `FOR UPDATE` lock, unprojected: the release
-/// verdict needs the raw holder columns to tell a released row (`Released`)
-/// from an absent one (`Absent`) and a held row from its successor.
-pub(crate) async fn load_process_lease_row_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &ProcessId,
-) -> Result<Option<registry_transitions::ProcessLeaseRow>, PluginError> {
-    let row = sqlx::query(
-        process_sql()
-            .lease_postgres
-            .select_by_process_for_update
-            .sql(),
-    )
-    .bind(process_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    Ok(Some(registry_transitions::ProcessLeaseRow {
-        owner_id: row.get(0),
-        incarnation_id: row.get(5),
-        lease_token: row.get(1),
-        fencing_token: row.get(2),
-        claimed_at_ms: row.get(3),
-        expires_at_ms: row.get(4),
-    }))
-}
-
-pub(crate) async fn load_process_lease_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &ProcessId,
-    fleet_format: lash_core_execution::FleetFormat,
-) -> Result<Option<ProcessLease>, PluginError> {
-    let Some(row) = load_process_lease_row_tx(tx, process_id).await? else {
-        return Ok(None);
-    };
-    Ok(row.project(process_id, fleet_format))
-}
-
-/// Insert-or-replace the persisted lease row for `process_id` with a fresh
-/// lease owned by `owner` at `fencing_token`.
-pub(crate) async fn acquire_process_lease_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &ProcessId,
-    owner: &LeaseOwnerIdentity,
-    fencing_token: u64,
-    now: u64,
-    lease_ttl_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
-) -> Result<ProcessLease, PluginError> {
-    let lease = registry_transitions::acquired_process_lease(
-        process_id,
-        owner,
-        fencing_token,
-        now,
-        lease_ttl_ms,
-        fleet_format,
-    );
-    let sql_fencing_token = plugin_sql_monotonic_counter_value(
-        "process_lease_fencing_token",
-        fencing_token.saturating_sub(1),
-        lease.fencing_token,
-    )?;
-    sqlx::query(process_sql().lease_postgres.upsert_acquired.sql())
-        .bind(lease.process_id.as_str())
-        .bind(&lease.owner.owner_id)
-        .bind(&lease.owner.incarnation_id)
-        .bind(&lease.lease_token)
-        .bind(sql_fencing_token)
-        .bind(lease.claimed_at_epoch_ms as i64)
-        .bind(lease.expires_at_epoch_ms as i64)
-        .execute(&mut **tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-    Ok(lease)
-}
-
-pub(crate) async fn retained_process_lease_fencing_token(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &ProcessId,
-) -> Result<u64, PluginError> {
-    let existing_fence: Option<i64> = sqlx::query_scalar(
-        process_sql()
-            .lease_postgres
-            .select_fencing_token_for_update
-            .sql(),
-    )
-    .bind(process_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    existing_fence
-        .map(|value| plugin_u64_from_sql("ProcessLease", "lease_fencing_token", value))
-        .transpose()
-        .map(|value| value.unwrap_or(0))
-}
-
-pub(crate) async fn validate_process_execution_authority_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+pub(crate) fn validate_process_execution_authority(
     process_id: &ProcessId,
     record: &ProcessRecord,
     authority: &ProcessExecutionWriteAuthority,
     start: Option<&ProcessStarted>,
-    now: u64,
-    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
-    match authority {
-        ProcessExecutionWriteAuthority::Invocation { .. } => {
-            if let Some(started) = start {
-                authority.validate_invocation_for_start(
-                    process_id,
-                    started,
-                    record.first_started.as_deref(),
-                )
-            } else {
-                authority.validate_invocation_for_write(process_id, record)
-            }
-        }
-        ProcessExecutionWriteAuthority::Lease { lease, .. } => {
-            // The process-id half of the fence is checked first so a lease for
-            // another process is refused without reading this process's row.
-            if lease.process_id != process_id {
-                return Err(PluginError::ProcessLeaseSuperseded {
-                    process_id: process_id.clone(),
-                });
-            }
-            let current = load_process_lease_tx(tx, process_id, fleet_format).await?;
-            registry_transitions::authorize_process_lease_write(
-                process_id,
-                lease,
-                current.as_ref(),
-                now,
-            )
-        }
+    if let Some(started) = start {
+        authority.validate_invocation_for_start(
+            process_id,
+            started,
+            record.first_started.as_deref(),
+        )
+    } else {
+        authority.validate_invocation_for_write(process_id, record)
     }
 }
 
-/// One authoritative wall-clock sample for every process-lease transaction.
-/// Using the database clock prevents worker clock skew from stealing or
-/// spuriously expiring a lease in multi-host Postgres deployments.
+/// Sample the PostgreSQL server clock for process-registry event timestamps.
 ///
-/// Deliberately the last item in this file: every lease atom above it is inside
-/// `postgres_clock_contract`'s lexical fence, and this is the one function
-/// allowed to read a clock at all. It is fenced too — a dedicated end-of-file
-/// region bans client clock reads from its body and from anything appended
-/// after it, and pins that its query samples `clock_timestamp()`.
-pub(crate) async fn process_lease_now_epoch_ms_tx(
+/// This is intentionally the final helper in the file: the clock-contract
+/// test fences its body and any code appended after it against client-clock
+/// reads.
+pub(crate) async fn process_registry_now_epoch_ms_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
     let now: i64 = sqlx::query_scalar(

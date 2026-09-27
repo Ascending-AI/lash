@@ -4,13 +4,9 @@
 
 Accepted.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour in its rows for the lease-claim outcomes
-`ProcessLeaseClaimOutcome` and `SessionExecutionLeaseClaimOutcome`. Those rows
-stay as written until the PR that deletes the code (FIG-3667, FIG-3668, or
-FIG-3600 for the session lease) removes them.
+Amended 2026-09-27 (FIG-3863): the process lease protocol and its
+`ProcessLeaseClaimOutcome` type are deleted under decision D21. The session
+execution lease outcome remains.
 
 ## Context
 
@@ -216,7 +212,6 @@ alphabetical order of the old name.
 | `ProcessEffectOutcome` | *unchanged* | Closed enum of terminal states per process operation. |
 | `ProcessEventAppendResult` | `ProcessEventAppendReceipt` | Acknowledges a recorded event and any wake it armed. |
 | `ProcessHandleSummary` | `ProcessHandleView` | Read projection: the handle rendering of a process row. |
-| `ProcessLeaseClaimOutcome` | *unchanged* | Closed enum: acquired, or busy with the observed holder. |
 | `ProcessLiveReferenceSummary` | `ProcessLiveReferenceView` | Read projection of a definition's live references. |
 | `ProcessPruneReport` | *unchanged* | Retention aggregate: rows, events, and deliveries deleted. FIG-1505 builds on this vocabulary. |
 | `ProcessRecoveryAttemptDisposition` | `ProcessRecoveryAttemptOutcome` | Closed enum of how one recovery attempt ended. |

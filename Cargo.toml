@@ -243,7 +243,6 @@ rmcp = { version = "1.6", default-features = false }
 restate-sdk = { version = "0.11", default-features = false, features = ["http_server"] }
 schemars = "0.8"
 serde = "1"
-serde-content = { version = "0.1.2", default-features = false, features = ["serde", "std"] }
 serde_bytes = "0.11"
 # `float_roundtrip`: without it serde_json's fast float parser lands one ULP
 # off the written value for roughly a tenth of all doubles, so a journaled

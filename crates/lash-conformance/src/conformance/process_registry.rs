@@ -12,7 +12,6 @@ mod observer_transfer;
 mod parent_end;
 mod registration;
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
-pub use lifecycle::superseded_process_lease_cannot_release_or_complete;
 pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
 pub use registration::{
     a_host_start_key_is_scoped_to_its_owner_and_fences_its_content,
@@ -90,13 +89,13 @@ pub async fn long_cancellation_requester_replay_is_backend_safe(
     event_replay::long_cancellation_requester_replay_is_backend_safe(registry).await;
 }
 
-/// Prove that leased terminal replay repairs a stale record projection from
+/// Prove that terminal replay repairs a stale record projection from
 /// the persisted tail event on the backend under test.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn leased_completion_replay_repairs_projection<C, Fut>(
+pub async fn external_completion_replay_repairs_projection<C, Fut>(
     registry: Arc<dyn ProcessRegistry>,
     corrupt_projection: C,
 ) where
@@ -112,23 +111,17 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
             lash_core::Lifetime::Detached,
         ))
         .await
-        .expect("register leased replay repair process");
+        .expect("register external replay repair process");
     let process_id = base.id.clone();
-    let lease = registry
-        .claim_process_lease(
-            &process_id,
-            &crate::LeaseOwnerIdentity::opaque("repair-owner", "repair-incarnation"),
-            60_000,
-        )
-        .await
-        .expect("claim leased replay repair process")
-        .acquired()
-        .expect("leased replay repair lease acquired");
     let output = settled_success(serde_json::json!({"repaired": true}));
     let committed = registry
-        .complete_process_with_lease(&lease, output.clone())
+        .complete_process(
+            &process_id,
+            output.clone(),
+            ProcessCompletionAuthority::external_owner(),
+        )
         .await
-        .expect("commit leased terminal event");
+        .expect("commit external terminal event");
     assert!(matches!(
         committed,
         crate::ProcessCompletionOutcome::Committed(ref stored) if stored.is_terminal()
@@ -146,9 +139,13 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
     );
 
     let replayed = registry
-        .complete_process_with_lease(&lease, output)
+        .complete_process(
+            &process_id,
+            output,
+            ProcessCompletionAuthority::external_owner(),
+        )
         .await
-        .expect("replay leased terminal event");
+        .expect("replay external terminal event");
     assert!(matches!(
         replayed,
         crate::ProcessCompletionOutcome::AlreadyApplied { ref stored }
@@ -158,10 +155,10 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
         registry
             .get_process(&process_id)
             .await
-            .expect("read repaired leased replay projection")
+            .expect("read repaired external replay projection")
             .expect("repaired process exists")
             .is_terminal(),
-        "leased completion replay must persist the repaired terminal projection"
+        "external completion replay must persist the repaired terminal projection"
     );
 }
 
@@ -495,108 +492,41 @@ pub async fn watched_process_registry_start_key_after_prune_starts_a_new_process
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessRegistry>) {
-    let mut process_ids = Vec::new();
-    for label in [
-        "lease-batch-leased",
-        "lease-batch-unleased",
-        "lease-batch-terminal",
-    ] {
-        process_ids.push(
-            registry
-                .register_process(registration(label))
-                .await
-                .expect("register batch lease-read fixture")
-                .id,
-        );
-    }
-    registry
-        .claim_process_lease(
-            &process_ids[0],
-            &process_lease_owner("lease-batch-owner"),
-            60_000,
-        )
-        .await
-        .expect("claim batch lease-read fixture")
-        .acquired()
-        .expect("batch lease-read fixture acquired");
-    registry
-        .complete_process(
-            &process_ids[2],
-            settled_success(serde_json::json!({"terminal": true})),
-            ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete terminal batch lease-read fixture");
-
-    let batched = registry
-        .get_process_leases(&process_ids)
-        .await
-        .expect("batch read process leases");
-    let mut point = Vec::with_capacity(process_ids.len());
-    for process_id in &process_ids {
-        point.push(
-            registry
-                .get_process_lease(process_id)
-                .await
-                .expect("point read process lease"),
-        );
-    }
-    assert_eq!(batched.len(), 3, "batch reads preserve input cardinality");
-    assert_eq!(
-        batched.iter().filter(|lease| lease.is_some()).count(),
-        1,
-        "only the leased process carries lease evidence"
-    );
-    assert_eq!(
-        serde_json::to_value(&batched).expect("serialize batch leases"),
-        serde_json::to_value(&point).expect("serialize point leases"),
-        "batched lease reads must equal aligned point reads"
-    );
-}
-
-/// Lifecycle refusals come from the shared process-event fold, so every
-/// registry backend must return the fold's exact answer for the same record
-/// and requested transition.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn lifecycle_transition_refusals_are_backend_invariant(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let departed_id = "transition-refusal-departed-wait";
     let departed = registry
-        .register_process(registration(departed_id))
+        .register_process(executed_registration(departed_id))
         .await
         .expect("register departed-wait-refusal process");
     let departed_id = departed.id.clone();
+    let authority = crate::ProcessExecutionWriteAuthority::invocation(
+        departed_id.clone(),
+        "transition-refusal:execution",
+    )
+    .bind_attempt(1);
     registry
-        .record_caller_departure(&departed_id)
+        .record_first_started_with_authority(
+            &departed_id,
+            authority
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &authority,
+        )
         .await
-        .expect("record caller departure before wait refusal");
+        .expect("record departed-wait process execution start");
     assert_session_refusal(
-        registry
-            .set_process_wait(
-                &departed_id,
-                WaitState {
-                    since_ms: departed.updated_at_ms,
-                    kind: WaitKind::Signal {
-                        name: "resume".to_string(),
-                        event_type: "signal.resume".to_string(),
-                        key: format!("{departed_id}:signal.resume:1"),
-                        ordinal: 1,
-                    },
-                },
-            )
-            .await,
-        &format!("caller-departed process `{departed_id}` cannot enter a wait state"),
+        registry.record_caller_departure(&departed_id).await,
+        &format!(
+            "process `{departed_id}` is not externally-owned and cannot record a caller departure"
+        ),
     );
     registry
         .complete_process(
             &departed_id,
             settled_success(serde_json::Value::Null),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(departed_id.as_str()),
         )
         .await
         .expect("reconcile departed-wait-refusal process");
@@ -709,18 +639,18 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
     for index in 0..7 {
         process_ids.push(
             registry
-                .register_process(registration(&format!("paged-worklist-{index:02}")))
+                .register_process(registration(&format!("paged-process-{index:02}")))
                 .await
-                .expect("register paged worklist process")
+                .expect("register paged process")
                 .id,
         );
     }
 
     let limit = std::num::NonZeroUsize::new(2).expect("non-zero test page size");
     let first = registry
-        .list_non_terminal_page(limit, None)
+        .list_non_terminal_processes_page(limit, None)
         .await
-        .expect("read first recovery worklist page");
+        .expect("read first non-terminal page");
     assert_eq!(
         first.records.len(),
         2,
@@ -750,9 +680,9 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
     let mut continuation = first.continuation;
     while let Some(cursor) = continuation {
         let page = registry
-            .list_non_terminal_page(limit, Some(cursor))
+            .list_non_terminal_processes_page(limit, Some(cursor))
             .await
-            .expect("read recovery worklist continuation");
+            .expect("read non-terminal page continuation");
         page_count += 1;
         returned_ids.extend(page.records.into_iter().map(|record| record.id));
         continuation = page.continuation;
@@ -774,23 +704,84 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
         1,
         "a process completed after its page must not be dispatched again"
     );
-    worklist_excludes_rows_terminalized_before_a_later_page(Arc::clone(&registry)).await;
-    worklist_captured_boundary_defers_beyond_bound_insert(registry).await;
+    non_terminal_page_excludes_rows_terminalized_before_a_later_page(Arc::clone(&registry)).await;
+    non_terminal_page_bound_defers_beyond_bound_insert(registry).await;
+}
+
+/// A non-terminal registry pass is bounded per read and visits every row over
+/// successive pages, even when its requested page size exceeds the hard cap.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn non_terminal_process_pages_visit_every_row_across_the_page_bound(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let mut process_ids = Vec::new();
+    for index in 0..=lash_core::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE {
+        process_ids.push(
+            registry
+                .register_process(registration(&format!("bounded-page-{index:04}")))
+                .await
+                .expect("register bounded-page process")
+                .id,
+        );
+    }
+
+    let requested = std::num::NonZeroUsize::new(usize::MAX).expect("non-zero page size");
+    let first = registry
+        .list_non_terminal_processes_page(requested, None)
+        .await
+        .expect("read first bounded process page");
+    assert!(
+        first.records.len() <= lash_core::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
+        "a caller request cannot exceed the hard page bound"
+    );
+
+    let mut page_count = 1;
+    let mut returned_ids = first
+        .records
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<Vec<_>>();
+    let mut continuation = first.continuation;
+    while let Some(cursor) = continuation {
+        let page = registry
+            .list_non_terminal_processes_page(requested, Some(cursor))
+            .await
+            .expect("read bounded process continuation");
+        assert!(
+            page.records.len() <= lash_core::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
+            "each continuation respects the hard page bound"
+        );
+        page_count += 1;
+        returned_ids.extend(page.records.into_iter().map(|record| record.id));
+        continuation = page.continuation;
+    }
+
+    assert!(page_count > 1, "the fixture must span more than one page");
+    for process_id in &process_ids {
+        assert_eq!(
+            returned_ids.iter().filter(|id| *id == process_id).count(),
+            1,
+            "every non-terminal row in the scan must be returned exactly once"
+        );
+    }
 }
 
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<ProcessId> {
+async fn collect_non_terminal_process_ids(registry: &dyn ProcessRegistry) -> Vec<ProcessId> {
     let limit = std::num::NonZeroUsize::new(128).expect("non-zero test page size");
     let mut continuation = None;
     let mut ids = Vec::new();
     loop {
         let page = registry
-            .list_non_terminal_page(limit, continuation)
+            .list_non_terminal_processes_page(limit, continuation)
             .await
-            .expect("scan complete recovery worklist");
+            .expect("scan complete non-terminal registry");
         ids.extend(page.records.into_iter().map(|record| record.id));
         let Some(next) = page.continuation else {
             return ids;
@@ -804,14 +795,14 @@ async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<ProcessId> 
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
+pub async fn non_terminal_page_excludes_rows_terminalized_before_a_later_page(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let mut ids = Vec::new();
     for label in [
-        "worklist-terminal-later-a",
-        "worklist-terminal-later-b",
-        "worklist-terminal-later-c",
+        "non-terminal-page-later-a",
+        "non-terminal-page-later-b",
+        "non-terminal-page-later-c",
     ] {
         ids.push(
             registry
@@ -821,7 +812,7 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
                 .id,
         );
     }
-    // Minted ids order the worklist; the law needs only their relative order,
+    // Minted ids order the scan; the law needs only their relative order,
     // never a chosen position.
     ids.sort();
     let [first_id, terminalized_id, last_id] =
@@ -832,7 +823,7 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
     let mut continuation = None;
     loop {
         let page = registry
-            .list_non_terminal_page(limit, continuation)
+            .list_non_terminal_processes_page(limit, continuation)
             .await
             .expect("read up to the first later-page fixture");
         let reached = page.records.iter().any(|record| record.id == first_id);
@@ -857,7 +848,7 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
     let mut ids = Vec::new();
     while let Some(cursor) = continuation {
         let page = registry
-            .list_non_terminal_page(limit, Some(cursor))
+            .list_non_terminal_processes_page(limit, Some(cursor))
             .await
             .expect("read later-page terminalization continuation");
         ids.extend(page.records.into_iter().map(|record| record.id));
@@ -872,18 +863,18 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
+pub async fn non_terminal_page_bound_defers_beyond_bound_insert(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let limit = std::num::NonZeroUsize::new(1).expect("non-zero test page size");
     let first = registry
-        .list_non_terminal_page(limit, None)
+        .list_non_terminal_processes_page(limit, None)
         .await
-        .expect("capture bounded worklist scan");
+        .expect("capture bounded non-terminal scan");
     // A registrar mints ids in order, so a row registered after the scan
     // captured its bound sorts beyond it.
     let inserted_id = registry
-        .register_process(registration("worklist-after-captured-bound"))
+        .register_process(registration("page-after-captured-bound"))
         .await
         .expect("insert beyond captured bound")
         .id;
@@ -896,7 +887,7 @@ pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
     let mut continuation = first.continuation;
     while let Some(cursor) = continuation {
         let page = registry
-            .list_non_terminal_page(limit, Some(cursor))
+            .list_non_terminal_processes_page(limit, Some(cursor))
             .await
             .expect("read captured-bound continuation");
         current_scan_ids.extend(page.records.into_iter().map(|record| record.id));
@@ -907,7 +898,7 @@ pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
         "an insert beyond the captured bound must not leak into the current scan"
     );
     assert!(
-        collect_worklist_ids(registry.as_ref())
+        collect_non_terminal_process_ids(registry.as_ref())
             .await
             .contains(&inserted_id),
         "the next scan must include the beyond-bound insert"
@@ -942,20 +933,22 @@ async fn refolded_process_record_matches_stored_projection(
         .expect("register refold process");
     let process_id = &base.id.clone();
     assert_refold_matches_stored_projection(&reader, &base, process_id, "registration").await;
+    let authority = crate::ProcessExecutionWriteAuthority::invocation(
+        (*process_id).clone(),
+        format!("refold-worker:{process_id}"),
+    )
+    .bind_attempt(1);
     writer
-        .record_first_started(
+        .record_first_started_with_authority(
             process_id,
             crate::ProcessStarted {
-                owner: crate::LeaseOwnerIdentity::opaque(
-                    "refold-worker",
-                    format!("refold-worker:{process_id}"),
-                ),
-                fencing_token: 0,
+                owner: authority.owner_identity(),
                 attempt: 1,
                 started_at_ms: base.created_at_ms,
                 build_generation: None,
                 generation: None,
             },
+            &authority,
         )
         .await
         .expect("record refold first start");
@@ -970,12 +963,12 @@ async fn refolded_process_record_matches_stored_projection(
         },
     };
     writer
-        .set_process_wait(process_id, wait)
+        .set_process_wait_with_authority(process_id, wait, Vec::new(), &authority)
         .await
         .expect("enter refold wait");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "wait entered").await;
     writer
-        .clear_process_wait(process_id)
+        .clear_process_wait_with_authority(process_id, Vec::new(), &authority)
         .await
         .expect("clear refold wait");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "wait cleared").await;
@@ -1178,9 +1171,9 @@ pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn ProcessRegistry>) {
-    let definition = serde_json::json!({"suite": "waiting-recovery-worklist"});
-    let env_ref = ProcessExecutionEnvRef::new("process-env:waiting-recovery-worklist");
+pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn ProcessRegistry>) {
+    let definition = serde_json::json!({"suite": "waiting-non-terminal-scan"});
+    let env_ref = ProcessExecutionEnvRef::new("process-env:waiting-non-terminal-scan");
     let count_before = registry
         .count_non_terminal_processes()
         .await
@@ -1189,7 +1182,7 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
         .register_process(
             ProcessRegistration::new(
                 ProcessInput::Engine {
-                    kind: "waiting-recovery-worklist".to_string(),
+                    kind: "waiting-non-terminal-scan".to_string(),
                     payload: serde_json::Value::Null,
                 },
                 ProcessProvenance::host(),
@@ -1198,7 +1191,7 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::for_definition(
                     lash_core::ProcessDefinitionRef::unclaimed(
-                        "waiting-recovery-worklist",
+                        "waiting-non-terminal-scan",
                         definition.clone(),
                     ),
                     None::<String>,
@@ -1209,8 +1202,23 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
         .await
         .expect("register waiting process");
     let process_id = record.id.clone();
+    let authority = crate::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        format!("waiting-scan:{process_id}"),
+    )
+    .bind_attempt(1);
     registry
-        .set_process_wait(
+        .record_first_started_with_authority(
+            &process_id,
+            authority
+                .invocation_started()
+                .expect("the authority is bound to attempt one"),
+            &authority,
+        )
+        .await
+        .expect("start the waiting process");
+    registry
+        .set_process_wait_with_authority(
             &process_id,
             WaitState {
                 since_ms: record.created_at_ms,
@@ -1221,12 +1229,14 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
                     ordinal: 1,
                 },
             },
+            Vec::new(),
+            &authority,
         )
         .await
         .expect("park process");
 
     let non_terminal = registry
-        .list_non_terminal_page(
+        .list_non_terminal_processes_page(
             std::num::NonZeroUsize::new(128).expect("non-zero test page size"),
             None,
         )
@@ -1260,291 +1270,6 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
                 && summary.process_count == 1
         }),
         "live-reference accounting must retain waiting process rows"
-    );
-}
-
-fn process_lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
-    crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn claim_after_expiry(
-    registry: &dyn ProcessRegistry,
-    process_id: &ProcessId,
-    owner: &crate::LeaseOwnerIdentity,
-) -> crate::ProcessLease {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        match registry
-            .claim_process_lease(process_id, owner, 60_000)
-            .await
-            .expect("claim after expiry")
-        {
-            crate::ProcessLeaseClaimOutcome::Acquired(lease) => return lease,
-            crate::ProcessLeaseClaimOutcome::Busy { .. }
-                if tokio::time::Instant::now() < deadline =>
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            crate::ProcessLeaseClaimOutcome::Busy { holder } => {
-                panic!("lease remained busy after expiry: {holder:?}")
-            }
-        }
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
-    const SHORT_TTL_MS: u64 = 20;
-
-    // A lease is authority over a retained registry row, so a claim for a
-    // process the store never registered must be refused, never materialized.
-    // FIG-953: the in-memory registry used to invent a lease here, which the
-    // cross-backend differential caught at seed 852 as raw-state divergence
-    // from the SQL backends.
-    match registry
-        .claim_process_lease(
-            &crate::ProcessId::fixture("lease-never-registered"),
-            &process_lease_owner("owner-a"),
-            60_000,
-        )
-        .await
-    {
-        Err(crate::PluginError::ProcessUnknown { process_id }) => {
-            assert_eq!(
-                process_id,
-                crate::ProcessId::fixture("lease-never-registered")
-            );
-        }
-        other => {
-            panic!("claiming a lease for an unregistered process must be refused, got {other:?}")
-        }
-    }
-    assert!(
-        registry
-            .get_process_lease(&crate::ProcessId::fixture("lease-never-registered"))
-            .await
-            .expect("read lease for unregistered process")
-            .is_none(),
-        "a refused claim must not persist a lease row"
-    );
-    let lease_active = registry
-        .register_process(registration("lease-active"))
-        .await
-        .expect("register active lease process")
-        .id;
-    let first = registry
-        .claim_process_lease(&lease_active, &process_lease_owner("owner-a"), 60_000)
-        .await
-        .expect("claim active lease")
-        .acquired()
-        .expect("active lease acquired");
-    let conflict = registry
-        .claim_process_lease(&lease_active, &process_lease_owner("owner-b"), 60_000)
-        .await
-        .expect("competing claim");
-    assert!(
-        matches!(
-            conflict,
-            crate::ProcessLeaseClaimOutcome::Busy { ref holder }
-                if holder.lease_token == first.lease_token
-        ),
-        "a live lease must fence a competing owner"
-    );
-    let reentered = registry
-        .claim_process_lease(&lease_active, &process_lease_owner("owner-a"), 120_000)
-        .await
-        .expect("re-enter lease")
-        .acquired()
-        .expect("same owner re-enters");
-    assert_eq!(reentered.lease_token, first.lease_token);
-    assert_eq!(reentered.fencing_token, first.fencing_token);
-    let lease_renew = registry
-        .register_process(registration("lease-renew"))
-        .await
-        .expect("register renewal process")
-        .id;
-    let short = registry
-        .claim_process_lease(&lease_renew, &process_lease_owner("owner-a"), 60_000)
-        .await
-        .expect("claim short lease")
-        .acquired()
-        .expect("short lease acquired");
-    let renewed = registry
-        .renew_process_lease(&short, 120_000)
-        .await
-        .expect("renew lease");
-    assert!(
-        renewed.expires_at_epoch_ms > short.expires_at_epoch_ms,
-        "renewal must extend the persisted lease expiry"
-    );
-    let persisted_renewed = registry
-        .get_process_lease(&lease_renew)
-        .await
-        .expect("read renewed lease")
-        .expect("renewed lease remains persisted");
-    assert_eq!(
-        persisted_renewed.expires_at_epoch_ms, renewed.expires_at_epoch_ms,
-        "renewal must write the returned expiry to the persisted lease"
-    );
-    registry
-        .renew_process_lease(&renewed, 120_000)
-        .await
-        .expect("extended lease remains renewable");
-    let lease_release = registry
-        .register_process(registration("lease-release"))
-        .await
-        .expect("register release process")
-        .id;
-    let released = registry
-        .claim_process_lease(&lease_release, &process_lease_owner("owner-a"), 60_000)
-        .await
-        .expect("claim releasable lease")
-        .acquired()
-        .expect("releasable lease acquired");
-    registry
-        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&released))
-        .await
-        .expect("release lease");
-    let reclaimed = registry
-        .claim_process_lease(&lease_release, &process_lease_owner("owner-b"), 60_000)
-        .await
-        .expect("claim released lease")
-        .acquired()
-        .expect("released lease acquired");
-    assert!(reclaimed.fencing_token > released.fencing_token);
-    let lease_stale_release = registry
-        .register_process(registration("lease-stale-release"))
-        .await
-        .expect("register stale-release process")
-        .id;
-    let stale_release = registry
-        .claim_process_lease(&lease_stale_release, &process_lease_owner("owner-a"), 0)
-        .await
-        .expect("claim immediately expiring lease")
-        .acquired()
-        .expect("immediately expiring lease acquired");
-    let live = registry
-        .claim_process_lease(
-            &lease_stale_release,
-            &process_lease_owner("owner-b"),
-            60_000,
-        )
-        .await
-        .expect("claim successor lease")
-        .acquired()
-        .expect("successor lease acquired");
-    registry
-        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&stale_release))
-        .await
-        .expect("stale release is idempotently ignored");
-    let still_busy = registry
-        .claim_process_lease(
-            &lease_stale_release,
-            &process_lease_owner("owner-c"),
-            60_000,
-        )
-        .await
-        .expect("claim against live successor");
-    assert!(matches!(
-        still_busy,
-        crate::ProcessLeaseClaimOutcome::Busy { .. }
-    ));
-    registry
-        .renew_process_lease(&live, 60_000)
-        .await
-        .expect("successor remains renewable");
-
-    let lease_stale_completion_id = registry
-        .register_process(registration("lease-stale-completion"))
-        .await
-        .expect("register stale-completion process")
-        .id;
-    let stale = registry
-        .claim_process_lease(
-            &lease_stale_completion_id,
-            &process_lease_owner("owner-a"),
-            SHORT_TTL_MS,
-        )
-        .await
-        .expect("claim stale candidate")
-        .acquired()
-        .expect("stale candidate acquired");
-    let current = claim_after_expiry(
-        registry.as_ref(),
-        &lease_stale_completion_id,
-        &process_lease_owner("owner-b"),
-    )
-    .await;
-    assert!(
-        registry
-            .complete_process_with_lease(
-                &stale,
-                settled_success(serde_json::json!({"writer": "stale"})),
-            )
-            .await
-            .is_err(),
-        "a superseded lease must not complete the process"
-    );
-    let record = registry
-        .get_process(&lease_stale_completion_id)
-        .await
-        .expect("read stale-completion process")
-        .expect("stale-completion process exists");
-    assert!(!record.is_terminal());
-    let lease_after_stale_completion = registry
-        .get_process_lease(&lease_stale_completion_id)
-        .await
-        .expect("read current lease")
-        .expect("current lease remains");
-    assert_eq!(
-        lease_after_stale_completion.lease_token,
-        current.lease_token
-    );
-    assert_eq!(
-        lease_after_stale_completion.fencing_token,
-        current.fencing_token
-    );
-
-    let lease_expired_completion_id = registry
-        .register_process(registration("lease-expired-completion"))
-        .await
-        .expect("register expired-completion process")
-        .id;
-    let expired = registry
-        .claim_process_lease(
-            &lease_expired_completion_id,
-            &process_lease_owner("owner-a"),
-            SHORT_TTL_MS,
-        )
-        .await
-        .expect("claim expiring lease")
-        .acquired()
-        .expect("expiring lease acquired");
-    tokio::time::sleep(std::time::Duration::from_millis(SHORT_TTL_MS + 100)).await;
-    assert!(
-        registry
-            .complete_process_with_lease(
-                &expired,
-                settled_success(serde_json::json!({"writer": "expired"})),
-            )
-            .await
-            .is_err(),
-        "an expired lease must not complete the process"
-    );
-    assert!(
-        !registry
-            .get_process(&lease_expired_completion_id)
-            .await
-            .expect("read expired-completion process")
-            .expect("expired-completion process exists")
-            .is_terminal()
     );
 }
 
@@ -1820,14 +1545,6 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     event_paging::assert_pruned_history(&registry, &process_id, pruned_at_ms).await;
-    // A pruned process has no row to hold authority over, so a lease claim must
-    // read as the tombstone rather than resurrecting a lease (FIG-953).
-    assert!(matches!(
-        registry
-            .claim_process_lease(&process_id, &process_lease_owner("after-prune"), 60_000)
-            .await,
-        Err(crate::PluginError::ProcessNoLongerRetained { .. })
-    ));
     assert!(matches!(
         registry
             .append_event(
@@ -1966,7 +1683,7 @@ pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegis
 ///
 /// Every transition in the model is exercised here, legal and illegal alike:
 /// the state is durable, reachable only from a running Externally-Owned row,
-/// idempotent, refused from every other source state and disposition, closable
+/// idempotent, refused from every other source state and input class, closable
 /// by external reconciliation, and never retracts a reconciled terminal state.
 #[expect(
     clippy::expect_used,
@@ -2029,16 +1746,16 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
 
     // A caller-departed row is not live: recovery must never pick it up, and a
     // live listing must not present it as work still in flight.
-    let worklist = registry
-        .list_non_terminal_page(
+    let page = registry
+        .list_non_terminal_processes_page(
             std::num::NonZeroUsize::new(256).expect("non-zero page size"),
             None,
         )
         .await
-        .expect("read recovery worklist")
+        .expect("read non-terminal registry page")
         .records;
     assert!(
-        !worklist.iter().any(|record| record.id == process_id),
+        !page.iter().any(|record| record.id == process_id),
         "recovery may never act on a caller-departed row"
     );
     let live = registry
@@ -2087,7 +1804,8 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
         "external reconciliation must be able to find the state on every backend"
     );
 
-    // Illegal: waiting is an execution state an externally-owned row never has.
+    // An externally-owned row has no engine invocation authority, so it cannot
+    // enter an execution wait state after caller departure.
     let wait_refusal = registry
         .set_process_wait(
             &process_id,

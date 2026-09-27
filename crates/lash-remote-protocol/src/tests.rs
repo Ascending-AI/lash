@@ -1239,8 +1239,6 @@ fn remote_process_dtos_json_round_trip() {
                 created_at_ms: 1,
                 updated_at_ms: 2,
                 first_started: None,
-                lease_holder: None,
-                lease_expires_at_ms: None,
                 cancel_request: None,
                 input: RemoteProcessInput::External {
                     metadata: serde_json::json!({ "label": "Import" }),

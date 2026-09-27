@@ -14,29 +14,29 @@
 use crate::process_registry::sql::process_sql;
 
 #[test]
-fn worklist_statements_keep_their_previous_bytes() {
+fn non_terminal_page_statements_keep_their_previous_bytes() {
     let process = &process_sql().process_sqlite;
     assert_eq!(
-        process.count_live_worklist.sql(),
-        "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_live_worklist
+        process.count_non_terminal_processes.sql(),
+        "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_non_terminal
      WHERE status IN ('running', 'waiting')"
     );
     assert_eq!(
-        process.select_max_worklist_process_id.sql(),
-        "SELECT MAX(process_id) FROM processes INDEXED BY idx_processes_live_worklist
+        process.select_max_non_terminal_process_id.sql(),
+        "SELECT MAX(process_id) FROM processes INDEXED BY idx_processes_non_terminal
      WHERE status IN ('running', 'waiting')"
     );
     assert_eq!(
-        process.list_first_worklist_page.sql(),
+        process.list_first_non_terminal_process_page.sql(),
         "SELECT record_json FROM processes
-     INDEXED BY idx_processes_live_worklist
+     INDEXED BY idx_processes_non_terminal
      WHERE status IN ('running', 'waiting') AND process_id <= ?1
      ORDER BY process_id ASC LIMIT ?3"
     );
     assert_eq!(
-        process.list_next_worklist_page.sql(),
+        process.list_next_non_terminal_process_page.sql(),
         "SELECT record_json FROM processes
-     INDEXED BY idx_processes_live_worklist
+     INDEXED BY idx_processes_non_terminal
      WHERE status IN ('running', 'waiting')
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3"
@@ -212,7 +212,7 @@ mod vocabulary_tokens {
         let schema = crate::schema::PROCESS_SCHEMA;
         for (index, declared) in [
             (
-                "idx_processes_live_worklist",
+                "idx_processes_non_terminal",
                 format!(
                     "    ON processes(process_id) WHERE {};",
                     rendered("{{live_process_status(status)}}")

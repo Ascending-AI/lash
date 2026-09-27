@@ -88,7 +88,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("recovery_leader", "lash_recovery_leader"),
     pair("draining_generations", "lash_draining_generations"),
     pair("process_events", "lash_process_events"),
-    pair("process_leases", "lash_process_leases"),
     pair("process_observers", "lash_process_observers"),
     pair("parent_end_plans", "lash_parent_end_plans"),
     pair("process_artifact_cleanup", "lash_process_artifact_cleanup"),

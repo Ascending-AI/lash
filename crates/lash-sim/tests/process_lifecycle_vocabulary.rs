@@ -5,7 +5,7 @@
 //! `status IN ('running', 'waiting')` at 35 sites, with retention as its
 //! `NOT IN` inverse and the wake-delivery labels spelled out again. Adding a
 //! [`ProcessStatus`] variant compiled clean and silently dropped rows from
-//! worklist queries while making live rows prunable. Both backends now build
+//! non-terminal page queries while making live rows prunable. Both backends now build
 //! those predicates from the exported vocabulary
 //! (`lash_core::store_backend_support::live_process_status_predicate_sql` and
 //! friends); this test fails if a raw literal comes back.

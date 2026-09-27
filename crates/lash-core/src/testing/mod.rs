@@ -19,10 +19,10 @@
 // serves its own store-backed tests and is not re-exported here.
 pub use lash_core_execution::testing::{
     EffectLayer, EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
-    LayeredEffectHost, MockSessionManager, ProcessRegistryFaults, RegistrationHoldPoint,
-    RuntimeCommitBudgetMeasurement, TestClock, TestExecutionContextBuilder, TestExecutionPorts,
-    TestProvider, TestProviderBuilder, UnavailableEffectController,
-    UnavailableProcessExecutionEnvStore, WorklistPagePause, WorklistPageRead, attempt_sentinel,
+    LayeredEffectHost, MockSessionManager, NonTerminalPagePause, NonTerminalPageRead,
+    ProcessRegistryFaults, RegistrationHoldPoint, RuntimeCommitBudgetMeasurement, TestClock,
+    TestExecutionContextBuilder, TestExecutionPorts, TestProvider, TestProviderBuilder,
+    UnavailableEffectController, UnavailableProcessExecutionEnvStore, attempt_sentinel,
     behavior_transcript, cancelled_code_execution_context, code_execution_context,
     code_execution_context_for_process, code_execution_context_stopped,
     code_execution_context_stopped_on, code_execution_context_with_invocation,

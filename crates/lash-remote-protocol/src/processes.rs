@@ -789,10 +789,6 @@ pub struct RemoteObservedProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_started: Option<RemoteProcessStarted>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease_holder: Option<RemoteLeaseOwnerIdentity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease_expires_at_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<lash_sansio::CancelRequest>,
     pub input: RemoteProcessInput,
     pub originator: RemoteProcessOriginator,
@@ -821,9 +817,6 @@ impl RemoteObservedProcess {
         }
         self.input.validate(type_name)?;
         self.originator.validate(type_name)?;
-        if let Some(lease_holder) = &self.lease_holder {
-            lease_holder.validate(type_name)?;
-        }
         if let Some(first_started) = &self.first_started {
             first_started.owner.validate(type_name)?;
         }
@@ -1042,8 +1035,6 @@ pub struct RemoteAbandonEvidence {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStarted {
     pub owner: RemoteLeaseOwnerIdentity,
-    #[serde(default)]
-    pub fencing_token: u64,
     #[serde(default = "remote_first_process_attempt")]
     pub attempt: u32,
     pub started_at_ms: u64,

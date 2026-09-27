@@ -620,7 +620,7 @@
   "waiting_process": {
     "id": "p_00000000000070008000000000000001",
     "start_key": "process-start-key:v1:host:blake3:31478e59bda91f8d59606543c763719fe0813e431d1bc9e7ba1856a186e31ce4",
-    "last_event_sequence": 4,
+    "last_event_sequence": 5,
     "input": {
       "type": "engine",
       "kind": "durable-read-engine",
@@ -711,6 +711,14 @@
     "env_ref": "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738",
     "created_at_ms": 1700000000000,
     "updated_at_ms": 1700000000000,
+    "first_started": {
+      "owner": {
+        "owner_id": "restate:p_00000000000070008000000000000001",
+        "incarnation_id": "durable-read-fixture"
+      },
+      "attempt": 1,
+      "started_at_ms": 0
+    },
     "wait": {
       "kind": {
         "kind": "signal",

@@ -3,7 +3,7 @@ use lash_core_execution::{ProcessInput, ProcessProvenance, ProcessRegistration};
 
 const REGISTERED: usize = 10;
 
-/// Registers minted rows and pages the worklist two at a time: the pages must
+/// Registers minted rows and reads pages two at a time: the pages must
 /// visit every row once, in byte order of the minted id, on either backend.
 async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String>, Vec<String>) {
     let mut registered = Vec::new();
@@ -18,7 +18,7 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
                     lash_core_execution::Lifetime::Detached,
                 ))
                 .await
-                .expect("register worklist fixture")
+                .expect("register page fixture")
                 .id
                 .to_string(),
         );
@@ -27,9 +27,9 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
     let mut continuation = None;
     loop {
         let page = registry
-            .list_non_terminal_page(std::num::NonZeroUsize::new(2).unwrap(), continuation)
+            .list_non_terminal_processes_page(std::num::NonZeroUsize::new(2).unwrap(), continuation)
             .await
-            .expect("read worklist page");
+            .expect("read non-terminal page");
         ids.extend(page.records.into_iter().map(|record| record.id.to_string()));
         continuation = page.continuation;
         if continuation.is_none() {
@@ -40,7 +40,7 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
 }
 
 #[tokio::test]
-async fn worklist_pagination_is_byte_ordered_on_both_backends() {
+async fn non_terminal_page_order_is_byte_ordered_on_both_backends() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
@@ -58,12 +58,12 @@ async fn worklist_pagination_is_byte_ordered_on_both_backends() {
     ] {
         let (mut registered, paged) = registered_and_paged_ids(registry).await;
         registered.sort_unstable();
-        assert_eq!(paged, registered, "{name} worklist byte order");
+        assert_eq!(paged, registered, "{name} non-terminal page byte order");
     }
 }
 
 #[tokio::test]
-async fn process_family_columns_and_worklist_index_pin_c_collation() {
+async fn process_family_columns_and_registry_scan_index_pin_c_collation() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
@@ -74,7 +74,6 @@ async fn process_family_columns_and_worklist_index_pin_c_collation() {
         "lash_process_wake_deliveries",
         "lash_process_observers",
         "lash_process_tombstones",
-        "lash_process_leases",
         "lash_process_segment_handovers",
     ] {
         let collation: String = sqlx::query_scalar(
@@ -106,10 +105,10 @@ async fn process_family_columns_and_worklist_index_pin_c_collation() {
     );
     let index: String = sqlx::query_scalar(
         "SELECT c.collname FROM pg_index i JOIN pg_collation c ON c.oid = i.indcollation[0]
-         WHERE i.indexrelid = 'idx_lash_processes_live_worklist'::regclass",
+         WHERE i.indexrelid = 'idx_lash_processes_non_terminal'::regclass",
     )
     .fetch_one(storage.pool())
     .await
     .expect("index collation");
-    assert_eq!(index, "C", "worklist index must inherit byte order");
+    assert_eq!(index, "C", "page index must inherit byte order");
 }

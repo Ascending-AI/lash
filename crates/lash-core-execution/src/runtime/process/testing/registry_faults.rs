@@ -1,6 +1,6 @@
-//! A registry decorator that injects read, lease, terminal-write and worklist
-//! faults and stale wake deliveries, holds a worklist page at a known point,
-//! and counts point and lease reads, over any backend.
+//! A registry decorator that injects read, terminal-write and page-read
+//! faults and stale wake deliveries, holds a non-terminal page at a known point,
+//! and counts point reads, over any backend.
 
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
@@ -14,10 +14,10 @@ use super::super::registry_delegate::{
 };
 
 /// Wraps a registry so a test can make its point reads of one process fail,
-/// miss, or answer a stale record, can fail its lease, terminal,
+/// miss, or answer a stale record, can fail terminal,
 /// external-reference and cancellation writes, can hand its wake-delivery
 /// driver a claimed delivery the registry no longer holds, and can count how
-/// its callers read processes and leases.
+/// its callers read processes.
 ///
 /// Reads are faulted at the point reads —
 /// [`get_process`](super::super::registry_concerns::ProcessQuery::get_process)
@@ -30,8 +30,6 @@ pub struct ProcessRegistryFaults {
     faults: Arc<std::sync::Mutex<ReadFaultPlan>>,
     injected_wakes: Arc<std::sync::Mutex<Vec<crate::WakeDelivery>>>,
     process_point_reads: Arc<AtomicUsize>,
-    lease_point_reads: Arc<AtomicUsize>,
-    lease_batch_reads: Arc<AtomicUsize>,
 }
 
 /// What a held external-reference write runs before it stops for good.
@@ -46,18 +44,15 @@ struct ReadFaultPlan {
     record_override: Option<crate::ProcessRecord>,
     pinned: Option<crate::ProcessRecord>,
     events_read_error: Option<crate::PluginError>,
-    lease_claim_error: Option<crate::PluginError>,
-    lease_renew_error: Option<crate::PluginError>,
-    lease_release_error: Option<crate::PluginError>,
     terminal_write_error: Option<crate::PluginError>,
     terminal_write_outcome: Option<crate::ProcessCompletionOutcome>,
     external_ref_write_error: Option<crate::PluginError>,
     external_ref_write_hold: Option<ExternalRefWriteHold>,
     cancel_request_write_error: Option<crate::PluginError>,
     event_append_error: Option<crate::PluginError>,
-    worklist_page_reads: Vec<WorklistPageRead>,
-    worklist_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
-    worklist_page_pause: Option<WorklistPagePause>,
+    non_terminal_page_reads: Vec<NonTerminalPageRead>,
+    non_terminal_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
+    non_terminal_page_pause: Option<NonTerminalPagePause>,
     registration_hold: Option<RegistrationHold>,
 }
 
@@ -77,18 +72,18 @@ struct RegistrationHold {
     reached: Arc<dyn Fn() + Send + Sync>,
 }
 
-/// One worklist-page read the decorator saw: the page limit and the
+/// One non-terminal-page read the decorator saw: the page limit and the
 /// continuation it was asked from.
-pub type WorklistPageRead = (usize, Option<crate::ProcessWorklistCursor>);
+pub type NonTerminalPageRead = (usize, Option<crate::ProcessRegistryCursor>);
 
-/// Holds the next worklist-page read until the test resumes it.
+/// Holds the next non-terminal-page read until the test resumes it.
 #[derive(Clone)]
-pub struct WorklistPagePause {
+pub struct NonTerminalPagePause {
     reached: Arc<tokio::sync::Notify>,
     resume: Arc<tokio::sync::Notify>,
 }
 
-impl WorklistPagePause {
+impl NonTerminalPagePause {
     fn new() -> Self {
         Self {
             reached: Arc::new(tokio::sync::Notify::new()),
@@ -119,8 +114,6 @@ impl ProcessRegistryFaults {
             faults: Arc::default(),
             injected_wakes: Arc::default(),
             process_point_reads: Arc::default(),
-            lease_point_reads: Arc::default(),
-            lease_batch_reads: Arc::default(),
         }
     }
 
@@ -161,23 +154,6 @@ impl ProcessRegistryFaults {
     /// The next event-history read fails with `error`, once.
     pub fn set_process_events_read_error(&self, error: crate::PluginError) {
         self.faults.lock_recover().events_read_error = Some(error);
-    }
-
-    /// Every process-lease claim fails with `error` until cleared with `None`.
-    pub fn set_process_lease_claim_error(&self, error: Option<crate::PluginError>) {
-        self.faults.lock_recover().lease_claim_error = error;
-    }
-
-    /// Every process-lease renewal fails with `error` until cleared with
-    /// `None`.
-    pub fn set_process_lease_renew_error(&self, error: Option<crate::PluginError>) {
-        self.faults.lock_recover().lease_renew_error = error;
-    }
-
-    /// Every process-lease release fails with `error` until cleared with
-    /// `None`.
-    pub fn set_process_lease_release_error(&self, error: Option<crate::PluginError>) {
-        self.faults.lock_recover().lease_release_error = error;
     }
 
     /// Every fenced terminal write fails with `error` until cleared with
@@ -221,19 +197,20 @@ impl ProcessRegistryFaults {
         self.faults.lock_recover().event_append_error = Some(error);
     }
 
-    /// After `successful_reads` more worklist-page reads pass, the following
+    /// After `successful_reads` more non-terminal-page reads pass, the following
     /// ones fail with `errors`, in order.
-    pub fn set_worklist_page_errors(
+    pub fn set_non_terminal_page_errors(
         &self,
         successful_reads: usize,
         errors: Vec<crate::PluginError>,
     ) {
-        self.faults.lock_recover().worklist_page_errors = Some((successful_reads, errors.into()));
+        self.faults.lock_recover().non_terminal_page_errors =
+            Some((successful_reads, errors.into()));
     }
 
-    /// Every worklist-page read that reached the decorator, in order.
-    pub fn worklist_page_reads(&self) -> Vec<WorklistPageRead> {
-        self.faults.lock_recover().worklist_page_reads.clone()
+    /// Every non-terminal-page read that reached the decorator, in order.
+    pub fn non_terminal_page_reads(&self) -> Vec<NonTerminalPageRead> {
+        self.faults.lock_recover().non_terminal_page_reads.clone()
     }
 
     /// The next registration through this decorator stops at `point` and
@@ -249,10 +226,10 @@ impl ProcessRegistryFaults {
         self.faults.lock_recover().registration_hold = Some(RegistrationHold { point, reached });
     }
 
-    /// Hold the next worklist-page read until the returned handle resumes it.
-    pub fn pause_next_worklist_page(&self) -> WorklistPagePause {
-        let pause = WorklistPagePause::new();
-        self.faults.lock_recover().worklist_page_pause = Some(pause.clone());
+    /// Hold the next non-terminal-page read until the returned handle resumes it.
+    pub fn pause_next_non_terminal_page(&self) -> NonTerminalPagePause {
+        let pause = NonTerminalPagePause::new();
+        self.faults.lock_recover().non_terminal_page_pause = Some(pause.clone());
         pause
     }
 
@@ -271,16 +248,6 @@ impl ProcessRegistryFaults {
         delivery.attempts = 1;
         self.injected_wakes.lock_recover().push(delivery);
         Ok(())
-    }
-
-    /// How many single-process lease reads reached the registry.
-    pub fn lease_point_reads(&self) -> usize {
-        self.lease_point_reads.load(Ordering::SeqCst)
-    }
-
-    /// How many batched lease reads reached the registry.
-    pub fn lease_batch_reads(&self) -> usize {
-        self.lease_batch_reads.load(Ordering::SeqCst)
     }
 
     fn faulted_read(&self) -> Option<Result<Option<crate::ProcessRecord>, crate::PluginError>> {
@@ -305,15 +272,6 @@ impl ProcessRegistryFaults {
         plan.pinned.clone().map(|record| Ok(Some(record)))
     }
 
-    fn lease_fault(
-        &self,
-        fault: impl FnOnce(&ReadFaultPlan) -> &Option<crate::PluginError>,
-    ) -> Result<(), crate::PluginError> {
-        fault(&self.faults.lock_recover())
-            .clone()
-            .map_or(Ok(()), Err)
-    }
-
     fn take_events_read_fault(&self) -> Result<(), crate::PluginError> {
         self.faults
             .lock_recover()
@@ -322,9 +280,9 @@ impl ProcessRegistryFaults {
             .map_or(Ok(()), Err)
     }
 
-    fn worklist_page_fault(&self) -> Result<(), crate::PluginError> {
+    fn non_terminal_page_fault(&self) -> Result<(), crate::PluginError> {
         let mut plan = self.faults.lock_recover();
-        let Some((successful_reads, errors)) = plan.worklist_page_errors.as_mut() else {
+        let Some((successful_reads, errors)) = plan.non_terminal_page_errors.as_mut() else {
             return Ok(());
         };
         if *successful_reads > 0 {
@@ -333,7 +291,7 @@ impl ProcessRegistryFaults {
         }
         let error = errors.pop_front();
         if errors.is_empty() {
-            plan.worklist_page_errors = None;
+            plan.non_terminal_page_errors = None;
         }
         error.map_or(Ok(()), Err)
     }
@@ -377,22 +335,24 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
         self.inner.processes_changed_since(cursor, limit).await
     }
 
-    async fn list_non_terminal_page(
+    async fn list_non_terminal_processes_page(
         &self,
         limit: std::num::NonZeroUsize,
-        continuation: Option<crate::ProcessWorklistCursor>,
-    ) -> Result<crate::ProcessWorklistPage, crate::PluginError> {
+        continuation: Option<crate::ProcessRegistryCursor>,
+    ) -> Result<crate::NonTerminalProcessPage, crate::PluginError> {
         let pause = {
             let mut plan = self.faults.lock_recover();
-            plan.worklist_page_reads
+            plan.non_terminal_page_reads
                 .push((limit.get(), continuation.clone()));
-            plan.worklist_page_pause.take()
+            plan.non_terminal_page_pause.take()
         };
         if let Some(pause) = pause {
             pause.hold().await;
         }
-        self.worklist_page_fault()?;
-        self.inner.list_non_terminal_page(limit, continuation).await
+        self.non_terminal_page_fault()?;
+        self.inner
+            .list_non_terminal_processes_page(limit, continuation)
+            .await
     }
 
     async fn filter_unregistered_process_ids(
@@ -582,25 +542,6 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
     ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
         self.inner
             .complete_process_with_prelude(process_id, await_output, prelude, authority)
-            .await
-    }
-
-    async fn complete_process_with_lease(
-        &self,
-        lease: &crate::ProcessLease,
-        await_output: crate::ProcessAwaitOutput,
-    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
-        {
-            let mut faults = self.faults.lock_recover();
-            if let Some(error) = faults.terminal_write_error.clone() {
-                return Err(error);
-            }
-            if let Some(outcome) = faults.terminal_write_outcome.take() {
-                return Ok(outcome);
-            }
-        }
-        self.inner
-            .complete_process_with_lease(lease, await_output)
             .await
     }
 
@@ -840,67 +781,6 @@ impl super::super::registry_concerns::ProcessWakeOutbox for ProcessRegistryFault
     }
 }
 
-#[async_trait::async_trait]
-impl super::super::registry_concerns::ProcessLeases for ProcessRegistryFaults {
-    async fn claim_process_lease(
-        &self,
-        process_id: &ProcessId,
-        owner: &crate::LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Result<crate::ProcessLeaseClaimOutcome, crate::PluginError> {
-        self.lease_fault(|plan| &plan.lease_claim_error)?;
-        self.inner
-            .claim_process_lease(process_id, owner, lease_ttl_ms)
-            .await
-    }
-
-    async fn reclaim_process_lease(
-        &self,
-        process_id: &ProcessId,
-        owner: &crate::LeaseOwnerIdentity,
-        observed_holder: &crate::ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<crate::ProcessLeaseClaimOutcome, crate::PluginError> {
-        self.lease_fault(|plan| &plan.lease_claim_error)?;
-        self.inner
-            .reclaim_process_lease(process_id, owner, observed_holder, lease_ttl_ms)
-            .await
-    }
-
-    async fn renew_process_lease(
-        &self,
-        lease: &crate::ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<crate::ProcessLease, crate::PluginError> {
-        self.lease_fault(|plan| &plan.lease_renew_error)?;
-        self.inner.renew_process_lease(lease, lease_ttl_ms).await
-    }
-
-    async fn get_process_lease(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<crate::ProcessLease>, crate::PluginError> {
-        self.lease_point_reads.fetch_add(1, Ordering::SeqCst);
-        self.inner.get_process_lease(process_id).await
-    }
-
-    async fn get_process_leases(
-        &self,
-        process_ids: &[ProcessId],
-    ) -> Result<Vec<Option<crate::ProcessLease>>, crate::PluginError> {
-        self.lease_batch_reads.fetch_add(1, Ordering::SeqCst);
-        self.inner.get_process_leases(process_ids).await
-    }
-
-    async fn complete_process_lease(
-        &self,
-        completion: &crate::ProcessLeaseCompletion,
-    ) -> Result<(), crate::PluginError> {
-        self.lease_fault(|plan| &plan.lease_release_error)?;
-        self.inner.complete_process_lease(completion).await
-    }
-}
-
 delegate_process_retention!(ProcessRegistryFaults, inner);
 
 impl super::super::registry_concerns::ProcessClockRebind for ProcessRegistryFaults {
@@ -911,8 +791,6 @@ impl super::super::registry_concerns::ProcessClockRebind for ProcessRegistryFaul
                 faults: Arc::clone(&self.faults),
                 injected_wakes: Arc::clone(&self.injected_wakes),
                 process_point_reads: Arc::clone(&self.process_point_reads),
-                lease_point_reads: Arc::clone(&self.lease_point_reads),
-                lease_batch_reads: Arc::clone(&self.lease_batch_reads),
             }) as Arc<dyn ProcessRegistry>
         })
     }

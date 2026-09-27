@@ -8,29 +8,26 @@ use pretty_assertions::assert_eq;
 pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessRegistry>) {
     let record = registry
         .register_process(crate::started_until_starter(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                ProcessProvenance::session(SessionScope::new("filter-origin")).with_caused_by(
-                    Some(crate::CausalRef::TriggerOccurrence {
-                        occurrence_id: "indexed-occurrence-target".to_string(),
-                        subscription_id: Some("indexed-subscription-target".to_string()),
-                        subscription_incarnation: None,
-                        subscription_revision: None,
-                    }),
-                ),
-                lash_core::Lifetime::Detached,
-            )
-            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                ProcessIdentity::for_definition(
-                    lash_core::ProcessDefinitionRef::unclaimed(
-                        "indexed-filter-kind",
-                        serde_json::json!({"definition": "target"}),
+            executed_registration("filter-target")
+                .with_process_provenance(
+                    ProcessProvenance::session(SessionScope::new("filter-origin")).with_caused_by(
+                        Some(crate::CausalRef::TriggerOccurrence {
+                            occurrence_id: "indexed-occurrence-target".to_string(),
+                            subscription_id: Some("indexed-subscription-target".to_string()),
+                            subscription_incarnation: None,
+                            subscription_revision: None,
+                        }),
                     ),
-                    Some("filter-label"),
-                ),
-            )),
+                )
+                .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                    ProcessIdentity::for_definition(
+                        lash_core::ProcessDefinitionRef::unclaimed(
+                            "indexed-filter-kind",
+                            serde_json::json!({"definition": "target"}),
+                        ),
+                        Some("filter-label"),
+                    ),
+                )),
             lash_core::ScopeId::turn(
                 SessionId::from("filter-origin"),
                 crate::TurnId::from("filter-turn"),
@@ -39,8 +36,23 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
         .await
         .expect("register filter target");
     let process_id = record.id.clone();
+    let authority = crate::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        "filter-target:execution",
+    )
+    .bind_attempt(1);
     registry
-        .set_process_wait(
+        .record_first_started_with_authority(
+            &process_id,
+            authority
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &authority,
+        )
+        .await
+        .expect("record filter target execution start");
+    registry
+        .set_process_wait_with_authority(
             &process_id,
             WaitState {
                 since_ms: record.created_at_ms,
@@ -51,6 +63,8 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                     ordinal: 1,
                 },
             },
+            Vec::new(),
+            &authority,
         )
         .await
         .expect("set filter target waiting");

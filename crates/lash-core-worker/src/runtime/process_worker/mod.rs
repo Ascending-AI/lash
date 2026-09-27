@@ -231,21 +231,9 @@ impl DurableProcessWorker {
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
         let attachment_owner = current.id.clone();
-        let (owner, fencing_token) = match &execution_write_authority {
-            crate::ProcessExecutionWriteAuthority::Lease { lease, .. } => {
-                (self.config.lease_owner.clone(), lease.fencing_token)
-            }
-            crate::ProcessExecutionWriteAuthority::Invocation {
-                process_id,
-                execution_id,
-                ..
-            } => (
-                crate::LeaseOwnerIdentity::engine_process_execution(process_id, execution_id),
-                0,
-            ),
-        };
+        let owner = execution_write_authority.owner_identity();
         let attempt = current.first_started.as_deref().map_or(1, |started| {
-            if started.owner.same_incarnation(&owner) && started.fencing_token == fencing_token {
+            if started.owner.same_incarnation(&owner) {
                 started.attempt
             } else {
                 started.attempt.saturating_add(1)
@@ -276,7 +264,6 @@ impl DurableProcessWorker {
                     &process_id,
                     crate::ProcessStarted {
                         owner,
-                        fencing_token,
                         attempt,
                         started_at_ms: self.now_ms(),
                         build_generation: None,

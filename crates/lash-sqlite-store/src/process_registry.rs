@@ -4,9 +4,9 @@ use lash_core_execution::facade_support;
 use lash_sansio::ProcessId;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
-mod leases;
 #[cfg(test)]
 mod list_tests;
+pub(crate) mod pages;
 #[path = "process_registry/parent_end.rs"]
 pub(crate) mod parent_end;
 #[path = "process_registry/park_feed.rs"]
@@ -25,14 +25,11 @@ mod terminal_publication;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
 mod wake_delivery;
-pub(crate) mod worklist;
 
 use sql::process_sql;
 use support::cancel_requested_at_ms;
 use support::process_status_label;
-pub(crate) use support::{
-    ProcessEventAppendArm, ProcessEventBatch, ProcessEventWriteAuthorization, tx_outcome,
-};
+pub(crate) use support::{ProcessEventAppendArm, ProcessEventBatch, tx_outcome};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
 #[async_trait::async_trait]
@@ -156,12 +153,12 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn list_non_terminal_page(
+    async fn list_non_terminal_processes_page(
         &self,
         limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core_execution::ProcessWorklistCursor>,
-    ) -> Result<lash_core_execution::ProcessWorklistPage, lash_core_execution::PluginError> {
-        worklist::list_non_terminal_page(self, limit, continuation).await
+        continuation: Option<lash_core_execution::ProcessRegistryCursor>,
+    ) -> Result<lash_core_execution::NonTerminalProcessPage, lash_core_execution::PluginError> {
+        pages::list_non_terminal_processes_page(self, limit, continuation).await
     }
 
     async fn filter_unregistered_process_ids(
@@ -181,14 +178,14 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
     async fn live_reference_summary(
         &self,
     ) -> Result<Vec<ProcessLiveReferenceView>, lash_core_execution::PluginError> {
-        let records = worklist::collect_non_terminal_records(self).await?;
+        let records = pages::collect_non_terminal_records(self).await?;
         Ok(ProcessLiveReferenceView::from_records(records.iter()))
     }
 
     async fn count_non_terminal_processes(
         &self,
     ) -> Result<usize, lash_core_execution::PluginError> {
-        worklist::count_non_terminal_processes(self).await
+        pages::count_non_terminal_processes(self).await
     }
 
     async fn list_parked_processes(
@@ -517,15 +514,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority_conn(
-                        tx,
-                        &process_id,
-                        &record,
-                        &authority,
-                        None,
-                        occurred_at_ms,
-                        fleet_format,
-                    )?;
+                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
                     Self::append_event_batch_conn(
                         tx,
                         &mut record,
@@ -712,16 +701,6 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         .await
     }
 
-    async fn complete_process_with_lease(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-    ) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError>
-    {
-        super::process_registry_completion::complete_process_with_lease(self, lease, await_output)
-            .await
-    }
-
     async fn record_parent_end(
         &self,
         parent: &lash_core_execution::ScopeId,
@@ -800,14 +779,11 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority_conn(
-                        tx,
+                    validate_process_execution_authority(
                         &process_id,
                         &record,
                         &authority,
                         Some(&started),
-                        now,
-                        fleet_format,
                     )?;
                     match lash_core_execution::runtime::prepare_process_start(&record, &started)? {
                         ProcessStartPlan::AlreadyApplied => {
@@ -961,15 +937,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority_conn(
-                        tx,
-                        &process_id,
-                        &record,
-                        &authority,
-                        None,
-                        now,
-                        fleet_format,
-                    )?;
+                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
                     // The run's pending prelude commits ahead of the
                     // transition, in its transaction (FIG-3571).
                     let mut batch = ProcessEventBatch::for_fleet(fleet_format);
@@ -1007,15 +975,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority_conn(
-                        tx,
-                        &process_id,
-                        &record,
-                        &authority,
-                        None,
-                        now,
-                        fleet_format,
-                    )?;
+                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
                     // The run's pending prelude commits ahead of the
                     // transition, in its transaction (FIG-3571).
                     let mut batch = ProcessEventBatch::for_fleet(fleet_format);
@@ -1053,15 +1013,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority_conn(
-                        tx,
-                        &process_id,
-                        &record,
-                        &authority,
-                        None,
-                        now,
-                        fleet_format,
-                    )?;
+                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
                     match lash_core_execution::runtime::prepare_process_transition(
                         &record,
                         ProcessTransition::Park(park),
@@ -1099,15 +1051,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority_conn(
-                        tx,
-                        &process_id,
-                        &record,
-                        &authority,
-                        None,
-                        now,
-                        fleet_format,
-                    )?;
+                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
                     match lash_core_execution::runtime::prepare_process_transition(
                         &record,
                         ProcessTransition::BeginParkedRerun,
@@ -1370,44 +1314,20 @@ impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
     }
 }
 
-fn validate_process_execution_authority_conn(
-    conn: &rusqlite::Connection,
+fn validate_process_execution_authority(
     process_id: &ProcessId,
     record: &ProcessRecord,
     authority: &ProcessExecutionWriteAuthority,
     start: Option<&ProcessStarted>,
-    now: u64,
-    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), lash_core_execution::PluginError> {
-    match authority {
-        ProcessExecutionWriteAuthority::Invocation { .. } => {
-            if let Some(started) = start {
-                authority.validate_invocation_for_start(
-                    process_id,
-                    started,
-                    record.first_started.as_deref(),
-                )
-            } else {
-                authority.validate_invocation_for_write(process_id, record)
-            }
-        }
-        ProcessExecutionWriteAuthority::Lease { lease, .. } => {
-            // The process-id half of the fence is checked first so a lease for
-            // another process is refused without reading this process's row.
-            if lease.process_id != process_id {
-                return Err(lash_core_execution::PluginError::ProcessLeaseSuperseded {
-                    process_id: process_id.clone(),
-                });
-            }
-            let current =
-                SqliteProcessRegistry::load_process_lease_conn(conn, process_id, fleet_format)?;
-            registry_transitions::authorize_process_lease_write(
-                process_id,
-                lease,
-                current.as_ref(),
-                now,
-            )
-        }
+    if let Some(started) = start {
+        authority.validate_invocation_for_start(
+            process_id,
+            started,
+            record.first_started.as_deref(),
+        )
+    } else {
+        authority.validate_invocation_for_write(process_id, record)
     }
 }
 

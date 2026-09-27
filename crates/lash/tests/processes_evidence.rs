@@ -207,20 +207,6 @@ fn processes_area_witnesses() {
     variant_witness(|value: &lash::durability::ProcessRecoveryAttemptOutcome| {
         matches!(value, lash::durability::ProcessRecoveryAttemptOutcome::Busy)
     });
-    // W0069: lash::durability::ProcessRecoveryAttemptOutcome::LeaseLost [variant]
-    variant_witness(|value: &lash::durability::ProcessRecoveryAttemptOutcome| {
-        matches!(
-            value,
-            lash::durability::ProcessRecoveryAttemptOutcome::LeaseLost { .. }
-        )
-    });
-    // W0070: lash::durability::ProcessRecoveryAttemptOutcome::LeaseLost::operation [field]
-    field_witness(|value: &lash::durability::ProcessRecoveryAttemptOutcome| {
-        if let lash::durability::ProcessRecoveryAttemptOutcome::LeaseLost { operation, .. } = value
-        {
-            let _ = operation;
-        }
-    });
     // W0071: lash::durability::ProcessRecoveryAttemptOutcome::SettledByPeer [variant]
     variant_witness(|value: &lash::durability::ProcessRecoveryAttemptOutcome| {
         matches!(
@@ -240,32 +226,11 @@ fn processes_area_witnesses() {
     });
     // W0073: lash::durability::ProcessRecoveryOperation [enum]
     type_witness::<lash::durability::ProcessRecoveryOperation>();
-    // W0074: lash::durability::ProcessRecoveryOperation::ClaimLease [variant]
-    variant_witness(|value: &lash::durability::ProcessRecoveryOperation| {
-        matches!(
-            value,
-            lash::durability::ProcessRecoveryOperation::ClaimLease
-        )
-    });
     // W0075: lash::durability::ProcessRecoveryOperation::ReadProcess [variant]
     variant_witness(|value: &lash::durability::ProcessRecoveryOperation| {
         matches!(
             value,
             lash::durability::ProcessRecoveryOperation::ReadProcess
-        )
-    });
-    // W0076: lash::durability::ProcessRecoveryOperation::ReleaseLease [variant]
-    variant_witness(|value: &lash::durability::ProcessRecoveryOperation| {
-        matches!(
-            value,
-            lash::durability::ProcessRecoveryOperation::ReleaseLease
-        )
-    });
-    // W0077: lash::durability::ProcessRecoveryOperation::RenewLease [variant]
-    variant_witness(|value: &lash::durability::ProcessRecoveryOperation| {
-        matches!(
-            value,
-            lash::durability::ProcessRecoveryOperation::RenewLease
         )
     });
     // W0078: lash::durability::ProcessRecoveryOperation::WriteTerminal [variant]
@@ -425,16 +390,16 @@ fn processes_area_witnesses() {
             let _ = status;
         }
     });
-    // W0120: lash::plugins::PluginError::ProcessLeaseSuperseded [variant]
+    // W0120: lash::plugins::PluginError::ProcessExecutionSuperseded [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(
             value,
-            lash::plugins::PluginError::ProcessLeaseSuperseded { .. }
+            lash::plugins::PluginError::ProcessExecutionSuperseded { .. }
         )
     });
-    // W0121: lash::plugins::PluginError::ProcessLeaseSuperseded::process_id [field]
+    // W0121: lash::plugins::PluginError::ProcessExecutionSuperseded::process_id [field]
     field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessLeaseSuperseded { process_id, .. } = value {
+        if let lash::plugins::PluginError::ProcessExecutionSuperseded { process_id, .. } = value {
             let _ = process_id;
         }
     });
@@ -807,26 +772,6 @@ fn processes_area_witnesses() {
             let _ = call;
         }
     });
-    // W0211: lash::process::ProcessLeaseClaimOutcome::Busy::holder [field]
-    field_witness(|value: &lash::process::ProcessLeaseClaimOutcome| {
-        if let lash::process::ProcessLeaseClaimOutcome::Busy { holder, .. } = value {
-            let _ = holder;
-        }
-    });
-    // W0212: lash::process::ProcessLeaseClaimOutcome::acquired [function]
-    let _ = lash::process::ProcessLeaseClaimOutcome::acquired;
-    // W0213: lash::process::ProcessLeaseCompletion [struct]
-    type_witness::<lash::process::ProcessLeaseCompletion>();
-    // W0214: lash::process::ProcessLeaseCompletion::from_lease [function]
-    let _ = lash::process::ProcessLeaseCompletion::from_lease;
-    // W0215: lash::process::ProcessLeaseCompletion::lease_token [field]
-    field_witness(|value: &lash::process::ProcessLeaseCompletion| {
-        let _ = &value.lease_token;
-    });
-    // W0216: lash::process::ProcessLeaseCompletion::process_id [field]
-    field_witness(|value: &lash::process::ProcessLeaseCompletion| {
-        let _ = &value.process_id;
-    });
     // W0217: lash::process::ProcessListFilter::created_at_end_ms [field]
     field_witness(|value: &lash::process::ProcessListFilter| {
         let _ = &value.created_at_end_ms;
@@ -905,10 +850,6 @@ fn processes_area_witnesses() {
     fn meth_0239<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::clear_process_wait_with_authority;
     }
-    // W0240: lash::process::ProcessRegistry::complete_process_lease [function]
-    fn meth_0240<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::complete_process_lease;
-    }
     // W0241: lash::process::ProcessRegistry::defer_wake_delivery [function]
     fn meth_0241<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::defer_wake_delivery;
@@ -944,10 +885,6 @@ fn processes_area_witnesses() {
     // W0250: lash::process::ProcessRegistry::processes_changed_since [function]
     fn meth_0250<T: lash::process::ProcessRegistry>(_: &T) {
         let _ = T::processes_changed_since;
-    }
-    // W0251: lash::process::ProcessRegistry::reclaim_process_lease [function]
-    fn meth_0251<T: lash::process::ProcessRegistry>(_: &T) {
-        let _ = T::reclaim_process_lease;
     }
     // W0252: lash::process::ProcessRegistry::record_first_started_with_authority [function]
     fn meth_0252<T: lash::process::ProcessRegistry>(_: &T) {

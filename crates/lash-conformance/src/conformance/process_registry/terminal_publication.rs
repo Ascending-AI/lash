@@ -35,7 +35,7 @@ fn registration() -> ProcessRegistration {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn ProcessRegistry>) {
-    // The unleased completion a workflow-key substrate writes.
+    // The completion a workflow-key substrate writes under its explicit authority.
     let keyed = registry
         .register_process(registration())
         .await
@@ -82,35 +82,32 @@ pub(super) async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn
         "a replayed terminal keeps the one obligation its first commit armed"
     );
 
-    // A leased completion arms the same obligation.
-    let leased = registry
-        .register_process(registration())
+    // An external owner arms the same obligation through its explicit authority.
+    let external = registry
+        .register_process(ProcessRegistration::new(
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await
-        .expect("register the leased process")
+        .expect("register the externally owned process")
         .id;
-    let lease = registry
-        .claim_process_lease(
-            &leased,
-            &crate::LeaseOwnerIdentity::opaque("publication-owner", "publication-owner:i"),
-            60_000,
-        )
-        .await
-        .expect("claim the leased process")
-        .acquired()
-        .expect("the lease is acquired");
     registry
-        .complete_process_with_lease(
-            &lease,
+        .complete_process(
+            &external,
             settled_success(serde_json::json!({ "ended": "leased" })),
+            crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
-        .expect("complete the leased process");
-    let leased_publication = publication(&registry, &leased)
+        .expect("complete the externally owned process");
+    let external_publication = publication(&registry, &external)
         .await
-        .expect("the leased terminal arms its publication");
-    assert_eq!(leased_publication.state, ObligationState::Due);
+        .expect("the external terminal arms its publication");
+    assert_eq!(external_publication.state, ObligationState::Due);
     assert_ne!(
-        leased_publication.id, armed.id,
+        external_publication.id, armed.id,
         "each terminal owes its own obligation"
     );
 
@@ -137,7 +134,7 @@ pub(super) async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn
         "a delivered publication settles nothing"
     );
     assert_eq!(
-        publication(&registry, &leased)
+        publication(&registry, &external)
             .await
             .map(|publication| publication.state),
         Some(ObligationState::Due),

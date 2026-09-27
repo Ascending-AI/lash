@@ -410,6 +410,9 @@ mod blake3_domain_tests {
         "lash-runtime-usage-payload/v3",
         "lash-tool-intent-payload/v2",
         "lash-lashlang-execution-site/v2",
+        // FIG-3863: the process lease format is deleted, but its hash tag
+        // remains permanently reserved so it cannot identify another format.
+        "lash-process-lease/v2",
         // FIG-3571: the program generation also names the executable, segment
         // state and replay-key grammar, under v3.
         "lash-lashlang-program/v2",

@@ -465,10 +465,10 @@ pub enum ProcessStatus {
     CallerDeparted,
 }
 impl ProcessStatus {
-    /// Whether the row is still on the live worklist.
+    /// Whether the row belongs to the non-terminal process partition.
     ///
     /// This is the Rust twin of the `status IN (...)` predicate every backend
-    /// worklist query carries, and the complement of
+    /// non-terminal page query carries, and the complement of
     /// [`ProcessStatus::is_retired`]. The match is exhaustive on purpose: a new
     /// variant must declare which side of the live/retired partition it falls
     /// on before any query can compile.

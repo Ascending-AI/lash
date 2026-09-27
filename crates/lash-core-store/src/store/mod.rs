@@ -104,11 +104,10 @@ pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{
     EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority, EffectReplayLeaseFacts,
     EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
-    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, ProcessLeaseAuthority,
-    ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
-    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
-    effect_replay_lease_verdict, fenced_write_applied, head_publication_verdict,
-    process_lease_verdict, queued_work_batch_claimability, require_fenced_write_applied,
+    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, QueuedWorkSettlementFacts,
+    TurnInputSettlementFacts, WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts,
+    WorkRowClaimability, effect_replay_lease_verdict, fenced_write_applied,
+    head_publication_verdict, queued_work_batch_claimability, require_fenced_write_applied,
     require_releasable_session_execution_lease, require_renewable_session_execution_lease,
     require_settleable_queued_work, require_settleable_turn_input,
     require_single_writer_head_publication, turn_input_claimability,
@@ -1832,9 +1831,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// Returns the store-clock instant sampled alongside the optional persisted
     /// lease. The lease is `None` when the row is absent, unleased, or released.
     /// A returned lease may already be expired: expiry is a raw fact exposed
-    /// read-side, mirroring
-    /// [`ProcessRegistry::get_process_lease`](crate::ProcessRegistry::get_process_lease),
-    /// so callers classify staleness themselves. This never mutates the lease
+    /// read-side, so callers classify staleness themselves. This never mutates the lease
     /// and never advances a generation. Unknown session ids return an
     /// observation whose lease is `None`.
     ///

@@ -513,7 +513,6 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         "DROP TABLE IF EXISTS lash_process_artifact_cleanup;
          DROP TABLE lash_parent_end_plans;
          DROP TABLE lash_process_segment_handovers;
-         DROP TABLE lash_process_leases;
          DROP TABLE lash_process_observers;
          DROP TABLE lash_process_wake_deliveries;
          DROP TABLE lash_process_events;
@@ -607,7 +606,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     )
     .execute(&pool)
     .await
-    .expect("refresh refusal fixture pending-input and process-lease catalog");
+    .expect("refresh refusal fixture pending-input and store catalog");
     sqlx::raw_sql(
         "ALTER TABLE lash_turn_cancel_requests
              DROP COLUMN IF EXISTS affected_input_ids,
@@ -1260,12 +1259,6 @@ async fn migrate_fixture_forward(fixture_database_url: &str) {
         .expect("migrate the restored fixture catalog to this build's component");
 }
 
-/// PostgreSQL runs process leases on the database clock, so the seed claims a
-/// term a slow runner cannot outlive while it writes under the lease; the row
-/// is normalized to the pinned term afterwards
-/// (`normalize_server_authoritative_fixture_rows`).
-const WALL_CLOCK_PROCESS_LEASE_TTL_MS: u64 = 600_000;
-
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
     let runtime = Arc::new(
@@ -1297,7 +1290,6 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        process_lease_ttl_ms: WALL_CLOCK_PROCESS_LEASE_TTL_MS,
         runtime: runtime as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
         processes: Arc::clone(&processes)
@@ -1381,19 +1373,6 @@ async fn install_fixed_catalog_identity(storage: &PostgresStorage) {
 }
 
 async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) {
-    let lease = fixture::expected_process_lease();
-    sqlx::query(
-        "UPDATE lash_process_leases
-         SET lease_token = $2, lease_claimed_at_ms = $3, lease_expires_at_ms = $4
-         WHERE process_id = $1",
-    )
-    .bind(lease.process_id.as_str())
-    .bind(&lease.lease_token)
-    .bind(lease.claimed_at_epoch_ms as i64)
-    .bind(lease.expires_at_epoch_ms as i64)
-    .execute(storage.pool())
-    .await
-    .expect("normalize server-authoritative fixture process lease");
     sqlx::query(
         "UPDATE lash_session_execution_leases
          SET lease_claimed_at_ms = $2, lease_expires_at_ms = $3, lease_term_ms = $4

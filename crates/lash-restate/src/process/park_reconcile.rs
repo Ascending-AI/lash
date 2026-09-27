@@ -173,7 +173,7 @@ pub(crate) struct LostRunPass {
 ///
 /// The scan is bounded by the live processes lash still waits on, never by
 /// the engine's retained history: it reads the registry's non-terminal
-/// worklist in pages of `limit`, and asks Restate only about those
+/// non-terminal registry records in pages of `limit`, and asks Restate only about those
 /// processes' current segments' `run` invocations. A segment's external
 /// reference names its workflow key (a handover's reference carries no
 /// invocation id — the key is the owner), and a key's `run` executes once,
@@ -184,7 +184,7 @@ pub(crate) struct LostRunPass {
 /// the pass.
 ///
 /// # Errors
-/// When the registry's worklist or Restate's admin query fails.
+/// When the registry page read or Restate's admin query fails.
 pub(crate) async fn end_lost_process_runs(
     admin: &RestateAdminClient,
     namespace: &crate::RestateNamespace,
@@ -195,7 +195,9 @@ pub(crate) async fn end_lost_process_runs(
     let mut pass = LostRunPass::default();
     let mut continuation = None;
     loop {
-        let page = registry.list_non_terminal_page(limit, continuation).await?;
+        let page = registry
+            .list_non_terminal_processes_page(limit, continuation)
+            .await?;
         continuation = page.continuation;
         let segment_keys: Vec<String> = page
             .records

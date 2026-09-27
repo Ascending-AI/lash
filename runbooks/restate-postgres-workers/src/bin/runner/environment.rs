@@ -228,31 +228,6 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
             Ok(rows) => eprintln!("workers-e2e TIMEOUT process events:\n{rows:#?}"),
             Err(err) => eprintln!("workers-e2e TIMEOUT process-event query failed: {err:#}"),
         }
-        match sqlx::query_as::<
-            _,
-            (
-                String,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-                i64,
-                i64,
-                i64,
-            ),
-        >(
-            "SELECT process_id, lease_owner_id, lease_owner_incarnation_id, lease_token,
-                    lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
-             FROM lash_process_leases
-             WHERE process_id = ANY($1)
-             ORDER BY process_id",
-        )
-        .bind(&process_ids)
-        .fetch_all(pool)
-        .await
-        {
-            Ok(rows) => eprintln!("workers-e2e TIMEOUT process lease rows:\n{rows:#?}"),
-            Err(err) => eprintln!("workers-e2e TIMEOUT process-lease query failed: {err:#}"),
-        }
     } else {
         eprintln!("workers-e2e TIMEOUT process state/events: no matching process ids");
     }

@@ -38,20 +38,11 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         .register_process(child)
         .await
         .expect("register cancel child under the live parent");
-    let lease = registry
-        .claim_process_lease(
-            &process_id,
-            &crate::LeaseOwnerIdentity::opaque("parent-end-owner", "parent-end-owner:i"),
-            60_000,
-        )
-        .await
-        .expect("claim parent-end-plan process")
-        .acquired()
-        .expect("parent-end-plan lease acquired");
     let completion = registry
-        .complete_process_with_lease(
-            &lease,
+        .complete_process(
+            &process_id,
             settled_success(serde_json::json!({"parent": "done"})),
+            crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("terminal write and ledger row commit atomically");
@@ -259,7 +250,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
         .await
         .expect("register cancel child under the live parent");
 
-    complete_process(&registry, &parent.id, "parent-end-reclaim-parent").await;
+    complete_process(&registry, &parent.id).await;
     registry
         .settle_parent_end_plan(&parent_scope)
         .await
@@ -289,7 +280,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
         "a settled row is retained while a live child still names its scope"
     );
 
-    complete_process(&registry, &child.id, "parent-end-reclaim-child").await;
+    complete_process(&registry, &child.id).await;
     registry
         .prune_terminal_processes(
             u64::MAX,
@@ -308,28 +299,18 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
     );
 }
 
-/// Drive one registered process to a terminal outcome under its own lease.
+/// Drive one externally owned process to a terminal outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn complete_process(
-    registry: &Arc<dyn ProcessRegistry>,
-    process_id: &ProcessId,
-    owner: &str,
-) {
-    let lease = registry
-        .claim_process_lease(
-            process_id,
-            &crate::LeaseOwnerIdentity::opaque(owner, format!("{owner}:i")),
-            60_000,
-        )
-        .await
-        .expect("claim lease")
-        .acquired()
-        .expect("lease acquired");
+async fn complete_process(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) {
     registry
-        .complete_process_with_lease(&lease, settled_success(serde_json::json!({"done": true})))
+        .complete_process(
+            process_id,
+            settled_success(serde_json::json!({"done": true})),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
         .await
         .expect("complete process");
 }

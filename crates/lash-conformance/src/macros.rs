@@ -372,15 +372,13 @@ macro_rules! process_registry_tests {
                 (producer_terminal_status_must_match_materialized_outcome, "terminal-status-outcome"),
                 (list_filters_match_extracted_and_json_fields, "list-filters"),
                 (process_registry_pagination, "pagination"),
+                (non_terminal_process_pages_visit_every_row_across_the_page_bound, "bounded-pagination"),
                 (process_event_pages_reject_out_of_range_sequences, "process-event-page-sql-cursor-range"),
-                (waiting_processes_remain_in_the_recovery_worklist, "waiting-worklist"),
+                (waiting_processes_remain_in_the_non_terminal_scan, "waiting-non-terminal-scan"),
                 (list_processes_filters_by_enriched_fields, "enriched-filters"),
                 (list_processes_bounds_retired_rows_without_hiding_live_rows, "retired-bounds"),
                 (list_processes_filters_by_until_scope_and_pending_cancel, "until-scope-cancel-filters"),
                 (process_change_feed_never_misses_concurrent_terminal_writers, "concurrent-terminal-feed"),
-                (process_lease_fencing_contract, "lease-fencing"),
-                (superseded_process_lease_cannot_release_or_complete, "lease-takeover-release"),
-                (process_lease_batch_read_matches_point_reads, "lease-batch-read"),
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (refolded_process_record_matches_hot_projection, "hot-refold"),
                 (tombstones_make_pruned_processes_distinguishable, "tombstones"),
@@ -892,12 +890,12 @@ macro_rules! process_change_horizon_tests {
     };
 }
 
-/// Register the leased-completion projection-repair law.
+/// Register the external-completion projection-repair law.
 #[macro_export]
 macro_rules! process_projection_repair_tests {
     ($fixture:block) => {
         $crate::process_projection_repair_tests!(@catalogue $fixture; [
-            (leased_completion_replay_repairs_projection, "leased-completion-projection-repair"),
+            (external_completion_replay_repairs_projection, "external-completion-projection-repair"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

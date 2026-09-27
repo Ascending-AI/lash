@@ -258,17 +258,6 @@ pub(crate) fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError
     sql_counter_value("session_lease_generation", value)
 }
 
-pub(crate) fn plugin_sql_monotonic_counter_value(
-    counter: &'static str,
-    current: u64,
-    value: u64,
-) -> Result<i64, PluginError> {
-    i64::try_from(value).map_err(|_| PluginError::MonotonicCounterOverflow {
-        counter: counter.to_string(),
-        current,
-    })
-}
-
 pub(crate) fn plugin_sql_counter_value(
     counter: &'static str,
     value: u64,

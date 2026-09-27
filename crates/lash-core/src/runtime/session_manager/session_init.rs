@@ -696,8 +696,8 @@ impl RuntimeSessionServices {
     ///
     /// 1. The child session's create commit lands durably in the child store.
     /// 2. The first turn is accepted and committed inside the child session
-    ///    under the ordinary session execution lease — never the process
-    ///    registry.
+    ///    under the ordinary session execution lease. The process registry's
+    ///    start fact does not authorize the child turn.
     /// 3. Only the runner's caller records the process terminal. A committed
     ///    child turn is not itself a recorded process result.
     ///

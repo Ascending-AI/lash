@@ -356,7 +356,7 @@ async fn a_child_started_from_a_turn_is_started_by_the_turn() {
 }
 
 #[test]
-fn native_authority_retains_attempt_correlation_without_restate_identity() {
+fn invocation_authority_retains_attempt_correlation() {
     let process_id = crate::process_id_for_test("native-process");
     let authority = crate::ProcessExecutionWriteAuthority::invocation(
         process_id.clone(),
@@ -365,17 +365,6 @@ fn native_authority_retains_attempt_correlation_without_restate_identity() {
     .bind_attempt(1);
     let mut turn_context = crate::TurnContext::default();
     super::attach_process_invocation_correlation(&mut turn_context, &process_id, &authority);
-    let native_authority = crate::ProcessExecutionWriteAuthority::lease(crate::ProcessLease {
-        schema_version: crate::PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: process_id.clone(),
-        owner: crate::LeaseOwnerIdentity::opaque("native-worker", "attempt"),
-        lease_token: "native-worker-lease".to_string(),
-        fencing_token: 1,
-        claimed_at_epoch_ms: 0,
-        expires_at_epoch_ms: u64::MAX,
-    })
-    .bind_attempt(3);
-    super::attach_process_invocation_correlation(&mut turn_context, &process_id, &native_authority);
     let context = crate::testing::TestExecutionContextBuilder::over_controller(Arc::new(
         crate::testing::UnavailableEffectController,
     )
@@ -385,8 +374,11 @@ fn native_authority_retains_attempt_correlation_without_restate_identity() {
     .build()
     .into_runtime();
 
-    assert_eq!(context.engine_execution_id(), None);
-    assert_eq!(context.admitted_process_attempt(), Some(3));
+    assert_eq!(
+        context.engine_execution_id(),
+        Some("foreign-restate-invocation")
+    );
+    assert_eq!(context.admitted_process_attempt(), Some(1));
 }
 
 /// A queued-work drain is a durable owner with an end protocol (FIG-3419), so

@@ -461,43 +461,20 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineRunContext::take_handover;
     // W0477: lash::plugins::ProcessEngineRunContext::turn_phase_probe [function]
     let _ = lash::plugins::ProcessEngineRunContext::turn_phase_probe;
-    // W0482: lash::process::ProcessExecutionWriteAuthority [enum]
+    // W0482: lash::process::ProcessExecutionWriteAuthority [struct]
     type_witness::<lash::process::ProcessExecutionWriteAuthority>();
-    // W0483: lash::process::ProcessExecutionWriteAuthority::Invocation [variant]
-    variant_witness(|value: &lash::process::ProcessExecutionWriteAuthority| {
-        matches!(
-            value,
-            lash::process::ProcessExecutionWriteAuthority::Invocation { .. }
-        )
-    });
-    // W0484: lash::process::ProcessExecutionWriteAuthority::Invocation::attempt [field]
-    field_witness(|value: &lash::process::ProcessExecutionWriteAuthority| {
-        if let lash::process::ProcessExecutionWriteAuthority::Invocation { attempt, .. } = value {
-            let _ = attempt;
-        }
-    });
-    // W0485: lash::process::ProcessExecutionWriteAuthority::Invocation::execution_id [field]
-    field_witness(|value: &lash::process::ProcessExecutionWriteAuthority| {
-        if let lash::process::ProcessExecutionWriteAuthority::Invocation { execution_id, .. } =
-            value
-        {
-            let _ = execution_id;
-        }
-    });
-    // W0486: lash::process::ProcessExecutionWriteAuthority::Invocation::process_id [field]
-    field_witness(|value: &lash::process::ProcessExecutionWriteAuthority| {
-        if let lash::process::ProcessExecutionWriteAuthority::Invocation { process_id, .. } = value
-        {
-            let _ = process_id;
-        }
-    });
-    // W0488: lash::process::ProcessExecutionWriteAuthority::Lease [variant]
-    variant_witness(|value: &lash::process::ProcessExecutionWriteAuthority| {
-        matches!(
-            value,
-            lash::process::ProcessExecutionWriteAuthority::Lease { .. }
-        )
-    });
+    // W0483: lash::process::ProcessExecutionWriteAuthority::attempt [function]
+    let _ = lash::process::ProcessExecutionWriteAuthority::attempt;
+    // W0484: lash::process::ProcessExecutionWriteAuthority::attempt_for [function]
+    let _ = lash::process::ProcessExecutionWriteAuthority::attempt_for;
+    // W0485: lash::process::ProcessExecutionWriteAuthority::engine_execution_id [function]
+    let _ = lash::process::ProcessExecutionWriteAuthority::engine_execution_id;
+    // W0486: lash::process::ProcessExecutionWriteAuthority::execution_id [function]
+    let _ = lash::process::ProcessExecutionWriteAuthority::execution_id;
+    // W0487: lash::process::ProcessExecutionWriteAuthority::owner_identity [function]
+    let _ = lash::process::ProcessExecutionWriteAuthority::owner_identity;
+    // W0488: lash::process::ProcessExecutionWriteAuthority::process_id [function]
+    let _ = lash::process::ProcessExecutionWriteAuthority::process_id;
     // W0490: lash::process::ProcessExecutionWriteAuthority::bind_attempt [function]
     let _ = lash::process::ProcessExecutionWriteAuthority::bind_attempt;
     // W0491: lash::process::ProcessExecutionWriteAuthority::invocation [function]
@@ -507,8 +484,6 @@ fn processes_area_witnesses_b() {
     );
     // W0493: lash::process::ProcessExecutionWriteAuthority::invocation_started [function]
     let _ = lash::process::ProcessExecutionWriteAuthority::invocation_started;
-    // W0494: lash::process::ProcessExecutionWriteAuthority::lease [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::lease;
     // W0496: lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_start [function]
     let _ = lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_start;
     // W0497: lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_write [function]
@@ -871,8 +846,6 @@ fn processes_area_witnesses_b() {
     let _ = lash_core::facade_support::TurnOptions::with_local_stop;
     // W0606: lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS [constant]
     let _ = lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
-    // W0607: lash_core::facade_support::registry_transitions::ProcessLeaseRow::project [function]
-    let _ = lash_core::facade_support::registry_transitions::ProcessLeaseRow::project;
     // W0608: lash_core::facade_support::registry_transitions::WakeDeliveryRow::project [function]
     let _ = lash_core::facade_support::registry_transitions::WakeDeliveryRow::project;
     // W0609: lash::runtime::RuntimeNamedPhase [struct]
@@ -973,24 +946,24 @@ fn processes_area_witnesses_b() {
     });
     // W0654: lash::process::WakeDelivery::claim_token [function]
     let _ = lash::process::WakeDelivery::claim_token;
-    // W0655: lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch [variant]
+    // W0655: lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(
             value,
-            lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch { .. }
+            lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch { .. }
         )
     });
-    // W0656: lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch::actual [field]
+    // W0656: lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch::actual [field]
     field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch { actual, .. } =
+        if let lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch { actual, .. } =
             value
         {
             let _ = actual;
         }
     });
-    // W0657: lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch::expected [field]
+    // W0657: lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch::expected [field]
     field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch {
+        if let lash::plugins::PluginError::ProcessRegistryCursorBackendMismatch {
             expected, ..
         } = value
         {

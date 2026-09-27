@@ -4,27 +4,11 @@
 
 use super::*;
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-pub(super) struct ProcessLeaseObservation {
-    pub(super) process_id: ProcessId,
-    pub(super) owner: serde_json::Value,
-    pub(super) lease_token_present: bool,
-    pub(super) fencing_token: u64,
-    // PostgreSQL stamps `lease_expires_at_ms` from database wall time and
-    // re-stamps it when a held lease is extended while `lease_claimed_at_ms`
-    // stays put, so `expires - claimed` carries real elapsed time there; the
-    // SQLite backend reads the harness's frozen injected clock and reports the
-    // requested term verbatim. The durable temporal contract that crosses the
-    // backend boundary is `claimed`, not an epoch-difference.
-    pub(super) claimed: bool,
-}
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(super) struct ProcessRows {
     pub(super) records: Vec<serde_json::Value>,
     pub(super) events: Vec<serde_json::Value>,
     pub(super) observers: Vec<(SessionId, ProcessId)>,
-    pub(super) leases: Vec<ProcessLeaseObservation>,
     pub(super) wake_deliveries: Vec<serde_json::Value>,
     pub(super) wake_allocation_floors: Vec<(SessionId, ProcessId, u64)>,
     pub(super) tombstones: Vec<serde_json::Value>,
@@ -224,35 +208,6 @@ pub(super) fn read_sqlite_surface(
         .collect::<Result<Vec<_>, _>>()
         .unwrap()
     };
-    let leases = {
-        let mut stmt = process
-            .prepare(
-                "SELECT process_id, lease_owner_id, lease_owner_incarnation_id,
-                    lease_token, lease_fencing_token, lease_claimed_at_ms,
-                    lease_expires_at_ms
-             FROM process_leases ORDER BY process_id",
-            )
-            .unwrap();
-        stmt.query_map([], |row| {
-            let owner_id: Option<String> = row.get(1)?;
-            let incarnation_id: Option<String> = row.get(2)?;
-            let claimed: i64 = row.get(5)?;
-            Ok(ProcessLeaseObservation {
-                process_id: stored_process_id(row.get::<_, String>(0)?),
-                lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
-                owner: if row.get::<_, Option<String>>(3)?.is_some() {
-                    serde_json::to_value(decode_lease_owner(owner_id, incarnation_id)).unwrap()
-                } else {
-                    serde_json::Value::Null
-                },
-                fencing_token: row.get::<_, i64>(4)? as u64,
-                claimed: claimed != 0,
-            })
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-    };
     let wake_deliveries = sqlite_simple_json_rows(
         &process,
         "SELECT delivery_id, delivery_json, state, claim_token, attempts, first_attempt_ms,
@@ -348,7 +303,6 @@ pub(super) fn read_sqlite_surface(
             records,
             events,
             observers,
-            leases,
             wake_deliveries,
             wake_allocation_floors,
             tombstones,
@@ -463,33 +417,6 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         (SessionId::from(session_id), stored_process_id(process_id))
     })
     .collect();
-    type PgLeaseRow = (
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        i64,
-        i64,
-    );
-    let lease_rows: Vec<PgLeaseRow> = sqlx::query_as("SELECT process_id, lease_owner_id, lease_owner_incarnation_id, lease_token, lease_fencing_token, lease_claimed_at_ms FROM lash_process_leases ORDER BY process_id").fetch_all(pool).await.unwrap();
-    let leases = lease_rows
-        .into_iter()
-        .map(
-            |(process_id, owner_id, incarnation, token, fencing, claimed)| {
-                ProcessLeaseObservation {
-                    process_id: stored_process_id(process_id),
-                    owner: if token.is_some() {
-                        serde_json::to_value(decode_lease_owner(owner_id, incarnation)).unwrap()
-                    } else {
-                        serde_json::Value::Null
-                    },
-                    lease_token_present: token.is_some(),
-                    fencing_token: fencing as u64,
-                    claimed: claimed != 0,
-                }
-            },
-        )
-        .collect();
     type PgWakeRow = (
         String,
         String,
@@ -572,7 +499,6 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
             records,
             events,
             observers,
-            leases,
             wake_deliveries,
             wake_allocation_floors,
             tombstones,

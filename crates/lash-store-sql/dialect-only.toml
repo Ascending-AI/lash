@@ -490,7 +490,6 @@ tables = [
     "processes",
     "process_definitions",
     "process_events",
-    "process_leases",
     "process_observers",
     "process_segment_handovers",
     "process_tombstones",
@@ -508,7 +507,6 @@ statement_prefixes = [
     "process_registry",
     "process_definition",
     "process_event",
-    "process_lease",
     "process_observer",
     "process_segment_handover",
     "process_tombstone",
@@ -525,7 +523,6 @@ shared = [
     "crates/lash-store-sql/src/process/artifact_cleanup.rs",
     "crates/lash-store-sql/src/process/definitions.rs",
     "crates/lash-store-sql/src/process/events.rs",
-    "crates/lash-store-sql/src/process/leases.rs",
     "crates/lash-store-sql/src/process/observers.rs",
     "crates/lash-store-sql/src/process/parent_end_plans.rs",
     "crates/lash-store-sql/src/process/park_clock.rs",
@@ -563,7 +560,6 @@ schema = [
 processes = "crates/lash-store-sql/src/process/processes.rs"
 process_definitions = "crates/lash-store-sql/src/process/definitions.rs"
 process_events = "crates/lash-store-sql/src/process/events.rs"
-process_leases = "crates/lash-store-sql/src/process/leases.rs"
 process_observers = "crates/lash-store-sql/src/process/observers.rs"
 process_segment_handovers = "crates/lash-store-sql/src/process/segment_handovers.rs"
 process_tombstones = "crates/lash-store-sql/src/process/tombstones.rs"
@@ -1603,14 +1599,14 @@ kind = "bound id list"
 reason = "Same bound-id-list fork as process.classify_tombstoned_candidates."
 
 [[dialect_only]]
-statement = "process.count_live_worklist"
+statement = "process.count_non_terminal_processes"
 backends = ["sqlite", "postgres"]
 kind = "INDEXED BY"
 reason = """
-SQLite pins the worklist to idx_processes_live_worklist by name rather than
+SQLite pins the worklist to idx_processes_non_terminal by name rather than
 asking its planner to choose it, so a statistics change cannot silently turn
 the scan into a table scan. PostgreSQL has no such hint and its planner picks
-idx_lash_processes_live_worklist, which its own EXPLAIN witness asserts.
+idx_lash_processes_non_terminal, which its own EXPLAIN witness asserts.
 """
 
 [[dialect_only]]
@@ -1708,26 +1704,26 @@ limit are otherwise identical.
 """
 
 [[dialect_only]]
-statement = "process.list_first_worklist_page"
+statement = "process.list_first_non_terminal_process_page"
 backends = ["sqlite", "postgres"]
 kind = "INDEXED BY"
 reason = """
-Same index-hint fork as process.count_live_worklist. SQLite also binds an
-unused cursor slot so that both of its worklist pages take the same three
+Same index-hint fork as process.count_non_terminal_processes. SQLite also binds an
+unused cursor slot so that both of its non-terminal page queries take the same three
 parameters, which PostgreSQL does not.
 """
 
 [[dialect_only]]
-statement = "process.list_next_worklist_page"
+statement = "process.list_next_non_terminal_process_page"
 backends = ["sqlite", "postgres"]
 kind = "INDEXED BY"
-reason = "Same index-hint fork as process.list_first_worklist_page."
+reason = "Same index-hint fork as process.list_first_non_terminal_process_page."
 
 [[dialect_only]]
-statement = "process.select_max_worklist_process_id"
+statement = "process.select_max_non_terminal_process_id"
 backends = ["sqlite", "postgres"]
 kind = "INDEXED BY"
-reason = "Same index-hint fork as process.count_live_worklist."
+reason = "Same index-hint fork as process.count_non_terminal_processes."
 
 [[dialect_only]]
 statement = "process.list_parent_end_children"
@@ -1868,65 +1864,10 @@ event count has to come from the same statement as the row delete.
 """
 
 [[dialect_only]]
-statement = "process_lease.delete_by_process_ids"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite deletes the dependent lease rows explicitly. PostgreSQL lets the process
-delete inside process_registry.prune_rows cascade them through the existing
-foreign key.
-"""
-
-[[dialect_only]]
-statement = "process_lease.list_by_process_ids"
-backends = ["sqlite", "postgres"]
-kind = "bound id list"
-reason = "Same bound-id-list fork as process.classify_tombstoned_candidates."
-
-[[dialect_only]]
-statement = "process_lease.select_by_process"
-backends = ["sqlite"]
-kind = "FOR UPDATE"
-reason = """
-SQLite reads the lease with no lock suffix: the claim decision runs under BEGIN
-IMMEDIATE. PostgreSQL's read takes the row's write lock, which is the entry
-below. This is a fencing read, relocated with its predicate unchanged for
-FIG-3381.
-"""
-
-[[dialect_only]]
-statement = "process_lease.select_by_process_for_update"
-backends = ["postgres"]
-kind = "FOR UPDATE"
-reason = "The PostgreSQL half of the process_lease.select_by_process fork."
-
-[[dialect_only]]
-statement = "process_lease.select_fencing_token"
-backends = ["sqlite"]
-kind = "FOR UPDATE"
-reason = "Same lock fork as process_lease.select_by_process, for the retained fencing token."
-
-[[dialect_only]]
-statement = "process_lease.select_fencing_token_for_update"
-backends = ["postgres"]
-kind = "FOR UPDATE"
-reason = "The PostgreSQL half of the process_lease.select_fencing_token fork."
-
-[[dialect_only]]
-statement = "process_lease.upsert_acquired"
-backends = ["sqlite", "postgres"]
-kind = "ON CONFLICT"
-reason = """
-The proposed row is `excluded` on SQLite and `EXCLUDED` on PostgreSQL, so the
-conflict clause's text forks. This is a fencing write, relocated with its
-predicate unchanged for FIG-3381.
-"""
-
-[[dialect_only]]
 statement = "process_observer.delete_by_process_ids"
 backends = ["sqlite"]
 kind = "operation exists on one backend only"
-reason = "Same explicit-dependent-delete fork as process_lease.delete_by_process_ids."
+reason = "Same explicit-dependent-delete fork as process_event.delete_by_process_ids."
 
 [[dialect_only]]
 statement = "process_observer.exists"
@@ -2011,7 +1952,7 @@ the conflict.
 statement = "process_segment_handover.delete_by_process_ids"
 backends = ["sqlite"]
 kind = "operation exists on one backend only"
-reason = "Same explicit-dependent-delete fork as process_lease.delete_by_process_ids."
+reason = "Same explicit-dependent-delete fork as process_event.delete_by_process_ids."
 
 [[dialect_only]]
 statement = "process_segment_handover.list_parked_segments"

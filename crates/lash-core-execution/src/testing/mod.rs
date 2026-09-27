@@ -41,7 +41,7 @@ mod trigger_context;
 /// A recording or fault layer over any effect host (FIG-3580).
 pub use crate::runtime::effect::{EffectLayer, LayeredEffectHost};
 pub use crate::runtime::process::{
-    ProcessRegistryFaults, RegistrationHoldPoint, WorklistPagePause, WorklistPageRead,
+    NonTerminalPagePause, NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
 };
 pub use execution_context_builder::*;
 #[cfg(any(test, feature = "testing"))]

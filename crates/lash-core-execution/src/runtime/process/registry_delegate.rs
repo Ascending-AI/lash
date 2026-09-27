@@ -43,13 +43,13 @@ macro_rules! delegate_process_query {
                 self.$inner.processes_changed_since(cursor, limit).await
             }
 
-            async fn list_non_terminal_page(
+            async fn list_non_terminal_processes_page(
                 &self,
                 limit: std::num::NonZeroUsize,
-                continuation: Option<$crate::ProcessWorklistCursor>,
-            ) -> Result<$crate::ProcessWorklistPage, $crate::PluginError> {
+                continuation: Option<$crate::ProcessRegistryCursor>,
+            ) -> Result<$crate::NonTerminalProcessPage, $crate::PluginError> {
                 self.$inner
-                    .list_non_terminal_page(limit, continuation)
+                    .list_non_terminal_processes_page(limit, continuation)
                     .await
             }
 
@@ -318,17 +318,6 @@ macro_rules! delegate_process_lifecycle {
                     prelude,
                     authority,
                 );
-                $event_hook
-            }
-
-            async fn complete_process_with_lease(
-                &self,
-                lease: &$crate::ProcessLease,
-                await_output: $crate::ProcessAwaitOutput,
-            ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
-                let $event_process_id = &lease.process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.complete_process_with_lease(lease, await_output);
                 $event_hook
             }
 
@@ -696,66 +685,6 @@ macro_rules! delegate_process_wake_outbox {
     };
 }
 pub(crate) use delegate_process_wake_outbox;
-
-macro_rules! delegate_process_leases {
-    ($wrapper:ty, $inner:ident) => {
-        #[async_trait::async_trait]
-        impl $crate::runtime::process::registry_concerns::ProcessLeases for $wrapper {
-            async fn claim_process_lease(
-                &self,
-                process_id: &ProcessId,
-                owner: &$crate::LeaseOwnerIdentity,
-                lease_ttl_ms: u64,
-            ) -> Result<$crate::ProcessLeaseClaimOutcome, $crate::PluginError> {
-                self.$inner
-                    .claim_process_lease(process_id, owner, lease_ttl_ms)
-                    .await
-            }
-
-            async fn reclaim_process_lease(
-                &self,
-                process_id: &ProcessId,
-                owner: &$crate::LeaseOwnerIdentity,
-                observed_holder: &$crate::ProcessLease,
-                lease_ttl_ms: u64,
-            ) -> Result<$crate::ProcessLeaseClaimOutcome, $crate::PluginError> {
-                self.$inner
-                    .reclaim_process_lease(process_id, owner, observed_holder, lease_ttl_ms)
-                    .await
-            }
-
-            async fn renew_process_lease(
-                &self,
-                lease: &$crate::ProcessLease,
-                lease_ttl_ms: u64,
-            ) -> Result<$crate::ProcessLease, $crate::PluginError> {
-                self.$inner.renew_process_lease(lease, lease_ttl_ms).await
-            }
-
-            async fn get_process_lease(
-                &self,
-                process_id: &ProcessId,
-            ) -> Result<Option<$crate::ProcessLease>, $crate::PluginError> {
-                self.$inner.get_process_lease(process_id).await
-            }
-
-            async fn get_process_leases(
-                &self,
-                process_ids: &[$crate::ProcessId],
-            ) -> Result<Vec<Option<$crate::ProcessLease>>, $crate::PluginError> {
-                self.$inner.get_process_leases(process_ids).await
-            }
-
-            async fn complete_process_lease(
-                &self,
-                completion: &$crate::ProcessLeaseCompletion,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner.complete_process_lease(completion).await
-            }
-        }
-    };
-}
-pub(crate) use delegate_process_leases;
 
 macro_rules! delegate_process_retention {
     ($wrapper:ty, $inner:ident) => {

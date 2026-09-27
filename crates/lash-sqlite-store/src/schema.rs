@@ -1129,7 +1129,7 @@ CREATE INDEX IF NOT EXISTS idx_processes_status
 -- A start key maps to the one retained process minted for it (ADR 0107).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_key
     ON processes(start_key) WHERE start_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
+CREATE INDEX IF NOT EXISTS idx_processes_non_terminal
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
 -- The scope-retirement fence this database shares with the effect journal is
@@ -1296,17 +1296,6 @@ CREATE TABLE IF NOT EXISTS process_artifact_cleanup (
     FOREIGN KEY (process_id) REFERENCES process_tombstones(process_id) ON DELETE RESTRICT
 );
 
-CREATE TABLE IF NOT EXISTS process_leases (
-    process_id       TEXT PRIMARY KEY,
-    lease_owner_id   TEXT,
-    lease_owner_incarnation_id TEXT,
-    lease_token      TEXT,
-    lease_fencing_token  INTEGER NOT NULL DEFAULT 0,
-    lease_claimed_at_ms  INTEGER NOT NULL DEFAULT 0,
-    lease_expires_at_ms  INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,
     segment_ordinal  INTEGER NOT NULL,
@@ -1411,7 +1400,7 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 // payloads structurally instead of retaining a payload-hash column.
 // Version 22 stores v3 process-environment refs whose content-addressed policy
 // payload includes the required per-turn budget.
-// Version 23 indexes the bounded non-terminal recovery worklist by process id.
+// Version 23 indexes the bounded non-terminal registry scan by process id.
 // Version 24 durably retains pending process-parent teardown beside terminal completion.
 // Version 25 switches durable process identities to domain-tagged BLAKE3.
 // Version 26 adds DDL-enforced process status, wake state/discard reason, and

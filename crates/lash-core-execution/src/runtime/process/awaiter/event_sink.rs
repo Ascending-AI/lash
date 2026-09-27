@@ -62,7 +62,7 @@ pub trait ProcessEventSink: Send + Sync {
     async fn emit(&self, event: &ProcessEvent);
 
     /// Observe one process worker fault: a row an admission pass admitted but a
-    /// backend or execution failure left non-terminal, or a worklist scan that
+    /// backend or execution failure left non-terminal, or a registry scan that
     /// stopped short of the whole queue.
     ///
     /// Same discipline as [`emit`](Self::emit) — fast, non-blocking,

@@ -366,14 +366,7 @@ pub async fn run_lashlang_process(
         .execution_context()
         .execution_write_authority
         .as_ref()
-        .and_then(|authority| match authority {
-            lash_core::ProcessExecutionWriteAuthority::Lease { lease, .. } => {
-                Some(lease.owner.clone())
-            }
-            lash_core::ProcessExecutionWriteAuthority::Invocation { .. } => {
-                authority.invocation_started().map(|started| started.owner)
-            }
-        });
+        .and_then(|authority| authority.invocation_started().map(|started| started.owner));
     let current_program_hash = lashlang_program_hash(&input);
     if let Some(refusal) = handover.as_ref().and_then(|handover| {
         refuse_foreign_program(

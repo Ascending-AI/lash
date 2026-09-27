@@ -110,15 +110,13 @@ pub struct AbandonEvidence {
     pub epoch_ms: u64,
 }
 
-/// Authority under which an *unleased* terminal completion
+/// Authority under which a terminal completion
 /// ([`ProcessRegistry::complete_process`](super::registry::ProcessRegistry::complete_process))
 /// is written.
 ///
-/// Lash-owned workers fence terminal writes with a process lease
-/// (`complete_process_with_lease`), which the store validates against the
-/// persisted `(owner, lease_token, fencing_token)`. The unleased path is
-/// reserved for writers whose single-writer discipline lives *outside* the Lash
-/// lease. In-process Rust cannot make such a token unforgeable; the value of
+/// Each variant names the engine or external owner whose single-writer
+/// discipline authorizes the completion. In-process Rust cannot make such a
+/// token unforgeable; the value of
 /// this type is instead **explicitness + a single validation choke point per
 /// backend + audit evidence** on the terminal write. Every backend calls
 /// [`validate`](Self::validate) against the row's ownership (its input class)
@@ -138,7 +136,7 @@ pub enum ProcessCompletionAuthority {
     ExternalOwner,
     /// A workflow-key-coalesced substrate (e.g. Restate keyed by `process_id`)
     /// completes a row it ran itself. Its single-writer discipline is the
-    /// engine's per-key coalescing, not a Lash lease; `workflow_key` records the
+    /// engine's per-key coalescing; `workflow_key` records the
     /// key that served as that discipline. Valid for every process lash
     /// executes, and rejected on an externally-owned process: an engine never
     /// runs one, so it may not close one.
@@ -177,7 +175,7 @@ impl ProcessCompletionAuthority {
     }
 
     /// Validate this authority against the row's ownership. This is the single per-backend choke point that
-    /// keeps unleased completion honest: each `complete_process`
+    /// keeps completion authority honest: each `complete_process`
     /// implementation calls it before appending the terminal event, so the
     /// ownership×authority contract is enforced uniformly across memory,
     /// SQLite, and Postgres rather than at each scattered caller.
@@ -242,13 +240,11 @@ pub fn terminal_event_type_name(status: ProcessStatus) -> &'static str {
 /// Build the replay-keyed terminal event append for a completion.
 ///
 /// The single source of truth for the terminal event's type, replay key, and
-/// payload shape, shared by every completion path (leased and unleased) across
-/// all backends. When `authority` is supplied — the unleased
-/// [`ProcessRegistry::complete_process`](super::registry::ProcessRegistry::complete_process)
-/// path — it is recorded alongside `await_output` as durable audit evidence
-/// (the leased path's evidence is the lease it releases, so it passes `None`
-/// and the payload is byte-identical to the historical shape). The
-/// `await_output` selector (`/await_output`) is untouched by the sibling key.
+/// payload shape, shared by every completion path across all backends. New
+/// completions record their authority alongside `await_output` as durable
+/// audit evidence. `None` remains readable for terminal events persisted
+/// before completion authority was recorded. The `await_output` selector
+/// (`/await_output`) is untouched by the sibling key.
 pub fn terminal_append_request(
     process_id: &ProcessId,
     await_output: &ProcessAwaitOutput,

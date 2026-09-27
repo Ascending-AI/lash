@@ -11,7 +11,7 @@
 
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
-use crate::{ProcessExecutionWriteAuthority, ProcessLease};
+use crate::ProcessExecutionWriteAuthority;
 use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
@@ -29,41 +29,32 @@ fn batch_registration() -> ProcessRegistration {
     )))
 }
 
-/// Register a process and claim and start its first attempt, returning its
-/// id and the lease that attempt writes under.
+/// Register a process and start its first engine invocation.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn started(registry: &Arc<dyn ProcessRegistry>, label: &str) -> (ProcessId, ProcessLease) {
+async fn started(
+    registry: &Arc<dyn ProcessRegistry>,
+    label: &str,
+) -> (ProcessId, ProcessExecutionWriteAuthority) {
     let id = registry
         .register_process(batch_registration())
         .await
         .expect("register the batch process")
         .id;
-    let owner = crate::LeaseOwnerIdentity::opaque(label, format!("{label}:i"));
-    let lease = registry
-        .claim_process_lease(&id, &owner, 60_000)
-        .await
-        .expect("claim the attempt's lease")
-        .acquired()
-        .expect("the attempt's lease is free");
+    let authority = ProcessExecutionWriteAuthority::invocation(id.clone(), label).bind_attempt(1);
     registry
         .record_first_started_with_authority(
             &id,
-            crate::ProcessStarted {
-                owner,
-                fencing_token: lease.fencing_token,
-                attempt: 1,
-                started_at_ms: lease.claimed_at_epoch_ms,
-                generation: None,
-                build_generation: None,
-            },
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            authority
+                .invocation_started()
+                .expect("the authority is bound to attempt one"),
+            &authority,
         )
         .await
         .expect("record the attempt's start");
-    (id, lease)
+    (id, authority)
 }
 
 fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppendRequest {
@@ -190,10 +181,8 @@ fn event_types(events: &[(String, u64, serde_json::Value)]) -> Vec<&str> {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_process_event_batch_is_one_commit(registry: Arc<dyn ProcessRegistry>) {
-    let (single, single_lease) = started(&registry, "batch-law-single").await;
-    let single_authority = ProcessExecutionWriteAuthority::lease(single_lease);
-    let (batched, batched_lease) = started(&registry, "batch-law-batched").await;
-    let batched_authority = ProcessExecutionWriteAuthority::lease(batched_lease);
+    let (single, single_authority) = started(&registry, "batch-law-single").await;
+    let (batched, batched_authority) = started(&registry, "batch-law-batched").await;
 
     let before = change_clock(&registry).await;
     for request in summary() {
@@ -221,7 +210,7 @@ pub async fn a_process_event_batch_is_one_commit(registry: Arc<dyn ProcessRegist
     );
     let (single_events, single_record) = folded(&registry, &single).await;
     let (batched_events, batched_record) = folded(&registry, &batched).await;
-    // Each process's start names its own lease owner; what follows it is the
+    // Each process's start names its own invocation; what follows it is the
     // summary under test.
     assert_eq!(
         batched_events[1..],
@@ -304,8 +293,7 @@ pub async fn a_process_event_batch_is_one_commit(registry: Arc<dyn ProcessRegist
 pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let (id, lease) = started(&registry, "batch-law-boundary").await;
-    let authority = ProcessExecutionWriteAuthority::lease(lease);
+    let (id, authority) = started(&registry, "batch-law-boundary").await;
 
     let clock = change_clock(&registry).await;
     let waiting = registry

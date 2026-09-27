@@ -994,19 +994,6 @@ fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
     }
 }
 
-fn decode_lease_owner(
-    owner_id: Option<String>,
-    incarnation_id: Option<String>,
-) -> Option<LeaseOwnerIdentity> {
-    match (owner_id, incarnation_id) {
-        (None, None) => None,
-        (Some(owner_id), Some(incarnation_id)) => {
-            Some(LeaseOwnerIdentity::opaque(owner_id, incarnation_id))
-        }
-        fields => panic!("partial lease-owner identity in durable row: {fields:?}"),
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"

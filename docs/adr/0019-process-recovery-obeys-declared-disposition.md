@@ -12,14 +12,14 @@ below are deleted; "lash never executes this process" is the
 `Completed | Failed | Cancelled`, and `CallerDeparted`, stand. The text below
 is the history.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: lease-validated completion
-(`complete_process_with_lease`) and recovery after a lapsed process lease; the
-declared disposition itself stays and the engine applies it. Those passages stay
-as written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600
-for the session lease) rewrites them.
+Amended 2026-09-27 (FIG-3863): the process-lease completion path and its
+lease-expiry recovery behavior described in this historical decision have been
+deleted. The `ObservedProcess` lease-holder/expiry projection and the
+`get_process_lease` and `get_process_leases` accessors are deleted as well. The
+lease and sweep passages below record the former design; they are not current
+behavior. The current engine-owned recovery contract is
+[ADR 0110](0110-the-engine-owns-process-recovery.md); the completion-authority
+contract is [ADR 0027](0027-unleased-completion-carries-explicit-authority.md).
 
 ## Decision
 
@@ -148,13 +148,15 @@ work the only sound policy is to never start the replacement.
   owner drain or a lapsed-lease Abandon Request authorizes Abandoned;
   ExternallyOwned rows are never claimed. The
   fabricated-success path for External inputs is deleted.
-- `ObservedProcess` exposes lease holder identity, expiry, and the declared
-  disposition. A pending Abandon Request is visible to observers. Stuck
-  detection is a host-built read-side classification, not a lash daemon.
-- Conformance gains cases pinning: sweep obeys disposition, Abandoned requires
+- At the time, `ObservedProcess` exposed lease holder identity, expiry, and the
+  declared disposition. A pending Abandon Request was visible to observers.
+  Those lease projections were removed by FIG-3863; stuck detection remains a
+  host-built read-side classification, not a lash daemon.
+- Conformance gained cases pinning: sweep obeys disposition, Abandoned requires
   owner drain or a lapsed-lease reconciled request, a revenant's
   lease-fenced writes are rejected after abandonment, and owner drain
-  terminalizes inline.
+  terminalizes inline. FIG-3863 deletes this recovery sweep and its lease
+  fencing; engine invocations now authorize process execution writes.
 - Hosts that drain gracefully see their OwnerBound work reach Abandoned at
   close; hosts that crash see it reach Abandoned at the next sweep any peer
   drives. A host that wants work to survive it uses a Rerunnable input on a

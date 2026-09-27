@@ -223,7 +223,6 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
     fn try_from(value: lash_core::ProcessStarted) -> Result<Self, Self::Error> {
         let lash_core::ProcessStarted {
             owner,
-            fencing_token,
             attempt,
             started_at_ms,
             generation,
@@ -231,7 +230,6 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
         } = value;
         Ok(Self {
             owner: owner.into(),
-            fencing_token,
             attempt,
             started_at_ms,
             generation: generation.map(|generation| generation.as_str().to_owned()),
@@ -246,7 +244,6 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
     fn try_from(value: RemoteProcessStarted) -> Result<Self, Self::Error> {
         let RemoteProcessStarted {
             owner,
-            fencing_token,
             attempt,
             started_at_ms,
             generation,
@@ -264,7 +261,6 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             .transpose()?;
         Ok(Self {
             owner: owner.into(),
-            fencing_token,
             attempt,
             started_at_ms,
             generation: generation.map(lash_core::ExecutableGeneration::new),

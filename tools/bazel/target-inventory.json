@@ -16418,7 +16418,6 @@
         "rmp-serde",
         "schemars",
         "serde",
-        "serde-content",
         "serde_json",
         "sha2",
         "syn",

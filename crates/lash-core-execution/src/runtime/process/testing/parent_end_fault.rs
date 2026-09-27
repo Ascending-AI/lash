@@ -16,15 +16,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::runtime::process::registry::ProcessRegistry;
 use crate::runtime::process::registry_concerns::ProcessLifecycle;
 use crate::runtime::process::registry_delegate::{
-    delegate_process_event_log, delegate_process_leases, delegate_process_observer_registry,
-    delegate_process_query, delegate_process_registrar, delegate_process_retention,
-    delegate_process_tool_intents, delegate_process_wake_outbox,
+    delegate_process_event_log, delegate_process_observer_registry, delegate_process_query,
+    delegate_process_registrar, delegate_process_retention, delegate_process_tool_intents,
+    delegate_process_wake_outbox,
 };
 use crate::{
     CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessId, ProcessLease,
-    ProcessRecord, ProcessStartOutcome, ProcessStarted, RuntimeReplayAttribution, ScopeId,
-    SessionId, StoreRealization, WaitState,
+    ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessId, ProcessRecord,
+    ProcessStartOutcome, ProcessStarted, RuntimeReplayAttribution, ScopeId, SessionId,
+    StoreRealization, WaitState,
 };
 
 /// The decorated registry: one armed fault for `target`, everything else
@@ -89,8 +89,6 @@ delegate_process_tool_intents!(ParentEndFault, inner);
 
 delegate_process_wake_outbox!(ParentEndFault, inner);
 
-delegate_process_leases!(ParentEndFault, inner);
-
 delegate_process_retention!(ParentEndFault, inner);
 
 #[async_trait::async_trait]
@@ -115,16 +113,6 @@ impl ProcessLifecycle for ParentEndFault {
     ) -> Result<ProcessCompletionOutcome, PluginError> {
         self.inner
             .complete_process_with_prelude(process_id, await_output, prelude, authority)
-            .await
-    }
-
-    async fn complete_process_with_lease(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-    ) -> Result<ProcessCompletionOutcome, PluginError> {
-        self.inner
-            .complete_process_with_lease(lease, await_output)
             .await
     }
 

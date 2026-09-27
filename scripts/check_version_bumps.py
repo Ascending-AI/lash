@@ -222,14 +222,6 @@ REGISTRATION_BASELINES = {
         "sha256:0b06228ca33674b8cbfcb73a02c46a03f6629dcc7949f9da785a43c9082bcfdc"
     ),
 
-    # FIG-2996 part 2: the durable process-lease block (PROCESS_LEASE_SCHEMA_VERSION,
-    # ProcessLease and its version fence) moved verbatim from
-    # crates/lash-core/src/runtime/process/model.rs into the sibling
-    # model/lease.rs to bring model.rs back under the production file-size
-    # budget. Same re-exports, no field, variant, serde attribute or constant
-    # changed, so the serialized lease bytes are identical and
-    # PROCESS_LEASE_SCHEMA_VERSION stays 2 under its relocated key.
-    'crates/lash-core/src/runtime/process/model/lease.rs:PROCESS_LEASE_SCHEMA_VERSION': 'sha256:627d95b22c67fe20640132b6a8fff0b188aa1b107891feaf350487de0194e8f6',
     # FIG-3042 step 4: the durable domain layer was carved verbatim out of
     # lash-core into the new lash-internal-core-store crate. Every surface
     # below kept its file name and its contents; only the crate directory in
@@ -305,7 +297,7 @@ REGISTRATION_BASELINES = {
     # every key below reads to the check as brand new even though its
     # merge-base value sits under the old path. Same reading as FIG-3042 step
     # 4, taken per file against the merge-base copy: validation.rs, triggers.rs,
-    # wake.rs, model/lease.rs and lease_serde.rs are byte-identical; router.rs,
+    # and wake.rs are byte-identical; router.rs,
     # causal.rs, tool_execution.rs and promise_semantics.rs differ only in
     # `pub(crate)`/`pub(super)` -> `pub` on items lash-core still calls; and
     # events.rs already re-exported PROCESS_WAKE_DELIVERY_FORMAT_VERSION (3)
@@ -353,9 +345,6 @@ REGISTRATION_BASELINES = {
     ),
     "crates/lash-core-execution/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION": (
         "sha256:509ac3693782c0b9bbc41dc2a2f44976c9ec0532ba508d6c23a42809244debe1"
-    ),
-    "crates/lash-core-execution/src/runtime/process/model/lease.rs:PROCESS_LEASE_SCHEMA_VERSION": (
-        "sha256:5ba0ecd22f3c782cd1b68121ca8772b6a2833ed48a54440dc3a614604ebb2dd0"
     ),
     # FIG-3537: the durable runtime-commit receipt (RuntimeCommitReceipt,
     # persisted in lash_runtime_turn_commits.result_json) gains its explicit
@@ -457,11 +446,6 @@ IDENTIFIER_RENAME_BASELINES = {
     # the append-request identity bytes are identical and
     # APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4.
     'crates/lash-core/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:24244e89d86a4ca909abb06815828b9d16c143e416861c3fb3619735dacc7cdf',
-
-    # FIG-2360: the reviewed version fence replaces derived decoding while
-    # preserving version-2 serialization and current-format input semantics.
-    # Both HARD review scopes confirmed exact JSON/MessagePack output parity.
-    'crates/lash-core/src/runtime/process/model.rs:PROCESS_LEASE_SCHEMA_VERSION': 'sha256:b8ae30a35110ff90e730de2de77f97489b8ff82f3482a5e4ddc3fab1568e674e',
 
     # FIG-2783: restoring the usage_disposition_json explanation comment added
     # two `--` lines inside the SQLite CREATE TABLE body. Comments are inert

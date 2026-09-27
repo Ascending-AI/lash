@@ -250,26 +250,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_batches_lease_reads_without_changing_mixed_results() {
+    async fn list_preserves_mixed_process_results_without_lease_projection() {
         let registry = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
         let mut ids = std::collections::BTreeMap::new();
-        for process_id in ["batch-leased", "batch-unleased", "batch-terminal"] {
+        for process_id in ["batch-live-a", "batch-live-b", "batch-terminal"] {
             let registered = registry
                 .register_process(external_registration(process_id))
                 .await
                 .expect("register batch observation fixture");
             ids.insert(process_id, registered.id.clone());
         }
-        registry
-            .claim_process_lease(
-                &ids["batch-leased"],
-                &crate::LeaseOwnerIdentity::opaque("observer", "one"),
-                60_000,
-            )
-            .await
-            .expect("claim observed lease")
-            .acquired()
-            .expect("observed lease acquired");
         registry
             .complete_process(
                 &ids["batch-terminal"],
@@ -292,18 +282,9 @@ mod tests {
 
         assert_eq!(observed.len(), 3);
         assert_eq!(
-            observed
-                .iter()
-                .filter(|process| process.lease_holder.is_some())
-                .count(),
-            1
-        );
-        assert_eq!(
             observed.iter().filter(|process| process.terminal()).count(),
             1
         );
-        assert_eq!(registry.lease_batch_reads(), 1);
-        assert_eq!(registry.lease_point_reads(), 0);
     }
 
     #[tokio::test]
@@ -414,8 +395,32 @@ mod tests {
     async fn observed_process_exposes_current_wait_state() {
         let registry = memory_registry().await;
         let scope = SessionScope::new("wait");
-        let waiting_process_id =
-            register_visible(&registry, &scope, external_registration("Waiting")).await;
+        let mut registration = ProcessRegistration::new(
+            ProcessInput::Engine {
+                kind: "observation-test".to_string(),
+                payload: json!({}),
+            },
+            ProcessProvenance::host(),
+            crate::Lifetime::Detached,
+        );
+        registration.env_ref = Some(ProcessExecutionEnvRef::new("process-env:observation-test"));
+        let waiting_process_id = register_visible(&registry, &scope, registration).await;
+        registry
+            .record_first_started(
+                &waiting_process_id,
+                crate::ProcessStarted {
+                    owner: crate::LeaseOwnerIdentity::engine_process_execution(
+                        &waiting_process_id,
+                        "observation-test",
+                    ),
+                    attempt: 1,
+                    started_at_ms: 1,
+                    generation: None,
+                    build_generation: None,
+                },
+            )
+            .await
+            .expect("start engine process");
         let wait = WaitState {
             since_ms: 1234,
             kind: WaitKind::Signal {

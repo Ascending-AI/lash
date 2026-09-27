@@ -202,7 +202,6 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/process_model.rs",
-        "tests/runtime/process/lease_serde_tests.rs",
         "tests/runtime/process/registry_transitions.rs",
     ],
     exec_properties = sized_exec_properties("lash-internal-core-execution", "process_model", "//crates/lash-core-execution:process_model__test"),
@@ -831,7 +830,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core_execution",
     manifest_dir = "crates/lash-core-execution",
     package_name = "lash-internal-core-execution",
-    srcs_patterns = ["tests/process_model.rs", "tests/runtime/process/lease_serde_tests.rs", "tests/runtime/process/registry_transitions.rs"],
+    srcs_patterns = ["tests/process_model.rs", "tests/runtime/process/registry_transitions.rs"],
     tags = [
         "feature-lane",
         "manual",

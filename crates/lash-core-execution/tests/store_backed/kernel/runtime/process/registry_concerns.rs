@@ -4,9 +4,9 @@ mod concern_isolation_tests {
 
     use crate::runtime::process::ProcessLiveReferenceView;
     use crate::runtime::process::{
-        ProcessChange, ProcessChangeCursor, ProcessInput, ProcessListFilter, ProcessObserverBy,
-        ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport,
-        ProcessWorklistCursor, ProcessWorklistPage,
+        NonTerminalProcessPage, ProcessChange, ProcessChangeCursor, ProcessInput,
+        ProcessListFilter, ProcessObserverBy, ProcessProvenance, ProcessRecord,
+        ProcessRegistration, ProcessRegistryCursor, ProcessSessionDeleteReport,
     };
     use crate::{
         PluginError, ProcessId, ProcessObserverRegistry, ProcessQuery, ProcessRegistry, SessionId,
@@ -50,12 +50,14 @@ mod concern_isolation_tests {
         ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
             self.inner.processes_changed_since(cursor, limit).await
         }
-        async fn list_non_terminal_page(
+        async fn list_non_terminal_processes_page(
             &self,
             limit: NonZeroUsize,
-            continuation: Option<ProcessWorklistCursor>,
-        ) -> Result<ProcessWorklistPage, PluginError> {
-            self.inner.list_non_terminal_page(limit, continuation).await
+            continuation: Option<ProcessRegistryCursor>,
+        ) -> Result<NonTerminalProcessPage, PluginError> {
+            self.inner
+                .list_non_terminal_processes_page(limit, continuation)
+                .await
         }
         async fn live_reference_summary(
             &self,

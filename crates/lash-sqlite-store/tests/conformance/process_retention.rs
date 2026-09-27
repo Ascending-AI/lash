@@ -58,7 +58,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
     assert!(!waiting.is_terminal(), "a waiting process is not terminal");
 
     let live = registry
-        .list_non_terminal_page(
+        .list_non_terminal_processes_page(
             std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
             None,
         )

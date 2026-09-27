@@ -156,9 +156,9 @@ So a neutral statement **names** the predicate, as a token:
 
 ```rust
 lash_store_sql::statements! {
-    pub struct WorklistStatements @ "process_worklist" {
-        /// The live worklist's page, pinned to its partial index.
-        count_live = "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_live_worklist
+    pub struct NonTerminalPageStatements @ "process_non_terminal_page" {
+        /// The non-terminal page, pinned to its partial index.
+        count_live = "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_non_terminal
      WHERE {{live_process_status(status)}}";
     }
 }
@@ -189,8 +189,8 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
     ),
 ]);
 
-static WORKLIST_SQL: LazyLock<WorklistStatements> = LazyLock::new(|| {
-    WorklistStatements::render(Dialect::postgres().with_vocabulary(PROCESS_LIFECYCLE))
+static NON_TERMINAL_PAGE_SQL: LazyLock<NonTerminalPageStatements> = LazyLock::new(|| {
+    NonTerminalPageStatements::render(Dialect::postgres().with_vocabulary(PROCESS_LIFECYCLE))
 });
 ```
 
@@ -220,13 +220,13 @@ processes = ["status"]
 process_wake_deliveries = ["state"]
 ```
 
-**Partial indexes are why byte identity matters.** `idx_processes_live_worklist`
+**Partial indexes are why byte identity matters.** `idx_processes_non_terminal`
 is `ON processes(process_id) WHERE status IN ('running', 'waiting')`, and a
 planner uses a partial index only for a query whose predicate matches it. The
 token renders to exactly the schema's text — pinned per backend by
 `every_vocabulary_partial_index_predicate_is_what_a_token_renders` in
 `crates/lash-{sqlite,postgres}-store/src/process_lifecycle_sql_tests.rs`, which
-also pins that a real worklist statement renders to the bytes its `format!`
+also pins that a real non-terminal page statement renders to the bytes its `format!`
 site produces today. Any family whose statements pin a partial index adds its
 indexes to those tests.
 

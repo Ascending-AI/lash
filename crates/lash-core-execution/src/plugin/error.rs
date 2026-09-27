@@ -206,8 +206,8 @@ pub enum PluginError {
     },
     #[error(transparent)]
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
-    #[error("process lease for `{process_id}` is missing or expired (superseded)")]
-    ProcessLeaseSuperseded { process_id: ProcessId },
+    #[error("process execution authority for `{process_id}` is missing or superseded")]
+    ProcessExecutionSuperseded { process_id: ProcessId },
     #[error("monotonic counter `{counter}` cannot advance past {current}")]
     MonotonicCounterOverflow { counter: String, current: u64 },
     #[error(
@@ -255,10 +255,10 @@ pub enum PluginError {
         "process wake delivery format version {found} is incompatible with version {expected}; drain in-flight sessions on the old build before deploying this build, or recreate development/test stores"
     )]
     ProcessWakeDeliveryFormatVersionMismatch { expected: u32, found: u32 },
-    /// A worklist continuation was passed to a registry backend other than the
+    /// A process-registry continuation was passed to a backend other than the
     /// backend that issued it.
-    #[error("process worklist cursor belongs to backend `{actual}`, not `{expected}`")]
-    ProcessWorklistCursorBackendMismatch { expected: String, actual: String },
+    #[error("process registry cursor belongs to backend `{actual}`, not `{expected}`")]
+    ProcessRegistryCursorBackendMismatch { expected: String, actual: String },
 }
 
 impl PluginError {
@@ -268,7 +268,7 @@ impl PluginError {
     /// redrive repairs it: a carried runtime or controller error keeps its own
     /// code, a lost session lease is `SessionExecutionLeaseLost`, and an opaque
     /// session-seam failure (store I/O behind a plugin service) or a lost
-    /// process lease is `PluginSessionManager`. A carried session retirement
+    /// process execution failure is `PluginSessionManager`. A carried session retirement
     /// keeps its own error and cause, so the caller aborts on it (FIG-3630).
     /// Every other variant is a
     /// deliberate refusal over the turn's inputs or durable state: an outcome
@@ -291,7 +291,7 @@ impl PluginError {
                 crate::RuntimeErrorCode::SessionExecutionLeaseLost,
                 error.to_string(),
             ),
-            error @ (Self::Session(_) | Self::ProcessLeaseSuperseded { .. }) => {
+            error @ (Self::Session(_) | Self::ProcessExecutionSuperseded { .. }) => {
                 crate::RuntimeError::new(
                     crate::RuntimeErrorCode::PluginSessionManager,
                     error.to_string(),
@@ -332,7 +332,7 @@ impl PluginError {
             | Self::ReservedProcessEvent { .. }
             | Self::InvalidProcessWakeIdentity { .. }
             | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
-            | Self::ProcessWorklistCursorBackendMismatch { .. }) => {
+            | Self::ProcessRegistryCursorBackendMismatch { .. }) => {
                 crate::RuntimeError::new(refusal, refused.to_string())
             }
         }
@@ -390,7 +390,7 @@ impl PluginError {
             | Self::ReservedProcessEvent { .. }
             | Self::InvalidProcessWakeIdentity { .. }
             | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
-            | Self::ProcessWorklistCursorBackendMismatch { .. } => true,
+            | Self::ProcessRegistryCursorBackendMismatch { .. } => true,
             _ => false,
         }
     }

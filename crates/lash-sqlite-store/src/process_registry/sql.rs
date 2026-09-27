@@ -20,7 +20,7 @@ use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
-    events::EventStatements, leases::LeaseStatements, observers::ObserverStatements,
+    events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
     processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
     tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
@@ -165,25 +165,25 @@ lash_store_sql::statements! {
         ///
         /// `INDEXED BY` is the fork: SQLite's planner is pinned to the partial
         /// index rather than asked to choose it, so a statistics change cannot
-        /// silently turn the worklist into a table scan.
-        count_live_worklist = "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_live_worklist
+        /// silently turn the non-terminal page scan into a table scan.
+        count_non_terminal_processes = "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_non_terminal
      WHERE {{live_process_status(status)}}";
 
-        /// The id the first worklist page is bounded by: the page is pinned to
+        /// The id the first non-terminal page is bounded by: the page is pinned to
         /// a snapshot high-water mark so a process registered mid-walk cannot
         /// shift it.
-        select_max_worklist_process_id = "SELECT MAX(process_id) FROM processes INDEXED BY idx_processes_live_worklist
+        select_max_non_terminal_process_id = "SELECT MAX(process_id) FROM processes INDEXED BY idx_processes_non_terminal
      WHERE {{live_process_status(status)}}";
 
         /// The first `?3` live processes at or below `?1`.
-        list_first_worklist_page = "SELECT record_json FROM processes
-     INDEXED BY idx_processes_live_worklist
+        list_first_non_terminal_process_page = "SELECT record_json FROM processes
+     INDEXED BY idx_processes_non_terminal
      WHERE {{live_process_status(status)}} AND process_id <= ?1
      ORDER BY process_id ASC LIMIT ?3";
 
         /// The next `?3` live processes in `(?2, ?1]`.
-        list_next_worklist_page = "SELECT record_json FROM processes
-     INDEXED BY idx_processes_live_worklist
+        list_next_non_terminal_process_page = "SELECT record_json FROM processes
+     INDEXED BY idx_processes_non_terminal
      WHERE {{live_process_status(status)}}
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3";
@@ -609,54 +609,6 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `process_leases` statements only SQLite issues.
-    pub(crate) struct LeaseSqliteStatements @ "process_lease" {
-        /// The retained fencing token of `?1`.
-        ///
-        /// No lock suffix: the whole claim decision runs under
-        /// `BEGIN IMMEDIATE`. PostgreSQL takes the row's write lock here.
-        select_fencing_token = "SELECT lease_fencing_token FROM process_leases WHERE process_id = ?1";
-
-        /// `?1`'s lease. Same lock fork as
-        /// [`LeaseSqliteStatements::select_fencing_token`].
-        select_by_process = "SELECT lease_owner_id, lease_token, lease_fencing_token,
-                    lease_claimed_at_ms, lease_expires_at_ms,
-                    lease_owner_incarnation_id
-             FROM process_leases
-             WHERE process_id = ?1";
-
-        /// The leases of every process named by the JSON id array `?1`.
-        list_by_process_ids = "SELECT process_id, lease_owner_id, lease_token,
-                                lease_fencing_token, lease_claimed_at_ms,
-                                lease_expires_at_ms, lease_owner_incarnation_id
-                         FROM process_leases
-                         WHERE process_id IN (SELECT value FROM json_each(?1))";
-
-        /// Take the lease of `?1` at fencing token `?5`.
-        ///
-        /// `excluded` is SQLite's spelling of the proposed row; PostgreSQL
-        /// spells it `EXCLUDED`.
-        upsert_acquired = "INSERT INTO process_leases (
-                process_id, lease_owner_id, lease_owner_incarnation_id,
-                lease_token, lease_fencing_token,
-                lease_claimed_at_ms, lease_expires_at_ms
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(process_id) DO UPDATE SET
-                lease_owner_id = excluded.lease_owner_id,
-                lease_owner_incarnation_id = excluded.lease_owner_incarnation_id,
-                lease_token = excluded.lease_token,
-                lease_fencing_token = excluded.lease_fencing_token,
-                lease_claimed_at_ms = excluded.lease_claimed_at_ms,
-                lease_expires_at_ms = excluded.lease_expires_at_ms";
-
-        /// Drop the leases of every process named by the JSON id array `?1`.
-        delete_by_process_ids = "DELETE FROM process_leases
-                 WHERE process_id IN (SELECT value FROM json_each(?1))";
-    }
-}
-
-lash_store_sql::statements! {
     /// `process_change_clock` statements only SQLite issues.
     ///
     /// Every one of them forks: the singleton flag is `INTEGER 1` here and
@@ -968,10 +920,6 @@ pub(crate) struct ProcessSql {
     pub(crate) event: EventStatements,
     /// `process_events` statements only SQLite issues.
     pub(crate) event_sqlite: EventSqliteStatements,
-    /// `process_leases` statements both backends issue verbatim.
-    pub(crate) lease: LeaseStatements,
-    /// `process_leases` statements only SQLite issues.
-    pub(crate) lease_sqlite: LeaseSqliteStatements,
     /// `process_observers` statements both backends issue verbatim.
     pub(crate) observer: ObserverStatements,
     /// `process_observers` statements only SQLite issues.
@@ -1022,8 +970,6 @@ impl ProcessSql {
             definition: DefinitionStatements::render(dialect),
             event: EventStatements::render(dialect),
             event_sqlite: EventSqliteStatements::render(dialect),
-            lease: LeaseStatements::render(dialect),
-            lease_sqlite: LeaseSqliteStatements::render(dialect),
             observer: ObserverStatements::render(dialect),
             observer_sqlite: ObserverSqliteStatements::render(dialect),
             handover: SegmentHandoverStatements::render(dialect),

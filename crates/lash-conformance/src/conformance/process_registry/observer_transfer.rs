@@ -4,7 +4,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 /// Everything a transfer could touch, read through the registry's own
-/// surface: both processes' records, event logs, observer edges and leases,
+/// surface: both processes' records, event logs, observer edges,
 /// every wake delivery, the sender floors, and the change feed.
 #[expect(
     clippy::expect_used,
@@ -46,7 +46,6 @@ async fn transfer_footprint(
                 .await
                 .expect("read observers"),
             "observed_by": observed_by,
-            "lease": registry.get_process_lease(process_id).await.expect("read a lease"),
             "floors": floors,
         }));
     }

@@ -199,7 +199,7 @@ struct Fixtures {
     host: Arc<lash_core::testing::MockSessionManager>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn lash_core::TriggerStore>,
-    lease: lash_core::ProcessLease,
+    execution_authority: lash_core::ProcessExecutionWriteAuthority,
     /// The live, terminal and externally-owned matrix processes.
     live: ProcessId,
     terminal: ProcessId,
@@ -323,25 +323,16 @@ async fn fixtures() -> Fixtures {
         )
         .await
         .expect("complete terminal matrix process");
-    let owner = lash_core::LeaseOwnerIdentity::opaque("attempt-atomicity", "incarnation");
-    let lease = registry
-        .claim_process_lease(&live, &owner, 60_000)
-        .await
-        .expect("claim live process lease")
-        .acquired()
-        .expect("live process lease");
+    let execution_authority =
+        lash_core::ProcessExecutionWriteAuthority::invocation(live.clone(), "attempt-atomicity")
+            .bind_attempt(1);
     registry
         .record_first_started_with_authority(
             &live,
-            lash_core::ProcessStarted {
-                owner,
-                fencing_token: lease.fencing_token,
-                attempt: 1,
-                started_at_ms: 1,
-                build_generation: None,
-                generation: None,
-            },
-            &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
+            execution_authority
+                .invocation_started()
+                .expect("the authority is bound to attempt one"),
+            &execution_authority,
         )
         .await
         .expect("start live matrix process");
@@ -352,7 +343,7 @@ async fn fixtures() -> Fixtures {
         host,
         registry,
         trigger_store,
-        lease,
+        execution_authority,
         live,
         terminal,
         external,
@@ -477,7 +468,7 @@ fn tool_context_with_provider<'run>(
         )))
         .process_events(
             fixtures.live.clone(),
-            lash_core::ProcessExecutionWriteAuthority::lease(fixtures.lease.clone()),
+            fixtures.execution_authority.clone(),
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
             None,
             None,

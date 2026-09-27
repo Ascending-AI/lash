@@ -13,7 +13,7 @@ use crate::store::{
     ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkReason, ParkReasonCode, ProcessParkQuery,
     UnparkCause,
 };
-use crate::{PluginError, ProcessExecutionWriteAuthority, ProcessLease, ProcessRecord};
+use crate::{PluginError, ProcessExecutionWriteAuthority, ProcessRecord};
 use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeSet;
@@ -51,8 +51,8 @@ fn parkable() -> ProcessRegistration {
     )))
 }
 
-/// Claim `id`'s lease and record execution attempt `attempt` under it,
-/// returning the lease and what the start said.
+/// Record engine invocation `attempt`, returning its write authority and start
+/// outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -61,44 +61,21 @@ async fn start_attempt(
     registry: &Arc<dyn ProcessRegistry>,
     id: &ProcessId,
     attempt: u32,
-) -> (ProcessLease, crate::ProcessStartOutcome) {
-    let owner = crate::LeaseOwnerIdentity::opaque(
-        format!("park-owner-{attempt}"),
-        format!("park-owner-{attempt}:i"),
-    );
-    let lease = registry
-        .claim_process_lease(id, &owner, 60_000)
-        .await
-        .expect("claim the attempt's lease")
-        .acquired()
-        .expect("the attempt's lease is free");
+) -> (ProcessExecutionWriteAuthority, crate::ProcessStartOutcome) {
+    let authority =
+        ProcessExecutionWriteAuthority::invocation(id.clone(), format!("park-owner-{attempt}"))
+            .bind_attempt(attempt);
     let outcome = registry
         .record_first_started_with_authority(
             id,
-            crate::ProcessStarted {
-                owner,
-                fencing_token: lease.fencing_token,
-                attempt,
-                started_at_ms: lease.claimed_at_epoch_ms,
-                build_generation: None,
-                generation: None,
-            },
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            authority
+                .invocation_started()
+                .expect("the authority is bound to an attempt"),
+            &authority,
         )
         .await
         .expect("record the attempt's start");
-    (lease, outcome)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn release(registry: &Arc<dyn ProcessRegistry>, lease: &ProcessLease) {
-    registry
-        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(lease))
-        .await
-        .expect("release the attempt's lease");
+    (authority, outcome)
 }
 
 /// Register a parkable process, returning its minted id.
@@ -115,7 +92,7 @@ async fn register(registry: &Arc<dyn ProcessRegistry>) -> ProcessId {
 }
 
 /// Register a process and park it once under a first attempt, returning its
-/// id and the lease that attempt holds.
+/// id and the authority that attempt writes under.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -123,18 +100,14 @@ async fn register(registry: &Arc<dyn ProcessRegistry>) -> ProcessId {
 async fn parked(
     registry: &Arc<dyn ProcessRegistry>,
     reason: ParkReason,
-) -> (ProcessId, ProcessLease, ProcessRecord) {
+) -> (ProcessId, ProcessExecutionWriteAuthority, ProcessRecord) {
     let id = register(registry).await;
-    let (lease, _) = start_attempt(registry, &id, 1).await;
+    let (authority, _) = start_attempt(registry, &id, 1).await;
     let record = registry
-        .park_process_with_authority(
-            &id,
-            reason.into(),
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
-        )
+        .park_process_with_authority(&id, reason.into(), &authority)
         .await
         .expect("park the process");
-    (id, lease, record)
+    (id, authority, record)
 }
 
 #[expect(
@@ -291,7 +264,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     // S8: a park whose writer knows the checkpoint's build generation records
     // it on the park and stamps the `Parked` feed event it opens.
     let id = register(&registry).await;
-    let (lease, _) = start_attempt(&registry, &id, 1).await;
+    let (authority, _) = start_attempt(&registry, &id, 1).await;
     let checkpoint_generation = lash_core::engine::BuildGeneration::for_test("f3795c");
     let first = registry
         .park_process_with_authority(
@@ -301,11 +274,10 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
                 engine: None,
                 build_generation: Some(checkpoint_generation.clone()),
             },
-            &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            &authority,
         )
         .await
         .expect("park the process");
-    let authority = ProcessExecutionWriteAuthority::lease(lease.clone());
     let opened = first
         .park
         .as_deref()
@@ -383,7 +355,6 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
         "neither a rerun's start nor a re-park writes a feed event"
     );
     assert_eq!(list(&registry, query(10)).await, vec![id.clone()]);
-    release(&registry, &lease).await;
 }
 
 /// P3: the first fact of the process's own execution past a refusal ends
@@ -394,8 +365,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn ProcessRegistry>) {
-    let (id, lease, first) = parked(&registry, cell_divergence()).await;
-    let authority = ProcessExecutionWriteAuthority::lease(lease.clone());
+    let (id, authority, first) = parked(&registry, cell_divergence()).await;
     let opened = first.park.as_deref().cloned().expect("the refusal parks");
     registry
         .begin_parked_rerun_with_authority(&id, &authority)
@@ -454,7 +424,6 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
     assert_ne!(park.park_id, opened.park_id, "a new park has a new id");
     assert_eq!(park.attempts, 1);
     assert_eq!(transitions_of(&registry, &id).await.len(), 3);
-    release(&registry, &lease).await;
 }
 
 /// P4: a parked process's terminal closes its park by how it ended —
@@ -468,11 +437,11 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
 pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let (failed, lease, record) = parked(&registry, cell_divergence()).await;
+    let (failed, _authority, record) = parked(&registry, cell_divergence()).await;
     let park_id = record.park.as_deref().expect("parked").park_id;
     let completed = registry
-        .complete_process_with_lease(
-            &lease,
+        .complete_process(
+            &failed,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
                 crate::ToolFailure::runtime(
                     crate::ToolFailureClass::Execution,
@@ -480,6 +449,7 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
                     "the operator gave up on it",
                 ),
             )),
+            crate::ProcessCompletionAuthority::workflow_key(failed.to_string()),
         )
         .await
         .expect("fail the parked process");
@@ -502,7 +472,7 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
         ))
     );
 
-    let (cancelled, lease, record) = parked(&registry, cell_divergence()).await;
+    let (cancelled, _authority, record) = parked(&registry, cell_divergence()).await;
     let park_id = record.park.as_deref().expect("parked").park_id;
     let requested = registry
         .request_process_cancel(
@@ -518,11 +488,12 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
         "a cancel request alone does not end the park"
     );
     registry
-        .complete_process_with_lease(
-            &lease,
+        .complete_process(
+            &cancelled,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
                 crate::ToolCancellation::runtime("the operator cancelled it"),
             )),
+            crate::ProcessCompletionAuthority::workflow_key(cancelled.to_string()),
         )
         .await
         .expect("cancel the parked process");

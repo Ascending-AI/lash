@@ -1,7 +1,7 @@
 //! `processes`: one row per registered process.
 //!
 //! The row is wide and its authoritative form is `record_json`; the other
-//! columns are the indexed projection a worklist, a retention sweep or a
+//! columns are the indexed projection a non-terminal scan, a retention sweep or a
 //! change feed filters on. No caller reads the whole row, so this module
 //! declares the **named** projections that exist and nothing else.
 //!
@@ -162,7 +162,7 @@ crate::statements! {
              GROUP BY park_executable_generation";
 
         /// Every live process, whole. The unpaged read behind the in-memory
-        /// worklist rebuild; the paged worklist scans are dialect-only because
+        /// registry rebuild; the paged non-terminal scans are dialect-only because
         /// SQLite pins them to a partial index by name.
         collect_non_terminal_records = "SELECT record_json FROM processes
                          WHERE {{live_process_status(status)}}

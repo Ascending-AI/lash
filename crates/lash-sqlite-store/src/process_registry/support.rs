@@ -52,15 +52,8 @@ impl ProcessEventBatch {
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     ) -> Result<ProcessEventAppendReceipt, lash_core_execution::PluginError> {
-        self.stage_arm(
-            conn,
-            record,
-            request,
-            occurred_at_ms,
-            wake_delivery_config,
-            ProcessEventWriteAuthorization::Preauthorized,
-        )
-        .map(|(receipt, _)| receipt)
+        self.stage_arm(conn, record, request, occurred_at_ms, wake_delivery_config)
+            .map(|(receipt, _)| receipt)
     }
 
     /// Stage one append of the batch under `authorization`, answering its
@@ -72,7 +65,6 @@ impl ProcessEventBatch {
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-        authorization: ProcessEventWriteAuthorization<'_>,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
         let (receipt, arm) = SqliteProcessRegistry::stage_process_event_append_conn(
@@ -81,7 +73,6 @@ impl ProcessEventBatch {
             request,
             occurred_at_ms,
             wake_delivery_config,
-            authorization,
             self.fleet_format,
         )?;
         self.record_changed |= arm.record_changed();
@@ -99,15 +90,6 @@ impl ProcessEventBatch {
         }
         Ok(())
     }
-}
-
-/// Where the write authority for one process-event append is settled.
-pub(crate) enum ProcessEventWriteAuthorization<'a> {
-    /// The entry point authorized the write before the append sequence began.
-    Preauthorized,
-    /// Re-read the persisted lease and authorize against it after the
-    /// replay-or-insert decision and before the first row is written.
-    Lease(&'a ProcessLease),
 }
 
 pub(super) async fn recent_events(
@@ -189,22 +171,6 @@ pub(super) async fn wake_allocation_floor_for_testing(
 }
 
 impl SqliteProcessRegistry {
-    pub(crate) fn retained_process_lease_fencing_token_conn(
-        conn: &Connection,
-        process_id: &ProcessId,
-    ) -> Result<u64, lash_core_execution::PluginError> {
-        conn.query_row(
-            process_sql().lease_sqlite.select_fencing_token.sql(),
-            params![process_id.as_str()],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()
-        .map_err(process_sqlite_error)?
-        .map(|value| plugin_u64_from_sql("ProcessLease", "lease_fencing_token", value))
-        .transpose()
-        .map(|value| value.unwrap_or(0))
-    }
-
     pub(crate) fn require_process_conn(
         conn: &rusqlite::Connection,
         process_id: &ProcessId,
@@ -574,7 +540,6 @@ impl SqliteProcessRegistry {
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-        authorization: ProcessEventWriteAuthorization<'_>,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
@@ -584,7 +549,6 @@ impl SqliteProcessRegistry {
             request,
             occurred_at_ms,
             wake_delivery_config,
-            authorization,
             fleet_format,
         )?;
         if arm.record_changed() {
@@ -628,16 +592,13 @@ impl SqliteProcessRegistry {
     /// prologue, transaction lifetime and outcome mapping.
     ///
     /// `occurred_at_ms` is the caller's clock and the only clock this function
-    /// sees; it never reads one itself. The `Lease` authorization compares that
-    /// same value against the stored lease, exactly as the leased entry point
-    /// did inline.
+    /// sees; it never reads one itself.
     pub(crate) fn stage_process_event_append_conn(
         conn: &Connection,
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-        authorization: ProcessEventWriteAuthorization<'_>,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
@@ -694,32 +655,6 @@ impl SqliteProcessRegistry {
                 projected_record,
                 wake_delivery,
             } => {
-                match authorization {
-                    ProcessEventWriteAuthorization::Preauthorized => {}
-                    ProcessEventWriteAuthorization::Lease(lease) => {
-                        // The shared process-lease verdict is the decision
-                        // here (FIG-3388): the write flow's lock is already
-                        // held and the release statement's predicate backstops
-                        // this call.
-                        let current = Self::load_process_lease_row_conn(conn, &process_id)?;
-                        let verdict =
-                            lash_core_execution::store_backend_support::process_lease_verdict(
-                                current
-                                    .as_ref()
-                                    .map(registry_transitions::ProcessLeaseRow::facts),
-                                lash_core_execution::store_backend_support::ProcessLeaseAuthority {
-                                    lease_token: &lease.lease_token,
-                                    fencing_token: lease.fencing_token,
-                                },
-                                occurred_at_ms,
-                            );
-                        if !verdict.is_current() {
-                            return Err(lash_core_execution::PluginError::ProcessLeaseSuperseded {
-                                process_id,
-                            });
-                        }
-                    }
-                }
                 conn.execute(
                     process_sql().event.insert.sql(),
                     params![
@@ -799,7 +734,6 @@ impl SqliteProcessRegistry {
             request,
             occurred_at_ms,
             wake_delivery_config,
-            ProcessEventWriteAuthorization::Preauthorized,
             fleet_format,
         )?;
         Ok((receipt, arm.record_changed()))
@@ -885,82 +819,6 @@ impl SqliteProcessRegistry {
         )
         .map_err(process_sqlite_error)?;
         Ok(())
-    }
-
-    /// The lease row under the write flow's lock, unprojected: the release
-    /// verdict needs the raw holder columns to tell a released row
-    /// (`Released`) from an absent one (`Absent`) and a held row from its
-    /// successor.
-    pub(crate) fn load_process_lease_row_conn(
-        conn: &Connection,
-        process_id: &ProcessId,
-    ) -> Result<Option<registry_transitions::ProcessLeaseRow>, lash_core_execution::PluginError>
-    {
-        conn.query_row(
-            process_sql().lease_sqlite.select_by_process.sql(),
-            params![process_id.as_str()],
-            |row| {
-                Ok(registry_transitions::ProcessLeaseRow {
-                    owner_id: row.get(0)?,
-                    incarnation_id: row.get(5)?,
-                    lease_token: row.get(1)?,
-                    fencing_token: row.get(2)?,
-                    claimed_at_ms: row.get(3)?,
-                    expires_at_ms: row.get(4)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(process_sqlite_error)
-    }
-
-    pub(crate) fn load_process_lease_conn(
-        conn: &Connection,
-        process_id: &ProcessId,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<Option<ProcessLease>, lash_core_execution::PluginError> {
-        Ok(Self::load_process_lease_row_conn(conn, process_id)?
-            .and_then(|row| row.project(process_id, fleet_format)))
-    }
-
-    /// Insert-or-replace the persisted lease row for `process_id` with a fresh
-    /// lease owned by `owner` at `fencing_token`.
-    pub(super) fn acquire_process_lease_conn(
-        conn: &Connection,
-        process_id: &ProcessId,
-        owner: &LeaseOwnerIdentity,
-        fencing_token: u64,
-        now: u64,
-        lease_ttl_ms: u64,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<ProcessLease, lash_core_execution::PluginError> {
-        let lease = registry_transitions::acquired_process_lease(
-            process_id,
-            owner,
-            fencing_token,
-            now,
-            lease_ttl_ms,
-            fleet_format,
-        );
-        let sql_fencing_token = plugin_sql_monotonic_counter_value(
-            "process_lease_fencing_token",
-            fencing_token.saturating_sub(1),
-            lease.fencing_token,
-        )?;
-        conn.execute(
-            process_sql().lease_sqlite.upsert_acquired.sql(),
-            params![
-                lease.process_id.as_str(),
-                lease.owner.owner_id.as_str(),
-                lease.owner.incarnation_id.as_str(),
-                lease.lease_token.as_str(),
-                sql_fencing_token,
-                lease.claimed_at_epoch_ms as i64,
-                lease.expires_at_epoch_ms as i64,
-            ],
-        )
-        .map_err(process_sqlite_error)?;
-        Ok(lease)
     }
 }
 

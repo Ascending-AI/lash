@@ -8,10 +8,10 @@ use super::*;
 use crate::ProcessEventLogTestSupport as _;
 use crate::{
     LeaseOwnerIdentity, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome, ProcessObserverBy, ProcessRecord,
-    ProcessStartOutcome, ProjectionWatermark, WakeDelivery, WakeDeliveryClaimOutcome,
-    WakeDeliveryDisposition, WakeDeliveryState, WakeDiscardReason, apply_process_event_projection,
-    fold_process_record, process_wake_batch_draft,
+    ProcessExternalRef, ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
+    WakeDelivery, WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryState,
+    WakeDiscardReason, apply_process_event_projection, fold_process_record,
+    process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
 use lash_sansio::{ProcessId, SessionId};
@@ -101,14 +101,6 @@ pub enum StoreContractOp {
         process: u8,
         session: Option<u8>,
     },
-    ClaimLease {
-        process: u8,
-        owner: u8,
-    },
-    ReleaseLease {
-        process: u8,
-        stale: bool,
-    },
     ClaimWake,
     MarkWake {
         stale: bool,
@@ -138,7 +130,7 @@ pub enum StoreContractOp {
 /// Stateful driver for the shared generated store-contract operation language.
 /// This deliberately performs only the operation semantics and the small
 /// amount of bookkeeping needed by later operations (current authorities,
-/// leases, wake claims, and queue selections). The property harness layers its
+/// wake claims, and queue selections). The property harness layers its
 /// reference-model laws on top; cross-backend differential tests use the same
 /// driver but provide their own backend-agreement oracle.
 pub struct StoreContractScenario {
@@ -198,7 +190,6 @@ struct ModelProcess {
     lifecycle_replay_keys: BTreeSet<String>,
     current_authority: Option<ProcessExecutionWriteAuthority>,
     superseded_authorities: Vec<ProcessExecutionWriteAuthority>,
-    leases: Vec<ProcessLease>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -960,81 +951,6 @@ async fn apply_operation(
                 }
             }
         }
-        StoreContractOp::ClaimLease { process, owner } => {
-            let id = model.slot_id(*process);
-            // A lease is authority over a retained registry row, so the store
-            // must refuse a claim for a process it does not retain — never
-            // registered, or already pruned to a tombstone. Backends that
-            // materialize the lease anyway diverge from the SQL stores in raw
-            // durable state (FIG-953, differential seed 852).
-            let retained = model
-                .processes
-                .get(&id)
-                .is_some_and(|process| process.expected().is_some());
-            let outcome = handles
-                .registry
-                .claim_process_lease(
-                    &id,
-                    &LeaseOwnerIdentity::opaque(
-                        format!("owner-{owner}"),
-                        format!("incarnation-{owner}"),
-                    ),
-                    60_000,
-                )
-                .await;
-            if !retained {
-                return match outcome {
-                    Err(_) => Ok(()),
-                    Ok(outcome) => Err(format!(
-                        "Lease retention guard: claim for unretained process `{id}` returned {outcome:?} instead of refusing"
-                    )),
-                };
-            }
-            if let Ok(ProcessLeaseClaimOutcome::Acquired(lease)) = outcome {
-                let leases = &mut model.process_mut(&id).leases;
-                if let Some(current) = leases
-                    .last_mut()
-                    .filter(|current| current.lease_token == lease.lease_token)
-                {
-                    // Same-incarnation re-entry renews the current authority;
-                    // it does not create an older authority that can be used
-                    // as a stale completion.
-                    *current = lease;
-                } else {
-                    leases.push(lease);
-                }
-            }
-        }
-        StoreContractOp::ReleaseLease { process, stale } => {
-            let id = model.slot_id(*process);
-            let Some(leases) = model.processes.get(&id).map(|process| &process.leases) else {
-                return Ok(());
-            };
-            if let Some(lease) = if *stale && leases.len() > 1 {
-                leases.first()
-            } else {
-                leases.last()
-            } {
-                let before = process_lease_snapshot(&handles.registry, &id).await?;
-                let completion = crate::ProcessLeaseCompletion::from_lease(lease);
-                handles
-                    .registry
-                    .complete_process_lease(&completion)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let after = process_lease_snapshot(&handles.registry, &id).await?;
-                if *stale && leases.len() > 1 {
-                    if before != after {
-                        return Err(
-                            "Stale-authority non-mutation: stale lease release changed the live lease"
-                                .to_string(),
-                        );
-                    }
-                } else if after.is_some() {
-                    return Err("current lease release left a live lease behind".to_string());
-                }
-            }
-        }
         StoreContractOp::ClaimWake => {
             let claims = handles
                 .registry
@@ -1216,12 +1132,12 @@ fn assert_typed_stale_authority_rejection<T>(
     if must_reject
         && !matches!(
             result,
-            Err(crate::PluginError::ProcessLeaseSuperseded { process_id })
+            Err(crate::PluginError::ProcessExecutionSuperseded { process_id })
                 if process_id == id
         )
     {
         return Err(format!(
-            "Stale-authority non-mutation: superseded authority {operation} for `{id}` did not return ProcessLeaseSuperseded"
+            "Stale-authority non-mutation: superseded authority {operation} for `{id}` did not return ProcessExecutionSuperseded"
         ));
     }
     Ok(())
@@ -1246,19 +1162,6 @@ fn select_live_wake(
         .collect::<Vec<_>>();
     live.get(usize::from(selection) % live.len().max(1))
         .cloned()
-}
-
-async fn process_lease_snapshot(
-    registry: &Arc<dyn ProcessRegistry>,
-    id: &ProcessId,
-) -> Result<Option<serde_json::Value>, String> {
-    registry
-        .get_process_lease(id)
-        .await
-        .map_err(|error| error.to_string())?
-        .map(serde_json::to_value)
-        .transpose()
-        .map_err(|error| error.to_string())
 }
 
 fn terminal_output(index: u8) -> ProcessAwaitOutput {

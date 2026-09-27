@@ -1,14 +1,10 @@
 use crate::*;
 use lash_core_execution::ProcessQuery as _;
-use lash_core_execution::facade_support::{
-    self, registry_transitions::ProcessLeaseReclaimDecision,
-};
+use lash_core_execution::facade_support;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
-#[path = "process_registry/leases.rs"]
-mod leases;
 #[path = "process_registry/lifecycle.rs"]
 mod lifecycle;
 #[cfg(test)]
@@ -28,9 +24,9 @@ pub(crate) mod terminal_publication;
 mod tool_intent_submission;
 use crate::process_sql::{list_processes_sql, process_sql};
 
+#[path = "process_registry/pages.rs"]
+pub(crate) mod pages;
 pub(crate) mod wake_delivery;
-#[path = "process_registry/worklist.rs"]
-pub(crate) mod worklist;
 use prune::prune_process_rows_tx;
 use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
 use wake_delivery::{
@@ -176,12 +172,12 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
         Ok((records, next_cursor))
     }
 
-    async fn list_non_terminal_page(
+    async fn list_non_terminal_processes_page(
         &self,
         limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core_execution::ProcessWorklistCursor>,
-    ) -> Result<lash_core_execution::ProcessWorklistPage, PluginError> {
-        worklist::list_non_terminal_page(self, limit, continuation).await
+        continuation: Option<lash_core_execution::ProcessRegistryCursor>,
+    ) -> Result<lash_core_execution::NonTerminalProcessPage, PluginError> {
+        pages::list_non_terminal_processes_page(self, limit, continuation).await
     }
 
     async fn filter_unregistered_process_ids(
@@ -199,12 +195,12 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
     }
 
     async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
-        let records = worklist::collect_non_terminal_records(self).await?;
+        let records = pages::collect_non_terminal_records(self).await?;
         Ok(ProcessLiveReferenceView::from_records(records.iter()))
     }
 
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
-        worklist::count_non_terminal_processes(self).await
+        pages::count_non_terminal_processes(self).await
     }
 
     async fn list_parked_processes(
@@ -731,17 +727,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         }
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now_ms = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            now_ms,
-            self.fleet_format,
-        )
-        .await?;
+        validate_process_execution_authority(process_id, &record, authority, None)?;
         // `occurred_at_ms` provenance is inconsistent in this backend: four
         // mutating paths stamp it from the server clock while the others (like
         // this one) use the injected clock. Decision-inert today — no fence or

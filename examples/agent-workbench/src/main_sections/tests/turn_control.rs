@@ -744,7 +744,7 @@ finish(await handle);
         await_entered.entered.notified().await;
         loop {
             let live = process_registry
-                .list_non_terminal_page(
+                .list_non_terminal_processes_page(
                     std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
                     None,
                 )

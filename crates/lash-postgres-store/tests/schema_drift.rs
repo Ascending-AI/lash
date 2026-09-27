@@ -385,25 +385,6 @@ async fn a_foreign_key_missing_its_cascade_is_rejected() {
     .await;
 }
 
-/// A foreign key dropped outright.
-#[tokio::test]
-async fn a_dropped_foreign_key_is_rejected() {
-    assert_mutation_is_rejected(
-        "ALTER TABLE lash_process_leases DROP CONSTRAINT lash_process_leases_process_id_fkey",
-        &[
-            "FOREIGN KEY DRIFT",
-            "lash_process_leases: missing foreign key (process_id) references lash_processes",
-        ],
-        |finding| {
-            matches!(
-                finding,
-                SchemaFinding::MissingForeignKey { table, .. } if table == "lash_process_leases"
-            )
-        },
-    )
-    .await;
-}
-
 /// A missing seed row. No structural comparison can see this, and every
 /// process-registry write depends on the clock row existing.
 #[tokio::test]

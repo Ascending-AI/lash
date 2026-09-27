@@ -90,10 +90,10 @@ pub async fn after_millisecond_tick(epoch_ms: u64) {
 pub mod prelude {
     pub use crate::{
         AttachmentStore as _, AwaitEventResolver as _, EffectHost as _, ProcessEventLog as _,
-        ProcessEventLogTestSupport as _, ProcessExecutionEnvStore as _, ProcessLeases as _,
-        ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessQuery as _,
-        ProcessRegistrar as _, ProcessRetention as _, ProcessWakeOutbox as _,
-        RuntimeEffectController as _, SessionStoreFactory as _, TestProcessRegistryWriteExt as _,
+        ProcessEventLogTestSupport as _, ProcessExecutionEnvStore as _, ProcessLifecycle as _,
+        ProcessObserverRegistry as _, ProcessQuery as _, ProcessRegistrar as _,
+        ProcessRetention as _, ProcessWakeOutbox as _, RuntimeEffectController as _,
+        SessionStoreFactory as _, TestProcessRegistryWriteExt as _,
     };
 }
 

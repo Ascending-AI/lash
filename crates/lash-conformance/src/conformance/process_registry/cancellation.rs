@@ -262,17 +262,18 @@ pub(super) async fn contract(
         .register_process(owned_registration("cancel-started-start-failed"))
         .await
         .expect("register started target");
+    let started_authority = crate::ProcessExecutionWriteAuthority::invocation(
+        started.id.clone(),
+        "cancel-worker:started",
+    )
+    .bind_attempt(1);
     writer
-        .record_first_started(
+        .record_first_started_with_authority(
             &started.id,
-            crate::ProcessStarted {
-                owner: crate::LeaseOwnerIdentity::opaque("cancel-worker", "cancel-worker:started"),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: started.created_at_ms,
-                build_generation: None,
-                generation: None,
-            },
+            started_authority
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &started_authority,
         )
         .await
         .expect("record actual first start");

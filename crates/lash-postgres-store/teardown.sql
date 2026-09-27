@@ -108,8 +108,6 @@ DROP TABLE IF EXISTS lash_process_tombstones CASCADE;
 
 DROP TABLE IF EXISTS lash_process_artifact_cleanup CASCADE;
 
-DROP TABLE IF EXISTS lash_process_leases CASCADE;
-
 DROP TABLE IF EXISTS lash_process_segment_handovers CASCADE;
 
 DROP TABLE IF EXISTS lash_parent_end_plans CASCADE;

@@ -21,22 +21,21 @@ use super::events::{
 };
 use super::model::{
     ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessId, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
-    ProcessObserverBy, ProcessRecord, ProcessRegistration, ProcessRegistrationOutcome,
-    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
+    ProcessId, ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
+    ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
+    SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
-    ParentEndPlan, ProcessPruneReport, ProcessRegistry, ProcessWorklistCursor, ProcessWorklistPage,
-    ProjectionWatermark, WakeDelivery, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    NonTerminalProcessPage, ParentEndPlan, ProcessPruneReport, ProcessRegistry,
+    ProcessRegistryCursor, ProjectionWatermark, WakeDelivery, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
 };
 
 /// Point reads and scans over registered processes.
 ///
-/// Identity resolution, record and listing reads, the trusted change feed, the
-/// recovery worklist, and registry-wide aggregates. Registry methods are point
-/// reads and writes only; process waits live on the work-driver seam (ADR 0016).
+/// Identity resolution, record and listing reads, a bounded non-terminal
+/// process scan, the trusted change feed, and registry-wide aggregates.
 #[async_trait::async_trait]
 pub trait ProcessQuery: Send + Sync {
     /// Refuse unless `process_id` names a retained process, answering the id
@@ -88,11 +87,8 @@ pub trait ProcessQuery: Send + Sync {
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError>;
 
-    /// This is the recovery sweep's worklist: every process that was started
-    /// but has not reached a terminal event is a candidate for re-execution by
-    /// a [`DurableProcessWorker`](crate::DurableProcessWorker) after a crash.
-    /// Terminal processes are excluded — they are already done and idempotent
-    /// by `process_id`, so re-running them would be wasted work.
+    /// Read one bounded page of non-terminal processes. Restate uses this for
+    /// admission and lost-run reconciliation. Terminal processes are excluded.
     ///
     /// A first call (`continuation = None`) captures the greatest non-terminal
     /// `process_id` as an inclusive upper bound. Continuations use keyset
@@ -107,12 +103,13 @@ pub trait ProcessQuery: Send + Sync {
     /// upper bound, wait for the next scan.
     ///
     /// Cursors are opaque outside the issuing registry and are invalid after
-    /// switching backends. `limit` is non-zero by construction.
-    async fn list_non_terminal_page(
+    /// switching backends. `limit` is non-zero by construction and is capped
+    /// at [`MAX_NON_TERMINAL_PROCESS_PAGE_SIZE`](super::registry::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE).
+    async fn list_non_terminal_processes_page(
         &self,
         limit: NonZeroUsize,
-        continuation: Option<ProcessWorklistCursor>,
-    ) -> Result<ProcessWorklistPage, PluginError>;
+        continuation: Option<ProcessRegistryCursor>,
+    ) -> Result<NonTerminalProcessPage, PluginError>;
 
     /// Return the candidate ids that were never registered, preserving input
     /// order. A terminal process retained only as a tombstone is registered
@@ -157,7 +154,7 @@ pub trait ProcessQuery: Send + Sync {
     }
 
     /// This is intentionally a full-scan aggregate. Implementations must read
-    /// one consistent snapshot; worklist pagination is not part of this API.
+    /// one consistent snapshot; non-terminal page pagination is not part of this API.
     async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError>;
 
     /// Count every retained process row that is still non-terminal.
@@ -319,7 +316,7 @@ pub trait ProcessObserverRegistry: ProcessQuery {
     /// List the observed rows that are still live for the session.
     ///
     /// "Live" is the un-retired partition — exactly the rows the recovery
-    /// worklist keeps (`status IN ('running', 'waiting')`), not merely the
+    /// non-terminal page keeps (`status IN ('running', 'waiting')`), not merely the
     /// non-terminal ones. A [`ProcessStatus::CallerDeparted`](super::model::ProcessStatus::CallerDeparted) row is
     /// non-terminal yet retired: lash will never observe an outcome for it, so
     /// presenting it as live would show a caller a launch still in flight that
@@ -502,15 +499,14 @@ pub struct ProcessTerminalPublication {
 /// Durable execution lifecycle transitions.
 ///
 /// The started fact, wait markers, the abandon request and caller-departure
-/// markers, terminal completion (leased and authority-bound), and the
+/// markers, authority-bound terminal completion, and the
 /// parent-end teardown plans retained atomically with a terminal outcome.
 #[async_trait::async_trait]
 pub trait ProcessLifecycle: Send + Sync {
-    /// Complete a process without a Lash process lease, under an explicit,
-    /// auditable completion authority.
+    /// Complete a process under an explicit, auditable completion authority.
     ///
     /// This path is reserved for writers whose single-writer discipline lives
-    /// *outside* the Lash lease: an external actor closing an externally-owned
+    /// outside the process engine: an external actor closing an externally-owned
     /// row, or a workflow-key-coalesced substrate completing a row it ran. The
     /// [`ProcessCompletionAuthority`] names which of these applies; the
     /// implementation MUST call
@@ -520,9 +516,6 @@ pub trait ProcessLifecycle: Send + Sync {
     /// authority on the terminal event as audit evidence (via
     /// [`terminal_append_request`](super::events::terminal_append_request)).
     ///
-    /// Lash-owned workers must instead use
-    /// [`complete_process_with_lease`](Self::complete_process_with_lease), which
-    /// fences the terminal append and lease release in one atomic operation.
     async fn complete_process(
         &self,
         process_id: &ProcessId,
@@ -546,20 +539,6 @@ pub trait ProcessLifecycle: Send + Sync {
         await_output: ProcessAwaitOutput,
         prelude: Vec<ProcessEventAppendRequest>,
         authority: ProcessCompletionAuthority,
-    ) -> Result<ProcessCompletionOutcome, PluginError>;
-
-    /// Atomically append the terminal output while the supplied process lease
-    /// is still current, then release that lease in the same transaction.
-    ///
-    /// Implementations must validate owner incarnation, lease token, fencing
-    /// token, and expiry against the persisted lease. A stale or expired writer
-    /// is rejected without appending any terminal event or clearing a newer
-    /// owner's lease. Replaying the same terminal event after a successful
-    /// completion returns the existing terminal record.
-    async fn complete_process_with_lease(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
     /// This is the single durable scope-close fact, written for a turn root,
@@ -857,92 +836,6 @@ pub trait ProcessWakeOutbox: Send + Sync {
     ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
 }
 
-/// The durable single-owner process lease protocol.
-#[async_trait::async_trait]
-pub trait ProcessLeases: Send + Sync {
-    /// Claim the durable single-owner lease over a non-terminal process.
-    ///
-    /// An unexpired lease held by a *different* owner returns
-    /// [`ProcessLeaseClaimOutcome::Busy`] carrying the observed holder;
-    /// claiming a free or expired lease succeeds and bumps the
-    /// `fencing_token`, and the same incarnation re-entering its own live
-    /// lease extends it without changing token or fence. The returned
-    /// [`ProcessLease`]'s `(owner, lease_token)` plus `fencing_token` are the
-    /// contract a worker presents on every subsequent renew/complete — a stale
-    /// writer is rejected.
-    async fn claim_process_lease(
-        &self,
-        process_id: &ProcessId,
-        owner: &crate::LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, PluginError>;
-
-    /// Retry a process lease claim after observing `observed_holder`.
-    ///
-    /// An unexpired lease remains busy. Once its TTL expires, the caller may
-    /// acquire it with a monotonically advanced fencing token.
-    async fn reclaim_process_lease(
-        &self,
-        process_id: &ProcessId,
-        owner: &crate::LeaseOwnerIdentity,
-        observed_holder: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, PluginError>;
-
-    /// Extend the expiry of a live lease the caller still owns.
-    ///
-    /// The lease must match the persisted `(owner, lease_token, fencing_token)`
-    /// and be unexpired, else the renewal is rejected (the lease was superseded
-    /// or expired). Workers renew across long-running effects so a healthy
-    /// process is not swept out from under its live owner.
-    async fn renew_process_lease(
-        &self,
-        lease: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLease, PluginError>;
-
-    /// Read the current lease row for a process without claiming it.
-    ///
-    /// Returns the persisted lease when one is held (owner and token present),
-    /// or `None` when the row is unleased or released. The returned lease may be
-    /// expired: expiry is a raw fact exposed read-side (ADR 0019) so hosts
-    /// classify staleness themselves; this never mutates the lease. Unknown
-    /// process ids return `None`.
-    async fn get_process_lease(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<ProcessLease>, PluginError>;
-
-    /// Read current lease rows for `process_ids` in input order.
-    ///
-    /// The result has exactly one entry per input id; unknown, unleased, and
-    /// released processes produce `None`. Durable registries override this
-    /// method with one backend query so observation polls do not serialize one
-    /// read per process.
-    async fn get_process_leases(
-        &self,
-        process_ids: &[ProcessId],
-    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
-        let mut leases = Vec::with_capacity(process_ids.len());
-        for process_id in process_ids {
-            leases.push(self.get_process_lease(process_id).await?);
-        }
-        Ok(leases)
-    }
-
-    /// Release a lease the caller owns, fenced by the completion's
-    /// `(process_id, lease_token)`.
-    ///
-    /// Mirrors clearing a runtime turn lease: a stale completion (whose token no
-    /// longer matches the live lease) is a no-op so it cannot release a lease a
-    /// newer owner now holds. Idempotent — completing an already-released lease
-    /// succeeds.
-    async fn complete_process_lease(
-        &self,
-        completion: &ProcessLeaseCompletion,
-    ) -> Result<(), PluginError>;
-}
-
 /// Physical reclamation of terminal processes and their tombstones.
 #[async_trait::async_trait]
 pub trait ProcessRetention: Send + Sync {
@@ -1092,9 +985,9 @@ pub trait ProcessClockRebind: Send + Sync {
 /// use lash_core::{
 ///     PluginError, ProcessChange, ProcessChangeCursor, ProcessLiveReferenceView,
 ///     ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessSessionDeleteReport,
-///     ProcessWorklistCursor, ProcessWorklistPage, SessionId,
+///     ProcessRegistryCursor, NonTerminalProcessPage, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, SessionId,
 /// };
-/// use lash_core::{ProcessLeases, ProcessObserverRegistry, ProcessQuery};
+/// use lash_core::{ProcessLifecycle, ProcessObserverRegistry, ProcessQuery};
 /// use std::num::NonZeroUsize;
 ///
 /// struct ObserverOnly;
@@ -1117,11 +1010,11 @@ pub trait ProcessClockRebind: Send + Sync {
 ///     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
 ///         unimplemented!()
 ///     }
-///     async fn list_non_terminal_page(
+///     async fn list_non_terminal_processes_page(
 ///         &self,
 ///         _: NonZeroUsize,
-///         _: Option<ProcessWorklistCursor>,
-///     ) -> Result<ProcessWorklistPage, PluginError> {
+///         _: Option<ProcessRegistryCursor>,
+///     ) -> Result<NonTerminalProcessPage, PluginError> {
 ///         unimplemented!()
 ///     }
 ///     async fn live_reference_summary(
@@ -1196,12 +1089,12 @@ pub trait ProcessClockRebind: Send + Sync {
 ///     }
 /// }
 ///
-/// fn requires_leases<T: ProcessLeases>(_: &T) {}
+/// fn requires_lifecycle<T: ProcessLifecycle>(_: &T) {}
 ///
-/// // ERROR: the trait bound `ObserverOnly: ProcessLeases` is not satisfied.
-/// // An observer-only wrapper is not draggable into the lease concern.
+/// // ERROR: the trait bound `ObserverOnly: ProcessLifecycle` is not satisfied.
+/// // An observer-only wrapper is not draggable into lifecycle writes.
 /// fn deny(wrapper: &ObserverOnly) {
-///     requires_leases(wrapper);
+///     requires_lifecycle(wrapper);
 /// }
 /// ```
 ///

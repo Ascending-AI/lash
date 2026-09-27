@@ -15,7 +15,7 @@ use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
-    events::EventStatements, leases::LeaseStatements, observers::ObserverStatements,
+    events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
     processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
     tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
@@ -162,24 +162,24 @@ lash_store_sql::statements! {
         /// How many processes are live.
         ///
         /// No `INDEXED BY`: PostgreSQL has no such hint and its planner picks
-        /// `idx_lash_processes_live_worklist` from the statistics, which
-        /// `worklist_plans_put_both_cursor_bounds_in_the_partial_index_condition`
+        /// `idx_lash_processes_non_terminal` from the statistics, which
+        /// `non_terminal_page_plans_put_both_cursor_bounds_in_the_partial_index_condition`
         /// pins.
-        count_live_worklist = "SELECT COUNT(*) FROM processes WHERE {{live_process_status(status)}}";
+        count_non_terminal_processes = "SELECT COUNT(*) FROM processes WHERE {{live_process_status(status)}}";
 
-        /// The id the first worklist page is bounded by.
-        select_max_worklist_process_id = "SELECT MAX(process_id) FROM processes WHERE {{live_process_status(status)}}";
+        /// The id the first non-terminal page is bounded by.
+        select_max_non_terminal_process_id = "SELECT MAX(process_id) FROM processes WHERE {{live_process_status(status)}}";
 
         /// The first `?2` live processes at or below `?1`.
         ///
         /// One parameter fewer than SQLite's, which binds an unused cursor
-        /// slot so that both of its worklist pages take the same three binds.
-        list_first_worklist_page = "SELECT record_json FROM processes
+        /// slot so that both non-terminal page queries take the same three binds.
+        list_first_non_terminal_process_page = "SELECT record_json FROM processes
      WHERE {{live_process_status(status)}} AND process_id <= ?1
      ORDER BY process_id ASC LIMIT ?2";
 
         /// The next `?3` live processes in `(?2, ?1]`.
-        list_next_worklist_page = "SELECT record_json FROM processes
+        list_next_non_terminal_process_page = "SELECT record_json FROM processes
      WHERE {{live_process_status(status)}}
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3";
@@ -502,49 +502,6 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `process_leases` statements only PostgreSQL issues.
-    pub(crate) struct LeasePostgresStatements @ "process_lease" {
-        /// The retained fencing token of `?1`, under the row's write lock.
-        ///
-        /// `FOR UPDATE` is the fork: the claim decision is taken from this
-        /// read and must not interleave with another claimant's, which
-        /// SQLite's `BEGIN IMMEDIATE` already guarantees.
-        select_fencing_token_for_update = "SELECT lease_fencing_token FROM process_leases WHERE process_id = ?1 FOR UPDATE";
-
-        /// `?1`'s lease, under the row's write lock. Same lock fork.
-        select_by_process_for_update = "SELECT lease_owner_id, lease_token, lease_fencing_token,
-                lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id
-         FROM process_leases
-         WHERE process_id = ?1
-         FOR UPDATE";
-
-        /// The leases of every process in the id array `?1`.
-        list_by_process_ids = "SELECT process_id, lease_owner_id, lease_token,
-                lease_fencing_token, lease_claimed_at_ms,
-                lease_expires_at_ms, lease_owner_incarnation_id
-         FROM process_leases
-         WHERE process_id = ANY(?1)";
-
-        /// Take the lease of `?1` at fencing token `?5`. `EXCLUDED` is
-        /// PostgreSQL's spelling of SQLite's `excluded`.
-        upsert_acquired = "INSERT INTO process_leases (
-            process_id, lease_owner_id, lease_owner_incarnation_id,
-            lease_token, lease_fencing_token,
-            lease_claimed_at_ms, lease_expires_at_ms
-         )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT (process_id) DO UPDATE SET
-            lease_owner_id = EXCLUDED.lease_owner_id,
-            lease_owner_incarnation_id = EXCLUDED.lease_owner_incarnation_id,
-            lease_token = EXCLUDED.lease_token,
-            lease_fencing_token = EXCLUDED.lease_fencing_token,
-            lease_claimed_at_ms = EXCLUDED.lease_claimed_at_ms,
-            lease_expires_at_ms = EXCLUDED.lease_expires_at_ms";
-    }
-}
-
-lash_store_sql::statements! {
     /// `process_change_clock` statements only PostgreSQL issues.
     ///
     /// Every one of them forks: the singleton flag is `BOOLEAN TRUE` here and
@@ -847,10 +804,6 @@ pub(crate) struct ProcessSql {
     pub(crate) definition: DefinitionStatements,
     /// `process_events` statements both backends issue verbatim.
     pub(crate) event: EventStatements,
-    /// `process_leases` statements both backends issue verbatim.
-    pub(crate) lease: LeaseStatements,
-    /// `process_leases` statements only PostgreSQL issues.
-    pub(crate) lease_postgres: LeasePostgresStatements,
     /// `process_observers` statements both backends issue verbatim.
     pub(crate) observer: ObserverStatements,
     /// `process_observers` statements only PostgreSQL issues.
@@ -898,8 +851,6 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         registry_postgres: ProcessRegistryPostgresStatements::render(dialect),
         definition: DefinitionStatements::render(dialect),
         event: EventStatements::render(dialect),
-        lease: LeaseStatements::render(dialect),
-        lease_postgres: LeasePostgresStatements::render(dialect),
         observer: ObserverStatements::render(dialect),
         observer_postgres: ObserverPostgresStatements::render(dialect),
         handover: SegmentHandoverStatements::render(dialect),

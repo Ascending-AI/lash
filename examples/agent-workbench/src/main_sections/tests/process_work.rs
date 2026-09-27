@@ -337,21 +337,21 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
 }
 
 #[test]
-fn durable_process_registry_preserves_identity_lifecycle_and_fencing() {
+fn durable_process_registry_preserves_identity_lifecycle_and_execution_authority() {
     run_async_test_on_stack_budget("workbench-process-registry-lifecycle-test", || {
-        durable_process_registry_preserves_identity_lifecycle_and_fencing_inner()
+        durable_process_registry_preserves_identity_lifecycle_and_execution_authority_inner()
     });
 }
 
-async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner() {
+async fn durable_process_registry_preserves_identity_lifecycle_and_execution_authority_inner() {
     use lash::process::{
         CausalRef, ProcessAwaitOutput, ProcessChangeCursor, ProcessCompletionAuthority,
         ProcessEventAppendRequest, ProcessEventType, ProcessExecutionEnvRef,
-        ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView, ProcessIdentity,
-        ProcessInput, ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode,
+        ProcessExecutionEnvSpec, ProcessExecutionWriteAuthority, ProcessExternalRef,
+        ProcessHandleView, ProcessIdentity, ProcessInput, ProcessListFilter, ProcessListMode,
         ProcessObserverBy, ProcessOriginator, ProcessProvenance, ProcessRegistration,
-        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
-        ProjectionWatermark, SessionScope,
+        ProcessRegistryCursor, ProcessStatus, ProcessStatusFilter, ProjectionWatermark,
+        SessionScope,
     };
     let registry_dir = tempfile::tempdir().expect("process registry tempdir");
     let registry = crate::tests::standalone_process_registry(
@@ -651,56 +651,27 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         "progress"
     );
 
-    let owner = lash::persistence::LeaseOwnerIdentity::opaque("worker-berlin", "boot-9");
-    let lease = match registry
-        .claim_process_lease(&process_id, &owner, 60_000)
+    let execution_authority =
+        ProcessExecutionWriteAuthority::invocation(process_id.clone(), "worker-berlin:boot-9")
+            .bind_attempt(1);
+    let started = execution_authority
+        .invocation_started()
+        .expect("bound invocation has a started fact");
+    let start = registry
+        .record_first_started_with_authority(&process_id, started.clone(), &execution_authority)
         .await
-        .expect("claim process lease")
-    {
-        ProcessLeaseClaimOutcome::Acquired(lease) => lease,
-        ProcessLeaseClaimOutcome::Busy { holder } => {
-            panic!(
-                "fresh process unexpectedly held by {}",
-                holder.owner.owner_id
-            )
-        }
-    };
-    assert_eq!(lease.process_id, process_id);
-    assert!(lease.schema_version > 0);
-    assert_eq!(lease.owner.owner_id, "worker-berlin");
-    assert_eq!(lease.owner.incarnation_id, "boot-9");
-    assert_eq!(lease.fencing_token, 1);
-    assert!(lease.expires_at_epoch_ms > lease.claimed_at_epoch_ms);
-    assert_eq!(
-        registry
-            .get_process_lease(&process_id)
-            .await
-            .expect("read lease")
-            .as_ref()
-            .map(|held| held.lease_token.as_str()),
-        Some(lease.lease_token.as_str())
-    );
-    let renewed = registry
-        .renew_process_lease(&lease, 120_000)
-        .await
-        .expect("renew lease");
-    assert!(renewed.expires_at_epoch_ms >= lease.expires_at_epoch_ms);
-    let started = ProcessStarted {
-        owner: renewed.owner.clone(),
-        fencing_token: renewed.fencing_token,
-        attempt: 1,
-        started_at_ms: renewed.claimed_at_epoch_ms,
-        generation: None,
-        build_generation: None,
-    };
-    assert!(started.same_execution(&ProcessStarted {
-        owner: renewed.owner.clone(),
-        ..started.clone()
-    }));
-    assert!(!started.same_execution(&ProcessStarted {
-        fencing_token: renewed.fencing_token + 1,
-        ..started.clone()
-    }));
+        .expect("record invocation start");
+    assert!(matches!(
+        start,
+        lash::process::ProcessStartOutcome::Started(_)
+    ));
+    assert!(started.same_execution(&execution_authority.invocation_started().unwrap()));
+    let successor_attempt =
+        ProcessExecutionWriteAuthority::invocation(process_id.clone(), "worker-berlin:boot-9")
+            .bind_attempt(2)
+            .invocation_started()
+            .expect("successor invocation has a started fact");
+    assert!(!started.same_execution(&successor_attempt));
 
     let running = registry
         .get_process(&process_id)
@@ -787,25 +758,34 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         "invoices.csv"
     );
     let completion = registry
-        .complete_process_with_lease(&renewed, success.clone())
+        .complete_process(
+            &process_id,
+            success.clone(),
+            ProcessCompletionAuthority::workflow_key(process_id.as_str()),
+        )
         .await
-        .expect("complete process under lease");
-    assert_eq!(completion.status, ProcessStatus::Completed);
-    assert!(completion.is_terminal());
-    assert_eq!(completion.outcome.as_ref(), Some(&success));
-    let completed = (*completion).clone();
-    assert!(
-        registry
-            .get_process_lease(&process_id)
-            .await
-            .expect("read released lease")
-            .is_none()
-    );
+        .expect("complete process under workflow-key authority");
+    let completed = match completion {
+        lash::process::ProcessCompletionOutcome::Committed(record) => record,
+        other => panic!("first completion was not committed: {other:?}"),
+    };
+    assert_eq!(completed.status, ProcessStatus::Completed);
+    assert!(completed.is_terminal());
+    assert_eq!(completed.outcome.as_ref(), Some(&success));
 
     let replay = registry
-        .complete_process_with_lease(&renewed, success.clone())
+        .complete_process(
+            &process_id,
+            success.clone(),
+            ProcessCompletionAuthority::workflow_key(process_id.as_str()),
+        )
         .await
         .expect("replay terminal completion");
+    let replay = match replay {
+        lash::process::ProcessCompletionOutcome::AlreadyApplied { stored }
+        | lash::process::ProcessCompletionOutcome::Superseded { stored } => stored,
+        other => panic!("replayed completion was not settled: {other:?}"),
+    };
     assert_eq!(replay.status, ProcessStatus::Completed);
     assert_eq!(replay.outcome.as_ref(), Some(&success));
     let cancellation =
@@ -845,29 +825,29 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         "a completed process without an accepted cancel request has no cancel receipt"
     );
 
-    let worklist_cursor = ProcessWorklistCursor::new(
+    let registry_cursor = ProcessRegistryCursor::new(
         "example",
         ProcessId::fixture("invoice-a"),
         ProcessId::fixture("invoice-z"),
     );
-    assert_eq!(worklist_cursor.backend(), "example");
+    assert_eq!(registry_cursor.backend(), "example");
     assert_eq!(
-        worklist_cursor.after_process_id(),
+        registry_cursor.after_process_id(),
         &ProcessId::fixture("invoice-a")
     );
     assert_eq!(
-        worklist_cursor.through_process_id(),
+        registry_cursor.through_process_id(),
         &ProcessId::fixture("invoice-z")
     );
-    let worklist_page = registry
-        .list_non_terminal_page(
+    let non_terminal_page = registry
+        .list_non_terminal_processes_page(
             std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
             None,
         )
         .await
         .expect("list recovery work");
-    assert!(worklist_page.records.is_empty());
-    assert!(worklist_page.continuation.is_none());
+    assert!(non_terminal_page.records.is_empty());
+    assert!(non_terminal_page.continuation.is_none());
     assert_eq!(
         registry
             .list_processes(&ProcessListFilter {
@@ -1223,7 +1203,7 @@ fn rendered_run_failure(process_id: &ProcessId) -> String {
 }
 /// A scan that gave up part-way is pass-scoped, so it blames no row.
 const RENDERED_SCAN_FAILURE: &str =
-    "kind=worklist-scan-incomplete process=- operation=- error=worklist page read failed";
+    "kind=non-terminal-scan-incomplete process=- operation=- error=registry page read failed";
 
 /// Hand one typed fault to the workbench's sink the way the durable process
 /// worker does, and return the line the host would render for it.
@@ -1257,8 +1237,8 @@ async fn worker_faults_reach_the_workbench_sink_as_rendered_notices_inner() {
         rendered_run_failure(&failed_run)
     );
 
-    let scan_failure = lash::process::ProcessWorkerFault::WorklistScanIncomplete {
-        error: "worklist page read failed".to_string(),
+    let scan_failure = lash::process::ProcessWorkerFault::NonTerminalScanIncomplete {
+        error: "registry page read failed".to_string(),
     };
     assert_eq!(
         rendered_worker_fault(scan_failure).await,

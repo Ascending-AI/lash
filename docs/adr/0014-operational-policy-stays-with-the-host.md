@@ -13,13 +13,10 @@ a defaulted, fallible per-factory release seam through `LashCore::shutdown()` is
 in. An orchestrating drain remains out; intake, ordering, deadlines, active-turn
 handling, and other host policy do not move into Lash.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: the session-execution, effect-replay and process
-leases under *Lease Timings* and *Failover parity*. Those passages stay as
-written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
-the session lease) rewrites them.
+Amended 2026-09-27 (FIG-3863): process leases and their TTL-gated failover path
+are deleted under [ADR 0110](0110-the-engine-owns-process-recovery.md). The
+*Lease Timings* decision below applies only to the session-execution and
+durable-effect-replay lease lanes.
 
 ## Decision
 
@@ -31,8 +28,8 @@ host policy is implementable through explicit, lash-owned capabilities, because
 the state those capabilities act on (leases, claims, waits, cached transports,
 trace buffers) lives inside lash. The capability set:
 
-- **Lease Timings**: every runtime *lease* (session execution, durable effect
-  replay, process leases) derives its TTL and renewal cadence from one
+- **Lease Timings**: every remaining runtime *lease* (session execution and
+  durable effect replay) derives its TTL and renewal cadence from one
   host-configurable `LeaseTimings` on the core builder, validated against the
   survive-two-missed-renewals invariant (`ttl >= 3 * renew_interval`). The former
   hardcoded 30s constants are gone. Queued-work and turn-input **claims** are not
@@ -56,9 +53,6 @@ trace buffers) lives inside lash. The capability set:
   the batch held, and hidden from pending views, until this owner's generation
   stops holding the session lease; `revoke_durable_waits` resolves a session's
   outstanding Durable Waits as `Cancelled` without deleting the session.
-- **Failover parity**: process leases carry `LeaseOwnerIdentity` and support
-  the same fenced, TTL-gated acquisition as session execution leases. Neither
-  lane infers holder liveness from the local process table.
 - **Trigger reconciliation**: registered subscriptions are durable runtime
   state. Compiling or executing a module does not publish a current declaration
   set, and removing a registration call from source does not unregister its

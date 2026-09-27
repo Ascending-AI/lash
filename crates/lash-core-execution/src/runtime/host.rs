@@ -82,7 +82,7 @@ pub struct RuntimeControlConfig {
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
     /// Lease timing capability for every durable single-writer *lease* lane this
-    /// runtime renews on a cadence: session execution leases, process leases,
+    /// runtime renews on a cadence: session execution leases,
     /// and durable effect-replay leases. Queued-work and turn-input claims are
     /// not leases and carry no TTL; they pin a session execution lease generation
     /// for claimability and handoff (ADR 0029). Defaults to

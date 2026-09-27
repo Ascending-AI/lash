@@ -488,8 +488,10 @@ mod tests {
             .record_first_started(
                 &lifecycle_id,
                 ProcessStarted {
-                    owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
-                    fencing_token: 0,
+                    owner: crate::LeaseOwnerIdentity::engine_process_execution(
+                        &lifecycle_id,
+                        "lifecycle-test",
+                    ),
                     attempt: 1,
                     started_at_ms: 1,
                     build_generation: None,

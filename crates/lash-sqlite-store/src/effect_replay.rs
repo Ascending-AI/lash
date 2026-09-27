@@ -288,7 +288,7 @@ type SqliteEffectReplay =
 pub struct SqliteEffectReplayOptions {
     /// Effect-replay lease timing capability. Hosts share the same
     /// [`LeaseTimings`] they configure on the runtime so effect leases expire
-    /// on the same failover window as session and process leases.
+    /// on the same failover window as session execution leases.
     pub lease_timings: LeaseTimings,
     /// How long a group's finalization waits on a cancel-decided child's
     /// attempt body after the decision commits (ADR 0099 §7). Construction-

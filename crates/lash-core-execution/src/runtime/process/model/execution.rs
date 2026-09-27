@@ -1,15 +1,13 @@
 use crate::ProcessId;
 use serde::{Deserialize, Serialize};
 
-use super::{ProcessLease, ProcessRecord};
+use super::ProcessRecord;
 
 /// Durable execution-attempt fact. The fold retains the latest attempt, so a
 /// successor execution the engine resumes takes exactly the next attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessStarted {
     pub owner: crate::LeaseOwnerIdentity,
-    #[serde(default)]
-    pub fencing_token: u64,
     #[serde(default = "first_process_attempt")]
     pub attempt: u32,
     pub started_at_ms: u64,
@@ -35,130 +33,87 @@ const fn first_process_attempt() -> u32 {
 }
 
 impl ProcessStarted {
-    /// Compares owner incarnation, fencing token, and attempt for process-store implementors
+    /// Compares invocation identity and attempt for process-store implementors
     /// deciding whether two facts belong to the same execution generation.
     pub fn same_execution(&self, other: &Self) -> bool {
-        self.owner.same_incarnation(&other.owner)
-            && self.fencing_token == other.fencing_token
-            && self.attempt == other.attempt
+        self.owner.same_incarnation(&other.owner) && self.attempt == other.attempt
     }
 }
 
-/// Correctness fence presented by the process execution that writes runtime
-/// lifecycle facts. Lash workers present their persisted lease; durable
-/// substrates present a replay-stable execution id bound to one attempt.
-/// Restate successors within that attempt share the root execution id, so this
-/// authority fences attempt generations rather than individual segments.
+/// Correctness fence presented by the engine invocation that writes process
+/// lifecycle facts. Restate successors within one attempt share the root
+/// execution id, so this authority fences attempts rather than segments.
 #[derive(Clone, Debug)]
-pub enum ProcessExecutionWriteAuthority {
-    Lease {
-        lease: ProcessLease,
-        attempt: Option<u32>,
-    },
-    Invocation {
-        process_id: ProcessId,
-        execution_id: String,
-        attempt: Option<u32>,
-    },
+pub struct ProcessExecutionWriteAuthority {
+    process_id: ProcessId,
+    execution_id: String,
+    attempt: Option<u32>,
 }
 
 impl ProcessExecutionWriteAuthority {
-    /// Constructs a `ProcessExecutionWriteAuthority` using lease semantics for store and
-    /// durable-substrate implementors while persisting and coordinating durable process execution.
-    pub fn lease(lease: ProcessLease) -> Self {
-        Self::Lease {
-            lease,
-            attempt: None,
-        }
-    }
-
     /// Constructs a `ProcessExecutionWriteAuthority` using invocation semantics for store and
     /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn invocation(process_id: impl Into<ProcessId>, execution_id: impl Into<String>) -> Self {
-        Self::Invocation {
+        Self {
             process_id: process_id.into(),
             execution_id: execution_id.into(),
             attempt: None,
         }
     }
 
-    /// Binds invocation authority to one attempt for durable-substrate implementors; lease
-    /// authority already carries its generation and is unchanged.
+    /// Binds invocation authority to the process attempt admitted by the engine.
     pub fn bind_attempt(&self, attempt: u32) -> Self {
-        match self {
-            Self::Lease { lease, .. } => Self::Lease {
-                lease: lease.clone(),
-                attempt: Some(attempt),
-            },
-            Self::Invocation {
-                process_id,
-                execution_id,
-                ..
-            } => Self::Invocation {
-                process_id: process_id.clone(),
-                execution_id: execution_id.clone(),
-                attempt: Some(attempt),
-            },
-        }
+        let mut bound = self.clone();
+        bound.attempt = Some(attempt);
+        bound
     }
 
     /// The one-based process attempt this authority was admitted for.
     pub fn attempt(&self) -> Option<u32> {
-        match self {
-            Self::Lease { attempt, .. } | Self::Invocation { attempt, .. } => *attempt,
-        }
+        self.attempt
     }
 
     /// Returns the bound attempt only when this authority names `process_id`.
     pub fn attempt_for(&self, process_id: &ProcessId) -> Option<u32> {
-        match self {
-            Self::Lease { lease, attempt } if lease.process_id == process_id => *attempt,
-            Self::Invocation {
-                process_id: authority_process_id,
-                attempt,
-                ..
-            } if authority_process_id == process_id => *attempt,
-            Self::Lease { .. } | Self::Invocation { .. } => None,
-        }
+        (self.process_id == *process_id)
+            .then_some(self.attempt)
+            .flatten()
     }
 
-    /// Projects a replay-stable started fact only after invocation authority is attempt-bound,
-    /// returning `None` for leases and unbound invocations.
+    /// Projects a replay-stable started fact only after invocation authority is attempt-bound.
     pub fn invocation_started(&self) -> Option<ProcessStarted> {
-        match self {
-            Self::Lease { .. } => None,
-            Self::Invocation {
-                process_id,
-                execution_id,
-                attempt: Some(attempt),
-                ..
-            } => Some(ProcessStarted {
-                owner: crate::LeaseOwnerIdentity::engine_process_execution(
-                    process_id,
-                    execution_id.clone(),
-                ),
-                fencing_token: 0,
-                attempt: *attempt,
-                started_at_ms: 0,
-                generation: None,
-                build_generation: None,
-            }),
-            Self::Invocation { attempt: None, .. } => None,
-        }
+        Some(ProcessStarted {
+            owner: self.owner_identity(),
+            attempt: self.attempt?,
+            started_at_ms: 0,
+            generation: None,
+            build_generation: None,
+        })
+    }
+
+    /// The execution identity recorded when this invocation starts a process.
+    pub fn owner_identity(&self) -> crate::LeaseOwnerIdentity {
+        crate::LeaseOwnerIdentity::engine_process_execution(
+            &self.process_id,
+            self.execution_id.clone(),
+        )
+    }
+
+    /// The process this invocation may write.
+    pub fn process_id(&self) -> &ProcessId {
+        &self.process_id
+    }
+
+    /// The stable engine invocation id bound to this authority.
+    pub fn execution_id(&self) -> &str {
+        &self.execution_id
     }
 
     /// Returns the engine execution ID only after this authority
     /// is bound to the named process and one execution attempt.
     pub fn engine_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
-        match self {
-            Self::Invocation {
-                process_id: authority_process_id,
-                execution_id,
-                attempt: Some(_),
-                ..
-            } if authority_process_id == process_id => Some(execution_id),
-            Self::Lease { .. } | Self::Invocation { .. } => None,
-        }
+        (self.process_id == *process_id && self.attempt.is_some())
+            .then_some(self.execution_id.as_str())
     }
 
     fn trace_invocation_denial(
@@ -168,34 +123,21 @@ impl ProcessExecutionWriteAuthority {
         retained: Option<&ProcessStarted>,
         reason: &'static str,
     ) {
-        let Self::Invocation {
-            process_id: authority_process_id,
-            execution_id,
-            attempt,
-            ..
-        } = self
-        else {
-            return;
-        };
-        let presented_owner =
-            crate::LeaseOwnerIdentity::engine_process_execution(authority_process_id, execution_id);
+        let presented_owner = self.owner_identity();
         tracing::warn!(
             process_id = process_id.as_str(),
-            presented_process_id = authority_process_id.as_str(),
+            presented_process_id = self.process_id.as_str(),
             presented_owner_id = presented_owner.owner_id,
-            presented_invocation_id = execution_id,
-            presented_attempt = ?attempt,
-            presented_fencing_token = 0_u64,
+            presented_invocation_id = self.execution_id,
+            presented_attempt = ?self.attempt,
             proposed_owner_id = proposed_start.map(|started| started.owner.owner_id.as_str()),
             proposed_invocation_id =
                 proposed_start.map(|started| started.owner.incarnation_id.as_str()),
             proposed_attempt = proposed_start.map(|started| started.attempt),
-            proposed_fencing_token = proposed_start.map(|started| started.fencing_token),
             retained_owner_id = retained.map(|started| started.owner.owner_id.as_str()),
             retained_invocation_id =
                 retained.map(|started| started.owner.incarnation_id.as_str()),
             retained_attempt = retained.map(|started| started.attempt),
-            retained_fencing_token = retained.map(|started| started.fencing_token),
             verdict = "denied",
             reason,
             "process invocation fence decision"
@@ -210,14 +152,7 @@ impl ProcessExecutionWriteAuthority {
         started: &ProcessStarted,
         retained: Option<&ProcessStarted>,
     ) -> Result<(), crate::PluginError> {
-        let Self::Invocation {
-            process_id: authority_process_id,
-            ..
-        } = self
-        else {
-            return Ok(());
-        };
-        if authority_process_id != process_id
+        if self.process_id != *process_id
             || self
                 .invocation_started()
                 .is_none_or(|authority| !authority.same_execution(started))
@@ -228,7 +163,7 @@ impl ProcessExecutionWriteAuthority {
                 retained,
                 "presented start identity does not match authority",
             );
-            return Err(crate::PluginError::ProcessLeaseSuperseded {
+            return Err(crate::PluginError::ProcessExecutionSuperseded {
                 process_id: process_id.clone(),
             });
         }
@@ -242,15 +177,8 @@ impl ProcessExecutionWriteAuthority {
         process_id: &ProcessId,
         record: &ProcessRecord,
     ) -> Result<(), crate::PluginError> {
-        let Self::Invocation {
-            process_id: authority_process_id,
-            ..
-        } = self
-        else {
-            return Ok(());
-        };
         let current = record.first_started.as_deref();
-        if authority_process_id != process_id
+        if self.process_id != *process_id
             || self.invocation_started().is_none_or(|authority| {
                 current.is_none_or(|current| !current.same_execution(&authority))
             })
@@ -261,7 +189,7 @@ impl ProcessExecutionWriteAuthority {
                 current,
                 "presented write identity does not match retained execution",
             );
-            return Err(crate::PluginError::ProcessLeaseSuperseded {
+            return Err(crate::PluginError::ProcessExecutionSuperseded {
                 process_id: process_id.clone(),
             });
         }

@@ -144,7 +144,6 @@ class BazelTestContractTests(unittest.TestCase):
         unit = {path.relative_to(package).as_posix() for pattern in policy["unit_test_sources"] for path in package.glob(pattern)}
         integration = {path.relative_to(package).as_posix() for pattern in policy["tests"]["process_model"] for path in package.glob(pattern)}
         self.assertIn("src/runtime/effect/tool_child_driver/tests.rs", unit)
-        self.assertIn("tests/runtime/process/lease_serde_tests.rs", integration)
         self.assertFalse(unit & integration)
 
     def test_source_ownership_rejects_stale_and_escaping_patterns(self) -> None:

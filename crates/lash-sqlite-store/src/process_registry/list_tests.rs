@@ -35,7 +35,7 @@ fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
 
     assert!(
         plan.iter().any(|step| {
-            step.contains("idx_processes_status") || step.contains("idx_processes_live_worklist")
+            step.contains("idx_processes_status") || step.contains("idx_processes_non_terminal")
         }),
         "live branch must use a live/status index, plan: {plan:?}"
     );
@@ -79,7 +79,7 @@ fn observed_recently_retired_query_seeks_recency_before_observer_history() {
     );
     assert!(
         plan.iter().any(|step| step.contains("idx_processes_status")
-            || step.contains("idx_processes_live_worklist")),
+            || step.contains("idx_processes_non_terminal")),
         "live branch must use a live index: {plan:?}"
     );
     assert!(

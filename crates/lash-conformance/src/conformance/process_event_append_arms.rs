@@ -16,8 +16,8 @@ use pretty_assertions::assert_eq;
 /// that persisted nothing.
 ///
 /// Each backend spells the sequence once and reaches it from three entry points
-/// — the unfenced host append, unleased completion under an explicit authority,
-/// and leased completion. All three are exercised here. The completion paths
+/// — the unfenced host append, external-owner completion, and workflow-key
+/// completion. All three are exercised here. The completion paths
 /// settle their repeat call on the already-terminal row rather than the replay
 /// arm proper; the observable contract is the same either way, and asserting it
 /// per entry point is what catches a floor advance or an event row escaping
@@ -101,107 +101,106 @@ pub async fn process_event_append_arms_are_ordered(
         "the replay arm writes no event row and leaves the floor where the latest insert put it"
     );
 
-    // Entry point 2: unleased completion under an explicit authority.
-    let unleased_id = registry
+    // Entry point 2: terminal completion under an explicit authority.
+    let authority_id = registry
         .register_process(
-            registration("append-arm-unleased-completion")
+            registration("append-arm-authority-completion")
                 .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
-        .expect("register unleased-completion arm process")
+        .expect("register authority-completion arm process")
         .id;
-    let unleased_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-        serde_json::json!({"append_arm": "unleased"}),
+    let authority_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+        serde_json::json!({"append_arm": "authority"}),
     ));
     assert!(matches!(
         registry
             .complete_process(
-                &unleased_id,
-                unleased_output.clone(),
+                &authority_id,
+                authority_output.clone(),
                 ProcessCompletionAuthority::external_owner(),
             )
             .await
-            .expect("unleased completion takes the insert arm"),
+            .expect("authority completion takes the insert arm"),
         crate::ProcessCompletionOutcome::Committed(_)
     ));
-    let unleased_footprint =
-        append_arm_footprint(&registry, &unleased_id, &target_session_id).await;
+    let authority_footprint =
+        append_arm_footprint(&registry, &authority_id, &target_session_id).await;
     assert_eq!(
-        unleased_footprint.0, 1,
-        "unleased completion writes exactly one terminal event row"
+        authority_footprint.0, 1,
+        "authority completion writes exactly one terminal event row"
     );
     assert_eq!(
-        unleased_footprint.1,
-        Some(terminal_sequence(&registry, &unleased_id).await),
-        "unleased completion advances the floor to its terminal event"
+        authority_footprint.1,
+        Some(terminal_sequence(&registry, &authority_id).await),
+        "authority completion advances the floor to its terminal event"
     );
     assert!(matches!(
         registry
             .complete_process(
-                &unleased_id,
-                unleased_output,
+                &authority_id,
+                authority_output,
                 ProcessCompletionAuthority::external_owner(),
             )
             .await
-            .expect("unleased completion is idempotent"),
+            .expect("authority completion is idempotent"),
         crate::ProcessCompletionOutcome::AlreadyApplied { .. }
     ));
     assert_eq!(
-        append_arm_footprint(&registry, &unleased_id, &target_session_id).await,
-        unleased_footprint,
-        "a repeated unleased completion writes no event row and does not move the floor"
+        append_arm_footprint(&registry, &authority_id, &target_session_id).await,
+        authority_footprint,
+        "a repeated authority completion writes no event row and does not move the floor"
     );
 
-    // Entry point 3: leased completion.
-    let leased_id = registry
+    // Entry point 3: workflow-key completion.
+    let workflow_id = registry
         .register_process(
-            registration("append-arm-leased-completion")
+            executed_registration("append-arm-workflow-key-completion")
                 .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
-        .expect("register leased-completion arm process")
+        .expect("register workflow-key completion arm process")
         .id;
-    let lease = registry
-        .claim_process_lease(
-            &leased_id,
-            &crate::LeaseOwnerIdentity::opaque("append-arm-owner", "append-arm-owner:i"),
-            60_000,
-        )
-        .await
-        .expect("claim leased-completion arm lease")
-        .acquired()
-        .expect("leased-completion arm lease acquired");
-    let leased_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-        serde_json::json!({"append_arm": "leased"}),
+    let workflow_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+        serde_json::json!({"append_arm": "workflow_key"}),
     ));
     assert!(matches!(
         registry
-            .complete_process_with_lease(&lease, leased_output.clone())
+            .complete_process(
+                &workflow_id,
+                workflow_output.clone(),
+                ProcessCompletionAuthority::workflow_key(workflow_id.to_string()),
+            )
             .await
-            .expect("leased completion takes the insert arm"),
+            .expect("workflow-key completion takes the insert arm"),
         crate::ProcessCompletionOutcome::Committed(_)
     ));
-    let leased_footprint = append_arm_footprint(&registry, &leased_id, &target_session_id).await;
+    let workflow_footprint =
+        append_arm_footprint(&registry, &workflow_id, &target_session_id).await;
     assert_eq!(
-        leased_footprint.0, 1,
-        "leased completion writes exactly one terminal event row"
+        workflow_footprint.0, 1,
+        "workflow-key completion writes exactly one terminal event row"
     );
     assert_eq!(
-        leased_footprint.1,
-        Some(terminal_sequence(&registry, &leased_id).await),
-        "leased completion advances the floor to its terminal event"
+        workflow_footprint.1,
+        Some(terminal_sequence(&registry, &workflow_id).await),
+        "workflow-key completion advances the floor to its terminal event"
     );
     assert!(matches!(
         registry
-            .complete_process_with_lease(&lease, leased_output)
+            .complete_process(
+                &workflow_id,
+                workflow_output,
+                ProcessCompletionAuthority::workflow_key(workflow_id.to_string()),
+            )
             .await
-            .expect("leased completion is idempotent"),
+            .expect("workflow-key completion is idempotent"),
         crate::ProcessCompletionOutcome::AlreadyApplied { .. }
     ));
     assert_eq!(
-        append_arm_footprint(&registry, &leased_id, &target_session_id).await,
-        leased_footprint,
-        "a repeated leased completion writes no event row and does not move the floor"
+        append_arm_footprint(&registry, &workflow_id, &target_session_id).await,
+        workflow_footprint,
+        "a repeated workflow-key completion writes no event row and does not move the floor"
     );
 
     durable_effect_outcome_event_crash_windows(registry).await;
@@ -260,21 +259,25 @@ async fn durable_effect_outcome_event_crash_windows(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     let process_id = registry
-        .register_process(registration("durable-effect-outcome-crash-windows"))
+        .register_process(super::process_registry::executed_registration(
+            "durable-effect-outcome-crash-windows",
+        ))
         .await
         .expect("register effect-summary process")
         .id;
-    let lease = registry
-        .claim_process_lease(
+    let authority =
+        crate::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "effect-worker:1")
+            .bind_attempt(1);
+    registry
+        .record_first_started_with_authority(
             &process_id,
-            &crate::LeaseOwnerIdentity::opaque("effect-worker", "effect-worker:1"),
-            60_000,
+            authority
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &authority,
         )
         .await
-        .expect("claim execution lease")
-        .acquired()
-        .expect("execution lease available");
-    let authority = crate::ProcessExecutionWriteAuthority::lease(lease);
+        .expect("record the invocation's execution start");
     let recorded = lash_core::ProcessEffectSummaryOccurrence::new(
         "node:tool",
         1,
@@ -301,7 +304,7 @@ async fn durable_effect_outcome_event_crash_windows(
         .append_event_with_authority(&process_id, recorded.append_request(), &authority)
         .await
         .expect("incorporate the recorded failure");
-    assert_eq!(inserted.event.sequence, 1);
+    assert_eq!(inserted.event.sequence, 2);
     assert_eq!(
         inserted.event.event_type,
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
@@ -335,7 +338,7 @@ async fn durable_effect_outcome_event_crash_windows(
             .await
             .expect("read events")
             .len(),
-        1
+        2
     );
 
     // A durable substrate may replay the invocation that already completed

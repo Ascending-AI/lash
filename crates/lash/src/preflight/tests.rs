@@ -351,13 +351,6 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
         ),
         (
-            DurableFormat::ProcessLease,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: carried on process rows, refused when a lease is read rather \
-                 than at rest",
-            ),
-        ),
-        (
             DurableFormat::ProcessEffectSummary,
             SurfaceRelation::Unwalkable(
                 "no bounded surface: carried on process-event rows, refused when a summary event \
@@ -489,7 +482,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         })
         .collect();
 
-    assert_eq!(relations.len() + engine_relations.len(), 42);
+    assert_eq!(relations.len() + engine_relations.len(), 41);
     for (format, expected) in relations.iter().copied().chain(engine_relations) {
         assert_eq!(
             format_surface(format),
@@ -506,7 +499,6 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         DurableFormat::SessionStateGeneration,
         DurableFormat::ProtocolTurnOptions,
         DurableFormat::ScopeStoragePayload,
-        DurableFormat::ProcessLease,
         DurableFormat::ProcessEffectSummary,
         DurableFormat::AppendRequestIdentity,
         DurableFormat::RecordConfigRequestIdentity,

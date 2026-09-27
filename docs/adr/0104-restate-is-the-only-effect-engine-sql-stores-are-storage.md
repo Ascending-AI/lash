@@ -3,13 +3,16 @@
 ## Status
 
 Accepted 2026-09-24 (FIG-3669). It records Sam's ruling on FIG-3664, including
-the hard constraint that the effect interface stays engine-neutral. **Not yet
-implemented**: FIG-3665 through FIG-3668, FIG-3670, FIG-3585, FIG-3600 and the
-B2 backend-construction cutover build it, in the order under *Order*. Nothing below describes current behaviour unless it says
-so. Implemented so far: step 2 (FIG-3585) and step 3 (FIG-3667): the
-PostgreSQL engine is deleted, `PostgresBackend` with it. The B2 construction
-of section 2 is implemented as described there: a PostgreSQL deployment runs a
-`RestateEngine` over a `PostgresStoreSet`.
+the hard constraint that the effect interface stays engine-neutral. **Partially
+implemented**: the remaining FIG-3665 through FIG-3668 work, FIG-3670,
+FIG-3600 and B2 backend construction build it, in the order under
+*Order*. Nothing below describes current behaviour unless it says so.
+Implemented so far: step 2 (FIG-3585) and step 3 (FIG-3667) deleted the
+PostgreSQL engine and `PostgresBackend`; B2 runs a `RestateEngine` over a
+`PostgresStoreSet`. B6 (FIG-3863) removes process leases and native
+process-recovery sweeps under D21.
+The bounded non-terminal registry page remains for Restate admission and
+lost-run reconciliation, and ADR 0109's process-wake obligation claims remain.
 
 Supersedes [ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md); see
 "What 0104 kept" at the end of that ADR. Amends every ADR that specifies
@@ -29,8 +32,8 @@ Lash owns two effect engines and delegates to a third:
 
 - **The store-backed replay driver** (`StoreEffectReplayDriver`) over two row
   stores. SQLite and PostgreSQL each implement `EffectReplayRowStore` (27
-  methods), the process lease and wake outbox of `ProcessRegistry`, turn-input
-  and queued-work claims, and `SessionExecutionLeaseStore`. The engine share is
+  methods), the process wake outbox of `ProcessRegistry`, turn-input and
+  queued-work claims, and `SessionExecutionLeaseStore`. The engine share is
   about 13.8k code lines in `lash-sqlite-store` and 12.2k in
   `lash-postgres-store`. The decisions are shared (`decide_*` and `plan_*`), but
   every transaction around them is written twice: 45 mirrored modules and 293
@@ -39,8 +42,8 @@ Lash owns two effect engines and delegates to a third:
 - **Restate**, through `lash-restate`. It implements `Backend`, `EffectHost` and
   `RuntimeEffectController` over the Restate SDK and forwards every other port
   to an `Arc<dyn StoreSet>`, SQLite or PostgreSQL. Under Restate the replay rows
-  and the process lease are unused. The process registry's lifecycle, events and
-  wakes are still written, and the core turn loop still takes the SQL
+  are unused. The process registry's lifecycle, events and wake obligations are
+  still written, and the core turn loop still takes the SQL
   session-execution lease and turn-input claims
   (`crates/lash-core/src/runtime/turn_loop/lease.rs`, `accept.rs`).
 
@@ -86,8 +89,11 @@ FIG-3667, SQLite in FIG-3668.
   FIG-3600);
 - parked-work storage (FIG-3659).
 
-They decide no effect semantics: no replay, no lease, no claim arbitration, no
-wake scheduling and no process scheduling.
+They do not run effect replay or process scheduling. Session-execution leases
+and ingress claims remain storage contracts used by the session runtime.
+Process-wake obligation rows and their claim-token state remain under ADR 0109;
+Restate owns their relay. B6 deletes process leases and native process-recovery
+sweeps.
 
 ### 2. The effect interface is engine-neutral
 
@@ -310,8 +316,9 @@ Deleted from both SQL stores and from `lash-core-execution`, `lash-core` and
 - the effect replay driver and `EffectReplayRowStore`;
 - the SQL effect host, controller and adapter;
 - `AwaitEventResolver` on SQL;
-- process leases, lease renewal and takeover;
-- wake claiming and sweeps as SQL-engine duties;
+- native process-recovery workers and worklists;
+- native SQL wake-sweep workers; the ADR 0109 obligation relay and its
+  claim-token state remain in the storage contract;
 - queued-work claims;
 - `SessionExecutionLeaseStore`;
 - turn-input claim CAS as engine ownership (FIG-3600 makes ingress, claims and
@@ -357,20 +364,19 @@ Cancelled or reshaped:
 ### 8. ADR text
 
 The ADRs below specify SQL-engine behaviour, and each carries a note pointing
-here. Their SQL-engine passages stay as written while the code exists; the
-deletion PR that removes the code (FIG-3667 or FIG-3668, or FIG-3600 for the
-session lease) rewrites them in the same change. Their engine-neutral decisions
-stand.
+here. Their engine-neutral decisions stand. As each SQL-engine behavior is
+deleted, its ADR is amended to describe the current contract or clearly mark the
+old decision as historical.
 
 | ADR | SQL-engine behaviour it specifies |
 |---|---|
 | [0008](0008-confidence-gate.md) | SQLite and PostgreSQL backend conformance and lease-contention evidence in the gate lanes |
 | [0009](0009-deterministic-simulation-harness.md) | lash-sim's SQL worlds and their lease, fencing and reopen contention artifacts |
 | [0012](0012-durable-waits-via-effect-host-engines.md) | the SQL substrates' effect journal and promise rows |
-| [0014](0014-operational-policy-stays-with-the-host.md) | Lease Timings for session-execution, effect-replay and process leases, and failover parity |
-| [0019](0019-process-recovery-obeys-declared-disposition.md) | lease-validated completion and recovery after a lapsed process lease (superseded by [ADR 0110](0110-the-engine-owns-process-recovery.md)) |
+| [0014](0014-operational-policy-stays-with-the-host.md) | Lease Timings for session-execution and effect-replay leases |
+| [0019](0019-process-recovery-obeys-declared-disposition.md) | historical lease-based recovery (superseded by [ADR 0110](0110-the-engine-owns-process-recovery.md)) |
 | [0025](0025-bounded-journals-are-an-effect-controller-obligation.md) | re-drive against `runtime_effect_replay` on the store tier, and SQL replay-row retirement |
-| [0027](0027-unleased-completion-carries-explicit-authority.md) | completion with and without a Lash process lease |
+| [0027](0027-unleased-completion-carries-explicit-authority.md) | process completion authority and invocation-bound execution writes |
 | [0029](0029-claims-are-generation-fenced-under-the-session-lease.md) | generation-fenced claims under the session-execution lease |
 | [0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) | the lease generation that authorizes a cancel closure, and lease renewal and takeover around it |
 | [0041](0041-child-turn-and-driver-stack-growth-have-canonical-seams.md) | session-execution leases and claims owned by a child runtime |
@@ -378,11 +384,11 @@ stand.
 | [0053](0053-claim-nonces-scope-session-lease-lifecycle.md) | claim nonces of the session-execution lease |
 | [0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) | the SQL tiers' group rows, finalization and drain |
 | [0067](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) | owners and reclaim triggers of the effect-replay, group and await-event rows, and lease-held repair |
-| [0068](0068-one-meaning-per-outcome-suffix.md) | `ProcessLeaseClaimOutcome` and `SessionExecutionLeaseClaimOutcome` |
+| [0068](0068-one-meaning-per-outcome-suffix.md) | `SessionExecutionLeaseClaimOutcome` |
 | [0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) | claiming accepted input under the session-execution lease |
 | [0077](0077-session-state-migrates-totally-at-admission.md) | admission under the session-execution lease |
 | [0080](0080-substrate-attestation-is-not-a-lease-short-circuit.md) | failover that waits out the session-execution lease TTL |
-| [0082](0082-process-registry-is-composed-from-narrow-concern-traits.md) | the `ProcessLeases` and `ProcessWakeOutbox` registry concerns |
+| [0082](0082-process-registry-is-composed-from-narrow-concern-traits.md) | the `ProcessWakeOutbox` registry concern and bounded non-terminal pages |
 | [0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md) | the SQL tiers' parent-end ledger write and its crash window |
 | [0097](0097-durable-session-and-live-session-are-two-authorities.md) (durable session) | the live session's Session Execution Lease |
 | [0098](0098-one-owner-per-sql-table-across-both-stores.md) | table modules for engine tables such as `runtime_effect_replay` |
@@ -391,10 +397,9 @@ stand.
 | [0101](0101-one-session-ingress-carries-every-admitted-item.md) | ingress claims fenced by the session lease, and the in-process driver on SQLite and PostgreSQL |
 | [0103](0103-code-cells-replay-by-re-execution-on-every-host.md) | the journal-row hosts and replay-hash parking on every SQL host |
 
-`CONTEXT.md` follows the same rule. The Substrate Contract and engine entries
-are updated now. The lease and claim entries (Lease Timings, Claim Generation,
-Session Execution Lease Authority, Work Claim, Claim ID Derivation) are
-rewritten or removed by the deletion PRs.
+`CONTEXT.md` follows the same rule. The Substrate Contract, engine, Process
+Prune, and Lease Timings entries are updated here. Session lease and claim
+entries remain governed by their respective decisions and cutovers.
 
 ## What is deliberately not adopted
 

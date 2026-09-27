@@ -135,26 +135,17 @@ mod attach_terminal_tests {
             Self::assert_armed(outcome);
         }
 
-        /// Terminalizes the awaited process the way its executor does: under
-        /// the lease that fences the row's single writer.
+        /// Terminalizes the awaited process through its workflow-key writer.
         async fn complete(&self, value: serde_json::Value) -> crate::ProcessAwaitOutput {
             let terminal =
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value));
             let process_id = self.process_id.clone();
-            let owner = crate::LeaseOwnerIdentity::opaque(
-                "attach-terminal-test-writer",
-                "attach-terminal-test-writer:001",
-            );
-            let crate::ProcessLeaseClaimOutcome::Acquired(lease) = self
-                .registry
-                .claim_process_lease(&process_id, &owner, 60_000)
-                .await
-                .expect("claim the awaited process row")
-            else {
-                panic!("the test is the only writer of this row")
-            };
             self.registry
-                .complete_process_with_lease(&lease, terminal.clone())
+                .complete_process(
+                    &process_id,
+                    terminal.clone(),
+                    crate::ProcessCompletionAuthority::workflow_key(process_id.to_string()),
+                )
                 .await
                 .expect("the awaited process reaches its terminal");
             terminal
@@ -953,24 +944,43 @@ mod tests {
             crate::runtime::process_signal_event_type(signal_name).expect("signal event type");
         let backend = crate::support::memory_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let mut registration = crate::ProcessRegistration::new(
+            crate::ProcessInput::Engine {
+                kind: "signal-test".to_string(),
+                payload: serde_json::Value::Null,
+            },
+            crate::ProcessProvenance::host(),
+            crate::Lifetime::Detached,
+        )
+        .with_extra_event_types([crate::ProcessEventType {
+            name: event_type.clone(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        }]);
+        registration.env_ref = Some(crate::ProcessExecutionEnvRef::new(
+            "process-env:signal-test",
+        ));
         let record = registry
-            .register_process(
-                crate::ProcessRegistration::new(
-                    crate::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
-                    crate::ProcessProvenance::host(),
-                    crate::Lifetime::Detached,
-                )
-                .with_extra_event_types([crate::ProcessEventType {
-                    name: event_type.clone(),
-                    payload_schema: crate::LashSchema::any(),
-                    semantics: crate::ProcessEventSemanticsSpec::default(),
-                }]),
-            )
+            .register_process(registration)
             .await
             .expect("register process");
         let process_id = record.id.clone();
+        registry
+            .record_first_started(
+                &process_id,
+                crate::ProcessStarted {
+                    owner: crate::LeaseOwnerIdentity::engine_process_execution(
+                        &process_id,
+                        "signal-divergent-ordinal",
+                    ),
+                    attempt: 1,
+                    started_at_ms: 1,
+                    generation: None,
+                    build_generation: None,
+                },
+            )
+            .await
+            .expect("start engine process");
         registry
             .set_process_wait(
                 &process_id,

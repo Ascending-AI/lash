@@ -193,7 +193,7 @@ fn the_backstop_carries_any_callers_error_type() {
     struct ForeignRefusal;
     let (result, _capture) = lash_core_ids::trace_capture::capturing_sync(|| {
         require_fenced_write_applied(
-            FencedWrite::ProcessLeaseRelease,
+            FencedWrite::WakeDeliverySettlement,
             "postgres",
             "process-1",
             0,
@@ -216,8 +216,6 @@ fn every_fenced_write_has_a_distinct_label() {
         FencedWrite::QueuedWorkClaimSettlement,
         FencedWrite::EffectReplayLeaseFinalize,
         FencedWrite::EffectReplayLeaseRenewal,
-        FencedWrite::ProcessLeaseRenewal,
-        FencedWrite::ProcessLeaseRelease,
         FencedWrite::WakeDeliverySettlement,
     ];
     let labels = writes.map(FencedWrite::label);
@@ -885,88 +883,7 @@ fn effect_replay_expiry_is_decided_at_the_boundary_millisecond() {
 }
 
 // ---------------------------------------------------------------------------
-// D7 — process lease
-// ---------------------------------------------------------------------------
-
-fn process_facts<'a>(
-    lease_owner_id: Option<&'a str>,
-    lease_token: Option<&'a str>,
-    lease_fencing_token: u64,
-    lease_expires_at_ms: u64,
-) -> ProcessLeaseFacts<'a> {
-    ProcessLeaseFacts {
-        lease_owner_id,
-        lease_token,
-        lease_fencing_token,
-        lease_expires_at_ms,
-    }
-}
-
-fn process_authority() -> ProcessLeaseAuthority<'static> {
-    ProcessLeaseAuthority {
-        lease_token: "lease-1",
-        fencing_token: 5,
-    }
-}
-
-#[test]
-fn process_lease_is_current_only_when_token_and_generation_agree() {
-    assert_eq!(
-        process_lease_verdict(
-            Some(process_facts(Some("owner-1"), Some("lease-1"), 5, 1_001)),
-            process_authority(),
-            1_000,
-        ),
-        ProcessLeaseVerdict::Current
-    );
-}
-
-#[test]
-fn process_lease_names_each_refusal_distinctly() {
-    let cases: [(Option<ProcessLeaseFacts<'_>>, ProcessLeaseVerdict); 5] = [
-        (None, ProcessLeaseVerdict::Absent),
-        (
-            Some(process_facts(None, None, 5, 9_999)),
-            ProcessLeaseVerdict::Released,
-        ),
-        (
-            Some(process_facts(Some("owner-1"), Some("lease-2"), 5, 9_999)),
-            ProcessLeaseVerdict::Superseded,
-        ),
-        (
-            Some(process_facts(Some("owner-1"), Some("lease-1"), 6, 9_999)),
-            ProcessLeaseVerdict::GenerationSuperseded,
-        ),
-        (
-            Some(process_facts(Some("owner-1"), Some("lease-1"), 5, 1_000)),
-            ProcessLeaseVerdict::Expired,
-        ),
-    ];
-    for (observed, expected) in cases {
-        let verdict = process_lease_verdict(observed, process_authority(), 1_000);
-        assert_eq!(verdict, expected, "observed {observed:?}");
-        assert!(!verdict.is_current());
-        assert_ne!(verdict.label(), ProcessLeaseVerdict::Current.label());
-    }
-}
-
-#[test]
-fn process_lease_release_needs_the_fencing_token() {
-    // Both release paths decide through this verdict (FIG-3388), and it
-    // refuses a presented lease whose generation the row has moved past — the
-    // case a token-only fence would admit.
-    assert_eq!(
-        process_lease_verdict(
-            Some(process_facts(Some("owner-1"), Some("lease-1"), 6, 9_999)),
-            process_authority(),
-            1_000,
-        ),
-        ProcessLeaseVerdict::GenerationSuperseded
-    );
-}
-
-// ---------------------------------------------------------------------------
-// D8 — wake delivery
+// D7 — wake delivery
 // ---------------------------------------------------------------------------
 
 const ENQUEUING: &str = "enqueuing";

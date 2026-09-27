@@ -705,7 +705,11 @@ class RustRuntimeDocInputTests(unittest.TestCase):
             ["git", "ls-files", "-z", "*.rs"], cwd=ROOT, capture_output=True,
             text=True, check=True,
         )
-        cls.sources = [ROOT / entry for entry in listed.stdout.split("\0") if entry]
+        cls.sources = [
+            ROOT / entry
+            for entry in listed.stdout.split("\0")
+            if entry and (ROOT / entry).is_file()
+        ]
 
     def referenced_paths(self) -> dict[str, list[str]]:
         found: dict[str, list[str]] = {}

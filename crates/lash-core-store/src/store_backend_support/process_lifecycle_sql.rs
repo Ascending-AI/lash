@@ -1,11 +1,11 @@
 //! Process and wake-delivery lifecycle predicates, spelled once from the
 //! exported vocabulary.
 //!
-//! Every backend worklist, prune, preflight and change-feed query filters on
-//! the same two partitions: the live process rows a worklist keeps, and the
+//! Every backend non-terminal page, prune, preflight and change-feed query filters on
+//! the same two partitions: the live process rows a page keeps, and the
 //! retired rows retention may reclaim. Retyping those partitions as SQL string
 //! literals is how a new [`ProcessStatus`](crate::ProcessStatus) variant
-//! silently drops rows from a worklist while making live rows prunable — the
+//! silently drops rows from a page while making live rows prunable — the
 //! queries compile clean either way. The functions here derive the literal
 //! lists from the enums instead, so the SQL and the Rust predicates
 //! ([`ProcessStatus::is_live`](crate::ProcessStatus::is_live),
@@ -58,7 +58,7 @@ pub(crate) fn live_process_statuses_sql() -> String {
     process_status_sql_literal_list(&live)
 }
 
-/// `<column> IN (<live statuses>)`: the live-worklist predicate.
+/// `<column> IN (<live statuses>)`: the live-process predicate.
 ///
 /// `column` is a SQL identifier the caller owns (`status`, `p.status`,
 /// `processes.status`); it is never user input.

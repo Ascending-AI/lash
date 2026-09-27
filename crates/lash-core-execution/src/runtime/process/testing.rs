@@ -24,6 +24,6 @@ pub use registration_refusals::{
     refused_process_registrations,
 };
 pub use registry_faults::{
-    ProcessRegistryFaults, RegistrationHoldPoint, WorklistPagePause, WorklistPageRead,
+    NonTerminalPagePause, NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
 };
 pub use support::TestProcessRegistryWriteExt;

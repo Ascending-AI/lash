@@ -88,10 +88,10 @@ fn tick_type() -> lash_core::ProcessEventType {
     }
 }
 
-/// An engine process with an execution lease (for runtime-owned summary
-/// events) or a host-owned one (so a test can complete and prune it).
-fn registration(label: &str, leased: bool) -> lash_core::ProcessRegistration {
-    let input = if leased {
+/// An engine process that writes runtime-owned summary events, or an external
+/// process used to exercise host-owned event paths.
+fn registration(label: &str, engine_owned: bool) -> lash_core::ProcessRegistration {
+    let input = if engine_owned {
         lash_core::ProcessInput::Engine {
             kind: "l8-fixture".to_string(),
             payload: serde_json::Value::Null,
@@ -107,7 +107,7 @@ fn registration(label: &str, leased: bool) -> lash_core::ProcessRegistration {
         lash_core::Lifetime::Detached,
     )
     .with_extra_event_types([tick_type()]);
-    if leased {
+    if engine_owned {
         registration
             .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new("l8-env")))
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
@@ -129,19 +129,18 @@ struct Fixture {
     registry: Arc<dyn ProcessRegistry>,
     hub: Arc<ProcessObservationHub>,
     process_id: ProcessId,
-    lease: Option<lash_core::ProcessLease>,
+    execution_authority: Option<lash_core::ProcessExecutionWriteAuthority>,
 }
 
 impl Fixture {
-    async fn new(name: &str, leased: bool) -> Self {
-        Self::with_config(name, leased, ProcessObservationConfig::default()).await
+    async fn new(name: &str, engine_owned: bool) -> Self {
+        Self::with_config(name, engine_owned, ProcessObservationConfig::default()).await
     }
 
-    async fn with_config(name: &str, leased: bool, config: ProcessObservationConfig) -> Self {
-        // A leased fixture stays on the file registry: `claim_process_lease`
-        // below is an S6 fence signal (D5). An unleased fixture only needs
-        // the store port, so it runs on the memory store set.
-        let (dir, registry): (_, Arc<dyn ProcessRegistry>) = if leased {
+    async fn with_config(name: &str, engine_owned: bool, config: ProcessObservationConfig) -> Self {
+        // Engine-owned summary events exercise the SQLite registry path; the
+        // external fixture only needs the shared store port.
+        let (dir, registry): (_, Arc<dyn ProcessRegistry>) = if engine_owned {
             let dir = tempfile::tempdir().expect("L8 tempdir");
             let registry = Arc::new(
                 lash_sqlite_store::SqliteProcessRegistry::open(
@@ -159,20 +158,27 @@ impl Fixture {
             )
         };
         let process_id = registry
-            .register_process(registration(name, leased))
+            .register_process(registration(name, engine_owned))
             .await
             .expect("register L8 process")
             .id;
-        let lease = if leased {
+        let execution_authority = if engine_owned {
+            let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+                process_id.clone(),
+                "l8-invocation",
+            )
+            .bind_attempt(1);
             registry
-                .claim_process_lease(
+                .record_first_started_with_authority(
                     &process_id,
-                    &lash_core::LeaseOwnerIdentity::opaque("l8", "l8:1"),
-                    60_000,
+                    authority
+                        .invocation_started()
+                        .expect("the authority is bound to attempt one"),
+                    &authority,
                 )
                 .await
-                .expect("claim L8 lease")
-                .acquired()
+                .expect("record the L8 execution start");
+            Some(authority)
         } else {
             None
         };
@@ -181,7 +187,7 @@ impl Fixture {
             registry,
             hub: Arc::new(ProcessObservationHub::new(config)),
             process_id,
-            lease,
+            execution_authority,
         }
     }
 
@@ -222,9 +228,9 @@ impl Fixture {
             .append_event_with_authority(
                 &self.process_id,
                 outcome.append_request(),
-                &lash_core::ProcessExecutionWriteAuthority::lease(
-                    self.lease.clone().expect("a leased fixture"),
-                ),
+                self.execution_authority
+                    .as_ref()
+                    .expect("an engine-owned fixture"),
             )
             .await
             .expect("commit an effect outcome")

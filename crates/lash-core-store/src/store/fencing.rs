@@ -118,10 +118,6 @@ pub enum FencedWrite {
     EffectReplayLeaseFinalize,
     /// Effect-replay lease renewal (`D6`).
     EffectReplayLeaseRenewal,
-    /// Process-lease renewal (`D7`).
-    ProcessLeaseRenewal,
-    /// Process-lease release (`D7`).
-    ProcessLeaseRelease,
     /// Wake-delivery settlement out of the enqueuing claim (`D8`).
     WakeDeliverySettlement,
 }
@@ -140,8 +136,6 @@ impl FencedWrite {
             Self::QueuedWorkClaimSettlement => "queued_work_claim.settle",
             Self::EffectReplayLeaseFinalize => "effect_replay_lease.finalize",
             Self::EffectReplayLeaseRenewal => "effect_replay_lease.renew",
-            Self::ProcessLeaseRenewal => "process_lease.renew",
-            Self::ProcessLeaseRelease => "process_lease.release",
             Self::WakeDeliverySettlement => "wake_delivery.settle",
         }
     }
@@ -675,97 +669,7 @@ pub fn effect_replay_lease_verdict(
 }
 
 // ---------------------------------------------------------------------------
-// D7 — "is this process lease current?"
-// ---------------------------------------------------------------------------
-
-/// The lease columns a locked process-lease row carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ProcessLeaseFacts<'a> {
-    pub lease_owner_id: Option<&'a str>,
-    pub lease_token: Option<&'a str>,
-    pub lease_fencing_token: u64,
-    pub lease_expires_at_ms: u64,
-}
-
-/// The presented process-lease authority, spelled without driver types.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ProcessLeaseAuthority<'a> {
-    pub lease_token: &'a str,
-    pub fencing_token: u64,
-}
-
-/// The one answer to "is this process lease current?" (`D7`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProcessLeaseVerdict {
-    /// The row names this token and generation and has not expired.
-    Current,
-    /// No lease row exists for this process.
-    Absent,
-    /// The row records no holder: a previous release already cleared it.
-    Released,
-    /// The row names a different lease token.
-    Superseded,
-    /// The row's retained fencing generation has moved past the presented one.
-    GenerationSuperseded,
-    /// The row still names this holder, but the lease lapsed at `now`.
-    Expired,
-}
-
-impl ProcessLeaseVerdict {
-    /// Whether the lease is still the presenter's and live.
-    pub fn is_current(self) -> bool {
-        matches!(self, Self::Current)
-    }
-
-    /// Stable label for diagnostics and tests.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Absent => "absent",
-            Self::Released => "released",
-            Self::Superseded => "superseded",
-            Self::GenerationSuperseded => "generation_superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-
-/// Decide whether a process lease is still current (`D7`).
-///
-/// This is the single verdict both process-lease release paths call
-/// (FIG-3388): `complete_process_lease` treats `Current` and `Expired` as
-/// releasable and every other verdict as a no-op, while
-/// `complete_process_with_lease` requires `Current`. Both then issue the same
-/// release statement, whose predicate — token and generation — backstops this
-/// verdict.
-pub fn process_lease_verdict(
-    observed: Option<ProcessLeaseFacts<'_>>,
-    presented: ProcessLeaseAuthority<'_>,
-    now_epoch_ms: u64,
-) -> ProcessLeaseVerdict {
-    let Some(observed) = observed else {
-        return ProcessLeaseVerdict::Absent;
-    };
-    let Some(lease_token) = observed.lease_token else {
-        return ProcessLeaseVerdict::Released;
-    };
-    if observed.lease_owner_id.is_none() {
-        return ProcessLeaseVerdict::Released;
-    }
-    if lease_token != presented.lease_token {
-        return ProcessLeaseVerdict::Superseded;
-    }
-    if observed.lease_fencing_token != presented.fencing_token {
-        return ProcessLeaseVerdict::GenerationSuperseded;
-    }
-    if observed.lease_expires_at_ms <= now_epoch_ms {
-        return ProcessLeaseVerdict::Expired;
-    }
-    ProcessLeaseVerdict::Current
-}
-
-// ---------------------------------------------------------------------------
-// D8 — "is this wake delivery still in my enqueuing claim?"
+// D7 — "is this wake delivery still in my enqueuing claim?"
 // ---------------------------------------------------------------------------
 
 /// The claim columns a locked wake-delivery row carries.

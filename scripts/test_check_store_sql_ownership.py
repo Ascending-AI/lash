@@ -460,9 +460,9 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         """
         self.tree.substitute(
             "crates/lash-postgres-store/src/postgres/process_helpers.rs",
-            "pub(crate) async fn process_lease_now_epoch_ms_tx(",
+            "pub(crate) async fn process_registry_now_epoch_ms_tx(",
             'const STRAY: &str = "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";\n\n'
-            "pub(crate) async fn process_lease_now_epoch_ms_tx(",
+            "pub(crate) async fn process_registry_now_epoch_ms_tx(",
         )
         self.assert_refused("a production SQL literal in a store crate has no owner")
 

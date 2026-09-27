@@ -14,29 +14,35 @@
 use crate::process_sql::process_sql;
 
 #[test]
-fn worklist_statements_keep_their_previous_bytes() {
+fn non_terminal_page_statements_keep_their_previous_bytes() {
     assert_eq!(
-        process_sql().process_postgres.count_live_worklist.sql(),
+        process_sql()
+            .process_postgres
+            .count_non_terminal_processes
+            .sql(),
         "SELECT COUNT(*) FROM lash_processes WHERE status IN ('running', 'waiting')"
     );
     assert_eq!(
         process_sql()
             .process_postgres
-            .select_max_worklist_process_id
+            .select_max_non_terminal_process_id
             .sql(),
         "SELECT MAX(process_id) FROM lash_processes WHERE status IN ('running', 'waiting')"
     );
     assert_eq!(
         process_sql()
             .process_postgres
-            .list_first_worklist_page
+            .list_first_non_terminal_process_page
             .sql(),
         "SELECT record_json FROM lash_processes
      WHERE status IN ('running', 'waiting') AND process_id <= $1
      ORDER BY process_id ASC LIMIT $2"
     );
     assert_eq!(
-        process_sql().process_postgres.list_next_worklist_page.sql(),
+        process_sql()
+            .process_postgres
+            .list_next_non_terminal_process_page
+            .sql(),
         "SELECT record_json FROM lash_processes
      WHERE status IN ('running', 'waiting')
        AND process_id <= $1 AND process_id > $2
@@ -236,7 +242,7 @@ mod vocabulary_tokens {
         let schema = crate::PostgresStorage::schema_ddl();
         for (index, declared) in [
             (
-                "idx_lash_processes_live_worklist",
+                "idx_lash_processes_non_terminal",
                 format!(
                     "    ON lash_processes(process_id) WHERE {};",
                     rendered("{{live_process_status(status)}}")

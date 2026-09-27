@@ -234,10 +234,8 @@ impl SurfaceFormat {
     /// The registered surface `constant` — the name keys the fleet's
     /// per-format pins, and `build_newest` is the constant's own value.
     ///
-    /// Call sites spell both halves as one constant:
-    /// `SurfaceFormat::of("PROCESS_LEASE_SCHEMA_VERSION",
-    /// PROCESS_LEASE_SCHEMA_VERSION)` — the registry check refuses a pair
-    /// whose string and value name different constants.
+    /// Call sites spell both halves as one constant; the registry check
+    /// refuses a pair whose string and value name different constants.
     pub const fn of(constant: &'static str, build_newest: u32) -> Self {
         Self {
             constant,
@@ -269,10 +267,9 @@ impl SurfaceFormat {
 /// `finalize-upgrade` moves `F`.
 const WRITER_PINS: &[WriterPin] = &[];
 
-/// The [`SurfaceFormat`] a call site hands [`FleetFormat::writer_version`]:
-/// `surface_format!(PROCESS_LEASE_SCHEMA_VERSION)` names the registered
-/// surface and carries the constant's own value as its build-newest version,
-/// so the name and the version can never come from different constants.
+/// The [`SurfaceFormat`] a call site hands [`FleetFormat::writer_version`]
+/// names a registered surface and carries the constant's own value as its
+/// build-newest version, so the name and version cannot diverge.
 #[macro_export]
 macro_rules! surface_format {
     ($constant:expr) => {

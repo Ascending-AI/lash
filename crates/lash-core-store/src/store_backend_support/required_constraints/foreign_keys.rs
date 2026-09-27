@@ -318,27 +318,6 @@ pub const EXPECTED_FOREIGN_KEYS: &[ExpectedForeignKey] = &[
     expected_foreign_key(
         &[SqliteConstraintDatabase::ProcessRegistry],
         rendered_foreign_key(
-            "process_leases",
-            &["process_id"],
-            "processes",
-            &["process_id"],
-            "cascade",
-            false,
-            false,
-        ),
-        rendered_foreign_key(
-            "lash_process_leases",
-            &["process_id"],
-            "lash_processes",
-            &["process_id"],
-            "cascade",
-            false,
-            false,
-        ),
-    ),
-    expected_foreign_key(
-        &[SqliteConstraintDatabase::ProcessRegistry],
-        rendered_foreign_key(
             "process_segment_handovers",
             &["process_id"],
             "processes",

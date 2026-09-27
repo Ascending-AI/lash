@@ -63,11 +63,10 @@ use lash_core_execution::{
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseCompletion,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessStartOutcome, ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
     SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory,
     SessionSummary, StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
@@ -210,7 +209,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 40 adds immutable graph generations and frame pointers plus
 // zero-copy fork-lineage accelerators. Older stores are rejected and recreated;
 // there is no backfill or compatibility read path.
-// Version 41 indexes the bounded non-terminal recovery worklist by process id.
+// Version 41 indexes the bounded non-terminal registry scan by process id.
 // Version 42 replaces the fixed checkpoint slots with a complete keyed
 // component descriptor set carrying per-component encoding versions. Older
 // roots are rejected under the existing drain-and-recreate policy.

@@ -310,7 +310,6 @@ const CENSUS: &[(&str, RetentionClass)] = &[
             scope: "terminal process prune evidence; acknowledged only after exact artifact release",
         },
     ),
-    ("process_leases", LifecycleOwned { scope: "process" }),
     (
         "process_segment_handovers",
         LifecycleOwned {
@@ -507,7 +506,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 58, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 57, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

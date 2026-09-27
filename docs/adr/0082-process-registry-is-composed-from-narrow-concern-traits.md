@@ -6,49 +6,46 @@ Date: 2026-09-08
 
 Accepted
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: the `ProcessLeases` and `ProcessWakeOutbox`
-concerns; the registry keeps process records as data. Those passages stay as
-written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
-the session lease) rewrites them.
+Amended 2026-09-27 (FIG-3863): process leases and native process-recovery
+sweeps are removed under [ADR 0110](0110-the-engine-owns-process-recovery.md)
+and decision D21. `ProcessWakeOutbox` remains because its claim-token state is
+the ADR 0109 obligation relay. `ProcessQuery` exposes a bounded non-terminal
+registry page for Restate admission and lost-run reconciliation.
 
 ## Context
 
 `ProcessRegistry` had grown into one 47-plus-method trait bundling every
 process-store concern: registration, observer edges, the event log, lifecycle
-transitions, tool-intent durability, the wake-delivery outbox, leases,
-query/scan reads, and retention. A wide trait cannot be composed, decorated, or
+transitions, tool-intent durability, the wake-delivery outbox, query/scan reads,
+and retention. A wide trait cannot be composed, decorated, or
 partially reused: every backend had to re-implement all of it by hand, and a
 decorator that only wanted to observe mutations (`WatchedProcessRegistry`)
-still had to hand-forward every read, lease, wake, and retention method.
+still had to hand-forward every read, wake, and retention method.
 
 ## Decision
 
 The registry contract is a set of narrow, single-concern traits that a backend
 composes (`crates/lash-core-execution/src/runtime/process/registry_concerns.rs`):
 
-- `ProcessQuery` — point reads, listings, the change feed, the recovery
-  worklist, aggregates.
+- `ProcessQuery` — point reads, listings, the change feed, bounded pages of
+  non-terminal process rows, aggregates.
 - `ProcessRegistrar` — registration and the durable external backend
   reference.
 - `ProcessObserverRegistry` — observer edges, subscription targeting,
   session-scoped routing cleanup.
 - `ProcessEventLog` — the per-process append-only event log.
-- `ProcessLifecycle` — started fact, waits, abandon/departure markers,
+- `ProcessLifecycle` — started fact, waits, caller-departure markers,
   terminal completion, parent-end teardown plans.
 - `ProcessToolIntents` — durable tool-intent submission admission and
   settlement.
 - `ProcessWakeOutbox` — wake-delivery retention policy and the
   claim/settle/redrive protocol.
-- `ProcessLeases` — the single-owner process lease protocol.
 - `ProcessRetention` — physical reclamation of terminal rows and tombstones.
 - `ProcessClockRebind` — rebinding a backend to the runtime clock at facade
   construction.
 
-`ProcessRegistry` remains the composed contract: a supertrait bundle over all
-ten concerns, blanket-implemented for any type implementing every one of them.
+`ProcessRegistry` remains the composed contract: a supertrait bundle over the
+nine concerns, blanket-implemented for any type implementing every one of them.
 `Arc<dyn ProcessRegistry>` stays the uniform runtime handle; supertrait methods
 resolve on the trait object unchanged, so consumers are unaffected.
 
