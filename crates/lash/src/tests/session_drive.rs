@@ -92,11 +92,11 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Resul
     let engine_port = fixture.core.substrate_slot.ports().await.queued;
     let request = lash_core::engine::DriveRequestId::new("root-budget");
     engine_port.schedule_drive(&session_id, request.clone());
-    // Sixty-five journaled turns through the double's embedded server are
-    // serial work; under a loaded shared executor the chain can take several
-    // minutes, so the cap is generous rather than tight.
+    // `await_drive` attaches to the drive's invocations and follows its
+    // continuation legs, so the wait ends on the chain's own terminal
+    // event; the timeout only detects a chain that wedged.
     let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(600),
+        std::time::Duration::from_secs(120),
         engine_port.await_drive(&session_id, &request),
     )
     .await
@@ -106,21 +106,37 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Resul
     assert_eq!(outcome.stop, lash_core::engine::DriveStop::Idle);
     // The waiter observes the roots of every leg in its own chain; a
     // reconcile tick's sibling chain legitimately owns the roots it
-    // claimed first. Await those chains before the global assertions:
-    // the direct chain can report Idle while a sibling still runs the
-    // roots it claimed, so completion is only settled once every
-    // sibling's await resolves.
+    // claimed first. Which siblings exist is not settled by the direct
+    // chain's end — the sweep's ask can still be in flight while the
+    // last roots run — so the law settles on the state its assertions
+    // read: every drive ask it ever observes awaited once, the session's
+    // ingress drained, and every input's turn counted. The timeout
+    // again only detects a wedge.
     let mut observed = outcome.ran.len();
-    for root in sibling_drive_roots(&fixture, &session_id, request.as_str()).await? {
-        let sibling = tokio::time::timeout(
-            std::time::Duration::from_secs(600),
-            engine_port.await_drive(&session_id, &lash_core::engine::DriveRequestId::new(root)),
-        )
-        .await
-        .expect("a sibling drive chain ends")
-        .expect("a sibling drive is not refused");
-        observed += sibling.ran.len();
-    }
+    let mut awaited = std::collections::HashSet::new();
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        loop {
+            for root in sibling_drive_roots(&fixture, &session_id, request.as_str()).await? {
+                if !awaited.insert(root.clone()) {
+                    continue;
+                }
+                let sibling = engine_port
+                    .await_drive(&session_id, &lash_core::engine::DriveRequestId::new(root))
+                    .await
+                    .expect("a sibling drive is not refused");
+                observed += sibling.ran.len();
+            }
+            if session.durable().pending_turn_inputs().await?.is_empty()
+                && fixture.calls.load(Ordering::SeqCst) == INPUTS
+            {
+                return Ok::<_, EmbedError>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("every sibling drive chain ends and the session drains")
+    .expect("the pending reads succeed");
     assert!(
         session.durable().pending_turn_inputs().await?.is_empty(),
         "the chain drained the session"
