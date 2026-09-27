@@ -360,10 +360,19 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         controller: lash_core::ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
     ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
-        let runtime = self
-            .open_runtime(admitted.session())
-            .await
-            .map_err(OpenFailure::into_abort)?;
+        let runtime = match self.open_runtime(admitted.session()).await {
+            Ok(runtime) => runtime,
+            // A root whose session is already deleted — or closed past
+            // admission — still owes the journal its start marker and seal:
+            // an attempt that stopped short of them would diverge from what
+            // an earlier attempt of the run journaled, and the seal's
+            // recorded body answers the same retirement every redrive
+            // replays (ADR 0104 O1, FIG-3881).
+            Err(OpenFailure::SessionRetired(_)) => {
+                return lash_core::drive::run_admitted_root_retired(&controller, admitted).await;
+            }
+            Err(failure) => return Err(failure.into_abort()),
+        };
         crate::turn::run_admitted_root_observed(
             runtime.handle(),
             &self.config.env.core.backend().binding_identity(),

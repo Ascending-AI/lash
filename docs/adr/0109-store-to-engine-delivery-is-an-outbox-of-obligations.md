@@ -394,7 +394,7 @@ and is not a second ingress.
 
 | Kind | Table (both stores) | Armed by | Delivered when | Replaces |
 |---|---|---|---|---|
-| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | the admission transaction | the drive's claim of the row admitted it, in the claim's own transaction; the engine accepting drive request `{obligation_id}:{attempt}` only holds the relay's claim | the drives arm (`session_work_in_flight` stays: §4's delete gate reads it) |
+| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | the admission transaction | the drive's claim of the row admitted it, in the claim's own transaction; the engine accepting drive request `{obligation_id}:{attempt}` only holds the relay's claim | the drives arm |
 | `ControlIntent` | `control_intents` | the verb's transaction | the engine half is applied, the intent settled, and its follow-on drive `intent:{id}` accepted | the intents arm; the `attempts` column (use `obligation_attempts`) |
 | `ScopeClose` | `session_roots` | the root's terminal transaction | the close's own transaction | the scopes arm |
 | `ParentEnd` | `parent_end_plans` | the plan's record | every child's cancel delivered or refused | the parent-end slot and the native worker sweep |
@@ -458,9 +458,8 @@ refuses new sends typed (`SessionClosing`), in one transaction. The intent's
 obligation kills the running turn, cancels the session's processes and closes
 its scopes. Its delivered settle arms the session's `SessionDelete`
 obligation, whose deliver refuses retryably while any scope-close or
-parent-end obligation of the session is undelivered or the engine still runs
-work of the session (`session_work_in_flight`), then retires the journal and
-deletes the storage. The storage delete is last because it removes the
+parent-end obligation of the session is undelivered, then retires the journal
+and deletes the storage. The storage delete is last because it removes the
 `session_meta` row the obligation lives on: every step before it is
 idempotent, so a failed attempt leaves the obligation owed and the relay's
 next attempt runs them all again. The ADR 0108 §5a tombstone is kept. A
@@ -470,13 +469,15 @@ The close's delivered settle is the transaction that writes its
 `CloseSession` intent `Acknowledged`: the store arms `SessionDelete` there,
 whichever path acknowledged it.
 
-The engine-work gate keeps replays deterministic. A drive the crash
-interrupted has its admission journaled, and it replays once the dead host's
-session execution lease lapses. Admission opens the session before it replays
-anything, so a session deleted under that replay would answer
-`SessionDeleted` where the journal recorded an admission. A delete asked from
-the verb therefore usually defers to the reconcile tick on an engine whose
-released root is still finishing.
+The delete does not wait for the engine's work of the session. A drive or a
+root the crash interrupted may replay after the delete, and it cannot open the
+session then. It still issues the steps its journal holds: each admission is
+the recorded `AdmitDrive` step, and a root issues its start marker and its
+`SealDriveAdmission` step. A step that ran before the delete replays its
+recorded answer; one that runs after it records the retirement. A root the
+close ended was sealed, and the close's engine half killed its execution
+before the acknowledgement armed the delete, so no sealed root replays
+against a deleted session.
 
 A turn whose final commit the close cuts short may already have pinned its
 cancel closure. Nothing drains that pin: a pin is drained at the session's

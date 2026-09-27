@@ -276,9 +276,8 @@ pub enum DetectionBound {
     LapsedClaim,
     /// A lapsed claim whose delivery arms the next obligation of a chain,
     /// which its own bound allows one more tick: a session close whose host
-    /// died before the release, then the physical delete that waits for the
-    /// released root's engine work (ADR 0109 §4). `claimed_at + claim_ttl +
-    /// 2T`.
+    /// died before the release, then the physical delete its acknowledgement
+    /// arms (ADR 0109 §4). `claimed_at + claim_ttl + 2T`.
     LapsedClaimThenArmed,
     /// Undecodable or refused: stalled in the pass that claims it, one tick.
     StalledInClaimingPass,
@@ -404,9 +403,9 @@ pub const MATRIX: &[CaseSpec] = &[
     // The close's own attempt claims its `ControlIntent` obligation before
     // the engine half runs, so a host that dies at or after the release
     // leaves the claim to lapse: those cells are bounded by the lapsed claim.
-    // A host that died before the release leaves the root's engine work to
-    // wind down after the retaken close releases it, so the delete that
-    // waits for that work lands one tick later.
+    // A host that died before the release leaves the close to the retaken
+    // claim, and the delete its acknowledgement arms is delivered by the
+    // tick after it.
     today(
         Seam::ControlIntent,
         CrashPoint::AfterStateCommit,
@@ -419,10 +418,8 @@ pub const MATRIX: &[CaseSpec] = &[
         DetectionBound::LapsedClaim,
         "a session close whose root release the host died inside is re-applied and acknowledged",
     ),
-    // The acknowledgement the host died before is re-applied in bound, but
-    // the delete it arms waits for the session's engine work: the drive the
-    // crash interrupted replays only once the dead host's session execution
-    // lease lapses, so the end state is a lapsed claim's.
+    // The acknowledgement the host died before is re-applied once the
+    // close's claim lapses, so the end state is a lapsed claim's.
     today(
         Seam::ControlIntent,
         CrashPoint::AfterDeliveryBeforeSettle,

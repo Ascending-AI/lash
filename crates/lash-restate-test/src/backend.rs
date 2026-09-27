@@ -691,10 +691,6 @@ impl SessionWorkEngine for ExplicitlyReconciledSessionWork {
         self.inner.request_drive(session, request).await
     }
 
-    async fn session_work_in_flight(&self, session: &lash_core::SessionId) -> bool {
-        self.inner.session_work_in_flight(session).await
-    }
-
     /// The same get-or-init [`RestateSessionWork::install_session_driver`]
     /// answers, without its spawned interval: the driver a core installs
     /// serves every drive and answers [`SessionDriver::reconcile`] when a

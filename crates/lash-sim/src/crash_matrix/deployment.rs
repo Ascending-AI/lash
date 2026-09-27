@@ -464,10 +464,6 @@ impl SessionWorkEngine for CrashSessionWork {
         self.drives.asked.lock_recover().push(asked);
         Ok(())
     }
-
-    async fn session_work_in_flight(&self, session: &SessionId) -> bool {
-        self.inner.session_work_in_flight(session).await
-    }
 }
 
 struct CrashControl {

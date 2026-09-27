@@ -136,7 +136,6 @@ impl RestateEngine {
         let admin = crate::RestateAdminClient::new(admin_connection);
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
-            crate::RestateAdminClient::new(connection.clone()),
             crate::RestateSessionDriverSlot::new(),
             build_generation.clone(),
             namespace.clone(),

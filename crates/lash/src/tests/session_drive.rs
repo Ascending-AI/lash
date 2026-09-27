@@ -330,7 +330,7 @@ async fn a_drive_on_a_deleted_session_answers_its_retirement() -> Result<()> {
 
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
-            if !engine_port.session_work_in_flight(&session_id).await {
+            if open_session_invocations(&fixture, &session_id).is_empty() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -338,6 +338,162 @@ async fn a_drive_on_a_deleted_session_answers_its_retirement() -> Result<()> {
     })
     .await
     .expect("the deleted session holds no open engine work");
+    Ok(())
+}
+
+/// The lash invocations of `session` the engine has not completed: its
+/// `LashSession` drives and its roots' `LashTurn` runs, as `target status`.
+fn open_session_invocations(fixture: &Fixture, session: &lash_core::SessionId) -> Vec<String> {
+    fixture
+        ._double
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|view| {
+            (view.target.starts_with("LashSession/") || view.target.starts_with("LashTurn/"))
+                && view.target.contains(session.as_str())
+                && view.status != "completed"
+        })
+        .map(|view| format!("{} {} {:?}", view.target, view.status, view.last_failure))
+        .collect()
+}
+
+/// FIG-3881: a root's run replayed after its session was deleted replays the
+/// journal its first attempt recorded. The first attempt journals the
+/// root's start marker and dies before its seal; the session's close and its
+/// storage delete commit before the replay, so the replay cannot open the
+/// session. It still issues the start marker and the seal, whose recorded
+/// body answers the retirement, instead of ending the run where the journal
+/// holds the start marker, and the run and the drive that called it finish.
+async fn a_root_replayed_after_its_session_was_deleted_replays_its_journal() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let session_id = lash_core::SessionId::from("send-closed-replay");
+    drop(fixture.core.session("send-closed-replay").open().await?);
+    let root = lash_core::TurnId::from("closed-replay-root");
+    let server = fixture._double.server();
+    // The root's journal: its input, the generation sentinel, the start
+    // marker, then the seal. The first attempt dies before the seal.
+    server.crash_on(
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeCommand {
+            index: 3,
+        })
+        .service(lash_restate_test::TURN_DRIVER_SERVICE)
+        .key(lash_restate::turn_workflow_key(&session_id, &root))
+        .within_attempts(1),
+    );
+    // The close and the storage delete commit while the dead attempt's
+    // replay has not started: the listener runs before the server starts it,
+    // and both are the store's alone, so they need nothing from the server.
+    let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let factory = Arc::clone(&fixture.core.store_factory);
+    let clock = fixture._double.lash_backend().clock();
+    assert!(server.on_crash(Arc::new({
+        let closed = Arc::clone(&closed);
+        let session_id = session_id.clone();
+        move |_target: &str| {
+            let factory = Arc::clone(&factory);
+            let session_id = session_id.clone();
+            let at_ms = clock.timestamp_ms();
+            let close = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("a runtime for the close")
+                    .block_on(async {
+                        factory
+                            .begin_session_close(&session_id, at_ms)
+                            .await
+                            .expect("the close commits")
+                            .expect("the session exists");
+                        factory
+                            .delete_session(&session_id)
+                            .await
+                            .expect("the storage delete commits");
+                    });
+            })
+            .join();
+            closed.store(close.is_ok(), Ordering::SeqCst);
+        }
+    })));
+
+    let store = fixture
+        .core
+        .store_factory
+        .open_existing_store_by_id(&session_id)
+        .await?
+        .expect("an opened session has a store");
+    store
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                session_id.clone(),
+                lash_core::TurnInputIngress::NextTurn,
+                TurnInput::text("close me mid-root"),
+            )
+            .with_source_key(root.as_str()),
+        )
+        .await
+        .expect("enqueue the input");
+    let engine_port = fixture.core.substrate_slot.ports().await.queued;
+    engine_port.schedule_drive(
+        &session_id,
+        lash_core::engine::DriveRequestId::new("closed-replay"),
+    );
+
+    let settled = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            if closed.load(Ordering::SeqCst)
+                && open_session_invocations(&fixture, &session_id).is_empty()
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(
+        settled.is_ok(),
+        "the replayed root and its drive finish: deleted={}, crashes={}, open invocations {:?}, journals {:?}",
+        closed.load(Ordering::SeqCst),
+        server.stats().crashes,
+        open_session_invocations(&fixture, &session_id),
+        server
+            .invocations()
+            .into_iter()
+            .filter(|view| view.target.contains(session_id.as_str()))
+            .map(|view| {
+                let names: Vec<_> = server
+                    .journal(&view.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|entry| format!("{:?}:{:?}", entry.ty, entry.name))
+                    .collect();
+                format!("{} attempts={} {names:?}", view.target, view.attempts)
+            })
+            .collect::<Vec<_>>()
+    );
+    // The precondition: the first attempt died with the start marker
+    // journaled and the seal not, and the delete committed before the replay.
+    let run = server
+        .invocations()
+        .into_iter()
+        .find(|view| view.target.starts_with("LashTurn/") && view.target.contains(root.as_str()))
+        .expect("the root's run is an invocation");
+    let journal = server.journal(&run.id).expect("the run's journal");
+    let names: Vec<_> = journal
+        .iter()
+        .filter_map(|entry| entry.name.clone())
+        .collect();
+    assert!(
+        names.iter().any(|name| name.contains("drive-root-start:"))
+            && names.iter().any(|name| name.contains("drive-seal:")),
+        "the replay issued the start marker and the seal: {names:?}"
+    );
+    assert!(
+        !matches!(&run.last_failure, Some((570, _))),
+        "the replay followed its journal: {:?}",
+        run.last_failure
+    );
+    assert!(server.stats().crashes >= 1, "the first attempt died");
     Ok(())
 }
 
@@ -364,6 +520,12 @@ macro_rules! session_drive_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_drive_on_a_deleted_session_answers_its_retirement() -> Result<()> {
                 super::a_drive_on_a_deleted_session_answers_its_retirement().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_root_replayed_after_its_session_was_deleted_replays_its_journal()
+            -> Result<()> {
+                super::a_root_replayed_after_its_session_was_deleted_replays_its_journal().await
             }
         }
     };

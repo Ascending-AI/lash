@@ -95,8 +95,4 @@ impl lash_core::SessionWorkEngine for LatencySessionWork {
             AwaitDriveMode::Pending => std::future::pending().await,
         }
     }
-
-    async fn session_work_in_flight(&self, session: &SessionId) -> bool {
-        self.inner.session_work_in_flight(session).await
-    }
 }

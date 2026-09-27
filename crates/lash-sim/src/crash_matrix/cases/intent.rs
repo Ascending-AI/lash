@@ -28,8 +28,8 @@ use super::{Staged, TRIP_WAIT, crash_and_restart, held_core, send, session_name}
 /// The deliverable attempts a deletion's crash point may take to fire.
 const ATTEMPTS_TO_TRIP: usize = 6;
 
-/// The recovery ticks the close's cleanup and the released root's engine
-/// wind-down may take before the delete is declared stuck.
+/// The recovery ticks the close's cleanup may take before the delete is
+/// declared stuck.
 const TICKS_TO_DELIVERABLE: usize = 36;
 use crate::crash_matrix::deployment::{ArmEffect, HostSite};
 use crate::crash_matrix::invariants::{ChildOf, Expected};
@@ -122,8 +122,8 @@ async fn await_held(held: &AtomicUsize) -> Result<(), String> {
 }
 
 /// Whether `session`'s `SessionDelete` obligation could deliver now, read
-/// the way its relay reads it: the obligation armed, the close's cleanup
-/// settled, and the engine running nothing of the session.
+/// the way its relay reads it: the obligation armed and the close's cleanup
+/// settled.
 async fn delete_deliverable(world: &CrashWorld, session: &SessionId) -> Result<bool, String> {
     let admin = world.core()?.session_administration().await;
     let close = admin.session_close();
@@ -140,10 +140,7 @@ async fn delete_deliverable(world: &CrashWorld, session: &SessionId) -> Result<b
         .undelivered_cleanup(session)
         .await
         .map_err(|error| format!("`{session}`'s cleanup: {error}"))?;
-    if !cleanup.is_settled() {
-        return Ok(false);
-    }
-    Ok(!close.work.session_work_in_flight(session).await)
+    Ok(cleanup.is_settled())
 }
 
 /// Make `session`'s delete's next attempt on the host, as the verb's own
@@ -180,11 +177,10 @@ async fn deliver_delete_now(
 
 /// Tick the recovery interval until the armed crash point fires.
 ///
-/// The delete's delivery may run only once the close's cleanup settled and
-/// the engine wound down the released root's work; a slow wind-down holds
-/// `session_work_in_flight` past every backoff the due pass would wait out,
-/// so no fixed tick count bounds it. The ticks meanwhile run the passes that
-/// deliver the cleanup, and once the delivery's own gates read clear the
+/// The delete's delivery may run only once the close's cleanup settled; a
+/// slow cleanup can outlast every backoff the due pass would wait out, so no
+/// fixed tick count bounds it. The ticks meanwhile run the passes that
+/// deliver the cleanup, and once the delivery's own gate reads clear the
 /// attempt is made on the host, which dies inside it holding the claim.
 async fn tick_until_tripped(world: &CrashWorld, session: &SessionId) -> Result<(), String> {
     let mut ticks = 0_usize;

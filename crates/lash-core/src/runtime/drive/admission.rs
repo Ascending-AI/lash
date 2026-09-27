@@ -302,7 +302,11 @@ fn queued_root(admission: &AdmissionId) -> TurnId {
 /// marker the root's execution drew, so another execution of the same
 /// admission is answered `SubstrateLost` (L-S8).
 pub(in crate::runtime) struct SealDriveRunner {
-    pub(in crate::runtime) store: Arc<dyn crate::store::RuntimePersistence>,
+    /// The session's history store, or `None` when the engine could not open
+    /// it at all — the session's close or tombstone already committed — in
+    /// which case the step's recorded body is the retirement itself
+    /// (FIG-3881).
+    pub(in crate::runtime) store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     pub(in crate::runtime) admitted: Admitted,
     pub(in crate::runtime) root_start: crate::engine::RootStartNonce,
 }
@@ -322,8 +326,15 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
                 "drive seal executor was bound to another admission",
             ));
         }
-        let seal = self
-            .store
+        let Some(store) = self.store.as_ref() else {
+            return Err(store_fault(
+                "session store open",
+                StoreError::SessionDeleted {
+                    session_id: self.admitted.session().clone(),
+                },
+            ));
+        };
+        let seal = store
             .seal_drive_epoch(
                 self.admitted.session(),
                 self.admitted.admission(),

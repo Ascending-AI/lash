@@ -88,17 +88,6 @@ pub trait SessionWorkEngine: Send + Sync {
     ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
         Err(session_work_unavailable(session, request))
     }
-
-    /// Whether the engine still holds live work for `session`: an in-flight
-    /// drive, turn, or other invocation. The two-phase session delete (ADR
-    /// 0109 §4) waits while it answers `true`, so a replayed drive never
-    /// finds its session gone.
-    ///
-    /// The default answers `false`: an engine that cannot see its live work
-    /// holds no delete back.
-    async fn session_work_in_flight(&self, _session: &SessionId) -> bool {
-        false
-    }
 }
 
 /// The refusal of an engine that runs no drives, asked to wait for one.

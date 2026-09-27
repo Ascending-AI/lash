@@ -11,10 +11,10 @@
 //! **Phase two, the physical delete.** The `SessionDelete` obligation's
 //! delivery ([`SessionDeleteRelay`]) refuses, retryably, while any cleanup
 //! obligation the close left behind — a root's scope close, a parent-end plan
-//! of a scope the session owns — is undelivered, and while the engine still
-//! runs work of the session (`SessionWorkEngine::session_work_in_flight`):
-//! a drive replayed after a crash must find the session its first run saw.
-//! Then it deletes the
+//! of a scope the session owns — is undelivered. It does not wait for the
+//! engine's work of the session: a drive or root replayed after the delete
+//! answers the retirement from its journaled steps (FIG-3881). Then it
+//! deletes the
 //! session's process state, trigger subscriptions and durable waits, retires
 //! its effect journal and the artifact owners that retirement queued, and
 //! deletes its storage. The storage delete removes the `session_meta` row
@@ -165,10 +165,6 @@ pub enum SessionDeleteWait {
     /// Cleanup obligations of the session are undelivered; the relay
     /// attempts the delete again once they are.
     Cleanup(SessionCleanup),
-    /// The engine still runs work of the session (a drive or a turn that has
-    /// not finished, or a replay of one); the relay attempts the delete again
-    /// once it ends, so no replay reads a session its first run saw live.
-    EngineWork,
     /// This call's attempt failed; the relay attempts it again.
     Failed(SessionDeleteFailure),
     /// The obligation is not due: another relay holds it (`Claimed`), or it
@@ -271,7 +267,6 @@ pub async fn delete_session(
     match relay.take_attempt(&obligation.id) {
         Some(DeleteAttempt::Deleted(report)) => Ok(SessionDeletion::Deleted(report)),
         Some(DeleteAttempt::Waiting(cleanup)) => closing(SessionDeleteWait::Cleanup(cleanup)),
-        Some(DeleteAttempt::EngineWork) => closing(SessionDeleteWait::EngineWork),
         Some(DeleteAttempt::Failed(failure)) => closing(SessionDeleteWait::Failed(failure)),
         None => {
             // Not attempted: another relay claimed it between the read and
@@ -376,7 +371,6 @@ async fn retire_artifact_owners(
 enum DeleteAttempt {
     Deleted(SessionDeleteReport),
     Waiting(SessionCleanup),
-    EngineWork,
     Failed(SessionDeleteFailure),
 }
 
@@ -464,18 +458,6 @@ impl ObligationRelay for SessionDeleteRelay {
             self.record(id, DeleteAttempt::Waiting(cleanup));
             return Err(DeliveryFailure::Retryable(format!(
                 "session `{session_id}` waits on its cleanup: {cleanup}"
-            )));
-        }
-        if self
-            .administration
-            .session_close()
-            .work
-            .session_work_in_flight(session_id)
-            .await
-        {
-            self.record(id, DeleteAttempt::EngineWork);
-            return Err(DeliveryFailure::Retryable(format!(
-                "session `{session_id}` waits on its engine work"
             )));
         }
         match physically_delete(&self.administration, session_id).await {

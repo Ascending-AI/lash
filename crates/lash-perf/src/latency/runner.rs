@@ -353,7 +353,7 @@ pub(crate) async fn run_case(
         }
     }
     samples.sort_by_key(|sample| (sample.lane, sample.index));
-    quiesce_drives(&topology, spec, lane_count).await;
+    quiesce_drives(&env.restate, spec).await;
     let wall = started.elapsed();
     let report = CaseReport::assemble(spec, &samples, errors, wall);
     Ok((report, samples))
@@ -455,21 +455,28 @@ fn compat_profile() -> BenchmarkStreamProfile {
 /// Let the case's last drive legs finish before the endpoint drops. A drive
 /// still running when its deployment goes away is retried against the dead
 /// address for the rest of the run — dead retry traffic that would inflate
-/// the next case's numbers. `session_work_in_flight` reads the server's own
-/// invocation table, so it sees worker-process drives too.
-async fn quiesce_drives(topology: &CaseTopology, spec: &CaseSpec, lane_count: usize) {
-    let work = topology.core.backend().session_work();
+/// the next case's numbers. The server's own invocation table names every
+/// lash invocation of the case's sessions — a `LashSession` drive keyed by
+/// the session, a root's run keyed by a turn workflow key that carries it —
+/// so it sees worker-process drives too.
+async fn quiesce_drives(restate: &LocalRestate, spec: &CaseSpec) {
+    let admin = lash_restate::RestateAdminClient::new(restate.admin_url.clone());
+    let query = format!(
+        "SELECT target_service_key FROM sys_invocation \
+         WHERE status IN ('pending', 'scheduled', 'running', 'backing-off', 'suspended', 'paused') \
+         AND target_service_name LIKE '%Lash%' \
+         AND target_service_key LIKE '%latency-{}-%'",
+        spec.name
+    );
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let mut in_flight = false;
-        for lane in 0..lane_count {
-            let session_id = SessionId::from(format!("latency-{}-{lane}", spec.name));
-            if work.session_work_in_flight(&session_id).await {
-                in_flight = true;
-                break;
-            }
-        }
-        if !in_flight || Instant::now() >= deadline {
+        // An admin read that fails counts as open work: the deadline ends
+        // the wait either way.
+        let open = match admin.query_json::<serde::de::IgnoredAny>(&query).await {
+            Ok(rows) => !rows.is_empty(),
+            Err(_) => true,
+        };
+        if !open || Instant::now() >= deadline {
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;

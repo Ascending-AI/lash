@@ -389,6 +389,54 @@ pub async fn admit_drive_retired(
     emit_admission_step(controller, request, ordinal, None, stores).await
 }
 
+/// Run `admitted`'s root for a session whose store could not be opened: its
+/// close or tombstone already committed (FIG-3881). The root's start marker
+/// and seal are still emitted — an attempt that stopped short of them would
+/// diverge from the journal an earlier attempt of the run recorded (ADR 0104
+/// O1) — and the seal's recorded body answers the session's retirement, which
+/// every redrive of the run decodes. A seal an earlier attempt recorded
+/// answers what it answered then: a superseded or lost admission is the
+/// refused root it was. `controller` serves the root's
+/// [`drive_root_scope`](crate::engine::drive_root_scope).
+#[doc(hidden)]
+pub async fn run_admitted_root_retired(
+    controller: &ScopedEffectController<'_>,
+    admitted: Admitted,
+) -> Result<RootOutcome, DriveAbort> {
+    let scope = controller.admitted_scope().clone();
+    let verdict = Box::pin(mark_and_seal_root(controller, &scope, &admitted, None)).await?;
+    retired_root_outcome(&admitted, verdict)
+}
+
+/// What a root answers whose session retired before it ran: the refused root
+/// its seal recorded, or, for a seal that recorded the admission sealed, the
+/// retirement. A root sealed before its session's close is one the close
+/// ended and whose execution it released, so no run of it goes on.
+fn retired_root_outcome(
+    admitted: &Admitted,
+    verdict: crate::engine::SealVerdict,
+) -> Result<RootOutcome, DriveAbort> {
+    match verdict {
+        crate::engine::SealVerdict::Sealed(_) => Err(DriveAbort::Refused(
+            RuntimeError::new(
+                RuntimeErrorCode::SessionDeleted,
+                format!(
+                    "root `{}` of session `{}` was sealed before its session retired; its execution ended with the session's close",
+                    admitted.root(),
+                    admitted.session()
+                ),
+            )
+            .with_cause(crate::RuntimeErrorCause::SessionDeleted {
+                session_id: admitted.session().clone(),
+            }),
+        )),
+        verdict => Ok(RootOutcome::Refused {
+            root: admitted.root().clone(),
+            verdict,
+        }),
+    }
+}
+
 /// Run `admitted`'s root to its terminal through `controller`, which must
 /// serve [`drive_root_scope`](crate::engine::drive_root_scope) for the root:
 /// the recorded `SealDriveAdmission` step, then the root's turns (a frame
@@ -677,17 +725,42 @@ impl LashRuntime {
         // must not leave a start marker that refuses the execution that runs
         // the root after it (L-S8).
         let input_lease = match admitted.work() {
-            crate::engine::AdmittedWork::Input { .. } => Some(
-                self.claim_session_execution_lease()
-                    .await
-                    .map_err(|error| drive_abort(Some(&root), error))?,
-            ),
+            crate::engine::AdmittedWork::Input { .. } => {
+                match self.claim_session_execution_lease().await {
+                    Ok(lease) => Some(lease),
+                    // The session retired between this attempt's open and its
+                    // lane claim. An earlier attempt may have journaled the
+                    // start marker and the seal, so this one issues them too,
+                    // and the seal's recorded body answers (FIG-3881).
+                    Err(error) if error.is_session_retirement() => {
+                        let verdict = Box::pin(mark_and_seal_root(
+                            &root_controller,
+                            &scope,
+                            &admitted,
+                            Some(store),
+                        ))
+                        .await?;
+                        return retired_root_outcome(&admitted, verdict).map(|outcome| RootRun {
+                            outcome,
+                            run: None,
+                            driven_inputs: Vec::new(),
+                            queued_drain: None,
+                        });
+                    }
+                    Err(error) => return Err(drive_abort(Some(&root), error)),
+                }
+            }
             crate::engine::AdmittedWork::Queued | crate::engine::AdmittedWork::FollowOn { .. } => {
                 None
             }
         };
-        let marked =
-            Box::pin(self.mark_and_seal_root(&root_controller, &scope, &admitted, store)).await;
+        let marked = Box::pin(mark_and_seal_root(
+            &root_controller,
+            &scope,
+            &admitted,
+            Some(store),
+        ))
+        .await;
         let verdict = match marked {
             Ok(verdict) => verdict,
             Err(abort) => {
@@ -806,70 +879,6 @@ impl LashRuntime {
             .map_err(|error| controller_abort(Some(root), error))
     }
 
-    /// Draw this execution's start marker in the root's own journal, then seal
-    /// the admission with it (ADR 0105 §2, L-S8).
-    async fn mark_and_seal_root(
-        &mut self,
-        root_controller: &ScopedEffectController<'_>,
-        scope: &crate::AdmittedScope,
-        admitted: &Admitted,
-        store: Arc<dyn crate::store::RuntimePersistence>,
-    ) -> Result<crate::engine::SealVerdict, DriveAbort> {
-        let root = admitted.root().clone();
-        // The execution's start marker, drawn in the root's own journal before
-        // the seal: a retry replays it, an execution that cannot read the
-        // journal draws another, and the seal refuses that one (L-S8).
-        let start = RuntimeEffectInvocation::new(
-            EffectAddress::new(scope.scope().clone(), drive_root_start_replay_key(admitted))
-                .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
-            RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
-            format!("{root}.drive-root-start"),
-        );
-        let root_start = root_controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    start,
-                    RuntimeEffectCommand::DrawRootStart { root: root.clone() },
-                ),
-                RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(crate::runtime::root_start::DrawRootStartRunner {
-                        root: root.clone(),
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_draw_root_start)
-            .map_err(|error| controller_abort(Some(&root), error))?;
-        let invocation = RuntimeEffectInvocation::new(
-            EffectAddress::new(scope.scope().clone(), drive_seal_replay_key(admitted))
-                .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
-            RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
-            format!("{root}.drive-seal"),
-        );
-        let verdict = root_controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    invocation,
-                    RuntimeEffectCommand::SealDriveAdmission {
-                        admitted: Box::new(admitted.clone()),
-                    },
-                ),
-                RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(admission::SealDriveRunner {
-                        store,
-                        admitted: admitted.clone(),
-                        root_start,
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_seal_drive_admission)
-            .map_err(|error| controller_abort(Some(&root), error))?;
-        Ok(verdict)
-    }
-
     fn drive_store(&self) -> Result<Arc<dyn crate::store::RuntimePersistence>, DriveAbort> {
         self.session
             .as_ref()
@@ -881,4 +890,68 @@ impl LashRuntime {
                 ))
             })
     }
+}
+
+/// Draw this execution's start marker in the root's own journal, then seal
+/// the admission with it (ADR 0105 §2, L-S8). `store` is the session's
+/// history store, or `None` when the engine could not open the session at
+/// all — its close or tombstone already committed — in which case the seal's
+/// recorded body is the retirement itself (FIG-3881).
+async fn mark_and_seal_root(
+    root_controller: &ScopedEffectController<'_>,
+    scope: &crate::AdmittedScope,
+    admitted: &Admitted,
+    store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+) -> Result<crate::engine::SealVerdict, DriveAbort> {
+    let root = admitted.root().clone();
+    // The execution's start marker, drawn in the root's own journal before
+    // the seal: a retry replays it, an execution that cannot read the
+    // journal draws another, and the seal refuses that one (L-S8).
+    let start = RuntimeEffectInvocation::new(
+        EffectAddress::new(scope.scope().clone(), drive_root_start_replay_key(admitted))
+            .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+        RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
+        format!("{root}.drive-root-start"),
+    );
+    let root_start = root_controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                start,
+                RuntimeEffectCommand::DrawRootStart { root: root.clone() },
+            ),
+            RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(crate::runtime::root_start::DrawRootStartRunner { root: root.clone() }),
+                None,
+            ),
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_draw_root_start)
+        .map_err(|error| controller_abort(Some(&root), error))?;
+    let invocation = RuntimeEffectInvocation::new(
+        EffectAddress::new(scope.scope().clone(), drive_seal_replay_key(admitted))
+            .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+        RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
+        format!("{root}.drive-seal"),
+    );
+    let verdict = root_controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation,
+                RuntimeEffectCommand::SealDriveAdmission {
+                    admitted: Box::new(admitted.clone()),
+                },
+            ),
+            RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(admission::SealDriveRunner {
+                    store,
+                    admitted: admitted.clone(),
+                    root_start,
+                }),
+                None,
+            ),
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_seal_drive_admission)
+        .map_err(|error| controller_abort(Some(&root), error))?;
+    Ok(verdict)
 }

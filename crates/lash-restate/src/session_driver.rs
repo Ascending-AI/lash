@@ -85,8 +85,8 @@ use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    LashService, RestateAdminClient, RestateAuthorityId, RestateIngressClient,
-    RestateRuntimeEffectController, parked_turn_failure,
+    LashService, RestateAuthorityId, RestateIngressClient, RestateRuntimeEffectController,
+    parked_turn_failure,
 };
 
 /// The generation of the session driver's journaled command prefix: the
@@ -280,7 +280,6 @@ impl std::fmt::Debug for RestateSessionDriverSlot {
 #[derive(Clone)]
 pub struct RestateSessionWork {
     ingress: RestateIngressClient,
-    admin: RestateAdminClient,
     slot: RestateSessionDriverSlot,
     /// The drain generation of the build scheduling drives: every drive
     /// request it sends is stamped with it.
@@ -298,7 +297,6 @@ pub struct RestateSessionWork {
 impl RestateSessionWork {
     pub(crate) fn new(
         ingress: RestateIngressClient,
-        admin: RestateAdminClient,
         slot: RestateSessionDriverSlot,
         build_generation: BuildGeneration,
         namespace: crate::RestateNamespace,
@@ -306,7 +304,6 @@ impl RestateSessionWork {
     ) -> Self {
         Self {
             ingress,
-            admin,
             slot,
             build_generation,
             namespace,
@@ -577,35 +574,6 @@ impl SessionWorkEngine for RestateSessionWork {
                 build_generation: self.build_generation.clone(),
             });
         }
-    }
-
-    /// A session has live engine work while any lash invocation scoped to it
-    /// is not at a terminal status: a `LashSession` handler keyed by the
-    /// session itself, or a `LashTurn`/handler workflow whose key carries
-    /// the session through [`turn_workflow_key`]. The two-phase delete waits
-    /// on it (ADR 0109 §4). An admin read that fails answers `false`.
-    async fn session_work_in_flight(&self, session: &SessionId) -> bool {
-        #[derive(serde::Deserialize)]
-        struct Target {
-            target_service_key: Option<String>,
-        }
-        let Ok(rows) = self
-            .admin
-            .query_json::<Target>(
-                "SELECT target_service_key FROM sys_invocation \
-                 WHERE status IN ('pending', 'scheduled', 'running', 'backing-off', 'suspended', 'paused') \
-                 AND target_service_name LIKE 'Lash%'",
-            )
-            .await
-        else {
-            return false;
-        };
-        rows.iter().any(|row| {
-            row.target_service_key.as_deref().is_some_and(|key| {
-                key == session.as_str()
-                    || parse_turn_workflow_key(key).is_some_and(|(owner, _)| owner == *session)
-            })
-        })
     }
 }
 
@@ -1313,10 +1281,6 @@ mod tests {
                 "https://cloud.example",
                 transport.clone(),
             )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
             crate::RestateNamespace::default(),
@@ -1364,10 +1328,6 @@ mod tests {
         });
         let work = RestateSessionWork::new(
             crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
                 "https://cloud.example",
                 transport.clone(),
             )),
@@ -1444,10 +1404,6 @@ mod tests {
                 "https://cloud.example",
                 transport.clone(),
             )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
             crate::RestateNamespace::default(),
@@ -1507,10 +1463,6 @@ mod tests {
         });
         let work = RestateSessionWork::new(
             crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
-                "https://cloud.example",
-                transport.clone(),
-            )),
-            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
                 "https://cloud.example",
                 transport.clone(),
             )),
