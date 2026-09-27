@@ -2061,6 +2061,19 @@ fn differential_clock_wall_clock_faces_agree() {
     assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
+/// The lifecycle backend's session work: an engine that holds the core's
+/// installed driver and never runs it. The in-process engine the backend
+/// otherwise selects ticks the reconcile pass on a wall-clock cadence, and
+/// its relays claim due obligations on the shared Postgres database —
+/// a `SessionDelete` obligation went `Claimed` between the close's
+/// acknowledgement and the delete verb's own immediate attempt
+/// (FIG-3891). With the tick held, the verb's delivery is the only claimer.
+fn held_work_lifecycle_backend(backend: lash::Backend) -> lash::Backend {
+    lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
+        .with_session_work(Some(Arc::new(lash_core::NoSessionWork::new())))
+        .into_backend()
+}
+
 async fn runners_for_case(
     case: CaseName,
     sqlite_root: &Path,
@@ -2165,34 +2178,37 @@ async fn runners_for_case_with_clock(
     let postgres_factory_dyn =
         Arc::clone(&postgres_factory) as Arc<dyn ConformanceSessionStoreFactory>;
 
-    let memory_lifecycle: lash::Backend =
-        lash_conformance::recording_backend_over(memory_backend.clone());
-    let sqlite_lifecycle: lash::Backend = lash_conformance::recording_backend_over(Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
-            &sqlite_case_root,
-            lash_sqlite_store::SqliteStoreSetOptions::default(),
-            Arc::clone(&clock),
-        )
-        .await
-        .expect("open the SQLite lifecycle store set"),
-    ));
+    let memory_lifecycle: lash::Backend = held_work_lifecycle_backend(
+        lash_conformance::recording_backend_over(memory_backend.clone()),
+    );
+    let sqlite_lifecycle: lash::Backend =
+        held_work_lifecycle_backend(lash_conformance::recording_backend_over(Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
+                &sqlite_case_root,
+                lash_sqlite_store::SqliteStoreSetOptions::default(),
+                Arc::clone(&clock),
+            )
+            .await
+            .expect("open the SQLite lifecycle store set"),
+        )));
     // PostgreSQL is storage only (ADR 0104): the lifecycle runs over its
     // store set, and the session delete it drives needs some effect-host
     // authority to retire scopes against — a recording host is enough; the
     // differential certifies the rows, not the journal.
     let postgres_effects: Arc<dyn lash_core::EffectHost> =
         Arc::new(lash_conformance::RecordingEffectHost::default());
-    let postgres_lifecycle: lash::Backend = lash_conformance::backend_over(
-        Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
-            postgres,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                sqlite_case_root.join("postgres-attachments"),
+    let postgres_lifecycle: lash::Backend =
+        held_work_lifecycle_backend(lash_conformance::backend_over(
+            Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                postgres,
+                Arc::new(lash::persistence::FileAttachmentStore::new(
+                    sqlite_case_root.join("postgres-attachments"),
+                )),
+                lash_core::WakeDeliveryConfig::default(),
+                Arc::clone(&clock),
             )),
-            lash_core::WakeDeliveryConfig::default(),
-            Arc::clone(&clock),
-        )),
-        postgres_effects,
-    );
+            postgres_effects,
+        ));
 
     vec![
         BackendRunner {
