@@ -45,6 +45,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
+lash-render = { workspace = true }
 lash-core-ids = { workspace = true, features = ["testing"] }
 proptest = "1"
 tempfile = { workspace = true }

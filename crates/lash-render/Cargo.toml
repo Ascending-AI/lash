@@ -1,0 +1,22 @@
+[package]
+name = "lash-internal-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Synchronous value rendering and cut reports for Lash protocols."
+
+[lib]
+name = "lash_render"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

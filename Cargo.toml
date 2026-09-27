@@ -1,6 +1,7 @@
 [workspace]
 exclude = ["fuzz"]
 members = [
+    "crates/lash-render",
     "crates/lash-sansio",
     "crates/lash-trace",
     "crates/lash-rlm-types",
@@ -52,6 +53,7 @@ members = [
 # `cargo build` from the repo root compiles only the publishable SDK surface.
 # Internal bins/benches/examples build with `cargo build --workspace` or `-p <name>`.
 default-members = [
+    "crates/lash-render",
     "crates/lash-core-ids",
     "crates/lash-store-sql",
     "crates/lash-core-llm",
@@ -205,6 +207,7 @@ channel = "0.1.0-alpha"
 # Centralized external versions. Members opt in with
 # `dep = { workspace = true, features = [...] }`.
 [workspace.dependencies]
+lash-render = { package = "lash-internal-render", path = "crates/lash-render", version = "=0.0.0-dev" }
 lash-conformance = { package = "lash-internal-conformance", path = "crates/lash-conformance" }
 anyhow = "1"
 arc-swap = "1"

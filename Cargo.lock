@@ -2223,6 +2223,7 @@ dependencies = [
  "async-trait",
  "lash-internal-core-ids",
  "lash-internal-core-llm",
+ "lash-internal-render",
  "lash-internal-sansio",
  "lash-internal-trace",
  "proptest",
@@ -2589,6 +2590,14 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "lash-internal-render"
+version = "0.0.0-dev"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

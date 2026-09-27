@@ -645,7 +645,7 @@ fn process_start_requests_round_trip_core_values() {
         );
     }
 
-    let lashlang = lash_core::ProcessStartRequest::new(
+    let mut lashlang = lash_core::ProcessStartRequest::new(
         engine_process_input("main", serde_json::json!({ "event": true })),
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a")),
         lash_core::Lifetime::Detached,
@@ -676,6 +676,10 @@ fn process_start_requests_round_trip_core_values() {
         },
     ))
     .with_event_types([process_event_type()]);
+    lashlang.env_spec.as_mut().expect("env spec").render = Some(lash_core::RecordedRender {
+        renderer_id: "lash.ax.v1".into(),
+        params: serde_json::json!({"print": {"max_chars": 8000}, "preview": {"max_chars": 1000}}),
+    });
     assert_process_start_roundtrip(lashlang);
 
     let session_turn = lash_core::ProcessStartRequest::new(

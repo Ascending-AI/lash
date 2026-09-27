@@ -1,0 +1,115 @@
+[
+  {
+    "name": "null",
+    "input": null,
+    "max_chars": 100,
+    "body": "null"
+  },
+  {
+    "name": "boolean",
+    "input": true,
+    "max_chars": 100,
+    "body": "true"
+  },
+  {
+    "name": "number",
+    "input": 42,
+    "max_chars": 100,
+    "body": "42"
+  },
+  {
+    "name": "object",
+    "input": {
+      "a": 1,
+      "b": {
+        "c": "text"
+      }
+    },
+    "max_chars": 100,
+    "body": "{\n  \"a\": 1,\n  \"b\": {\n    \"c\": \"text\"\n  }\n}"
+  },
+  {
+    "name": "depth",
+    "input": {
+      "a": {
+        "b": {
+          "c": {
+            "d": 1
+          }
+        }
+      }
+    },
+    "max_chars": 200,
+    "body": "{\n  \"a\": {\n    \"b\": {\n      \"c\": \"[Object]\"\n    }\n  }\n}"
+  },
+  {
+    "name": "array10",
+    "input": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "max_chars": 200,
+    "body": "[\n  0,\n  1,\n  2,\n  3,\n  4,\n  5,\n  6,\n  7,\n  8,\n  9\n]"
+  },
+  {
+    "name": "array11",
+    "input": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "max_chars": 200,
+    "body": "[\n  0,\n  1,\n  2,\n  ... [6 hidden items],\n  9,\n  10\n]"
+  },
+  {
+    "name": "item",
+    "input": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "max_chars": 200,
+    "body": "[\n  \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...,\n  1,\n  2,\n  ... [6 hidden items],\n  9,\n  10\n]"
+  },
+  {
+    "name": "stack",
+    "input": {
+      "stack": "Error: boom\n    at a\n    at b\n    at c\n    at d\n    at e\n    at f"
+    },
+    "max_chars": 200,
+    "body": "Error: boom\n    at a\n    at b\n    at c\n    ... [2 frames hidden]\n    at f"
+  },
+  {
+    "name": "final_cut",
+    "input": {
+      "a": "abcdef",
+      "b": "ghijkl"
+    },
+    "max_chars": 12,
+    "body": "{\n  \"a\": \"ab\n...[truncated 24 chars]"
+  }
+]

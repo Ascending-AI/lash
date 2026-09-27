@@ -81,6 +81,8 @@ impl Default for ProtocolTurnOptions {
     }
 }
 impl ProtocolTurnOptions {
+    pub const RENDER_OPTIONS_KEY: &'static str = "render";
+
     pub fn empty() -> Self {
         Self {
             payload: serde_json::Value::Object(serde_json::Map::new()),
@@ -149,7 +151,16 @@ impl ProtocolTurnOptions {
         match (&self.payload, &override_options.payload) {
             (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
                 let mut payload = base.clone();
-                payload.extend(overrides.clone());
+                for (key, value) in overrides {
+                    if key == Self::RENDER_OPTIONS_KEY {
+                        let current = payload
+                            .entry(key.clone())
+                            .or_insert(serde_json::Value::Null);
+                        merge_render_options(current, value);
+                    } else {
+                        payload.insert(key.clone(), value.clone());
+                    }
+                }
                 Self {
                     payload: serde_json::Value::Object(payload),
                     schema_version: self.schema_version,
@@ -157,6 +168,19 @@ impl ProtocolTurnOptions {
             }
             _ => override_options.clone(),
         }
+    }
+}
+
+fn merge_render_options(base: &mut serde_json::Value, override_value: &serde_json::Value) {
+    if let (Some(base), Some(overrides)) = (base.as_object_mut(), override_value.as_object()) {
+        for (key, value) in overrides {
+            merge_render_options(
+                base.entry(key.clone()).or_insert(serde_json::Value::Null),
+                value,
+            );
+        }
+    } else {
+        *base = override_value.clone();
     }
 }
 
@@ -259,6 +283,45 @@ pub mod facade_ops {
 #[cfg(test)]
 mod schema_version_tests {
     use super::*;
+
+    #[test]
+    fn render_layers_merge_recursively_without_changing_other_option_keys() {
+        let session = ProtocolTurnOptions::from_payload(serde_json::json!({
+            "mode": {"left": 1},
+            "render": {
+                "print": {"max_chars": 8000, "layout": "auto"},
+                "per_tool": {"tool:a": {"value": {"max_depth": 4}}}
+            }
+        }));
+        let turn = ProtocolTurnOptions::from_payload(serde_json::json!({
+            "mode": {"right": 2},
+            "render": {
+                "print": {"layout": "compact"},
+                "per_tool": {"tool:a": {"value": {"max_chars": 200}}, "tool:b": {"max_lines": 8}}
+            }
+        }));
+        let merged = session.merged_with(&turn);
+        assert_eq!(
+            merged.payload,
+            serde_json::json!({
+                "mode": {"right": 2},
+                "render": {
+                    "print": {"max_chars": 8000, "layout": "compact"},
+                    "per_tool": {
+                        "tool:a": {"value": {"max_depth": 4, "max_chars": 200}},
+                        "tool:b": {"max_lines": 8}
+                    }
+                }
+            })
+        );
+        let reset = ProtocolTurnOptions::from_payload(serde_json::json!({
+            "render": {"print": {"max_chars": null}}
+        }));
+        assert_eq!(
+            merged.merged_with(&reset).payload["render"]["print"]["max_chars"],
+            serde_json::Value::Null
+        );
+    }
 
     #[test]
     fn protocol_turn_options_missing_payload_deserializes_to_empty_object() {

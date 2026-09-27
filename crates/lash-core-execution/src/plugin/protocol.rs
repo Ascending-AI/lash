@@ -134,6 +134,7 @@ impl ProtocolSessionRestoreView {
 pub struct ProtocolSessionContext<'a> {
     session_id: &'a SessionId,
     fleet_format: crate::FleetFormat,
+    recorded_render: Option<&'a crate::RecordedRender>,
 }
 
 impl<'a> ProtocolSessionContext<'a> {
@@ -141,7 +142,17 @@ impl<'a> ProtocolSessionContext<'a> {
         Self {
             session_id,
             fleet_format: session.fleet_format(),
+            recorded_render: None,
         }
+    }
+
+    pub fn with_recorded_render(mut self, recorded: &'a crate::RecordedRender) -> Self {
+        self.recorded_render = Some(recorded);
+        self
+    }
+
+    pub fn recorded_render(&self) -> Option<&crate::RecordedRender> {
+        self.recorded_render
     }
 
     /// ID of the session being initialized/restored. Equivalent to the
@@ -377,6 +388,13 @@ pub trait AssistantProseProjectorPlugin: Send + Sync {
 /// construction must install exactly one implementation.
 pub trait ProtocolDriverPlugin: Send + Sync {
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
+
+    fn resolve_render(
+        &self,
+        _options: &crate::ProtocolTurnOptions,
+    ) -> Result<Option<crate::RecordedRender>, String> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

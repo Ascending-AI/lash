@@ -374,6 +374,7 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(
         spec: Some(recorded_hash),
         resolved: None,
         capabilities: std::collections::BTreeMap::new(),
+        render: None,
     };
     let owed = commit_switch_owing(
         &store,

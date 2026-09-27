@@ -33,6 +33,55 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
 }
 
 #[test]
+fn recorded_render_survives_run_and_detached_environment_round_trip() {
+    use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps;
+
+    let record = RecordedRender {
+        renderer_id: "lash.ax.v1".to_owned(),
+        params: serde_json::json!({
+            "print": lash_render::RenderParams::default(),
+            "preview": lash_render::RenderParams::preview(),
+        }),
+    };
+    let mut resolved = ResolvedRun::snapshot(snapshot());
+    resolved.render = Some(record.clone());
+    let encoded = serde_json::to_vec(&resolved).expect("encode run");
+    let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
+    assert_eq!(decoded.render, Some(record.clone()));
+
+    let mut state =
+        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    crate::session_state::adopt_resolved_run(&mut state, &decoded);
+    let env = state.process_execution_env_spec(&state.policy);
+    assert_eq!(env.render, Some(record.clone()));
+    let env_bytes = env.to_store_bytes().expect("encode env");
+    let restored =
+        crate::ProcessExecutionEnvSpec::from_store_bytes(&env_bytes).expect("decode env");
+    assert_eq!(restored.render, Some(record));
+}
+
+#[test]
+fn unfinished_rendering_requires_the_exact_recorded_renderer() {
+    let record = RecordedRender {
+        renderer_id: "lash.ax.v1".into(),
+        params: serde_json::json!({"print": {"max_chars": 8000}}),
+    };
+    assert_eq!(
+        RecordedRender::require_available(Some(&record), "lash.ax.v1"),
+        Ok(&record)
+    );
+    assert_eq!(
+        RecordedRender::require_available(Some(&record), "lash.ax.v2"),
+        Err(crate::RuntimeErrorCode::RecordedRendererUnavailable)
+    );
+    assert_eq!(
+        RecordedRender::require_available(None, "lash.ax.v1"),
+        Err(crate::RuntimeErrorCode::RecordedRendererUnavailable)
+    );
+    assert!(crate::RuntimeErrorCode::RecordedRendererUnavailable.is_retryable());
+}
+
+#[test]
 fn a_spec_hash_is_canonical_over_prompt_slot_order() {
     let mut forward = PromptLayer::new();
     forward.add_contribution(PromptContribution::guidance("A", "a"));

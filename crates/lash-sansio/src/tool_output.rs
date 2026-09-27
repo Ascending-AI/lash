@@ -400,25 +400,6 @@ impl ToolValue {
         attachments
     }
 
-    pub(crate) fn model_parts(&self) -> Vec<ModelToolReturnPart> {
-        let mut parts = Vec::new();
-        match self {
-            Self::String(text) => push_text_part(&mut parts, text.clone()),
-            Self::Attachment(reference) => {
-                parts.push(ModelToolReturnPart::Attachment(reference.clone()))
-            }
-            Self::Null
-            | Self::Bool(_)
-            | Self::Number(_)
-            | Self::Array(_)
-            | Self::Object(_)
-            | Self::UntrustedJson(_) => {
-                self.push_compact_model_parts(&mut parts);
-            }
-        }
-        parts
-    }
-
     fn collect_attachments(&self, attachments: &mut Vec<AttachmentSource>) {
         match self {
             Self::Attachment(reference) => attachments.push(reference.clone()),
@@ -463,50 +444,6 @@ impl ToolValue {
             | Self::String(_)
             | Self::Attachment(_)
             | Self::UntrustedJson(_) => {}
-        }
-    }
-
-    fn push_compact_model_parts(&self, parts: &mut Vec<ModelToolReturnPart>) {
-        match self {
-            Self::Null => push_text_part(parts, "null"),
-            Self::Bool(value) => push_text_part(parts, value.to_string()),
-            Self::Number(value) => push_text_part(parts, value.to_string()),
-            Self::String(value) => push_text_part(
-                parts,
-                serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into()),
-            ),
-            Self::UntrustedJson(value) => push_text_part(
-                parts,
-                serde_json::to_string(value).unwrap_or_else(|_| "null".into()),
-            ),
-            Self::Attachment(reference) => {
-                parts.push(ModelToolReturnPart::Attachment(reference.clone()))
-            }
-            Self::Array(values) => {
-                push_text_part(parts, "[");
-                for (index, value) in values.iter().enumerate() {
-                    if index > 0 {
-                        push_text_part(parts, ",");
-                    }
-                    value.push_compact_model_parts(parts);
-                }
-                push_text_part(parts, "]");
-            }
-            Self::Object(entries) => {
-                push_text_part(parts, "{");
-                for (index, (key, value)) in entries.iter().enumerate() {
-                    if index > 0 {
-                        push_text_part(parts, ",");
-                    }
-                    push_text_part(
-                        parts,
-                        serde_json::to_string(key).unwrap_or_else(|_| "\"\"".into()),
-                    );
-                    push_text_part(parts, ":");
-                    value.push_compact_model_parts(parts);
-                }
-                push_text_part(parts, "}");
-            }
         }
     }
 }
@@ -1007,12 +944,94 @@ pub struct ModelToolReturn {
 
 impl ModelToolReturn {
     pub fn from_output(call_id: String, tool_name: String, output: &ToolCallOutput) -> Self {
-        let parts = model_parts_from_tool_output(output);
+        let parts = match &output.outcome {
+            ToolCallOutcome::Success(value) => Self::parts_from_value(value),
+            ToolCallOutcome::Failure(failure) => {
+                let mut parts = vec![ModelToolReturnPart::text(format_failure_message(failure))];
+                if let Some(raw) = &failure.raw {
+                    parts.extend(
+                        raw.attachments()
+                            .into_iter()
+                            .map(ModelToolReturnPart::Attachment),
+                    );
+                }
+                parts
+            }
+            ToolCallOutcome::Cancelled(cancellation) => {
+                let mut parts = vec![ModelToolReturnPart::text(format_cancellation_message(
+                    cancellation,
+                ))];
+                if let Some(raw) = &cancellation.raw {
+                    parts.extend(
+                        raw.attachments()
+                            .into_iter()
+                            .map(ModelToolReturnPart::Attachment),
+                    );
+                }
+                parts
+            }
+        };
         Self {
             call_id,
             tool_name,
             parts,
             attachment_notices: Vec::new(),
+        }
+    }
+
+    fn parts_from_value(value: &ToolValue) -> Vec<ModelToolReturnPart> {
+        let mut parts = Vec::new();
+        match value {
+            ToolValue::String(text) => push_text_part(&mut parts, text.clone()),
+            ToolValue::Attachment(reference) => {
+                parts.push(ModelToolReturnPart::Attachment(reference.clone()));
+            }
+            _ => Self::write_compact_value(value, &mut parts),
+        }
+        parts
+    }
+
+    fn write_compact_value(value: &ToolValue, parts: &mut Vec<ModelToolReturnPart>) {
+        match value {
+            ToolValue::Null => push_text_part(parts, "null"),
+            ToolValue::Bool(value) => push_text_part(parts, value.to_string()),
+            ToolValue::Number(value) => push_text_part(parts, value.to_string()),
+            ToolValue::String(value) => push_text_part(
+                parts,
+                serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into()),
+            ),
+            ToolValue::UntrustedJson(value) => push_text_part(
+                parts,
+                serde_json::to_string(value).unwrap_or_else(|_| "null".into()),
+            ),
+            ToolValue::Attachment(reference) => {
+                parts.push(ModelToolReturnPart::Attachment(reference.clone()));
+            }
+            ToolValue::Array(values) => {
+                push_text_part(parts, "[");
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        push_text_part(parts, ",");
+                    }
+                    Self::write_compact_value(value, parts);
+                }
+                push_text_part(parts, "]");
+            }
+            ToolValue::Object(entries) => {
+                push_text_part(parts, "{");
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    if index > 0 {
+                        push_text_part(parts, ",");
+                    }
+                    push_text_part(
+                        parts,
+                        serde_json::to_string(key).unwrap_or_else(|_| "\"\"".into()),
+                    );
+                    push_text_part(parts, ":");
+                    Self::write_compact_value(value, parts);
+                }
+                push_text_part(parts, "}");
+            }
         }
     }
 
@@ -1090,36 +1109,6 @@ pub fn tool_result_text(content: &[ModelToolReturnPart]) -> std::borrow::Cow<'_,
                 })
                 .collect();
             std::borrow::Cow::Owned(lines.join("\n"))
-        }
-    }
-}
-
-pub fn model_parts_from_tool_output(output: &ToolCallOutput) -> Vec<ModelToolReturnPart> {
-    match &output.outcome {
-        ToolCallOutcome::Success(value) => value.model_parts(),
-        ToolCallOutcome::Failure(failure) => {
-            let mut parts = vec![ModelToolReturnPart::text(format_failure_message(failure))];
-            if let Some(raw) = &failure.raw {
-                parts.extend(
-                    raw.attachments()
-                        .into_iter()
-                        .map(ModelToolReturnPart::Attachment),
-                );
-            }
-            parts
-        }
-        ToolCallOutcome::Cancelled(cancellation) => {
-            let mut parts = vec![ModelToolReturnPart::text(format_cancellation_message(
-                cancellation,
-            ))];
-            if let Some(raw) = &cancellation.raw {
-                parts.extend(
-                    raw.attachments()
-                        .into_iter()
-                        .map(ModelToolReturnPart::Attachment),
-                );
-            }
-            parts
         }
     }
 }
@@ -1311,7 +1300,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_value_model_parts_preserve_attachment_position() {
+    fn model_tool_return_preserves_attachment_position() {
         let value = ToolValue::Array(vec![
             ToolValue::String("before".into()),
             ToolValue::Attachment(attachment_source("img")),
@@ -1319,7 +1308,12 @@ mod tests {
         ]);
 
         assert_eq!(
-            value.model_parts(),
+            ModelToolReturn::from_output(
+                "call".into(),
+                "tool".into(),
+                &ToolCallOutput::success_tool_value(value),
+            )
+            .parts,
             vec![
                 ModelToolReturnPart::text("[\"before\","),
                 ModelToolReturnPart::Attachment(attachment_source("img")),
@@ -1376,7 +1370,7 @@ mod tests {
         });
 
         assert_eq!(
-            model_parts_from_tool_output(&output),
+            ModelToolReturn::from_output("call".into(), "tool".into(), &output).parts,
             vec![
                 ModelToolReturnPart::text("[Tool execution failed]\nboom"),
                 ModelToolReturnPart::Attachment(attachment),

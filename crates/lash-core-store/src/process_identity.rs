@@ -382,6 +382,8 @@ pub struct ProcessExecutionEnvSpec {
     #[serde(default)]
     pub plugin_options: crate::PluginOptions,
     pub policy: crate::SessionPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<crate::run_spec::RecordedRender>,
 }
 impl ProcessExecutionEnvSpec {
     /// Constructs a `ProcessExecutionEnvSpec` for protocol and process-engine implementors running a durable process.
@@ -389,6 +391,7 @@ impl ProcessExecutionEnvSpec {
         Self {
             plugin_options,
             policy,
+            render: None,
         }
     }
 

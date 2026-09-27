@@ -1135,6 +1135,10 @@ fn remote_process_dtos_json_round_trip() {
             metadata: serde_json::json!({ "label": "Import" }),
         },
         env_spec: Some(RemoteProcessExecutionEnvSpec {
+            render: Some(RemoteRecordedRender {
+                renderer_id: "lash.ax.v1".to_string(),
+                params: serde_json::json!({"print": {"max_chars": 8000}, "preview": {"max_chars": 1000}}),
+            }),
             plugin_options: RemoteProcessPluginOptions {
                 plugins: BTreeMap::from([(
                     "snapshot-tools".to_string(),
@@ -1891,6 +1895,7 @@ fn process_execution_policy_carries_session_generation_options() {
     // The env spec validates the options it carries, so a zero cap fails at
     // the boundary instead of reaching a provider.
     let mut env_spec = RemoteProcessExecutionEnvSpec {
+        render: None,
         plugin_options: RemoteProcessPluginOptions::default(),
         policy,
     };

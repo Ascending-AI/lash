@@ -833,6 +833,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    pub fn recorded_render(&self) -> Option<&crate::RecordedRender> {
+        self.execution_env_spec.render.as_ref()
+    }
+
     pub fn with_process_execution(
         mut self,
         process_id: ProcessId,

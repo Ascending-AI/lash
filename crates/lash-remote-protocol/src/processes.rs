@@ -1326,10 +1326,19 @@ pub struct RemoteProcessExecutionPolicy {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct RemoteRecordedRender {
+    pub renderer_id: String,
+    pub params: serde_json::Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessExecutionEnvSpec {
     #[serde(default, skip_serializing_if = "RemoteProcessPluginOptions::is_empty")]
     pub plugin_options: RemoteProcessPluginOptions,
     pub policy: RemoteProcessExecutionPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<RemoteRecordedRender>,
 }
 
 impl RemoteProcessPluginOptions {
@@ -1357,6 +1366,7 @@ impl RemoteProcessExecutionEnvSpec {
         Self {
             plugin_options: RemoteProcessPluginOptions::default(),
             policy: RemoteProcessExecutionPolicy::new(turn_budget),
+            render: None,
         }
     }
 

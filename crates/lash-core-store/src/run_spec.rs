@@ -358,6 +358,7 @@ impl RunSpec {
             resolved: (config != *snapshot).then(|| Box::new(config)),
             capabilities: self.capabilities.clone(),
             base: snapshot.clone(),
+            render: None,
         })
     }
 }
@@ -396,6 +397,25 @@ impl std::fmt::Display for RunSpecHash {
 /// under. Its config is the root's execution view only: commits keep writing
 /// the sticky session config.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedRender {
+    pub renderer_id: String,
+    pub params: serde_json::Value,
+}
+
+impl RecordedRender {
+    pub fn require_available<'a>(
+        recorded: Option<&'a Self>,
+        active_id: &str,
+    ) -> Result<&'a Self, crate::RuntimeErrorCode> {
+        match recorded {
+            Some(recorded) if recorded.renderer_id == active_id => Ok(recorded),
+            _ => Err(crate::RuntimeErrorCode::RecordedRendererUnavailable),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedRun {
     /// The root's snapshot: the session config after the boundary's command
     /// drain, which the spec resolved against. Its revision is the config
@@ -413,6 +433,8 @@ pub struct ResolvedRun {
     /// binds the same refs (FIG-3877).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<RecordedRender>,
 }
 
 impl ResolvedRun {
@@ -423,6 +445,7 @@ impl ResolvedRun {
             spec: None,
             resolved: None,
             capabilities: std::collections::BTreeMap::new(),
+            render: None,
         }
     }
 

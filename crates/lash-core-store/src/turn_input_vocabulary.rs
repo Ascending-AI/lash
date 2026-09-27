@@ -5,8 +5,8 @@
 //! driver that normalizes and applies them stays in `lash-core`.
 
 pub use crate::run_spec::{
-    BindingId, CapabilityRef, ContractRef, DefinitionRef, ResolvedRun, RunDefinition,
-    RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash, SlotId,
+    BindingId, CapabilityRef, ContractRef, DefinitionRef, RecordedRender, ResolvedRun,
+    RunDefinition, RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash, SlotId,
 };
 use crate::{CheckpointKind, PluginMessage, SessionId, TurnCause, TurnId};
 use std::any::Any;

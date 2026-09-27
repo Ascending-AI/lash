@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 47,
-  "cargo_target_count": 179,
+  "cargo_package_count": 48,
+  "cargo_target_count": 181,
   "feature_lane_units": [
     {
       "features": [
@@ -4770,29 +4770,11 @@
       "package": "lash-internal-core-store"
     },
     {
-      "features": [],
-      "kind": "unit-test",
-      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_083e6583",
-      "package": "lash-internal-core-store"
-    },
-    {
-      "features": [],
-      "kind": "unit-test",
-      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_3719f8c2",
-      "package": "lash-internal-core-store"
-    },
-    {
-      "features": [],
-      "kind": "unit-test",
-      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_4f1cb6e7",
-      "package": "lash-internal-core-store"
-    },
-    {
       "features": [
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_a39ffea1",
+      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_07d92565",
       "package": "lash-internal-core-store"
     },
     {
@@ -4800,13 +4782,31 @@
         "otel-trace"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_ce8f20d6",
+      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_1b1bbd77",
       "package": "lash-internal-core-store"
     },
     {
       "features": [],
       "kind": "unit-test",
-      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_d3dda01a",
+      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_2fc1493c",
+      "package": "lash-internal-core-store"
+    },
+    {
+      "features": [],
+      "kind": "unit-test",
+      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_6a8514cc",
+      "package": "lash-internal-core-store"
+    },
+    {
+      "features": [],
+      "kind": "unit-test",
+      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_a6ec35dc",
+      "package": "lash-internal-core-store"
+    },
+    {
+      "features": [],
+      "kind": "unit-test",
+      "label": "//crates/lash-core-store:lash-core-store__unit_test__fv_e4a8d0a5",
       "package": "lash-internal-core-store"
     },
     {
@@ -10352,6 +10352,42 @@
       "kind": "bin-unit-test",
       "label": "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test__fv_34a13f38",
       "package": "lash-internal-remote-protocol"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-render:lash-render",
+      "package": "lash-internal-render"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-render:lash-render",
+      "package": "lash-internal-render"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-render:lash-render",
+      "package": "lash-internal-render"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-render:lash-render",
+      "package": "lash-internal-render"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-render:lash-render",
+      "package": "lash-internal-render"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-render:lash-render",
+      "package": "lash-internal-render"
     },
     {
       "features": [],
@@ -16304,7 +16340,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 238,
+  "generated_label_count": 241,
   "packages": [
     {
       "declared_features": [
@@ -16604,6 +16640,7 @@
         "async-trait",
         "lash-internal-core-ids",
         "lash-internal-core-llm",
+        "lash-internal-render",
         "lash-internal-sansio",
         "lash-internal-trace",
         "proptest",
@@ -17898,6 +17935,43 @@
         "members": [
           "//crates/lash-remote-protocol:lash-remote-protocol__unit_test",
           "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test"
+        ]
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "serde",
+        "serde_json"
+      ],
+      "doc": "//crates/lash-render:lash-render__doc",
+      "manifest": "crates/lash-render/Cargo.toml",
+      "package": "lash-internal-render",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_render",
+          "kind": "lib",
+          "label": "//crates/lash-render:lash-render"
+        },
+        {
+          "cargo": "lash_render",
+          "kind": "unit-test",
+          "label": "//crates/lash-render:lash-render__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "render",
+          "kind": "test",
+          "label": "//crates/lash-render:render__test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": "//crates/lash-render:test_batch",
+        "members": [
+          "//crates/lash-render:lash-render__unit_test",
+          "//crates/lash-render:render__test"
         ]
       }
     },

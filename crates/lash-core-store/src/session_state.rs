@@ -630,6 +630,9 @@ pub struct RuntimeSessionAuthority {
     /// from this record so the root's commits stay replayable (FIG-3877).
     #[serde(skip)]
     pub resolved_run: Option<Box<crate::run_spec::ResolvedRun>>,
+    /// The root's execution-only renderer record. Head commits do not carry it.
+    #[serde(skip)]
+    pub resolved_render: Option<crate::run_spec::RecordedRender>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1337,7 +1340,8 @@ pub mod facade_ops {
             &self,
             fallback_policy: &SessionPolicy,
         ) -> crate::ProcessExecutionEnvSpec {
-            self.current_agent_frame()
+            let mut spec = self
+                .current_agent_frame()
                 .map(|frame| {
                     crate::ProcessExecutionEnvSpec::new(
                         frame.assignment.plugin_options.clone(),
@@ -1349,7 +1353,9 @@ pub mod facade_ops {
                         crate::PluginOptions::default(),
                         fallback_policy.clone(),
                     )
-                })
+                });
+            spec.render = self.authority.resolved_render.clone();
+            spec
         }
     }
 }
@@ -1401,6 +1407,7 @@ pub fn adopt_resolved_run(
     state.open_unpersisted_initial_frame_under_current_assignment();
     state.authority.root_snapshot = Some(Box::new(resolved.base.clone()));
     state.authority.resolved_run = Some(Box::new(resolved.clone()));
+    state.authority.resolved_render = resolved.render.clone();
 }
 
 /// Adopt the durable head config's carried fields onto resident state: the
@@ -1543,6 +1550,7 @@ pub fn adopt_durable_head(
     state.authority.committed_config = None;
     state.authority.root_snapshot = None;
     state.authority.resolved_run = None;
+    state.authority.resolved_render = None;
     state.policy.session_id = live_owned.session_id;
     state.policy.turn_budget = live_owned.turn_budget;
     // The config adopted the commanded head value before the checkpoint

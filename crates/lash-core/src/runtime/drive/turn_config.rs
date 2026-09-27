@@ -96,6 +96,10 @@ impl LashRuntime {
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
             spec,
             inherited,
+            protocol_driver: self
+                .session
+                .as_ref()
+                .map(|session| session.plugins().protocol_driver()),
         };
         let resolved = controller
             .execute_effect(
@@ -243,6 +247,7 @@ struct ResolveTurnConfigRunner {
     /// The shape a recovered follow-on inherits from its parent root
     /// (FIG-3877); present only on the follow-on's own admission.
     inherited: Option<crate::ResolvedRun>,
+    protocol_driver: Option<std::sync::Arc<dyn crate::plugin::ProtocolDriverPlugin>>,
 }
 
 /// A root's non-default spec, read and resolved only on the step's first
@@ -340,13 +345,25 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
                 ),
             ));
         }
-        let resolved = match (self.inherited, self.spec) {
+        let inherited = self.inherited.is_some();
+        let mut resolved = match (self.inherited, self.spec) {
             // A recovered follow-on re-records the shape its parent root
             // resolved, verbatim: it does not re-resolve.
             (Some(inherited), _) => inherited,
             (None, None) => crate::ResolvedRun::snapshot(self.snapshot),
             (None, Some(spec)) => spec.resolve(&self.snapshot).await?,
         };
+        if !inherited && let Some(driver) = self.protocol_driver {
+            let options = resolved
+                .config()
+                .protocol_turn_options
+                .as_ref()
+                .cloned()
+                .unwrap_or_default();
+            resolved.render = driver.resolve_render(&options).map_err(|message| {
+                RuntimeEffectControllerError::new(RuntimeErrorCode::RunShapeRefused, message)
+            })?;
+        }
         Ok(RuntimeEffectOutcome::ResolveTurnConfig {
             resolved: Box::new(resolved),
         })

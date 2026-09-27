@@ -207,6 +207,8 @@ pub enum RuntimeErrorCode {
     /// revision recovers it. Nothing is recorded, and no other revision is
     /// ever used instead.
     RunDefinitionUnavailable,
+    /// A recorded renderer is absent on this worker. Redeploying it can resume the root.
+    RecordedRendererUnavailable,
     /// A registered run definition refused the spec's context (FIG-3838):
     /// deterministic, so it is recorded as the root's failure.
     RunShapeRefused,
@@ -632,6 +634,7 @@ impl RuntimeErrorCode {
             Self::ProviderCredentialsMissing => "provider_credentials_missing",
             Self::ProviderBindingUnavailable => "provider_binding_unavailable",
             Self::RunDefinitionUnavailable => "run_definition_unavailable",
+            Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
             Self::RunShapeRefused => "run_shape_refused",
             Self::RunSpecMismatch => "run_spec_mismatch",
             Self::Plugin => "plugin",
@@ -878,6 +881,7 @@ impl RuntimeErrorCode {
         Self::ProviderCredentialsMissing,
         Self::ProviderBindingUnavailable,
         Self::RunDefinitionUnavailable,
+        Self::RecordedRendererUnavailable,
         Self::RunShapeRefused,
         Self::RunSpecMismatch,
         Self::Plugin,
@@ -1066,6 +1070,7 @@ impl RuntimeErrorCode {
             "provider_credentials_missing" => Self::ProviderCredentialsMissing,
             "provider_binding_unavailable" => Self::ProviderBindingUnavailable,
             "run_definition_unavailable" => Self::RunDefinitionUnavailable,
+            "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,
             "run_shape_refused" => Self::RunShapeRefused,
             "run_spec_mismatch" => Self::RunSpecMismatch,
             "plugin" => Self::Plugin,

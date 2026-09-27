@@ -442,10 +442,15 @@ impl From<lash_core::ProcessExecutionEnvSpec> for RemoteProcessExecutionEnvSpec 
         let lash_core::ProcessExecutionEnvSpec {
             plugin_options,
             policy,
+            render,
         } = value;
         Self {
             plugin_options: plugin_options.into(),
             policy: policy.into(),
+            render: render.map(|record| crate::processes::RemoteRecordedRender {
+                renderer_id: record.renderer_id,
+                params: record.params,
+            }),
         }
     }
 }
@@ -458,10 +463,15 @@ impl TryFrom<RemoteProcessExecutionEnvSpec> for lash_core::ProcessExecutionEnvSp
         let RemoteProcessExecutionEnvSpec {
             plugin_options,
             policy,
+            render,
         } = value;
         Ok(Self {
             plugin_options: plugin_options.into(),
             policy: policy.try_into()?,
+            render: render.map(|record| lash_core::RecordedRender {
+                renderer_id: record.renderer_id,
+                params: record.params,
+            }),
         })
     }
 }

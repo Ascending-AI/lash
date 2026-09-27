@@ -83,27 +83,6 @@
     "peak_bytes": 16609280,
     "samples": 12
   },
-  "//crates/lash-core-store:lash-core-store__unit_test__fv_083e6583": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 13832192,
-    "samples": 3
-  },
-  "//crates/lash-core-store:lash-core-store__unit_test__fv_3719f8c2": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 11468800,
-    "samples": 3
-  },
-  "//crates/lash-core-store:lash-core-store__unit_test__fv_d3dda01a": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 1.14,
-    "peak_bytes": 11599872,
-    "samples": 3
-  },
   "//crates/lash-core-worker:lash-core-worker__unit_test": {
     "cpu_count": 3,
     "memory_kb": 1048576,

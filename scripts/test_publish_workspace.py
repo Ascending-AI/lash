@@ -40,6 +40,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-provider-google": "lash-internal-provider-google",
     "lash-provider-openai": "lash-internal-provider-openai",
     "lash-remote-protocol": "lash-internal-remote-protocol",
+    "lash-render": "lash-internal-render",
     "lash-restate": "lash-internal-restate",
     "lash-rlm-types": "lash-internal-rlm-types",
     "lash-s3-store": "lash-internal-s3-store",

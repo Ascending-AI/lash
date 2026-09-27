@@ -91,6 +91,7 @@ fn main() {
             metadata: serde_json::json!({}),
         },
         env_spec: Some(lash::remote::processes::RemoteProcessExecutionEnvSpec {
+            render: None,
             plugin_options: lash::remote::processes::RemoteProcessPluginOptions::default(),
             policy: lash::remote::processes::RemoteProcessExecutionPolicy {
                 provider_id: "provider".to_string(),

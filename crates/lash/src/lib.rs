@@ -721,10 +721,10 @@ pub mod remote {
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
             RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-            RemoteProcessWorkSnapshot, RemoteRuntimeAttribution, RemoteRuntimeInvocation,
-            RemoteRuntimeReplay, RemoteRuntimeReplayAttribution, RemoteRuntimeSubject,
-            RemoteScopeGrant, RemoteScopeId, RemoteSessionScope, RemoteStartLifetime,
-            RemoteToolFailureClass, RemoteTurnBudget,
+            RemoteProcessWorkSnapshot, RemoteRecordedRender, RemoteRuntimeAttribution,
+            RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
+            RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
+            RemoteStartLifetime, RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 
