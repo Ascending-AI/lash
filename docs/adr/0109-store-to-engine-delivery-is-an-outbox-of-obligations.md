@@ -273,7 +273,7 @@ pub trait RecoveryLeaderStore: Send + Sync {
 
 `StoreSet::recovery_leader() -> Arc<dyn RecoveryLeaderStore>` is required.
 
-In `lash_core::runtime::drive::leadership`, `RecoveryLease` runs acquire or
+In `lash_core::runtime::recovery_lease`, `RecoveryLease` runs acquire or
 renew on its own cadence and publishes a `Standing`. The host sets
 `LashCoreBuilder::recovery_lease(RecoveryLeaseConfig { generation_rank,
 timings })`:
