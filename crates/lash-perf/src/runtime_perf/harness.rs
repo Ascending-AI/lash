@@ -26,7 +26,7 @@ use super::providers::{
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
 use backend::PerfBackend;
-pub(crate) use backend::{memory_stores, restate_backend};
+pub(crate) use backend::{memory_stores, restate_backend, restate_backend_over};
 
 const HISTORY_EXCHANGES: usize = 18;
 // `deep_turn_composition` performs two provider iterations: one runs the
@@ -137,19 +137,10 @@ impl BenchmarkCore {
 /// waits on the sent input's answer and never runs the turn itself.
 #[derive(Clone)]
 pub(crate) enum TurnEntry {
-    /// A durable SQLite or PostgreSQL lane: the core's in-process engine
-    /// drives the session.
-    Host,
-    /// The in-process lane on the Restate server double, whose engine drives
-    /// the session in its `LashSession` and `LashTurn` handlers. The handle
-    /// lets a test watch the double's teardown.
-    RestateHandler(
-        #[cfg_attr(
-            not(test),
-            expect(dead_code, reason = "only tests watch the server double")
-        )]
-        lash_restate_test::RestateTestBackend,
-    ),
+    /// A lane on the Restate server double, whose engine drives the session
+    /// in its `LashSession` and `LashTurn` handlers. The handle lets a test
+    /// watch the double's teardown.
+    RestateHandler(lash_restate_test::RestateTestBackend),
 }
 
 impl TurnEntry {
@@ -185,8 +176,8 @@ impl TurnEntry {
 
 pub(crate) struct BenchmarkRuntime {
     turn_entry: TurnEntry,
-    /// The in-process lane's deployment worker probes; the durable lanes'
-    /// cores carry their own.
+    /// The lane's deployment worker probes: the deployment's worker is not
+    /// the session's runtime.
     process_phase_probes: Option<lash::runtime::RuntimeTurnPhaseProbeSlot>,
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
@@ -206,6 +197,13 @@ pub(crate) struct RuntimePerfTraceConfig {
 }
 
 impl BenchmarkRuntime {
+    /// The server double the lane's engine runs on: a scenario that emits a
+    /// trigger occurrence runs it in a handler of the double's deployment.
+    pub(crate) fn restate(&self) -> &lash_restate_test::RestateTestBackend {
+        let TurnEntry::RestateHandler(restate) = &self.turn_entry;
+        restate
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "the benchmark session is taken by set_up before any measurement can read it; the accessor is the panicking half of the Option field"
@@ -1152,11 +1150,12 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let provider = benchmark_provider(scenario).into_handle();
     let mut plugin_stack =
         runtime_perf_plugin_stack(scenario.uses_standard_compaction(), mode_id.is_standard());
-    let sqlite = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(&root)
+    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(&root)
             .await
             .map_err(|err| anyhow::anyhow!(err.to_string()))?,
     );
+    let restate = restate_backend_over(stores).await?;
     let (store_factory, store_metrics): (
         Arc<dyn lash_core::SessionStoreFactory>,
         Arc<RuntimePerfStoreMetrics>,
@@ -1164,15 +1163,16 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         // Store-reopen scenarios keep the backend's own catalog: they
         // measure reopen, not decorated durable commits.
         (
-            sqlite.session_store_factory(),
+            restate.lash_backend().session_store_factory(),
             Arc::new(RuntimePerfStoreMetrics::default()),
         )
     } else {
-        let factory = RuntimePerfStoreFactory::decorating(sqlite.session_store_factory());
+        let factory =
+            RuntimePerfStoreFactory::decorating(restate.lash_backend().session_store_factory());
         let metrics = factory.metrics();
         (Arc::new(factory), metrics)
     };
-    let backend: lash::Backend = PerfBackend::over(sqlite.into())
+    let backend: lash::Backend = PerfBackend::over_restate(&restate)
         .with_catalog(Arc::clone(&store_factory))
         .into();
     let effect_host = backend.effect_host();
@@ -1180,6 +1180,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         plugin_stack.push(factory);
     }
     let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack)?;
+    let process_phase_probes = install_process_worker(&restate, &core)?;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core.open_session(session_id.clone()).await?;
     let persistence = if wiring.session_store_handle {
@@ -1197,8 +1198,8 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     };
     Ok(BenchmarkRuntime {
         store_metrics,
-        turn_entry: TurnEntry::Host,
-        process_phase_probes: None,
+        turn_entry: TurnEntry::RestateHandler(restate),
+        process_phase_probes: Some(process_phase_probes),
         core,
         session: Some(session),
         store: None,

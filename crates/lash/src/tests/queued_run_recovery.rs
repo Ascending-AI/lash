@@ -116,32 +116,6 @@ fn recorded_provider_effects(path: &std::path::Path) -> Vec<(String, String, ser
         .collect()
 }
 
-struct ColdCommitBoundary {
-    phase: lash_core::runtime::RuntimeTurnPhase,
-    reached: Arc<tokio::sync::Notify>,
-    skip: AtomicUsize,
-}
-impl lash_core::runtime::RuntimeTurnPhaseProbe for ColdCommitBoundary {
-    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
-        if phase == self.phase {
-            if self
-                .skip
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
-                    remaining.checked_sub(1)
-                })
-                .is_ok()
-            {
-                return;
-            }
-            self.reached.notify_one();
-            loop {
-                std::thread::park();
-            }
-        }
-    }
-    fn end(&self, _: lash_core::runtime::RuntimeTurnPhase) {}
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals() -> Result<()> {
     let directory = tempfile::tempdir().expect("temporary durable assembly");
@@ -290,275 +264,6 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
         "a later distinct run has a new admission identity"
     );
     Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "subprocess entry point for queued recovery"]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "cold-recovery harness owns worker processes and durable test files"
-)]
-async fn cold_queued_child_process() -> Result<()> {
-    use std::io::Write as _;
-    let Ok(action) = std::env::var("LASH_QUEUED_COLD_ACTION") else {
-        return Ok(());
-    };
-    let directory = std::path::PathBuf::from(std::env::var("LASH_QUEUED_COLD_DIRECTORY").unwrap());
-    let crash = action == "crash";
-    let boundary = std::env::var("LASH_QUEUED_COLD_BOUNDARY").unwrap();
-    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(if crash {
-        1_800_000_000_000
-    } else {
-        1_800_000_600_000
-    }));
-    let probe = Arc::new(RetryProbe::default());
-    if boundary != "completion" {
-        probe.hook_calls.store(1, Ordering::SeqCst);
-    }
-    if !crash {
-        probe.hook_calls.store(1, Ordering::SeqCst);
-        probe.hook_release.add_permits(32);
-    }
-    let provider = crate::testing::TestProvider::builder()
-        .kind("embed-test")
-        .complete({
-            let marker = directory.join("provider-count");
-            let follow_on = boundary == "follow-on";
-            move |_| {
-                let marker = marker.clone();
-                async move {
-                    let previous = std::fs::read_to_string(&marker)
-                        .unwrap_or_default()
-                        .lines()
-                        .count();
-                    let mut file = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&marker)
-                        .unwrap();
-                    writeln!(file, "completion").unwrap();
-                    file.sync_all().unwrap();
-                    if follow_on && previous == 0 {
-                        Ok(LlmResponse {
-                            parts: vec![lash_core::LlmOutputPart::ToolCall {
-                                call_id: "cold-switch".into(),
-                                tool_name: "switch_frame".into(),
-                                input_json: r#"{"task":"cold continuation"}"#.into(),
-                                replay: None,
-                            }],
-                            ..LlmResponse::default()
-                        })
-                    } else {
-                        Ok(text_response("cold recorded completion"))
-                    }
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    let backend = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-        directory.join("sessions"),
-        lash_sqlite_store::SqliteBackendOptions::default(),
-        clock,
-    )
-    .await
-    .expect("open the SQLite backend");
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(backend).into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(provider)
-    .model(mock_model_spec())
-    .tools(Arc::new(AgentFrameSwitchTools))
-    .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("cold-queued-recovery").open().await?;
-    let boundary_reached = Arc::new(tokio::sync::Notify::new());
-    if crash && boundary != "completion" {
-        session
-            .set_turn_phase_probe(Arc::new(ColdCommitBoundary {
-                phase: if boundary == "checkpoint" || boundary == "follow-on" {
-                    lash_core::runtime::RuntimeTurnPhase::PreparedTurn
-                } else {
-                    lash_core::runtime::RuntimeTurnPhase::PostCommitDelivery
-                },
-                reached: Arc::clone(&boundary_reached),
-                skip: AtomicUsize::new(usize::from(boundary == "follow-on")),
-            }))
-            .await;
-    }
-    if crash {
-        session
-            .durable()
-            .send(TurnInput::text("cold input"))
-            .id("cold-input")
-            .accepted()
-            .await?;
-        let running_session = session.clone();
-        let running = tokio::spawn(async move { drain_queued(&running_session, None).await });
-        tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            probe.hook_entered.notified(),
-        )
-        .await
-        .expect("cold driver reaches journaled completion");
-        let admission = session
-            .durable()
-            .pending_queued_run()
-            .await?
-            .expect("admitted run");
-        std::fs::write(
-            directory.join("admission.json"),
-            serde_json::to_vec(&admission).unwrap(),
-        )
-        .unwrap();
-        if boundary != "completion" {
-            probe.hook_release.add_permits(32);
-            tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                boundary_reached.notified(),
-            )
-            .await
-            .expect("child reaches selected durable boundary");
-        }
-        if boundary == "follow-on" {
-            let admission = session
-                .durable()
-                .pending_queued_run()
-                .await?
-                .expect("follow-on remains pending");
-            assert_eq!(admission.position.physical_ordinal, 1);
-            assert_eq!(admission.position.turn_index, 2);
-            assert!(
-                session.durable().pending_turn_inputs().await?.is_empty(),
-                "first physical input already settled"
-            );
-            std::fs::write(
-                directory.join("admission.json"),
-                serde_json::to_vec(&admission).unwrap(),
-            )
-            .unwrap();
-        }
-        println!("crash_ready");
-        std::io::stdout().flush().unwrap();
-        running.await.unwrap()?;
-        panic!("parent must kill the paused child");
-    }
-    let recorded: lash_core::store::QueuedRunAdmission =
-        serde_json::from_slice(&std::fs::read(directory.join("admission.json")).unwrap()).unwrap();
-    assert_eq!(
-        recorded.origin,
-        lash_core::store::QueuedRunOrigin::Anonymous
-    );
-    if boundary == "terminal" {
-        assert!(session.durable().pending_queued_run().await?.is_none());
-        let replay = drain_queued(&session, Some(recorded.scope.id())).await?;
-        assert!(
-            matches!(replay, lash_core::facade_support::QueuedTurnDrain::Replayed(ref receipt) if receipt.scope == recorded.scope && receipt.terminal.is_some())
-        );
-    } else {
-        let before = session
-            .durable()
-            .pending_queued_run()
-            .await?
-            .expect("cold admission is discoverable");
-        assert_eq!(before.scope, recorded.scope);
-        assert_eq!(before.origin, recorded.origin);
-        assert_eq!(before.position, recorded.position);
-        drain_queued(&session, None)
-            .await?
-            .expect("cold drain resumes");
-    }
-    assert!(session.durable().pending_queued_run().await?.is_none());
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    println!("recovered");
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_completion_survives_process_death() {
-    run_cold_queued_boundary("completion").await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_checkpoint_survives_process_death() {
-    run_cold_queued_boundary("checkpoint").await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_terminal_receipt_survives_process_death_before_reply() {
-    run_cold_queued_boundary("terminal").await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_follow_on_completion_survives_process_death() {
-    run_cold_queued_boundary("follow-on").await;
-}
-#[expect(
-    clippy::disallowed_methods,
-    reason = "cold-recovery harness owns worker processes and durable test files"
-)]
-async fn run_cold_queued_boundary(boundary: &str) {
-    use tokio::io::AsyncBufReadExt as _;
-    let directory = tempfile::tempdir().unwrap();
-    let command = |action: &str| {
-        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
-        command
-            .args([
-                "--exact",
-                "--ignored",
-                "tests::queued_run_recovery::cold_queued_child_process",
-                "--nocapture",
-                "--test-threads=1",
-            ])
-            .env("LASH_QUEUED_COLD_ACTION", action)
-            .env("LASH_QUEUED_COLD_BOUNDARY", boundary)
-            .env("LASH_QUEUED_COLD_DIRECTORY", directory.path())
-            .kill_on_drop(true);
-        command
-    };
-    let mut crashed = command("crash")
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut lines = tokio::io::BufReader::new(crashed.stdout.take().unwrap()).lines();
-    loop {
-        let line = lines
-            .next_line()
-            .await
-            .unwrap()
-            .expect("child reaches completion boundary");
-        if line.ends_with("crash_ready") {
-            break;
-        }
-    }
-    crashed.kill().await.unwrap();
-    assert!(!crashed.wait().await.unwrap().success());
-    let recorded = recorded_provider_effects(&effect_journal(directory.path()));
-    if boundary == "checkpoint" {
-        assert!(
-            recorded_effects(&effect_journal(directory.path()))
-                .iter()
-                .any(|(_, _, envelope)| envelope["command"]["type"] == "checkpoint"),
-            "checkpoint outcome is journaled before process death"
-        );
-    }
-    let recovered = command("recover").output().await.unwrap();
-    assert!(
-        recovered.status.success(),
-        "stdout: {}; stderr: {}",
-        String::from_utf8_lossy(&recovered.stdout),
-        String::from_utf8_lossy(&recovered.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(directory.path().join("provider-count"))
-            .unwrap()
-            .lines()
-            .count(),
-        if boundary == "follow-on" { 2 } else { 1 },
-        "provider counter outside both workers proves cold replay"
-    );
-    assert_eq!(
-        recorded_provider_effects(&effect_journal(directory.path())),
-        recorded
-    );
 }
 
 struct ExhaustedWake(Arc<tokio::sync::Notify>);
@@ -937,7 +642,7 @@ impl ToolProvider for StopQueuedTool {
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> {
+async fn a_stopped_turn_runs_withheld_input_in_a_follow_on() -> Result<()> {
     let durable = Arc::new(StdMutex::new(None::<crate::DurableSession>));
     let requests = Arc::new(StdMutex::new(Vec::new()));
     let provider = crate::testing::TestProvider::builder()
@@ -977,22 +682,20 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
+    // The engine's session drive runs the root and its follow-on (D5).
+    let double = restate_double(0x0036_685d).await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::new(StopQueuedTool))
-        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stopped-withheld").open().await?;
     *durable.lock_recover() = Some(session.durable());
-    session
-        .durable()
+    let output = session
         .send(TurnInput::text("start tool stop"))
-        .accepted()
+        .id("stopped-withheld")
+        .output()
         .await?;
-    let output = drain_queued(&session, Some("stopped-withheld"))
-        .await?
-        .expect("queued run executes");
     assert_eq!(
         requests.lock_recover().len(),
         2,
@@ -1011,6 +714,6 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
             .iter()
             .any(|application| application.source_key.as_deref() == Some("withheld-input"))
     );
-    assert!(session.durable().pending_queued_run().await?.is_none());
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
     Ok(())
 }

@@ -260,7 +260,7 @@ pub(crate) fn explicit_ephemeral_facets_with_budget(
 /// `backend` with the inline session-work double when it has no engine of
 /// its own (D14): the engine drives an accepted input only once a caller
 /// waits on it, and schedules nothing in the background, so a law reads what
-/// is pending, or drains it through [`drain_queued`], before anything runs.
+/// is pending before anything runs.
 /// A backend whose engine drives its sessions (the Restate double) keeps it.
 pub(crate) fn inline_session_work(backend: lash_core::Backend) -> lash_core::Backend {
     if backend.session_work().is_some() {
@@ -371,47 +371,6 @@ pub(crate) async fn output_into_cancelled_by(
     };
     canceller.await?;
     settle.await
-}
-
-/// Drain `session`'s next claimable queued work in the caller's task, as one
-/// turn, through lash-core's queued-run wrapper.
-///
-/// Hosts no longer drain (D5): the engine's session drive is the only
-/// executor, and `send()` is the only way in. These laws pin lash-core's
-/// queued-run settlement (a pending run kept for a redrive, a deterministic
-/// failure settled once, a drain resumed after a crash), which only this
-/// wrapper exercises until FIG-3668 retires it with the in-process engine.
-/// `drain_id` (or `turn_id`) names the drain scope; a retry under the same
-/// name resumes or answers that run.
-pub(crate) async fn drain_queued(
-    session: &crate::LashSession,
-    drain_id: Option<&str>,
-) -> Result<lash_core::facade_support::QueuedTurnDrain<crate::TurnOutput>> {
-    let runtime = session.runtime.clone();
-    let host = session.effect_host();
-    let identity = drain_id.map(|id| runtime.observe().queue_drain_scope(id));
-    let collector = RunActivityCollector::default();
-    let observation =
-        crate::turn::SessionObservationTurnActivitySink::new(runtime.clone(), Some(&collector));
-    let drain = {
-        let writer_handle = runtime.writer();
-        let mut writer = writer_handle.lock().await;
-        let opts = lash_core::facade_support::QueuedTurnOptions::new(
-            CancellationToken::new(),
-            lash_core::facade_support::QueuedEffectSource::Host {
-                host: host.as_ref(),
-                identity,
-            },
-        )
-        .with_turn_events(&observation);
-        let drain = writer.stream_next_queued_work(opts).await?;
-        runtime.publish_from(&writer);
-        drain
-    };
-    Ok(drain.map(|turn| crate::TurnOutput {
-        result: TurnReport::from_assembled(turn),
-        activities: collector.snapshot(),
-    }))
 }
 
 /// The durable acceptance receipt of a send: what a law reads when it

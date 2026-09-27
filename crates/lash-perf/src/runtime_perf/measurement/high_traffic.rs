@@ -370,6 +370,7 @@ async fn run_high_traffic_step(
 
     for (session_index, session) in sessions.into_iter().enumerate() {
         let core = core.clone();
+        let restate = runtime.restate().clone();
         let config = config.clone();
         let queue_depth = Arc::clone(&queue_depth);
         let queue_depth_samples = Arc::clone(&queue_depth_samples);
@@ -392,6 +393,7 @@ async fn run_high_traffic_step(
                 let depth = queue_depth.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 queue_depth_samples.lock_recover().push(depth as u64);
                 let operation = run_high_traffic_operation(
+                    &restate,
                     &core,
                     &session,
                     ordinal,
@@ -452,6 +454,7 @@ async fn run_high_traffic_step(
 }
 
 async fn run_high_traffic_operation(
+    restate: &lash_restate_test::RestateTestBackend,
     core: &lash::LashCore,
     session: &lash::LashSession,
     ordinal: usize,
@@ -500,11 +503,39 @@ async fn run_high_traffic_operation(
         )
         .with_source(serde_json::json!({}))
         .for_session(session.session_id());
-        let effect_host = core.effect_host();
-        let controller = effect_host.scoped(lash_core::AdmittedScope::new(
-            session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
-        ))?;
-        let delivery_report = core.triggers().emit(request, controller).await?;
+        // A trigger emission journals its process starts, so it runs in a
+        // handler of the engine's deployment, as a host's workflow runs it.
+        let emitted = Arc::new(Mutex::new(None));
+        restate
+            .run_in_handler(
+                lash_core::AdmittedScope::new(
+                    session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
+                ),
+                Arc::new({
+                    let core = core.clone();
+                    let emitted = Arc::clone(&emitted);
+                    move |controller| {
+                        let core = core.clone();
+                        let request = request.clone();
+                        let emitted = Arc::clone(&emitted);
+                        Box::pin(async move {
+                            let report = core
+                                .triggers()
+                                .emit(request, controller)
+                                .await
+                                .map_err(|error| error.to_string());
+                            *emitted.lock_recover() = Some(report);
+                        })
+                    }
+                }),
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
+        let delivery_report = emitted
+            .lock_recover()
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("the emission handler produced no report"))?
+            .map_err(anyhow::Error::msg)?;
         let delivery_process_ids = delivery_report.started_process_ids();
         if delivery_process_ids.is_empty() {
             let registrations = session.admin().triggers().list_all().await?;

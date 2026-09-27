@@ -425,27 +425,23 @@ pub(super) fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> 
     })
 }
 
+/// The engine's session drive runs a chained frame handoff through nested
+/// commits (D5: the drive is the only executor).
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn durable_queued_chained_continue_as_survives_nested_commit_handoff() -> Result<()> {
-    run_async_test_on_stack_budget("durable-queued-chained-continue-as-test", || {
-        durable_queued_chained_continue_as_survives_nested_commit_handoff_inner()
+pub(super) fn engine_driven_chained_continue_as_survives_nested_commit_handoff() -> Result<()> {
+    run_async_test_on_stack_budget("engine-chained-continue-as-test", || {
+        engine_driven_chained_continue_as_survives_nested_commit_handoff_inner()
     })
 }
 
 #[cfg(feature = "rlm")]
-pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_handoff_inner()
+pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_handoff_inner()
 -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "durable-queued-chained-continue-as";
+    let session_id = "engine-chained-continue-as";
     let append_count = Arc::new(AtomicUsize::new(0));
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let double = restate_double(0x0036_68c3).await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .provider(queued_text_provider(vec![
             typescript_block(r#"await control.continue_as({ task: "switch again" });"#),
             typescript_block(r#"await control.continue_as({ task: "finish chain" });"#),
@@ -456,31 +452,19 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
             append_count: Arc::clone(&append_count),
             max_appends: 2,
         }))
-        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
-    session
-        .durable()
-        .send(TurnInput::text("start chained frame handoff"))
-        .id("queued-chained-continue-as")
-        .accepted()
-        .await?;
 
-    let output = drain_queued(&session, None)
-        .await?
-        .expect("queued chained turn should run");
+    let output = session
+        .send(TurnInput::text("start chained frame handoff"))
+        .id("engine-chained-continue-as")
+        .output()
+        .await?;
 
     assert_eq!(append_count.load(Ordering::SeqCst), 2);
     assert_eq!(
         output.final_value(),
         Some(&serde_json::json!("done after chained handoffs"))
-    );
-    // The queued ingress admission and the outer chained turn each acquire
-    // once; both nested handoffs borrow the outer fence.
-    assert_sqlite_session_lane_free_at_generation(
-        store_factory.as_ref(),
-        &SessionId::from(session_id),
-        2,
     );
     Ok(())
 }
@@ -902,289 +886,6 @@ pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_to
         !events[failed + 1..next_code]
             .iter()
             .any(|event| matches!(&event.event, TurnEvent::ToolCallCompleted { .. }))
-    );
-    Ok(())
-}
-
-/// FIG-1573: a hard-killed host leaves a live session-execution-lease row; the
-/// reopened process must claim its queued turn within one lease TTL.
-///
-/// Field shape (hirsel, durable SQLite): `send_message` was accepted onto the
-/// queued-work path and the host process was killed before the drain claimed
-/// it. The lease row the dead boot left behind cannot be released by anyone,
-/// so the store's expiry check is the only thing that frees the lane. The
-/// reopened process then drains every 30s and reports "claimed nothing
-/// (session execution lease busy)" indefinitely.
-#[tokio::test]
-pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane()
--> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "fig1573-agent-g1";
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-            dir.path().join("sessions"),
-            lash_sqlite_store::SqliteBackendOptions::default(),
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
-        )
-        .await
-        .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
-
-    // Boot 1: the host accepts a queued turn, then is hard-killed.
-    let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(
-        crate::testing::TestProvider::builder()
-            .kind("fig1573-boot-1")
-            .complete(|_request| async { Ok(text_response("boot one must not answer")) })
-            .build()
-            .into_handle(),
-    )
-    .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
-    .build(crate::testing::runtime_lease_owner())?;
-    let first_session = first_core.session(session_id).open().await?;
-    first_session
-        .durable()
-        .send(TurnInput::text("what is the status of the migration?"))
-        .id("fig1573-queued-request")
-        .accepted()
-        .await?;
-    drop(first_session);
-    drop(first_core);
-
-    // The lane a SIGTERM leaves behind: a live lease row owned by a boot that
-    // will never renew and never release it. Taking it on a bare store handle
-    // and dropping the handle reproduces that row exactly - an in-process guard
-    // drop would spawn the best-effort release a killed process never performs.
-    let dead_boot_store = lash_core::SessionStoreFactory::create_store(
-        store_factory.as_ref(),
-        &lash_core::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        },
-    )
-    .await?;
-    let dead_lane = dead_boot_store
-        .try_claim_session_execution_lease(
-            &SessionId::from(session_id),
-            &lash_core::LeaseOwnerIdentity::opaque("fig1573-host", "fig1573-host:boot-1"),
-            "fig1573-boot-1-executor",
-            lash_core::facade_support::LeaseTimings::default().ttl_ms(),
-        )
-        .await?
-        .acquired()
-        .expect("the dying boot held the lane");
-    let dead_lane_expiry = dead_lane.expires_at_epoch_ms;
-    std::mem::forget(dead_lane);
-    drop(dead_boot_store);
-
-    // Boot 2 comes up after the dead boot's lease expires. Session recovery is
-    // itself lease-fenced, so a successor cannot hydrate the session at 14s
-    // and merely wait to acquire the lane later; it must first cross the same
-    // expiry boundary that makes the queued turn drainable.
-    clock.advance(dead_lane_expiry - lash_core::ClockWallTime::timestamp_ms(clock.as_ref()));
-    let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(
-        crate::testing::TestProvider::builder()
-            .kind("fig1573-boot-2")
-            .complete(|_request| async { Ok(text_response("the migration is green")) })
-            .build()
-            .into_handle(),
-    )
-    .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
-    .build(crate::testing::runtime_lease_owner())?;
-    let second_session = second_core.session(session_id).open().await?;
-    assert_eq!(
-        second_session.durable().pending_turn_inputs().await?.len(),
-        1,
-        "the queued turn is still pending after the reopen"
-    );
-
-    let mut claimed_at_ms = None;
-    for _attempt in 0..8 {
-        if let Some(output) = drain_queued(&second_session, None).await?.ran() {
-            assert_eq!(output.assistant_message(), Some("the migration is green"));
-            claimed_at_ms = Some(lash_core::ClockWallTime::timestamp_ms(clock.as_ref()));
-            break;
-        }
-        clock.advance(30_000);
-    }
-
-    let claimed_at_ms = claimed_at_ms.expect(
-        "the queued turn must be claimed by the reopened process, not wedged behind the dead \
-         boot's lease row",
-    );
-    assert!(
-        claimed_at_ms >= dead_lane_expiry && claimed_at_ms < dead_lane_expiry + 60_000,
-        "the drain must claim on the first probe after the dead boot's lease expires \
-         (claimed at {claimed_at_ms}, dead lane expired at {dead_lane_expiry})"
-    );
-    Ok(())
-}
-
-/// FIG-1573: an active-turn-scoped input orphaned by a hard kill must become
-/// drainable again in the reopened process.
-///
-/// A host that routes `send_message` into the turn currently running writes a
-/// `pending_active` row scoped to that turn id. The only thing that ever moves
-/// such a row back to `deferred_next_turn` is the interrupted-input re-defer
-/// carried by that same turn's own final commit
-/// (`RuntimeCommit::deferring_interrupted_turn_inputs`, applied by
-/// `commit_runtime_turn`). A hard kill skips that commit, and nothing at
-/// session reopen re-defers the row: the next-turn drain matches only
-/// `state = 'deferred_next_turn'`, and an active-turn claim would have to name
-/// a turn id that can never exist again. Before the fix the row stayed visible
-/// to `pending_turn_inputs` forever while every drain claimed nothing - the
-/// field signature in FIG-1573.
-///
-/// The regression law: the drain-time backstop repairs the row and the reopened
-/// process delivers it in that same drain. Remove
-/// `defer_orphaned_turn_inputs_before_drain` from `stream_queued_work` and this
-/// test goes red again - the dying boot released its lease on the way out, so
-/// the successor observes no displacement and nothing else in the reopened
-/// process ever reaches those rows.
-#[tokio::test]
-pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reopen()
--> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "fig1573-orphaned-active-input";
-    let interrupted_turn_id = "fig1573-interrupted-turn";
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-            dir.path().join("sessions"),
-            lash_sqlite_store::SqliteBackendOptions::default(),
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
-        )
-        .await
-        .expect("open the SQLite backend"),
-    );
-
-    // Boot 1: a turn is running and the host routes an input into it. The
-    // provider never answers, so the turn never reaches its final commit - the
-    // only writer of the interrupted-input re-defer.
-    let provider_entered = Arc::new(tokio::sync::Notify::new());
-    let entered = Arc::clone(&provider_entered);
-    let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(
-        crate::testing::TestProvider::builder()
-            .kind("fig1573-hung-boot-1")
-            .complete(move |_request| {
-                let entered = Arc::clone(&entered);
-                async move {
-                    entered.notify_one();
-                    std::future::pending::<()>().await;
-                    unreachable!("the killed boot never answers")
-                }
-            })
-            .build()
-            .into_handle(),
-    )
-    .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
-    .build(crate::testing::runtime_lease_owner())?;
-    let first_session = first_core.session(session_id).open().await?;
-    first_session
-        .durable()
-        .send(TurnInput::text("what is the status of the migration?"))
-        .id("fig1573-queued-request")
-        .ingress(lash_core::TurnInputIngress::active_turn(
-            interrupted_turn_id,
-            lash_core::TurnInputCheckpointBoundary::default(),
-        ))
-        .accepted()
-        .await?;
-    {
-        let running = first_session
-            .send(TurnInput::text("start the long turn"))
-            .id(interrupted_turn_id)
-            .output();
-        let mut running = std::pin::pin!(running);
-        tokio::select! {
-            _ = &mut running => panic!("the hung provider must not complete the turn"),
-            () = provider_entered.notified() => {}
-        }
-        // Dropping the in-flight turn and the core is the hard kill: no final
-        // commit, so no interrupted-input re-defer is ever written.
-    }
-    drop(first_session);
-    drop(first_core);
-
-    // Boot 2 cannot admit the session until the hard-killed turn's execution
-    // lease expires. Advance to that boundary before reopening; admission now
-    // fences recovery itself rather than letting a successor hydrate early and
-    // wait to acquire the lane only when it starts draining.
-    clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
-    let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone().into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(
-        crate::testing::TestProvider::builder()
-            .kind("fig1573-boot-2")
-            .complete(|_request| async { Ok(text_response("the migration is green")) })
-            .build()
-            .into_handle(),
-    )
-    .model(mock_model_spec())
-    .map_backend(crate::tests::inline_session_work)
-    .build(crate::testing::runtime_lease_owner())?;
-    let second_session = second_core.session(session_id).open().await?;
-    assert_eq!(
-        second_session.durable().pending_turn_inputs().await?.len(),
-        2,
-        "the hard kill leaves both the orphaned routed input and the killed turn's own \
-         acceptance pending after the reopen"
-    );
-
-    // Two rows, two drains: the killed turn's own acceptance is claimable
-    // immediately, while the input routed into that dead turn only becomes
-    // claimable once a drain that finds nothing runs the FIG-1573 backstop.
-    let mut claimed = None;
-    for _attempt in 0..10 {
-        if let Some(output) = drain_queued(&second_session, None).await?.ran() {
-            claimed = Some(output);
-            if second_session
-                .durable()
-                .pending_turn_inputs()
-                .await?
-                .is_empty()
-            {
-                break;
-            }
-            continue;
-        }
-        clock.advance(30_000);
-    }
-
-    let output = claimed.expect(
-        "the reopened process must drain the orphaned input; without the drain-time backstop \
-         every drain claims nothing, because the row is stuck in pending_active with a turn id \
-         that no longer exists",
-    );
-    assert_eq!(output.assistant_message(), Some("the migration is green"));
-    assert!(
-        second_session
-            .durable()
-            .pending_turn_inputs()
-            .await?
-            .is_empty(),
-        "the drained input must leave the pending queue"
     );
     Ok(())
 }

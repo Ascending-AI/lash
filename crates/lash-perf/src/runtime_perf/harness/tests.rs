@@ -165,12 +165,7 @@ async fn a_dropped_runtime_frees_its_in_process_lane() {
         let mut runtime = build_runtime(scenario, None)
             .await
             .expect("build the benchmark runtime");
-        let TurnEntry::RestateHandler(restate) = &runtime.turn_entry else {
-            panic!(
-                "{}: the in-process lane runs on the server double",
-                scenario.name()
-            );
-        };
+        let TurnEntry::RestateHandler(restate) = &runtime.turn_entry;
         let watch = restate.server().drop_watch();
         seed_runtime_state(&mut runtime, scenario)
             .await

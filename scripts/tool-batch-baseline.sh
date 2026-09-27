@@ -4,24 +4,20 @@
 # FIG-3397 replaces the tool batch with a first-class effect group; before that
 # cutover lands, someone has to write down what the batch costs today so the
 # after-number has something honest to be compared to. One run of this script
-# produces that record: for every (backend, producer, width) cell it drives the
+# produces that record: for every (producer, width) cell it drives the
 # conformance producers' batch through `crates/lash-perf`'s
 # `tool_batch_baseline` bin `reps` times and writes one JSONL row per rep —
 # turn wall time, leaf window, peak in-flight concurrency, journal rows, and
 # the load the rep ran under.
 #
-# The two legs:
+# It measures the Restate engine, the only effect engine (ADR 0104): it starts
+# `restatedev/restate` in a throwaway container on ephemeral loopback ports,
+# serves the probe endpoint from the bin, registers the deployment, and counts
+# the invocation's `sys_journal` rows. Before FIG-3397 Restate ran a batch
+# serially (its controller refused concurrent effects, a flag FIG-3397
+# deleted), so a pre-cutover run records a serial baseline, not a defect.
 #
-#   * `sqlite`   — runs in-process on a throwaway database file.
-#   * `restate`  — starts `restatedev/restate` in a throwaway container on
-#                  ephemeral loopback ports, serves the probe endpoint from
-#                  the bin, registers the deployment, and counts the
-#                  invocation's `sys_journal` rows. Before FIG-3397 Restate
-#                  ran a batch serially (its controller refused concurrent
-#                  effects, a flag FIG-3397 deleted), so a
-#                  pre-cutover leg records a serial baseline, not a defect.
-#
-# Evidence goes under `<archive-root>/<short-sha>/`: one JSONL per backend, a
+# Evidence goes under `<archive-root>/<short-sha>/`: `restate.jsonl`, a
 # `MANIFEST.md` naming the commit, tree state, quiet-box verdict and exact
 # commands, and a `SUMMARY.md` of medians and spreads. A number without its
 # load figure is not evidence, so the run refuses to start on a contended box
@@ -33,7 +29,6 @@
 #
 # Options:
 #   --archive-root DIR    evidence root (or LASH_PERF_BASELINE_ROOT); required
-#   --backends LIST       comma list of sqlite,restate (default: all)
 #   --widths LIST         batch widths (default: 2,8,50)
 #   --reps N              repetitions per cell (default: 5)
 #   --producers LIST      comma list of standard,rlm (default: both)
@@ -58,7 +53,6 @@ die() {
 }
 
 archive_root="${LASH_PERF_BASELINE_ROOT:-}"
-backends="sqlite,restate"
 widths="2,8,50"
 reps=5
 producers="standard,rlm"
@@ -70,7 +64,6 @@ allow_busy=0
 while (($#)); do
   case "$1" in
     --archive-root) archive_root="$2"; shift 2 ;;
-    --backends) backends="$2"; shift 2 ;;
     --widths) widths="$2"; shift 2 ;;
     --reps) reps="$2"; shift 2 ;;
     --producers) producers="$2"; shift 2 ;;
@@ -124,14 +117,12 @@ short="${sha:0:9}"
 dirty="$(git status --porcelain)"
 destination="$archive_root/$short"
 mkdir -p "$destination"
-scratch="$(mktemp -d)"
 containers=()
 
 cleanup() {
   for c in "${containers[@]+"${containers[@]}"}"; do
     docker rm -f "$c" >/dev/null 2>&1 || true
   done
-  rm -rf "$scratch"
 }
 trap cleanup EXIT
 
@@ -144,13 +135,6 @@ probe.close()'
 }
 
 commands=()
-
-run_sqlite() {
-  local out="$destination/sqlite.jsonl"
-  commands+=("$bin --backend sqlite --widths $widths --reps $reps --producers $producers --out $out --db-path <scratch>/sqlite-backend")
-  "$bin" --backend sqlite --widths "$widths" --reps "$reps" \
-    --producers "$producers" --out "$out" --db-path "$scratch/sqlite-backend"
-}
 
 wait_for_port() {
   local port="$1" what="$2" deadline=$((SECONDS + 60))
@@ -184,25 +168,18 @@ run_restate() {
   wait_for_port "$ingress_port" "Restate ingress"
   note "restate: $RESTATE_IMAGE admin=$admin_port ingress=$ingress_port endpoint=$endpoint_port"
 
-  commands+=("RESTATE_INGRESS_URL=http://127.0.0.1:$ingress_port RESTATE_ADMIN_URL=http://127.0.0.1:$admin_port EG_RESTATE_ENDPOINT_BIND=127.0.0.1:$endpoint_port EG_RESTATE_ENDPOINT_URL=http://127.0.0.1:$endpoint_port $bin --backend restate --widths $widths --reps $reps --producers $producers --out $out")
+  commands+=("RESTATE_INGRESS_URL=http://127.0.0.1:$ingress_port RESTATE_ADMIN_URL=http://127.0.0.1:$admin_port EG_RESTATE_ENDPOINT_BIND=127.0.0.1:$endpoint_port EG_RESTATE_ENDPOINT_URL=http://127.0.0.1:$endpoint_port $bin --widths $widths --reps $reps --producers $producers --out $out")
   RESTATE_INGRESS_URL="http://127.0.0.1:$ingress_port" \
   RESTATE_ADMIN_URL="http://127.0.0.1:$admin_port" \
   EG_RESTATE_ENDPOINT_BIND="127.0.0.1:$endpoint_port" \
   EG_RESTATE_ENDPOINT_URL="http://127.0.0.1:$endpoint_port" \
-    "$bin" --backend restate --widths "$widths" --reps "$reps" \
+    "$bin" --widths "$widths" --reps "$reps" \
       --producers "$producers" --out "$out"
 }
 
 before_uptime="$(uptime)"
 started=$SECONDS
-IFS=',' read -ra backend_list <<<"$backends"
-for backend in "${backend_list[@]}"; do
-  case "$backend" in
-    sqlite) run_sqlite ;;
-    restate) run_restate ;;
-    *) die "unknown backend $backend" ;;
-  esac
-done
+run_restate
 measure_seconds=$((SECONDS - started))
 after_uptime="$(uptime)"
 

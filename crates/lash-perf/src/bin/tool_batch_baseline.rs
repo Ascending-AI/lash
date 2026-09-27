@@ -1,6 +1,6 @@
 //! `tool-batch-baseline` — the FIG-3398 pre-cutover measurement.
 //!
-//! One invocation measures one backend. For every (producer, width) cell it
+//! For every (producer, width) cell it
 //! drives the FIG-3400 conformance producers' batch through
 //! [`lash_conformance::measure_tool_batch`] `reps` times and emits one JSONL
 //! row per rep: the turn's wall time, the leaf window (first leaf start to
@@ -9,16 +9,15 @@
 //! evidence; `scripts/tool-batch-baseline.sh` is the one-command entry point
 //! that wires the services and enforces the quiet-box precondition.
 //!
-//! * `sqlite` opens a fresh file `SqliteBackend` rooted at `--db-path` and
-//!   counts the delta in its effect journal's tables per rep.
-//! * `restate` serves a Restate backend's endpoint — every lash service, over
-//!   a SQLite memory store set — plus a probe workflow whose handler runs the
-//!   same measured turn through `RestateRuntimeEffectController` on that
-//!   backend's effect host, registers it on the deployment at
-//!   `--restate-admin-url`, and counts the invocation's `sys_journal` entries.
-//!   Before FIG-3397 Restate ran a batch serially (the since-deleted
-//!   `supports_concurrent_effects()` was hardcoded false), so its pre-cutover
-//!   numbers record a serial baseline, not a defect.
+//! It measures the Restate engine, the only effect engine (ADR 0104): it
+//! serves a Restate backend's endpoint — every lash service, over a SQLite
+//! memory store set — plus a probe workflow whose handler runs the measured
+//! turn through `RestateRuntimeEffectController` on that backend's effect
+//! host, registers it on the deployment at `--restate-admin-url`, and counts
+//! the invocation's `sys_journal` entries. Before FIG-3397 Restate ran a
+//! batch serially (the since-deleted `supports_concurrent_effects()` was
+//! hardcoded false), so its pre-cutover numbers record a serial baseline,
+//! not a defect.
 
 #![allow(
     deprecated,
@@ -45,9 +44,6 @@ const PROBE_SERVICE: &str = "ToolBatchProbe";
 #[derive(Parser)]
 #[command(about = "FIG-3398 pre-cutover tool-batch baseline measurement")]
 struct Args {
-    /// Which backend to measure.
-    #[arg(long, value_parser = ["sqlite", "restate"])]
-    backend: String,
     /// Batch widths to measure.
     #[arg(long, default_value = "2,8,50", value_delimiter = ',')]
     widths: Vec<usize>,
@@ -66,18 +62,15 @@ struct Args {
     /// JSONL output file, appended.
     #[arg(long)]
     out: PathBuf,
-    /// SQLite backend root directory, created fresh (backend=sqlite).
-    #[arg(long)]
-    db_path: Option<PathBuf>,
-    /// Restate ingress URL (backend=restate).
+    /// Restate ingress URL.
     #[arg(long, env = "RESTATE_INGRESS_URL")]
     restate_ingress_url: Option<String>,
-    /// Restate admin URL (backend=restate).
+    /// Restate admin URL.
     #[arg(long, env = "RESTATE_ADMIN_URL")]
     restate_admin_url: Option<String>,
     #[arg(long, env = "EG_RESTATE_ENDPOINT_BIND")]
     restate_endpoint_bind: Option<String>,
-    /// The URL Restate reaches the probe endpoint on (backend=restate).
+    /// The URL Restate reaches the probe endpoint on.
     #[arg(long, env = "EG_RESTATE_ENDPOINT_URL")]
     restate_endpoint_url: Option<String>,
 }
@@ -215,109 +208,6 @@ fn emit(out: &std::path::Path, row: &MeasurementRow) -> anyhow::Result<()> {
         row.journal_rows,
         row.load1,
     );
-    Ok(())
-}
-
-#[async_trait::async_trait]
-trait JournalCounter {
-    async fn count(&self) -> anyhow::Result<BTreeMap<String, i64>>;
-}
-
-struct SqliteJournalCounter {
-    path: PathBuf,
-}
-
-#[async_trait::async_trait]
-impl JournalCounter for SqliteJournalCounter {
-    async fn count(&self) -> anyhow::Result<BTreeMap<String, i64>> {
-        let path = self.path.clone();
-        tokio::task::spawn_blocking(move || {
-            let connection = rusqlite::Connection::open(&path)?;
-            let mut tables = connection.prepare(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND \
-                 (name LIKE 'runtime_effect%' OR name LIKE 'tool_intent%')",
-            )?;
-            let names = tables
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut counts = BTreeMap::new();
-            for name in names {
-                let count: i64 = connection.query_row(
-                    &format!("SELECT count(*) FROM \"{name}\""),
-                    [],
-                    |row| row.get(0),
-                )?;
-                counts.insert(name, count);
-            }
-            Ok(counts)
-        })
-        .await?
-    }
-}
-
-fn count_delta(
-    before: &BTreeMap<String, i64>,
-    after: &BTreeMap<String, i64>,
-) -> BTreeMap<String, i64> {
-    after
-        .iter()
-        .map(|(table, count)| {
-            (
-                table.clone(),
-                count - before.get(table).copied().unwrap_or(0),
-            )
-        })
-        .collect()
-}
-
-async fn run_sqlite(
-    args: &Args,
-    producers: &[lash_conformance::ToolBatchProducer],
-) -> anyhow::Result<()> {
-    let db_path = args
-        .db_path
-        .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join("tool-batch-baseline"));
-    if db_path.exists() {
-        anyhow::bail!("--db-path {} exists; pass a fresh path", db_path.display());
-    }
-    let backend = lash_sqlite_store::SqliteBackend::open(&db_path).await?;
-    let host = backend.effect_host() as Arc<dyn lash_core::EffectHost>;
-    let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core::StoreSet>;
-    let counter = SqliteJournalCounter {
-        path: db_path.join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
-    };
-    for producer in producers {
-        for &width in &args.widths {
-            for rep in 0..args.reps {
-                let session = session_id("sqlite", &producer.label, width, rep);
-                let before = counter.count().await?;
-                let load = load_average();
-                let measurement = lash_conformance::measure_tool_batch(
-                    lash_sansio::SessionId::from(session.clone()),
-                    Arc::clone(&host),
-                    Arc::clone(&stores),
-                    None,
-                    producer,
-                    width,
-                )
-                .await;
-                let after = counter.count().await?;
-                emit(
-                    &args.out,
-                    &MeasurementRow::new(
-                        "sqlite",
-                        &producer.label,
-                        rep,
-                        &session,
-                        &measurement,
-                        count_delta(&before, &after),
-                        load,
-                    ),
-                )?;
-            }
-        }
-    }
     Ok(())
 }
 
@@ -667,10 +557,5 @@ async fn main() -> anyhow::Result<()> {
     let artifacts = lash_sqlite_store::SqliteStoreSet::memory().await?;
     let artifacts_backend = lash_conformance::recording_backend_over(Arc::new(artifacts.clone()));
     let producers = producers(&args.producers, &artifacts_backend);
-    match args.backend.as_str() {
-        "sqlite" => run_sqlite(&args, &producers).await?,
-        "restate" => run_restate(&args, &producers).await?,
-        other => anyhow::bail!("unknown backend `{other}`"),
-    }
-    Ok(())
+    run_restate(&args, &producers).await
 }

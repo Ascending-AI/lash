@@ -250,7 +250,7 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &RECOVERY_ARTIFACT_BACKEND.clone().into(),
+            &RECOVERY_ARTIFACT_BACKEND,
         )
         .with_process_lifecycle(false),
     )
@@ -396,7 +396,7 @@ lash_conformance::admitted_head_redrive_tests!(
 /// Discards a claimed wake delivery with no reason, straight in the SQLite
 /// memory registry the Restate wake-ordering leg writes through.
 struct SqliteWakeDiscards {
-    backend: lash_sqlite_store::SqliteBackend,
+    backend: lash_sqlite_store::SqliteStoreSet,
 }
 
 #[async_trait::async_trait]
@@ -421,9 +421,9 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector for SqliteWakeDisc
 }
 
 lash_conformance::wake_delivery_ordering_tests!({
-    let backend = lash_sqlite_store::SqliteBackend::memory()
+    let backend = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("open a SQLite memory backend");
+        .expect("open a SQLite memory store set");
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
         serde_json::json!({"terminal_wait": "observed"}),
@@ -450,18 +450,18 @@ lash_conformance::wake_delivery_ordering_tests!({
 
 lash_conformance::wake_delivery_crash_tests!({
     let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
-    let backend = lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
-        lash_sqlite_store::SqliteBackendOptions {
+    let backend = lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
+        lash_sqlite_store::SqliteStoreSetOptions {
             wake_delivery: lash_core::WakeDeliveryConfig::new(10_000)
                 .expect("valid Restate conformance wake expiry")
                 .with_enqueuing_stale_after_ms(25)
                 .expect("valid Restate conformance stale-claim age"),
-            ..lash_sqlite_store::SqliteBackendOptions::memory()
+            ..lash_sqlite_store::SqliteStoreSetOptions::memory()
         },
         Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
     )
     .await
-    .expect("open a SQLite memory backend");
+    .expect("open a SQLite memory store set");
     let registry = backend.process_registry();
     let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
         serde_json::json!({"terminal_wait": "observed"}),
@@ -1859,7 +1859,7 @@ where
 
 pub(super) fn process_registry() -> Arc<dyn ProcessRegistry> {
     sync_await(async {
-        lash_sqlite_store::SqliteBackend::memory()
+        lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("sqlite registry")
             .process_registry()
@@ -1874,7 +1874,7 @@ pub(super) fn sequential_process_registry() -> Arc<dyn ProcessRegistry> {
 
 pub(super) fn continuation_store() -> Arc<dyn lash_core::ProcessContinuationStore> {
     sync_await(async {
-        lash_sqlite_store::SqliteBackend::memory()
+        lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("sqlite continuation store")
             .process_registry()
@@ -1886,7 +1886,7 @@ pub(super) fn process_stores() -> (
     Arc<dyn lash_core::ProcessContinuationStore>,
 ) {
     let storage = sync_await(async {
-        lash_sqlite_store::SqliteBackend::memory()
+        lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("sqlite process stores")
             .process_registry()
@@ -1905,10 +1905,10 @@ pub(super) fn sequential_process_stores() -> (
     Arc<dyn lash_core::ProcessContinuationStore>,
 ) {
     let storage = sync_await(async {
-        lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
-            lash_sqlite_store::SqliteBackendOptions {
+        lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
+            lash_sqlite_store::SqliteStoreSetOptions {
                 process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
-                ..lash_sqlite_store::SqliteBackendOptions::memory()
+                ..lash_sqlite_store::SqliteStoreSetOptions::memory()
             },
             Arc::new(lash_core::facade_support::SystemClock),
         )
@@ -1930,22 +1930,21 @@ pub(super) fn lashlang_process_input(
         .expect("serialize lashlang process input")
 }
 
-/// The SQLite memory backend whose Lashlang artifact store the recovery laws
-/// share: their registration helpers publish modules into it and their
-/// workers' engines read them back, as one host's backend would.
-pub(super) static RECOVERY_ARTIFACT_BACKEND: LazyLock<lash_sqlite_store::SqliteBackend> =
-    LazyLock::new(|| {
-        std::thread::spawn(|| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build the artifact backend runtime")
-                .block_on(lash_sqlite_store::SqliteBackend::memory())
-                .expect("open the recovery artifact backend")
-        })
-        .join()
-        .expect("open the recovery artifact backend on its own thread")
-    });
+/// The backend whose Lashlang artifact store the recovery laws share — this
+/// engine over one SQLite memory store set: their registration helpers
+/// publish modules into it and their workers' engines read them back, as one
+/// host's backend would.
+pub(super) static RECOVERY_ARTIFACT_BACKEND: LazyLock<lash_core::Backend> = LazyLock::new(|| {
+    std::thread::spawn(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build the artifact backend runtime")
+            .block_on(super::memory_engine_backend())
+    })
+    .join()
+    .expect("open the recovery artifact backend on its own thread")
+});
 
 /// [`RECOVERY_ARTIFACT_BACKEND`]'s process-exec-env store: the environments
 /// the recovery laws' registrations publish and their workers read back.
@@ -1954,5 +1953,5 @@ pub(super) static RECOVERY_PROCESS_ENV_STORE: LazyLock<Arc<dyn ProcessExecutionE
 
 /// [`RECOVERY_ARTIFACT_BACKEND`]'s Lashlang artifact store.
 pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
-    lashlang::LashlangArtifacts::of_backend(&RECOVERY_ARTIFACT_BACKEND.clone().into())
+    lashlang::LashlangArtifacts::of_backend(&RECOVERY_ARTIFACT_BACKEND)
 }

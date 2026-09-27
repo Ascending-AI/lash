@@ -2196,7 +2196,7 @@ mod deployment_and_testing_facade;
 mod durable_session;
 mod harness;
 pub(crate) use harness::{
-    AcceptedSend as _, DecoratedBackend, backend_work_facets_with_budget, drain_queued,
+    AcceptedSend as _, DecoratedBackend, backend_work_facets_with_budget,
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_backend_work,
     explicit_ephemeral_facets_with_budget, inline_session_work, memory_backend,
     memory_backend_with_clock, memory_store_backend, memory_store_set, mock_model_spec, model_spec,

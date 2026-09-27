@@ -1,11 +1,11 @@
 //! The backends the runtime perf harness measures over.
 //!
-//! Every benchmark core runs on one [`lash::Backend`]. The in-process lane
-//! is lash-restate's engine on the in-process Restate server double over a
-//! SQLite memory store set; the durable lanes open a SQLite file or a
-//! PostgreSQL backend. A lane that measures persistence puts the perf store
-//! decorator in front of the backend's session catalog; every other port
-//! stays the backend's.
+//! Every benchmark core runs on one [`lash::Backend`]: lash-restate's engine
+//! on the in-process Restate server double. The in-process lane runs it over
+//! a SQLite memory store set, the durable lane over a SQLite store set on
+//! disk. A lane that measures persistence puts the perf store decorator in
+//! front of the backend's session catalog; every other port stays the
+//! backend's.
 
 use std::sync::Arc;
 
@@ -56,6 +56,20 @@ pub(crate) async fn restate_backend() -> anyhow::Result<lash_restate_test::Resta
     lash_restate_test::backend(RESTATE_SEED, lash_restate_test::ServerConfig::default())
         .await
         .map_err(|err| anyhow::anyhow!(err.to_string()))
+}
+
+/// A fresh Restate test backend for the durable lane: lash-restate's engine
+/// on a new server double over `stores`, the lane's store set on disk.
+pub(crate) async fn restate_backend_over(
+    stores: Arc<dyn lash_core::StoreSet>,
+) -> anyhow::Result<lash_restate_test::RestateTestBackend> {
+    lash_restate_test::backend_with(
+        RESTATE_SEED,
+        lash_restate_test::ServerConfig::default(),
+        move |_| stores,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!(err.to_string()))
 }
 
 /// A fresh SQLite memory store set: storage only, for the store-level

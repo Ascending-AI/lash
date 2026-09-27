@@ -17367,7 +17367,6 @@
         "lash-runtime",
         "reqwest",
         "restate-sdk",
-        "rusqlite",
         "serde",
         "serde_json",
         "stats_alloc",

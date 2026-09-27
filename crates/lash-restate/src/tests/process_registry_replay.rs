@@ -65,10 +65,8 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all()),
     )
     .expect("link lashlang module");
-    let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open the artifact backend");
-    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend.clone().into());
+    let artifact_backend = memory_engine_backend().await;
+    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend);
     artifact_store
         .publish_module_artifact(
             &lash_core::ArtifactOwner::host("restate-serializable-input"),
@@ -77,9 +75,9 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         .await
         .expect("publish serializable-input artifact");
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteBackend::memory()
+        lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("process-exec-env backend")
+            .expect("process-exec-env store set")
             .process_env_store();
     let process_env_ref =
         lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;

@@ -77,28 +77,59 @@ fn test_restate_await_event_key(
     restate_await_event_key_for_authority(&test_restate_authority_id(), scope, wait)
 }
 
-/// A runtime host config over a fresh SQLite memory backend (ADR 0102): the
-/// store set a Restate test's runtime stands on. A test that journals under
-/// Restate installs its Restate host over this config's backend host.
+/// A runtime host config over this engine on a fresh SQLite memory store set
+/// (ADR 0104): the stores a Restate test's runtime stands on. The engine's
+/// connection reaches no server; a test that journals under Restate installs
+/// its own Restate host over this config's backend host.
 pub(super) async fn memory_host_config() -> lash_core::facade_support::RuntimeHostConfig {
     lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("open a SQLite memory backend"),
-        )
-        .into(),
+        memory_engine_backend().await,
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
 }
 
-/// A session-store catalog over a fresh SQLite memory backend: the catalog a
-/// process-worker test hands its worker.
+/// A backend of this engine over a fresh SQLite memory store set, connected
+/// to no server: the substrate a test's Lashlang artifacts live in.
+pub(super) async fn memory_engine_backend() -> lash_core::Backend {
+    lash_core::Backend::new(Arc::new(memory_engine().await))
+}
+
+/// This engine over a fresh SQLite memory store set, connected to no server.
+pub(super) async fn memory_engine() -> RestateEngine {
+    let connection = RestateConnection::new("https://restate.invalid");
+    RestateEngine::new(
+        Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("open a SQLite memory store set"),
+        ),
+        RestateConfig::new(
+            connection.clone(),
+            connection,
+            test_restate_authority_id(),
+            lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        ),
+    )
+}
+
+/// Restate process work over `registry`, submitting to no server: the
+/// wiring a test's process worker is built with. The worker runs the segments
+/// the test hands it; nothing here schedules a process in-process.
+pub(super) fn restate_process_work(
+    registry: Arc<dyn ProcessRegistry>,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+) -> lash_core::ProcessWorkWiring {
+    RestateProcessDeployment::new_for_test("https://restate.invalid", registry, continuations)
+        .process_work()
+}
+
+/// A session-store catalog over a fresh SQLite memory store set: the catalog
+/// a process-worker test hands its worker.
 pub(super) async fn memory_session_store_factory() -> Arc<dyn lash_core::SessionStoreFactory> {
-    lash_sqlite_store::SqliteBackend::memory()
+    lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("open a SQLite memory backend")
+        .expect("open a SQLite memory store set")
         .session_store_factory()
 }
 

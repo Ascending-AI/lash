@@ -16,7 +16,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
 
     // A worker like `recovery_worker`, with a scripted provider so the child
     // turn completes instead of failing on provider resolution.
-    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
+    let process_work = restate_process_work(Arc::clone(&registry), Arc::clone(&continuations));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![Arc::new(
         lash_protocol_standard::StandardProtocolPluginFactory::new(),
     )
@@ -49,7 +49,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::External(process_work),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

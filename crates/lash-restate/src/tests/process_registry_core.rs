@@ -409,10 +409,8 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
             "restate-scalar-replay-tools",
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         ));
-    let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open the artifact backend");
-    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend.clone().into());
+    let artifact_backend = memory_engine_backend().await;
+    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend);
     let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -420,7 +418,7 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &artifact_backend.clone().into(),
+            &artifact_backend,
         )
         .with_process_lifecycle(true),
     );
@@ -523,14 +521,14 @@ finish(await handle);
         restate_recorded_intent_target(),
         "the scripted tool names the first minted process"
     );
-    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
+    let process_work = restate_process_work(Arc::clone(&process_registry), continuation_store());
     let process_worker =
         DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 plugin_factories.clone(),
             )),
             host.clone(),
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::External(process_work),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ))

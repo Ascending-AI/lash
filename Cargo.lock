@@ -2849,7 +2849,6 @@ dependencies = [
  "lash-runtime",
  "reqwest 0.13.4",
  "restate-sdk",
- "rusqlite",
  "serde",
  "serde_json",
  "stats_alloc",

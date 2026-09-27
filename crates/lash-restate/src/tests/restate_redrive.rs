@@ -1494,9 +1494,9 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteBackend::memory()
+        lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("process-exec-env backend")
+            .expect("process-exec-env store set")
             .process_env_store();
     let process_env_ref =
         lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
@@ -1667,7 +1667,7 @@ pub(super) async fn register_fig811_subscription(
 
 #[tokio::test]
 pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order() {
-    let store = lash_sqlite_store::SqliteBackend::memory()
+    let store = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open SQLite trigger store")
         .trigger_store();
@@ -1706,9 +1706,9 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
 
     let registry = process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteBackend::memory()
+        lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("process-exec-env backend")
+            .expect("process-exec-env store set")
             .process_env_store();
     // The fixture environment every subscription draft here records.
     lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
@@ -1858,9 +1858,9 @@ pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_
     .await;
     let registry = process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteBackend::memory()
+        lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("process-exec-env backend")
+            .expect("process-exec-env store set")
             .process_env_store();
     // The fixture environment every subscription draft here records.
     lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;

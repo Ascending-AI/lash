@@ -825,7 +825,7 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
 ) -> DurableProcessWorker {
-    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let process_work = restate_process_work(registry, continuation_store());
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecoveryProcessTool);
     let mut plugins = vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
@@ -840,17 +840,11 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         RECOVERY_PROCESS_ENV_STORE.clone();
     // The worker reaches sessions through the catalog the test hands it, layered
-    // onto a memory backend for every other port.
-    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(
-        Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("open a SQLite memory backend"),
-        )
-        .into(),
-    )
-    .map_session_store_factory(|_| store_factory)
-    .into_backend();
+    // onto a memory store set for every other port.
+    let backend =
+        lash_core::testing::runtime_helpers::LayeredBackend::over(memory_engine_backend().await)
+            .map_session_store_factory(|_| store_factory)
+            .into_backend();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         backend,
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -870,7 +864,7 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
-            lash_core_worker::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::External(process_work),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

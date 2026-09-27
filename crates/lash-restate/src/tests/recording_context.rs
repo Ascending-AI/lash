@@ -1050,15 +1050,15 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
 
 pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>) {
     let clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
-    let backend = lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
-        lash_sqlite_store::SqliteBackendOptions {
+    let backend = lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
+        lash_sqlite_store::SqliteStoreSetOptions {
             process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
-            ..lash_sqlite_store::SqliteBackendOptions::memory()
+            ..lash_sqlite_store::SqliteStoreSetOptions::memory()
         },
         clock,
     )
     .await
-    .expect("open corpus backend");
+    .expect("open corpus store set");
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         backend.process_env_store();

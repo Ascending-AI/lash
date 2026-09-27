@@ -50,7 +50,6 @@ clap = { workspace = true, features = ["derive", "env"] }
 futures-util = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
-rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 stats_alloc = "0.1"

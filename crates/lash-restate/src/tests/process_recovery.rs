@@ -19,8 +19,9 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:ok").await;
+    let snapshot_registration = snapshot_lashlang_registration(env_ref).await;
     let snapshot_ok = registry_a
-        .register_process(snapshot_lashlang_registration(env_ref).await)
+        .register_process(snapshot_registration.clone())
         .await
         .expect("register snapshot-backed process")
         .id;
@@ -40,10 +41,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
         vec![snapshot_recovery_tool_factory()],
     )
     .await;
-    let _ = worker_b
-        .drive_pending_processes()
-        .await
-        .expect("recover snapshot-backed process");
+    let _ = run_recovered_segment(worker_b, &registry_b, &snapshot_ok, snapshot_registration).await;
 
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
@@ -52,6 +50,44 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
             .expect("await recovered snapshot-backed process"),
         process_success(serde_json::json!("snapshot:restored"))
     );
+}
+
+/// Run `registration`'s segment for `process_id` through the Restate process
+/// workflow on `worker`, as the deployment's handler runs a recovered process
+/// after a restart, and return how it ended. The workflow stores the terminal
+/// outcome in `registry`; nothing schedules the process in-process.
+async fn run_recovered_segment(
+    worker: DurableProcessWorker,
+    registry: &Arc<dyn ProcessRegistry>,
+    process_id: &ProcessId,
+    registration: ProcessRegistration,
+) -> lash_core::ProcessRunOutcome {
+    let workflow = LashProcessWorkflowImpl::new_for_test(
+        Arc::new(RestateCoreProcessRunner::new(worker)),
+        Arc::clone(registry),
+        continuation_store(),
+    );
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let controller = RestateRuntimeEffectController::with_options_for_test(
+        context,
+        RestateEffectControllerOptions::default().process_segment_drive(),
+    );
+    let execution_id = format!("recovered-{process_id}");
+    workflow
+        .run_registration_for_test(
+            process_id.clone(),
+            registration,
+            ProcessExecutionContext::default().with_execution_write_authority(
+                lash_core::ProcessExecutionWriteAuthority::invocation(process_id, &execution_id),
+            ),
+            controller
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(process_id)))
+                .expect("recovered process scope"),
+            0,
+            None,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("run recovered process {process_id}: {error:?}"))
 }
 
 struct InvalidLashlangBindingTool;
@@ -131,6 +167,7 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
         input.host_requirements_ref =
             lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("mismatch"));
     });
+    let requirements_mismatch_registration = requirements_mismatch.clone();
     let requirements_mismatch = registry_a
         .register_process(requirements_mismatch)
         .await
@@ -141,14 +178,17 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
     mutate_snapshot_lashlang_input(&mut process_ref_mismatch, |input| {
         input.process_ref = lashlang::ProcessRef::new(lashlang::ContentHash::new("mismatch"), 0);
     });
+    let process_ref_mismatch_registration = process_ref_mismatch.clone();
     let process_ref_mismatch = registry_a
         .register_process(process_ref_mismatch)
         .await
         .expect("register process-ref mismatch")
         .id;
 
+    let invalid_host_environment_registration =
+        snapshot_lashlang_registration(env_ref.clone()).await;
     let invalid_host_environment = registry_a
-        .register_process(snapshot_lashlang_registration(env_ref.clone()).await)
+        .register_process(invalid_host_environment_registration.clone())
         .await
         .expect("register invalid host environment")
         .id;
@@ -162,22 +202,29 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
         .await
         .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
-    let worker_b = recovery_worker_with_plugins(
-        Arc::clone(&registry_b),
-        Arc::clone(&store_factory),
-        vec![
-            snapshot_recovery_tool_factory(),
-            invalid_lashlang_binding_factory(),
-        ],
-    )
-    .await;
-    let _ = worker_b
-        .drive_pending_processes()
-        .await
-        .expect("drive immutable and invalid-host admission failures");
+    for (process_id, registration) in [
+        (&requirements_mismatch, requirements_mismatch_registration),
+        (&process_ref_mismatch, process_ref_mismatch_registration),
+        (
+            &invalid_host_environment,
+            invalid_host_environment_registration,
+        ),
+    ] {
+        let worker_b = recovery_worker_with_plugins(
+            Arc::clone(&registry_b),
+            Arc::clone(&store_factory),
+            vec![
+                snapshot_recovery_tool_factory(),
+                invalid_lashlang_binding_factory(),
+            ],
+        )
+        .await;
+        let _ = run_recovered_segment(worker_b, &registry_b, process_id, registration).await;
+    }
 
+    let incompatible_host_environment_registration = snapshot_lashlang_registration(env_ref).await;
     let incompatible_host_environment = registry_b
-        .register_process(snapshot_lashlang_registration(env_ref).await)
+        .register_process(incompatible_host_environment_registration.clone())
         .await
         .expect("register incompatible host environment")
         .id;
@@ -187,10 +234,13 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
         vec![snapshot_recovery_tool_factory()],
     )
     .await;
-    let _ = worker_c
-        .drive_pending_processes()
-        .await
-        .expect("drive incompatible-host admission failure");
+    let _ = run_recovered_segment(
+        worker_c,
+        &registry_b,
+        &incompatible_host_environment,
+        incompatible_host_environment_registration,
+    )
+    .await;
 
     for (process_id, expected_code) in [
         (requirements_mismatch, "process_host_requirements_mismatch"),
@@ -737,17 +787,15 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
 #[tokio::test]
 pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal() {
     let registry = process_registry();
+    let registration = typescript_process_registration().await;
     let typescript_worker = registry
-        .register_process(typescript_process_registration().await)
+        .register_process(registration.clone())
         .await
         .expect("register TypeScript process")
         .id;
 
     let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
-    let _ = worker
-        .drive_pending_processes()
-        .await
-        .expect("run stored TypeScript artifact");
+    let _ = run_recovered_segment(worker, &registry, &typescript_worker, registration).await;
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
             .await_terminal(&typescript_worker)
@@ -806,8 +854,9 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .await
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
+    let trigger_registration = trigger_lashlang_registration("issue-42").await;
     let trigger_notify = registry_a
-        .register_process(trigger_lashlang_registration("issue-42").await)
+        .register_process(trigger_registration.clone())
         .await
         .expect("register trigger-started process")
         .id;
@@ -824,8 +873,8 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
 
     // Reopen the registry and stand up a fresh worker over it: the crash
     // recovery counterpart. The recovery sweep submits the non-terminal process
-    // by workflow key; Restate coalesces duplicates and the workflow writes the
-    // terminal outcome.
+    // by workflow key; Restate coalesces duplicates and the workflow, run here
+    // on the fresh worker, writes the terminal outcome.
     let registry_b = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,
@@ -861,10 +910,8 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     );
 
     let worker_b = recovery_worker(Arc::clone(&registry_b), Arc::clone(&store_factory)).await;
-    let _ = worker_b
-        .drive_pending_processes()
-        .await
-        .expect("recover non-terminal trigger-started process");
+    let _ =
+        run_recovered_segment(worker_b, &registry_b, &trigger_notify, trigger_registration).await;
 
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
@@ -887,12 +934,8 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         "recovery must drive the trigger-started process to terminal"
     );
 
-    // Idempotent by process_id: re-running the sweep over an already-terminal
-    // process is a no-op and never double-executes it.
-    let _ = worker_b
-        .drive_pending_processes()
-        .await
-        .expect("second recovery sweep is idempotent");
+    // Idempotent by process_id: the stored terminal is what a later await
+    // reads, however often it is asked.
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&trigger_notify)

@@ -96,30 +96,43 @@ struct ProductionToolCell {
     llm_provider_calls: Arc<AtomicUsize>,
 }
 
-enum ControllerMode {
-    Local,
-    Durable,
-}
-
 /// The `llm_query` direct completion's answer, as the provider returns it.
 const LLM_QUERY_ANSWER: &str = r#"{"kind":"value","value":{"answer":"covered"},"error":null}"#;
 
-impl ProductionToolCell {
-    async fn new(mode: ControllerMode, tool_name: &str) -> Self {
-        let script = vec![
-            typescript_source_for(tool_name).to_string(),
-            LLM_QUERY_ANSWER.to_string(),
-        ];
-        Self::scripted(mode, tool_name, script).await
+/// The journaled Restate controller a cell runs under, over a recording
+/// context that replays what the live pass journaled once `start_replay`
+/// is called: the handler redriven against its own journal.
+struct DurableHost {
+    context: Arc<ReplayableRecordingContext>,
+    controller: Arc<RestateRuntimeEffectController<'static, Arc<ReplayableRecordingContext>>>,
+}
+
+impl DurableHost {
+    fn new() -> Self {
+        let context = Arc::new(ReplayableRecordingContext::default());
+        let controller = Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+            &context,
+        )));
+        Self {
+            context,
+            controller,
+        }
     }
 
+    fn start_replay(&self) {
+        self.context.start_replay();
+    }
+
+    fn effect_host(&self) -> &dyn EffectHost {
+        self.controller.as_ref()
+    }
+}
+
+impl ProductionToolCell {
     /// A cell whose provider answers call `n` with `script[n]` and refuses
     /// any call past the script: a re-issued call on replay panics.
-    async fn scripted(mode: ControllerMode, tool_name: &str, script: Vec<String>) -> Self {
-        let context_name = match mode {
-            ControllerMode::Local => "local",
-            ControllerMode::Durable => "restate-durable",
-        };
+    async fn scripted(tool_name: &str, script: Vec<String>) -> Self {
+        let context_name = "restate-durable";
         let session_id = SessionId::from(format!("tool-context-{context_name}-{tool_name}"));
         let turn_id = TurnId::from(format!("{session_id}-turn"));
         let dir = tempfile::tempdir().expect("tool-context tempdir");
@@ -135,9 +148,7 @@ impl ProductionToolCell {
                 "tool-context-first-party",
                 lash_core::facade_support::PluginSpec::new().with_tool_provider(counting_provider),
             ));
-        let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open the artifact backend");
+        let artifact_backend = memory_engine_backend().await;
         let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
             lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -145,7 +156,7 @@ impl ProductionToolCell {
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build(),
-                &artifact_backend.clone().into(),
+                &artifact_backend,
             )
             .with_process_lifecycle(false),
         );
@@ -308,22 +319,12 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
     for manifest in manifests {
         let _ = args_for(&manifest.name);
 
-        let (local_cell, local) = ProductionToolCell::sqlite(&manifest.name).await;
-        local_cell
-            .run(local.as_ref(), || local.start_replay())
-            .await;
-
-        let mut durable_cell =
-            ProductionToolCell::new(ControllerMode::Durable, &manifest.name).await;
-        let context = Arc::new(ReplayableRecordingContext::default());
-        let durable = Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
-            &context,
-        )));
-        durable_cell.host.control.effect_host = Arc::clone(&durable) as Arc<dyn EffectHost>;
+        let (durable_cell, durable) = ProductionToolCell::durable(&manifest.name).await;
         durable_cell
-            .run(durable.as_ref(), || context.start_replay())
+            .run(durable.effect_host(), || durable.start_replay())
             .await;
-        let tool_attempts = context
+        let tool_attempts = durable
+            .context
             .recorded_runtime_effect_envelopes()
             .into_iter()
             .filter(|(_, envelope)| {
@@ -378,30 +379,19 @@ impl lash_core::store::RuntimePersistenceDecorator for CrashAtFinalCommit {
 }
 
 impl ProductionToolCell {
-    /// A cell on the SQLite effect host with its session bound, ready to run.
-    async fn sqlite(tool_name: &str) -> (Self, Arc<lash_sqlite_store::SqliteEffectHost>) {
+    /// A cell under the journaled Restate controller, ready to run.
+    async fn durable(tool_name: &str) -> (Self, DurableHost) {
         let script = vec![
             typescript_source_for(tool_name).to_string(),
             LLM_QUERY_ANSWER.to_string(),
         ];
-        Self::sqlite_scripted(tool_name, script).await
+        Self::durable_scripted(tool_name, script).await
     }
 
-    async fn sqlite_scripted(
-        tool_name: &str,
-        script: Vec<String>,
-    ) -> (Self, Arc<lash_sqlite_store::SqliteEffectHost>) {
-        let mut cell = Self::scripted(ControllerMode::Local, tool_name, script).await;
-        cell.runtime_store
-            .admit_and_bind_session(&lash_core::SessionBinding::root(cell.session_id.clone()))
-            .await
-            .expect("bind local session");
-        let host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&cell._dir.path().join("effects.db"))
-                .await
-                .expect("in-process production replay host"),
-        );
-        cell.host.control.effect_host = Arc::clone(&host) as Arc<dyn EffectHost>;
+    async fn durable_scripted(tool_name: &str, script: Vec<String>) -> (Self, DurableHost) {
+        let mut cell = Self::scripted(tool_name, script).await;
+        let host = DurableHost::new();
+        cell.host.control.effect_host = Arc::clone(&host.controller) as Arc<dyn EffectHost>;
         (cell, host)
     }
 
@@ -460,10 +450,10 @@ impl ProductionToolCell {
 async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec<String>) {
     let provider_calls = script.len();
     let (control, control_host) =
-        ProductionToolCell::sqlite_scripted("llm_query", script.clone()).await;
+        ProductionToolCell::durable_scripted("llm_query", script.clone()).await;
     let mut control_runtime = control.runtime_on(Arc::clone(&control.runtime_store)).await;
     let control_turn = control
-        .run_once(&mut control_runtime, control_host.as_ref())
+        .run_once(&mut control_runtime, control_host.effect_host())
         .await
         .expect("the control turn commits");
     assert!(matches!(
@@ -478,7 +468,7 @@ async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec
     let live_head = control.committed_execution_state().await;
     assert!(live_head.is_some(), "an RLM turn leaves execution state");
 
-    let (cell, host) = ProductionToolCell::sqlite_scripted("llm_query", script).await;
+    let (cell, host) = ProductionToolCell::durable_scripted("llm_query", script).await;
     let crashing: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CrashAtFinalCommit {
         inner: Arc::clone(&cell.runtime_store),
         armed: AtomicBool::new(true),
@@ -490,7 +480,8 @@ async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec
             replay_test_input(&cell.turn_id),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
-                host.scoped(durable_admission(&turn_scope))
+                host.effect_host()
+                    .scoped(durable_admission(&turn_scope))
                     .expect("scope crashing tool cell"),
             ),
         )
@@ -512,7 +503,7 @@ async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec
     host.start_replay();
     let mut redrive = cell.runtime_on(Arc::clone(&cell.runtime_store)).await;
     let redriven = cell
-        .run_once(&mut redrive, host.as_ref())
+        .run_once(&mut redrive, host.effect_host())
         .await
         .expect("the redrive commits");
     assert!(matches!(
@@ -616,64 +607,6 @@ finish(second);
     .await;
 }
 
-/// Every `(scope_id, replay_key)` of a code cell the journal's rows name.
-/// The cell's own row is gone (ADR 0103), but each turn effect's key is
-/// `{turn prefix}{kind}:{ordinal}`, and the cell's nested rows extend the
-/// cell's key, so a row keyed `{turn prefix}exec_code:{n}:...` names cell `n`.
-fn journaled_exec_code_addresses(effects_db: &std::path::Path) -> Vec<(String, String)> {
-    let connection = rusqlite::Connection::open(effects_db).expect("open the effect journal");
-    let mut statement = connection
-        .prepare("SELECT scope_id, replay_key FROM runtime_effect_replay")
-        .expect("prepare the journal scan");
-    let rows: Vec<(String, String)> = statement
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .expect("scan the journal")
-        .map(|row| row.expect("journal row"))
-        .collect();
-    let turn_prefixes: std::collections::BTreeSet<(String, String)> = rows
-        .iter()
-        .filter_map(|(scope_id, key)| {
-            key.find("sync_execution_environment:")
-                .map(|at| (scope_id.clone(), key[..at].to_string()))
-        })
-        .collect();
-    let mut addresses = std::collections::BTreeSet::new();
-    for (scope_id, prefix) in &turn_prefixes {
-        let cell_prefix = format!("{prefix}exec_code:");
-        for (row_scope, key) in &rows {
-            let Some(rest) = key.strip_prefix(&cell_prefix) else {
-                continue;
-            };
-            if row_scope != scope_id {
-                continue;
-            }
-            let ordinal: String = rest.chars().take_while(char::is_ascii_digit).collect();
-            addresses.insert((scope_id.clone(), format!("{cell_prefix}{ordinal}")));
-        }
-    }
-    addresses.into_iter().collect()
-}
-
-/// Seed the row a pre-ADR-0103 worker leaves when it crashes mid-cell: the
-/// cell's own journal row, claimed and never finalized, under a lease that
-/// has long expired. Nothing in this build claims an `ExecCode` row again.
-fn seed_abandoned_exec_code_row(effects_db: &std::path::Path, scope_id: &str, replay_key: &str) {
-    let connection = rusqlite::Connection::open(effects_db).expect("open the effect journal");
-    connection
-        .execute(
-            "INSERT INTO runtime_effect_replay (
-                 scope_id, session_id, replay_key, envelope_hash, envelope_json, status,
-                 lease_owner_id, lease_token, lease_expires_at_ms, commit_state,
-                 created_at_ms, updated_at_ms
-             ) SELECT scope_id, session_id, ?2, 'pre-cutover-exec-code', envelope_json,
-                      'in_progress', 'crashed-old-build-worker', 'crashed-lease', 1,
-                      'pending', 1, 1
-               FROM runtime_effect_replay WHERE scope_id = ?1 LIMIT 1",
-            rusqlite::params![scope_id, replay_key],
-        )
-        .expect("seed the crashed worker's exec_code row");
-}
-
 async fn drive_drain(
     runtime: &mut lash_core::facade_support::LashRuntime,
     host: &dyn EffectHost,
@@ -689,88 +622,6 @@ async fn drive_drain(
         ))
         .await
         .map(|_| ())
-}
-
-/// FIG-3549 review F1: an `in_progress` `exec_code` row left by a pre-cutover
-/// worker that crashed mid-cell must not wedge the queue-drain end. The
-/// re-executed cell discards the row at its own address before it runs, so
-/// the drain's scope reads quiescent and the retried drain writes its end.
-#[tokio::test]
-async fn a_pre_cutover_in_progress_cell_row_does_not_wedge_the_drain_end() {
-    let (cell, host) = ProductionToolCell::sqlite("llm_query").await;
-    cell.runtime_store
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
-            cell.session_id.clone(),
-            lash_core::TurnInputIngress::NextTurn,
-            replay_test_input(&cell.turn_id),
-        ))
-        .await
-        .expect("seed the drain's turn input");
-    let drain_id = "pre-cutover-cell-drain";
-    let drain_scope = lash_core::ExecutionScope::queue_drain(cell.session_id.clone(), drain_id);
-
-    // The worker dies at the drain run's turn-final commit: the cell and its
-    // nested effects are journaled, and the drain owns no end yet.
-    let crashing: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CrashAtFinalCommit {
-        inner: Arc::clone(&cell.runtime_store),
-        armed: AtomicBool::new(true),
-    });
-    let mut crashed = cell.runtime_on(Arc::clone(&crashing)).await;
-    let _ = drive_drain(&mut crashed, host.as_ref(), &drain_scope).await;
-    drop(crashed);
-    assert!(
-        !lash_core::SessionCommitStore::drain_end_exists(cell.runtime_store.as_ref(), drain_id)
-            .await
-            .expect("read the drain-end receipt"),
-        "the crashed drain has not ended"
-    );
-
-    // What an old build would have left at the same point, had it crashed
-    // mid-cell: the cell's own row, `in_progress` forever.
-    let effects_db = cell._dir.path().join("effects.db");
-    let addresses = journaled_exec_code_addresses(&effects_db);
-    assert!(
-        !addresses.is_empty(),
-        "the crashed run journaled the cell's nested effects"
-    );
-    for (scope_id, replay_key) in &addresses {
-        seed_abandoned_exec_code_row(&effects_db, scope_id, replay_key);
-    }
-    let closing = host
-        .effect_group_closing()
-        .expect("the SQLite host has a closing seam");
-    assert!(
-        !closing
-            .scope_is_quiescent(&drain_scope)
-            .await
-            .expect("read quiescence"),
-        "the seeded row holds the drain scope non-quiescent"
-    );
-
-    // The retried drain re-runs the cell over its journaled nested effects,
-    // discards the leftover row, and ends.
-    let mut retried = cell.runtime_on(Arc::clone(&cell.runtime_store)).await;
-    drive_drain(&mut retried, host.as_ref(), &drain_scope)
-        .await
-        .expect("the retried drain runs");
-    assert!(
-        closing
-            .scope_is_quiescent(&drain_scope)
-            .await
-            .expect("read quiescence"),
-        "the re-executed cell removed the pre-cutover row"
-    );
-    assert!(
-        lash_core::SessionCommitStore::drain_end_exists(cell.runtime_store.as_ref(), drain_id)
-            .await
-            .expect("read the drain-end receipt"),
-        "the retried drain writes its end"
-    );
-    assert_eq!(
-        cell.llm_provider_calls.load(Ordering::SeqCst),
-        2,
-        "the retry re-issues no provider call"
-    );
 }
 
 /// Lets the drain's turn-final commit land, then never returns: the worker
@@ -843,19 +694,24 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
     }
     let drain_id = "after-commit-cell-drain";
 
-    let (control, control_host) = ProductionToolCell::sqlite("llm_query").await;
+    let (control, control_host) = ProductionToolCell::durable("llm_query").await;
     seed_drain_input(&control).await;
     let control_scope =
         lash_core::ExecutionScope::queue_drain(control.session_id.clone(), drain_id);
     let mut control_runtime = control.runtime_on(Arc::clone(&control.runtime_store)).await;
-    drive_drain(&mut control_runtime, control_host.as_ref(), &control_scope)
-        .await
-        .expect("the control drain commits");
+    drive_drain(
+        &mut control_runtime,
+        control_host.effect_host(),
+        &control_scope,
+    )
+    .await
+    .expect("the control drain commits");
     drop(control_runtime);
     let live_head = control.committed_execution_state().await;
     assert!(live_head.is_some(), "an RLM turn leaves execution state");
 
-    let (cell, host) = ProductionToolCell::sqlite("llm_query").await;
+    let (cell, host) = ProductionToolCell::durable("llm_query").await;
+    let host = Arc::new(host);
     seed_drain_input(&cell).await;
     let drain_scope = lash_core::ExecutionScope::queue_drain(cell.session_id.clone(), drain_id);
     let committed = Arc::new(tokio::sync::Notify::new());
@@ -868,7 +724,7 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
     let crashed_host = Arc::clone(&host);
     let crashed_scope = drain_scope.clone();
     let worker = tokio::spawn(async move {
-        let _ = drive_drain(&mut crashed, crashed_host.as_ref(), &crashed_scope).await;
+        let _ = drive_drain(&mut crashed, crashed_host.effect_host(), &crashed_scope).await;
     });
     tokio::time::timeout(std::time::Duration::from_secs(60), committed.notified())
         .await
@@ -898,6 +754,7 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
         cell.runtime_on(Arc::clone(&cell.runtime_store)).await
     };
     let scope = host
+        .effect_host()
         .scoped(durable_admission(&drain_scope))
         .expect("scope the redriven drain");
     let drain = redrive

@@ -2,21 +2,18 @@
 //!
 //! Each law runs the facade over a file-backed SQLite backend — the
 //! journaled `SqliteEffectHost` beside `SqliteSessionStoreFactory` — which is
-//! where the tier-keyed rule was live: a deterministic failure before the model
-//! call aborted instead of being recorded, a queued run retried it and stayed
-//! pending, and an aborted direct turn kept the claim on its own input.
+//! where the tier-keyed rule was live: a deterministic failure before the
+//! model call aborted instead of being recorded, and an aborted direct turn
+//! kept the claim on its own input.
 //!
 //! * A deterministic failure is an outcome: a direct turn records it as a
-//!   failed turn, and a queued run settles once.
+//!   failed turn.
 //! * A live fault aborts with `Err`. The aborted direct turn's error carries
 //!   its acceptance receipt: the host withdraws the input by it, or redrives
 //!   the same turn id, which replays the journal and commits once. Until then
 //!   the input is bound to the aborted turn (FIG-3589): no later direct turn
-//!   and no drain folds it in, while a crashed turn's input is still
-//!   reclaimed by the next lease generation. A queued run stays pending and a
-//!   retry completes it.
-//! * A failure the journal already holds is an outcome on every redrive,
-//!   whatever its code, so it never becomes an abort loop.
+//!   folds it in, while a crashed turn's input is still reclaimed by the next
+//!   lease generation.
 //! * Cancellation keeps settling `Stopped { Cancelled }`.
 
 use super::*;
@@ -195,47 +192,6 @@ async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_attempt() -> Result<()>
-{
-    let backend = SqliteBackend::open().await;
-    let protocol = Arc::new(RefusingBeforeLlmCall::default());
-    let core = backend.core(
-        counting_text_provider(Arc::default(), Arc::default()),
-        Some(protocol.clone()),
-    );
-    let session = core.session("queued-before-llm").open().await?;
-    session
-        .durable()
-        .send(TurnInput::text("queued and refused"))
-        .id("queued-refused")
-        .accepted()
-        .await?;
-
-    let drained = drain_queued(&session, None)
-        .await
-        .expect("a deterministic failure settles the queued run instead of retaining it");
-
-    let drained = format!("{drained:?}");
-    assert!(
-        drained.contains("RuntimeError") && drained.contains("ProtocolBeforeLlmCall"),
-        "the queued run's turn is the recorded failure: {drained}"
-    );
-    assert_eq!(protocol.calls.load(Ordering::SeqCst), 1);
-    assert!(
-        session.durable().pending_queued_run().await?.is_none(),
-        "the run settled after one attempt; nothing is retained for retry"
-    );
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    let again = format!("{:?}", drain_queued(&session, None).await?);
-    assert_eq!(
-        protocol.calls.load(Ordering::SeqCst),
-        1,
-        "a settled deterministic failure is never re-attempted: {again}"
-    );
-    Ok(())
-}
-
 /// A protocol whose `before_llm_call` meets a replay refusal every time, as a
 /// code cell does when its re-execution diverges from its journal (FIG-3586).
 #[derive(Default)]
@@ -331,37 +287,6 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
     let status = core.drain_status(false).await?;
     assert_eq!((status.parked_turns, status.in_flight_turns), (0, 0));
     assert!(status.drained(), "withdrawing the input settles the park");
-    Ok(())
-}
-
-/// FIG-3586: a replay refusal on a queued run keeps the run pending, never
-/// settling it failed, however often it is retried; its park is counted.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_replay_refusal_keeps_a_queued_run_pending_and_parked() -> Result<()> {
-    let backend = SqliteBackend::open().await;
-    let protocol = Arc::new(DivergingBeforeLlmCall::default());
-    let core = backend.core(
-        counting_text_provider(Arc::default(), Arc::default()),
-        Some(protocol.clone()),
-    );
-    let session = core.session("queued-replay-refusal").open().await?;
-    session
-        .durable()
-        .send(TurnInput::text("queued and diverging"))
-        .id("queued-diverging")
-        .accepted()
-        .await?;
-
-    for attempt in 1..=3 {
-        assert_queued_run_pending(drain_queued(&session, None).await);
-        assert_eq!(protocol.calls.load(Ordering::SeqCst), attempt);
-        assert!(
-            session.durable().pending_queued_run().await?.is_some(),
-            "attempt {attempt}: the refused run stays pending"
-        );
-        let status = core.drain_status(false).await?;
-        assert_eq!((status.parked_turns, status.in_flight_turns), (1, 1));
-    }
     Ok(())
 }
 
@@ -666,183 +591,6 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> R
         seen[1]
     );
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    Ok(())
-}
-
-fn plugin(id: &'static str, spec: lash_core::facade_support::PluginSpec) -> Arc<dyn PluginFactory> {
-    Arc::new(crate::plugins::StaticPluginFactory::new(id, spec))
-}
-
-/// An `after_turn` hook that fails with an opaque plugin-session error — a
-/// store blip behind a plugin service — the first `failures` times.
-fn failing_after_turn(calls: Arc<AtomicUsize>, failures: usize) -> Arc<dyn PluginFactory> {
-    plugin(
-        "failure-settlement-after-turn",
-        lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(move |_| {
-            let calls = Arc::clone(&calls);
-            Box::pin(async move {
-                if calls.fetch_add(1, Ordering::SeqCst) < failures {
-                    return Err(lash_core::PluginError::Session(
-                        "plugin session store unavailable".to_string(),
-                    ));
-                }
-                Ok(Vec::new())
-            })
-        })),
-    )
-}
-
-fn assert_queued_run_pending(
-    result: Result<lash_core::facade_support::QueuedTurnDrain<crate::TurnOutput>>,
-) {
-    match result {
-        Err(EmbedError::Runtime(error)) => assert_eq!(
-            error.code,
-            lash_core::RuntimeErrorCode::QueuedRunPending,
-            "a live fault keeps the run for a redrive: {error:?}"
-        ),
-        other => panic!("a live fault keeps the queued run pending: {other:?}"),
-    }
-}
-
-/// F1: an opaque plugin-session failure in a queued run's finalize hook is a
-/// live fault. The run stays pending for its retry budget and completes on
-/// the retry instead of settling failed for good.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_plugin_session_fault_in_a_queued_finalize_hook_is_retried_to_completion() -> Result<()> {
-    let backend = SqliteBackend::open().await;
-    let finalize_calls = Arc::new(AtomicUsize::new(0));
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let core = backend.core_with_plugins(
-        counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
-        None,
-        vec![failing_after_turn(Arc::clone(&finalize_calls), 1)],
-    );
-    let session = core.session("queued-finalize-fault").open().await?;
-    session
-        .durable()
-        .send(TurnInput::text("finalize blips once"))
-        .id("finalize-blip")
-        .accepted()
-        .await?;
-
-    assert_queued_run_pending(drain_queued(&session, None).await);
-    assert!(session.durable().pending_queued_run().await?.is_some());
-
-    let completed = format!("{:?}", drain_queued(&session, None).await?);
-    assert!(
-        completed.contains("Ran") || completed.contains("Replayed"),
-        "{completed}"
-    );
-    assert_eq!(finalize_calls.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        provider_calls.load(Ordering::SeqCst),
-        1,
-        "the retry replays the journaled model call"
-    );
-    assert!(session.durable().pending_queued_run().await?.is_none());
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    Ok(())
-}
-
-/// F3: a journal store fault is live and not terminal. On a queued run it
-/// keeps the run pending, and the retry completes it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_retry() -> Result<()>
-{
-    const SESSION: &str = "queued-journal-fault";
-    let backend = SqliteBackend::open().await;
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let core = backend.core(
-        counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
-        None,
-    );
-    let session = core.session(SESSION).open().await?;
-    session
-        .durable()
-        .send(TurnInput::text("the journal blips once"))
-        .id("journal-blip")
-        .accepted()
-        .await?;
-    let faults = backend.backend.effect_host().effect_journal_faults();
-    faults.fail_next(
-        EffectJournalFaultPoint::Claim,
-        &first_llm_call_key(SESSION, "queued-turn"),
-    );
-
-    assert_queued_run_pending(drain_queued(&session, Some("queued-turn")).await);
-    assert!(faults.fired(), "the armed model-call claim fault fired");
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
-    assert!(session.durable().pending_queued_run().await?.is_some());
-
-    let completed = format!("{:?}", drain_queued(&session, Some("queued-turn")).await?);
-    assert!(
-        completed.contains("Ran") || completed.contains("Replayed"),
-        "{completed}"
-    );
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
-    assert!(session.durable().pending_queued_run().await?.is_none());
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    Ok(())
-}
-
-/// F4: a failure the journal already holds is an outcome on every redrive,
-/// whatever its code. The checkpoint hook fails with a live-coded plugin
-/// session fault, which the checkpoint's journaled outcome records; the first
-/// attempt is then interrupted by a live finalize fault. The redrive replays
-/// the recorded checkpoint failure and settles it as a failed turn, instead of
-/// aborting on the replayed live code forever.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_journaled_live_coded_failure_replays_as_a_recorded_failed_turn() -> Result<()> {
-    let backend = SqliteBackend::open().await;
-    let checkpoint_calls = Arc::new(AtomicUsize::new(0));
-    let finalize_calls = Arc::new(AtomicUsize::new(0));
-    let failing_checkpoint = plugin(
-        "failure-settlement-checkpoint",
-        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new({
-            let checkpoint_calls = Arc::clone(&checkpoint_calls);
-            move |_| {
-                let checkpoint_calls = Arc::clone(&checkpoint_calls);
-                Box::pin(async move {
-                    checkpoint_calls.fetch_add(1, Ordering::SeqCst);
-                    Err(lash_core::PluginError::Session(
-                        "checkpoint store unavailable".to_string(),
-                    ))
-                })
-            }
-        })),
-    );
-    let core = backend.core_with_plugins(
-        counting_text_provider(Arc::default(), Arc::default()),
-        None,
-        vec![
-            failing_checkpoint,
-            failing_after_turn(Arc::clone(&finalize_calls), 1),
-        ],
-    );
-    let session = core.session("queued-journaled-failure").open().await?;
-    session
-        .durable()
-        .send(TurnInput::text("checkpoint fails and is journaled"))
-        .id("journaled-failure")
-        .accepted()
-        .await?;
-
-    assert_queued_run_pending(drain_queued(&session, None).await);
-    let recorded_checkpoints = checkpoint_calls.load(Ordering::SeqCst);
-    assert!(recorded_checkpoints > 0, "the checkpoint ran and failed");
-
-    let settled = format!("{:?}", drain_queued(&session, None).await?);
-    assert!(
-        settled.contains("RuntimeError") && settled.contains("plugin_session_manager"),
-        "the redrive records the journaled failure as a failed turn: {settled}"
-    );
-    assert_eq!(
-        checkpoint_calls.load(Ordering::SeqCst),
-        recorded_checkpoints,
-        "the redrive replays the recorded checkpoint instead of re-running it"
-    );
-    assert!(session.durable().pending_queued_run().await?.is_none());
     Ok(())
 }
 

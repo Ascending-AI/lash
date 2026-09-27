@@ -1619,27 +1619,23 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
     Ok(())
 }
 
+/// The engine's session drive runs the frame handoff: a post-commit graph
+/// append must not strand it (D5: the drive is the only executor).
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn durable_queued_continue_as_survives_post_commit_graph_append() -> Result<()> {
-    run_async_test_on_stack_budget("durable-queued-continue-as-authority-test", || {
-        durable_queued_continue_as_survives_post_commit_graph_append_inner()
+pub(super) fn engine_driven_continue_as_survives_post_commit_graph_append() -> Result<()> {
+    run_async_test_on_stack_budget("engine-continue-as-authority-test", || {
+        engine_driven_continue_as_survives_post_commit_graph_append_inner()
     })
 }
 
 #[cfg(feature = "rlm")]
-pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append_inner()
--> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "durable-queued-continue-as";
+pub(super) async fn engine_driven_continue_as_survives_post_commit_graph_append_inner() -> Result<()>
+{
+    let session_id = "engine-continue-as";
     let append_count = Arc::new(AtomicUsize::new(0));
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let double = restate_double(0x0036_68c1).await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .provider(queued_text_provider(vec![
             typescript_block(
                 r#"await control.continue_as({ task: "finish from durable handoff" });"#,
@@ -1651,19 +1647,14 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
             append_count: Arc::clone(&append_count),
             max_appends: 1,
         }))
-        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
-    session
-        .durable()
-        .send(TurnInput::text("switch frames from queued work"))
-        .id("queued-continue-as")
-        .accepted()
-        .await?;
 
-    let output = drain_queued(&session, None)
-        .await?
-        .expect("queued turn should run");
+    let output = session
+        .send(TurnInput::text("switch frames on the engine"))
+        .id("engine-continue-as")
+        .output()
+        .await?;
 
     assert_eq!(append_count.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -1671,29 +1662,21 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
         Some(&serde_json::json!("done after durable handoff")),
         "post-commit graph writes must not strand the committed frame handoff: {output:?}"
     );
-    // The queued ingress admission and the outer queued turn each acquire
-    // once; the nested post-commit append borrows that outer fence.
-    assert_sqlite_session_lane_free_at_generation(
-        store_factory.as_ref(),
-        &SessionId::from(session_id),
-        2,
-    );
     Ok(())
 }
 
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn durable_queued_continue_as_seed_is_visible_to_follow_turn_linker() -> Result<()> {
-    run_async_test_on_stack_budget("durable-queued-continue-as-seed-test", || {
-        durable_queued_continue_as_seed_is_visible_to_follow_turn_linker_inner()
+pub(super) fn engine_driven_continue_as_seed_is_visible_to_follow_turn_linker() -> Result<()> {
+    run_async_test_on_stack_budget("engine-continue-as-seed-test", || {
+        engine_driven_continue_as_seed_is_visible_to_follow_turn_linker_inner()
     })
 }
 
 #[cfg(feature = "rlm")]
-pub(super) async fn durable_queued_continue_as_seed_is_visible_to_follow_turn_linker_inner()
+pub(super) async fn engine_driven_continue_as_seed_is_visible_to_follow_turn_linker_inner()
 -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "durable-queued-continue-as-seed";
+    let session_id = "engine-continue-as-seed";
     let (first_provider_call_tx, first_provider_call_rx) = tokio::sync::oneshot::channel();
     let first_provider_call_tx = Arc::new(std::sync::Mutex::new(Some(first_provider_call_tx)));
     let release_first_provider_call = Arc::new(tokio::sync::Notify::new());
@@ -1754,15 +1737,10 @@ finish({ established: established.total });"#,
         })
         .build()
         .into_handle();
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
-            .await
-            .expect("open the SQLite backend"),
-    );
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let double = restate_double(0x0036_68c2).await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .provider(provider)
         .model(mock_model_spec())
-        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let established = session
@@ -1784,30 +1762,31 @@ finish({ established: established.total });"#,
                 .expect("valid session projection"),
         ))
         .await?;
-    session
-        .durable()
-        .send(TurnInput::text("switch frames with a durable seed"))
-        .id("queued-continue-as-seed")
-        .accepted()
-        .await?;
-
     let turn_session = session.clone();
-    let turn = tokio::spawn(async move { drain_queued(&turn_session, None).await });
-    tokio::time::timeout(std::time::Duration::from_secs(1), first_provider_call_rx)
+    let turn = tokio::spawn(async move {
+        turn_session
+            .send(TurnInput::text("switch frames with a durable seed"))
+            .id("engine-continue-as-seed")
+            .output()
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), first_provider_call_rx)
         .await
         .expect("first provider call should start")
         .expect("first provider call signal should arrive");
+    // The admitted root runs on; the engine admits nothing more while the
+    // input sent during the frame switch stays pending.
+    let _hold = double
+        .hold_session_drive(&SessionId::from(session_id))
+        .await;
     session
         .durable()
         .send(TurnInput::text("keep this pending across the frame switch"))
-        .id("queued-after-continue-as")
+        .id("pending-after-continue-as")
         .accepted()
         .await?;
     release_first_provider_call.notify_one();
-    let output = turn
-        .await
-        .expect("queued turn task")?
-        .expect("queued turn should run");
+    let output = turn.await.expect("the switch turn task")?;
 
     // `Value::Projected` carries through path expressions and is stripped by
     // computation. The retired surface reached the projection's length through
