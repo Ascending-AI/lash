@@ -105,6 +105,9 @@ pub struct RuntimeControlConfig {
     /// for claimability and handoff (ADR 0029). Defaults to
     /// [`crate::LeaseTimings::default`] (30s TTL / 10s renew).
     pub lease_timings: crate::LeaseTimings,
+    /// How this deployment competes for the recovery leader lease (ADR 0109
+    /// §1.6). Defaults to rank 0 on the default cadence.
+    pub recovery_lease: crate::engine::RecoveryLeaseConfig,
     /// What an open does when a persisted tool id no registered source
     /// resolves. Defaults to
     /// [`ToolSourcePolicy::Tolerate`](crate::ToolSourcePolicy): the session
@@ -227,6 +230,7 @@ impl RuntimeHostConfig {
                 effect_host,
                 process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
                 lease_timings: crate::LeaseTimings::default(),
+                recovery_lease: crate::engine::RecoveryLeaseConfig::default(),
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),

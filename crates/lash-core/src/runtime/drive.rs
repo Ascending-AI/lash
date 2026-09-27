@@ -41,6 +41,7 @@ mod close;
 mod control;
 mod park;
 mod reconcile;
+pub mod relay;
 mod root;
 mod turn_config;
 

@@ -58,3 +58,115 @@ crate::statements! {
              WHERE parent_kind = ?1 AND parent_id = ?2 AND settled_at_ms IS NULL";
     }
 }
+
+/// The obligation columns a claim reads back (ADR 0109 §1.3): the id, the
+/// attempt count after the claim, then the row's key.
+pub const OBLIGATION_CLAIM_COLUMNS: &str =
+    "obligation_id, obligation_attempts, parent_kind, parent_id";
+
+/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
+/// with the stall's reason, last error and instant before the key.
+pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, parent_kind, parent_id";
+
+crate::statements! {
+    /// `parent_end_plans` obligation statements (ADR 0109): a closed scope's plan owes its children's cancels. Both backends issue
+    /// them verbatim; every settling write compares the state and, while
+    /// claimed, the claim token.
+    pub struct ParentEndPlanObligationStatements @ "parent_end_plan" {
+        /// Arm the row keyed `?1`, `?2` as obligation `?3`, due at
+        /// `?4`, if it owes nothing.
+        obligation_arm = "UPDATE parent_end_plans
+             SET obligation_id = ?3, obligation_state = 'due', obligation_attempts = 0,
+                 obligation_due_at_ms = ?4, obligation_claim_token = NULL,
+                 obligation_stall_reason = NULL, obligation_last_error = NULL,
+                 obligation_settled_at_ms = NULL
+             WHERE parent_kind = ?1 AND parent_id = ?2 AND obligation_state IS NULL";
+
+        /// At most `?2` obligations due at `?1`, a lapsed claim included,
+        /// oldest due first.
+        obligation_select_due = "SELECT obligation_id FROM parent_end_plans
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2";
+
+        /// Claim obligation `?1` under token `?2` until `?3` if it is still
+        /// due at `?4`.
+        obligation_claim_due_row = "UPDATE parent_end_plans
+             SET obligation_state = 'claimed', obligation_claim_token = ?2,
+                 obligation_attempts = obligation_attempts + 1, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state IN ('due', 'claimed')
+               AND obligation_due_at_ms <= ?4
+             RETURNING obligation_id, obligation_attempts, parent_kind, parent_id";
+
+        /// Claim `due` obligation `?1` under token `?2` until `?3`, whatever
+        /// its backoff: a producer's own immediate attempt.
+        obligation_claim = "UPDATE parent_end_plans
+             SET obligation_state = 'claimed', obligation_claim_token = ?2,
+                 obligation_attempts = obligation_attempts + 1, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state = 'due'
+             RETURNING obligation_id, obligation_attempts, parent_kind, parent_id";
+
+        /// Settle claim `?2` on obligation `?1` delivered at `?3`.
+        obligation_settle_delivered = "UPDATE parent_end_plans
+             SET obligation_state = 'delivered', obligation_claim_token = NULL,
+                 obligation_due_at_ms = NULL, obligation_last_error = NULL,
+                 obligation_settled_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
+        /// error `?4`.
+        obligation_settle_retry = "UPDATE parent_end_plans
+             SET obligation_state = 'due', obligation_claim_token = NULL,
+                 obligation_due_at_ms = ?3, obligation_last_error = ?4
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Stall claim `?2` on obligation `?1` for reason `?3` with error
+        /// `?4` at `?5`.
+        obligation_settle_stall = "UPDATE parent_end_plans
+             SET obligation_state = 'stalled', obligation_claim_token = NULL,
+                 obligation_due_at_ms = NULL, obligation_stall_reason = ?3,
+                 obligation_last_error = ?4, obligation_settled_at_ms = ?5
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Re-arm stalled obligation `?1`, due at `?2`, its attempts reset.
+        obligation_rearm = "UPDATE parent_end_plans
+             SET obligation_state = 'due', obligation_attempts = 0, obligation_due_at_ms = ?2,
+                 obligation_stall_reason = NULL, obligation_settled_at_ms = NULL
+             WHERE obligation_id = ?1 AND obligation_state = 'stalled'";
+
+        /// At most `?2` stalled obligations after id `?1`, in id order.
+        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, parent_kind, parent_id
+             FROM parent_end_plans
+             WHERE obligation_state = 'stalled' AND obligation_id > ?1
+             ORDER BY obligation_id
+             LIMIT ?2";
+
+        /// How many obligations are stalled.
+        obligation_count_stalled = "SELECT COUNT(*) FROM parent_end_plans WHERE obligation_state = 'stalled'";
+
+        /// Obligation `?1`'s state.
+        obligation_select_state = "SELECT obligation_state FROM parent_end_plans WHERE obligation_id = ?1";
+    }
+}
+
+impl crate::obligation::ObligationStatementSet for ParentEndPlanObligationStatements {
+    fn obligation_sql(&self) -> crate::obligation::ObligationSql<'_> {
+        crate::obligation::ObligationSql {
+            key_columns: 2,
+            arm: &self.obligation_arm,
+            select_due: &self.obligation_select_due,
+            claim_due_row: &self.obligation_claim_due_row,
+            claim: &self.obligation_claim,
+            settle_delivered: &self.obligation_settle_delivered,
+            settle_retry: &self.obligation_settle_retry,
+            settle_stall: &self.obligation_settle_stall,
+            rearm: &self.obligation_rearm,
+            select_stalled: &self.obligation_select_stalled,
+            count_stalled: &self.obligation_count_stalled,
+            select_state: &self.obligation_select_state,
+        }
+    }
+}

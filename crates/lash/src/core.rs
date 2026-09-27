@@ -19,6 +19,7 @@ use lash_sansio::SessionId;
 mod advanced_builder;
 mod drain;
 pub(crate) mod queued_work;
+mod recovery;
 pub(crate) mod residents;
 mod runtime_host_config;
 mod session_policy;
@@ -77,6 +78,9 @@ pub struct LashCore {
     /// The sessions this core has open in this process: the driver runs a
     /// drive on the open session's runtime (FIG-3600 S5b).
     pub(crate) residents: Arc<residents::ResidentSessions>,
+    /// This core's seat in the recovery leader election (ADR 0109 §1.6),
+    /// shared with its session driver.
+    pub(crate) recovery: Arc<recovery::RecoverySlot>,
     /// Host-facing process event sink, retained so a worker config built from
     /// this core reports its worker faults to the same sink the registry
     /// decorator emits events on.
@@ -176,6 +180,12 @@ impl LashCore {
             processes,
         };
         crate::parked_work::record_park_gauges(&parked, checked_at);
+        let mut stalled_obligations = std::collections::BTreeMap::new();
+        for kind in lash_core::store::ObligationKind::ALL {
+            let count = self.backend.obligation_ledger(kind).count_stalled().await?;
+            lash_core::operational_metrics::record_obligations_stalled(kind.label(), count);
+            stalled_obligations.insert(kind, count);
+        }
         Ok(DeploymentDrainStatus {
             accepting_new_work,
             remaining_invocations,
@@ -184,8 +194,41 @@ impl LashCore {
             parked_processes: parked.processes.total(),
             oldest_parked_since_ms: parked.oldest_since_ms(),
             retired_by_executable_generation: parked.retired_by_executable_generation(),
+            stalled_obligations,
             checked_at,
         })
+    }
+
+    /// The stalled obligations of `kind` after `after`, in id order, at most
+    /// `limit` (ADR 0109 §1.5): store→engine deliveries the relay stopped
+    /// retrying, each with its reason, attempt count and last error.
+    pub async fn stalled_obligations(
+        &self,
+        kind: lash_core::store::ObligationKind,
+        after: Option<&lash_core::store::ObligationId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::store::StalledObligation>> {
+        Ok(self
+            .backend
+            .obligation_ledger(kind)
+            .list_stalled(after, limit)
+            .await?)
+    }
+
+    /// Put stalled obligation `id` of `kind` back in the relay's due index
+    /// with its attempts reset, due now (ADR 0109 §1.5). Nothing re-arms a
+    /// stalled obligation but this verb. `false` when `id` is not stalled.
+    pub async fn rearm_obligation(
+        &self,
+        kind: lash_core::store::ObligationKind,
+        id: &lash_core::store::ObligationId,
+    ) -> Result<bool> {
+        let now_ms = self.env.core.clock.timestamp_ms();
+        Ok(self
+            .backend
+            .obligation_ledger(kind)
+            .rearm(id, now_ms)
+            .await?)
     }
 
     /// The deployment's parked work — turns and processes whose redrive
@@ -254,6 +297,9 @@ impl LashCore {
     /// factories supplied only to durable-process-worker configuration or to an
     /// individual session are host-owned and are not walked by this method.
     pub async fn shutdown(&self) -> Result<()> {
+        // A stopping deployment hands recovery leadership over now rather
+        // than after the lease's TTL (ADR 0109 §1.6).
+        self.recovery.resign().await;
         let factories = self
             .protocol_factory
             .iter()
@@ -810,6 +856,7 @@ pub struct LashCoreBuilder {
     plugin_stack: PluginStack,
     plugin_host: Option<PluginHost>,
     lease_timings: Option<facade_support::LeaseTimings>,
+    recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
     // Per-worker bound for the default native process executor.
     process_execution_concurrency: Option<usize>,
     // Per-driver bound for the default native queued-work executor.
@@ -848,6 +895,7 @@ impl LashCoreBuilder {
             plugin_stack: PluginStack::default(),
             plugin_host: None,
             lease_timings: None,
+            recovery_lease: None,
             process_execution_concurrency: None,
             queued_work_execution_concurrency: None,
             worker_slot_supplier: None,
@@ -1014,6 +1062,16 @@ impl LashCoreBuilder {
     /// both boundaries.
     pub fn lease_timings(mut self, lease_timings: facade_support::LeaseTimings) -> Self {
         self.lease_timings = Some(lease_timings);
+        self
+    }
+
+    /// Configure how this deployment competes for the recovery leader lease
+    /// (ADR 0109 §1.6): its build rank — a higher rank preempts a
+    /// lower-ranked leader after the minimum tenure, so a rolling deploy that
+    /// raises the rank per build hands recovery to the newest build — and the
+    /// lease's cadence. Defaults to rank 0 on a 15 s TTL renewed every 5 s.
+    pub fn recovery_lease(mut self, config: lash_core::engine::RecoveryLeaseConfig) -> Self {
+        self.recovery_lease = Some(config);
         self
     }
 
@@ -1270,6 +1328,7 @@ impl LashCoreBuilder {
             substrate_slot,
             drive_lifetime,
             _session_driver: installed_driver,
+            recovery: session_driver.recovery(),
             residents,
             process_event_sink,
             tool_intent_submission_gates: Default::default(),
@@ -1349,8 +1408,10 @@ impl LashCoreBuilder {
         Arc<dyn lash_core::SessionDriver>,
     ) {
         let owner = session_execution_owner.clone();
+        let recovery = Arc::new(recovery::RecoverySlot::new(&env));
         let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
             NativeQueuedWorkRunConfig {
+                recovery,
                 residents,
                 session_execution_owner,
                 env,

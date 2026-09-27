@@ -64,6 +64,9 @@ impl LashCoreBuilder {
         if let Some(timings) = self.lease_timings.take() {
             core.control.lease_timings = timings;
         }
+        if let Some(recovery_lease) = self.recovery_lease.take() {
+            core.control.recovery_lease = recovery_lease;
+        }
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
                 Arc::new(facade_support::SingleProviderResolver::new(provider));

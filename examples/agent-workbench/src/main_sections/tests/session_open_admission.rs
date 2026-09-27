@@ -291,6 +291,17 @@ impl lash::StoreSet for GatedStoreSet {
     fn module_artifacts(&self) -> Arc<dyn lash::persistence::ModuleArtifactStore> {
         self.inner.module_artifacts()
     }
+
+    fn recovery_leader(&self) -> Arc<dyn lash::persistence::RecoveryLeaderStore> {
+        self.inner.recovery_leader()
+    }
+
+    fn obligation_ledger(
+        &self,
+        kind: lash::ObligationKind,
+    ) -> Arc<dyn lash::persistence::ObligationLedger> {
+        self.inner.obligation_ledger(kind)
+    }
 }
 
 pub(crate) struct GatedSessionStoreFactory {

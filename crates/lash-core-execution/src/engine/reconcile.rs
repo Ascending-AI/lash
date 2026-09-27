@@ -84,6 +84,8 @@ pub enum ReconcileArm {
     DrainHandOver,
     /// Terminal roots whose scope close may have been interrupted.
     Scopes,
+    /// Due obligations claimed through a kind's due index (ADR 0109 §1.4).
+    Obligations,
 }
 
 /// One arm's failure in a tick. A failed listing keeps its cursor; an
@@ -118,6 +120,21 @@ pub struct DriveReconcileReport {
     pub next: Option<SessionId>,
 }
 
+/// What one due-obligation pass of one kind did (ADR 0109 §1.4).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RelayPass {
+    /// Obligations the pass claimed.
+    pub claimed: usize,
+    /// Claims the engine accepted.
+    pub delivered: usize,
+    /// Claims handed back for a later attempt.
+    pub retried: usize,
+    /// Claims that stalled: refused, undecodable, or at the attempt ceiling.
+    pub stalled: usize,
+    /// Claims another relay, or the delivery itself, settled first.
+    pub claim_lost: usize,
+}
+
 /// What one tick did, and where the next one resumes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReconcileTick {
@@ -137,4 +154,57 @@ pub struct ReconcileTick {
     pub failures: Vec<ReconcileFailure>,
     /// Idempotent terminal-root close calls completed.
     pub closed_scopes: usize,
+    /// Whether this tick ran the leader-only arms (ADR 0109 §1.7).
+    pub led: bool,
+    /// Each relay's due pass, in relay order; empty when this deployment
+    /// may not claim due obligations this tick.
+    pub obligations: Vec<(crate::store::ObligationKind, RelayPass)>,
+}
+
+/// The recovery leader lease's cadence (ADR 0109 §1.6). Host levers
+/// (ADR 0014).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecoveryLeaseTimings {
+    /// How long a renew keeps the lease.
+    pub ttl: std::time::Duration,
+    /// How often a leader renews.
+    pub renew_every: std::time::Duration,
+    /// How long one acquire or renew may take before it counts as failed.
+    pub renew_timeout: std::time::Duration,
+    /// How far before the TTL a leader stops trusting its lease.
+    pub trust_margin: std::time::Duration,
+    /// How often a follower tries to acquire.
+    pub follower_retry: std::time::Duration,
+    /// The most random delay added to a follower's retry.
+    pub follower_jitter: std::time::Duration,
+    /// How long a holder leads before a higher rank may preempt it.
+    pub min_tenure: std::time::Duration,
+}
+
+impl Default for RecoveryLeaseTimings {
+    fn default() -> Self {
+        Self {
+            ttl: std::time::Duration::from_secs(15),
+            renew_every: std::time::Duration::from_secs(5),
+            renew_timeout: std::time::Duration::from_millis(2_500),
+            trust_margin: std::time::Duration::from_secs(2),
+            follower_retry: std::time::Duration::from_secs(5),
+            follower_jitter: std::time::Duration::from_millis(500),
+            min_tenure: std::time::Duration::from_secs(30),
+        }
+    }
+}
+
+/// How this deployment competes for the recovery leader lease (ADR 0109
+/// §1.6).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RecoveryLeaseConfig {
+    /// This build's rank: a higher rank preempts a lower-ranked leader once
+    /// that leader has held the lease for
+    /// [`min_tenure`](RecoveryLeaseTimings::min_tenure). A rolling deploy
+    /// gives each new build a higher rank than the last, so the newest
+    /// build leads recovery. Defaults to 0.
+    pub generation_rank: i64,
+    /// The lease's cadence.
+    pub timings: RecoveryLeaseTimings,
 }

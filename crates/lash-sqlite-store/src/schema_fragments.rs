@@ -104,6 +104,15 @@ CREATE TABLE IF NOT EXISTS session_ingress (
     claim_fencing_token INTEGER NOT NULL DEFAULT 0,
     claim_drive_epoch INTEGER,
     claim_turn_id     TEXT,
+    obligation_id     TEXT,
+    obligation_state  TEXT,
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms INTEGER,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms INTEGER,
+    CONSTRAINT ck_session_ingress_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_session_ingress_kind CHECK (kind IN ('input', 'process_wake', 'session_command')),
     CONSTRAINT ck_session_ingress_lane CHECK ((kind = 'session_command' AND lane = 'command') OR (kind IN ('input', 'process_wake') AND lane = 'turn')),
     CONSTRAINT ck_session_ingress_state CHECK (state IN ('open', 'accepted', 'completed', 'cancelled')),
@@ -115,6 +124,17 @@ CREATE TABLE IF NOT EXISTS session_ingress (
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
+
+-- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
+-- and the stalled listing.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_ingress_obligation_id
+    ON session_ingress(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_session_ingress_obligation_due
+    ON session_ingress(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_session_ingress_obligation_stalled
+    ON session_ingress(obligation_id)
+    WHERE obligation_state = 'stalled';
 
 CREATE INDEX IF NOT EXISTS idx_session_ingress_open
     ON session_ingress(session_id, lane, enqueue_seq) WHERE state IN ('open', 'accepted');
@@ -145,9 +165,29 @@ CREATE TABLE IF NOT EXISTS session_roots (
     terminal_cause_json     TEXT,
     terminal_head_revision  INTEGER,
     terminal_at_ms          INTEGER,
+    obligation_id           TEXT,
+    obligation_state        TEXT,
+    obligation_attempts     INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms    INTEGER,
+    obligation_claim_token  TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error   TEXT,
+    obligation_settled_at_ms INTEGER,
+    CONSTRAINT ck_session_roots_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     PRIMARY KEY (session_id, root),
     CONSTRAINT ck_session_roots_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
 );
+
+-- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
+-- and the stalled listing.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_roots_obligation_id
+    ON session_roots(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_session_roots_obligation_due
+    ON session_roots(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_session_roots_obligation_stalled
+    ON session_roots(obligation_id)
+    WHERE obligation_state = 'stalled';
 
 CREATE TABLE IF NOT EXISTS session_root_inputs (
     session_id  TEXT NOT NULL,
@@ -166,8 +206,28 @@ CREATE TABLE IF NOT EXISTS control_intents (
     state_json     TEXT NOT NULL,
     attempts       INTEGER NOT NULL,
     created_at_ms  INTEGER NOT NULL,
-    engine_ref     TEXT
+    engine_ref     TEXT,
+    obligation_id  TEXT,
+    obligation_state TEXT,
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms INTEGER,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms INTEGER,
+    CONSTRAINT ck_control_intents_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL))
 );
+
+-- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
+-- and the stalled listing.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_control_intents_obligation_id
+    ON control_intents(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_control_intents_obligation_due
+    ON control_intents(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_control_intents_obligation_stalled
+    ON control_intents(obligation_id)
+    WHERE obligation_state = 'stalled';
 
 CREATE INDEX IF NOT EXISTS idx_control_intents_open
     ON control_intents(intent_id) WHERE state IN ('pending', 'failed_retryable');
