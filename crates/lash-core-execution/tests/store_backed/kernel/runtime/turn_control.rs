@@ -170,16 +170,6 @@ mod tests {
             })
         }
 
-        async fn list_open_control_intents(
-            &self,
-            _after: Option<crate::store::ControlIntentId>,
-            _limit: std::num::NonZeroUsize,
-        ) -> std::result::Result<Vec<crate::store::ControlIntent>, crate::StoreError> {
-            Err(crate::StoreError::UnsupportedStoreOperation {
-                operation: "SessionStoreFactory::list_open_control_intents",
-            })
-        }
-
         async fn compact_turn_park_feed(
             &self,
             _through: crate::store::ParkFeedCursor,
@@ -215,8 +205,9 @@ mod tests {
         async fn acknowledge_intent(
             &self,
             _id: crate::store::ControlIntentId,
+            _claim: &crate::store::ClaimToken,
             _at_ms: u64,
-        ) -> std::result::Result<(), crate::StoreError> {
+        ) -> std::result::Result<crate::store::IntentSettle, crate::StoreError> {
             Err(crate::StoreError::UnsupportedStoreOperation {
                 operation: "ControlIntentStore::acknowledge_intent",
             })
@@ -225,10 +216,11 @@ mod tests {
         async fn record_intent_failure(
             &self,
             _id: crate::store::ControlIntentId,
+            _claim: &crate::store::ClaimToken,
             _error: &str,
             _retryable: bool,
             _at_ms: u64,
-        ) -> std::result::Result<crate::store::ControlIntent, crate::StoreError> {
+        ) -> std::result::Result<crate::store::IntentSettle, crate::StoreError> {
             Err(crate::StoreError::UnsupportedStoreOperation {
                 operation: "ControlIntentStore::record_intent_failure",
             })

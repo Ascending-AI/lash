@@ -150,6 +150,9 @@ impl BoundSession {
                 .map(|relay| {
                     Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
                 }),
+                intents: self
+                    .backend
+                    .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
                 clock: Arc::clone(&self.clock),
                 deletes: lash_core::session_delete::SessionDeleteStores::of(&self.backend),
             },

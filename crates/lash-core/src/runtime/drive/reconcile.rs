@@ -2,11 +2,12 @@
 //! guaranteed owner of every piece of session work whose owner was lost.
 //!
 //! One tick, [`reconcile_once`], is engine-neutral and idempotent. It runs
-//! five arms, each bounded by the tick's page and resuming from its own
+//! four arms, each bounded by the tick's page and resuming from its own
 //! cursor, so a tick never serializes the fleet and one arm's failure never
-//! stops another. Due obligations — including the scope closes a terminal
-//! write armed (ADR 0109 §3) — are claimed through every registered kind's
-//! due index before the leader-only arms, not scanned out of their tables:
+//! stops another. Due obligations — among them control intents' engine
+//! halves and the scope closes a terminal write armed (ADR 0109 §3) — are
+//! claimed through every registered kind's due index before the leader-only
+//! arms, not scanned out of their tables:
 //!
 //! 1. **Parks (O3).** The engine's own view of stalled work becomes lash
 //!    parks: [`SessionControlEngine::reconcile_parks`] reads what the engine
@@ -14,16 +15,14 @@
 //!    [`ParkRecoveryWriter`]; a paused admission-only drive is resumed, never
 //!    parked. One execution the pass cannot settle is reported and passed
 //!    over, never failing the page.
-//! 2. **Intents (O4).** Every open control intent (pending, or failed and
-//!    retryable) has its engine half re-applied by [`apply_control_intent`].
-//! 3. **Drives (O2).** Every live session with open ingress that no
+//! 2. **Drives (O2).** Every live session with open ingress that no
 //!    unresolved park holds is asked for a drive. Acceptance commits a row and then asks the engine to drive,
 //!    fire-and-forget; a process that dies between the two, a lost send, or a
 //!    re-ask the engine deduplicated all leave a durable row nothing drives,
 //!    and this arm asks again.
-//! 4. **Parent-end plans (FIG-3822).** A named slot:
+//! 3. **Parent-end plans (FIG-3822).** A named slot:
 //!    [`reconcile_parent_end_plans_slot`].
-//! 5. **Drain hand-over (FIG-3799).** Every live process of a generation an
+//! 4. **Drain hand-over (FIG-3799).** Every live process of a generation an
 //!    operator marked draining is woken to hand its open wait to a successor
 //!    on the newest build: [`drain_hand_over_slot`].
 //!
@@ -47,7 +46,6 @@ use std::num::NonZeroUsize;
 
 use std::sync::Arc;
 
-use super::control::apply_control_intent;
 use super::park::StoreParkRecovery;
 use super::relay::{ObligationRelay, relay_due, relay_kind};
 use crate::engine::{
@@ -67,14 +65,14 @@ pub struct ReconcileParts<'a> {
     /// The deployment's session catalog.
     pub sessions: &'a dyn SessionStoreFactory,
     /// The engine that drives sessions; its [`control`](SessionWorkEngine::control)
-    /// half reconciles parks and applies intents.
+    /// half reconciles parks.
     pub work: &'a dyn SessionWorkEngine,
     /// Where a released root's scope is closed.
     pub scopes: &'a dyn ScopeCloseSink,
     /// The process registry and the engine's process port, when the host
     /// runs processes. The parent-end and drain slots read them.
     pub processes: Option<ReconcileProcesses<'a>>,
-    /// The caller's clock: intent timestamps and recovery slots.
+    /// The caller's clock: obligation due times and recovery slots.
     pub clock: &'a dyn Clock,
     /// Which duties this deployment runs this tick (ADR 0109 §1.7): the
     /// leader-only arms, and the due-obligation claims.
@@ -182,53 +180,7 @@ pub async fn reconcile_once(
         }
     }
 
-    // 2. Intents: re-apply every open intent's engine half.
-    report.next.intents = cursor.intents;
-    // A released root's scope close is its obligation's delivery (ADR 0109
-    // §3) when the deployment registered the kind's relay.
-    let scope_close = parts
-        .relays
-        .iter()
-        .find(|relay| relay_kind(relay.as_ref()) == crate::store::ObligationKind::ScopeClose)
-        .map(|relay| relay.as_ref() as &dyn ObligationRelay);
-    match parts
-        .sessions
-        .list_open_control_intents(cursor.intents, page)
-        .await
-    {
-        Ok(intents) => {
-            let full = intents.len() >= page.get();
-            let mut next = None;
-            for intent in intents {
-                let id = intent.id;
-                match apply_control_intent(
-                    parts.sessions,
-                    control.as_ref(),
-                    parts.work,
-                    parts.scopes,
-                    scope_close,
-                    &intent,
-                    parts.clock,
-                )
-                .await
-                {
-                    Ok(state) => report.intents.push((id, state)),
-                    Err(error) => report.failures.push(ReconcileFailure {
-                        arm: ReconcileArm::Intents,
-                        error: format!("intent {id}: {error}"),
-                    }),
-                }
-                next = Some(id);
-            }
-            report.next.intents = if full { next } else { None };
-        }
-        Err(error) => report.failures.push(ReconcileFailure {
-            arm: ReconcileArm::Intents,
-            error: error.to_string(),
-        }),
-    }
-
-    // 3. Drives: ask again for every session with open ingress.
+    // 2. Drives: ask again for every session with open ingress.
     match reconcile_session_drives(
         parts.sessions,
         parts.work,
@@ -251,7 +203,7 @@ pub async fn reconcile_once(
         }
     }
 
-    // 4–5. The slots other slices fill.
+    // 3–4. The slots other slices fill.
     if let Some(processes) = parts.processes {
         match reconcile_parent_end_plans_slot(&processes, parts.sessions, page, parts.clock).await {
             Ok(pass) => report.parent_end_plans = pass,
@@ -289,7 +241,7 @@ pub async fn reconcile_once(
 /// failed plan never aborts the page.
 ///
 /// A root whose close step never recorded its plan has nothing to find
-/// here: a released root's scope is closed by the intent arm, and a root the
+/// here: a released root's scope is closed by its control intent's delivery, and a root the
 /// engine gave up on before its close recorded anything is not re-derived.
 pub async fn reconcile_parent_end_plans_slot(
     processes: &ReconcileProcesses<'_>,

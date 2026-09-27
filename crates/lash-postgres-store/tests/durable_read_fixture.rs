@@ -665,6 +665,15 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // ADR 0109 adds the obligation columns to every ledger; the refusal
     // fixture's ledgers predate them, so they gain the columns, empty.
     add_prior_fixture_obligation_columns(&pool).await;
+    // S8-C: a control intent's attempts live on its obligation, so the
+    // ledger's own attempt count and its open-intent index are gone.
+    sqlx::raw_sql(
+        "ALTER TABLE IF EXISTS lash_control_intents DROP COLUMN IF EXISTS attempts;
+         DROP INDEX IF EXISTS idx_lash_control_intents_open;",
+    )
+    .execute(&pool)
+    .await
+    .expect("drop the control intents' own attempt count");
     sqlx::query("DROP TABLE IF EXISTS lash_session_ingress")
         .execute(&pool)
         .await

@@ -100,8 +100,9 @@ pub enum EngineAck {
 }
 
 /// Why an engine could not carry out a control verb. A retryable refusal is
-/// retained on the intent for reconciliation to re-apply; a permanent one is
-/// retained as failed, visible to an operator.
+/// retained on the intent, and its `ControlIntent` obligation retried after a
+/// backoff (ADR 0109); a permanent one is retained as failed, its obligation
+/// stalled, visible to an operator.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum EngineRefusal {
@@ -118,8 +119,8 @@ pub enum EngineRefusal {
 /// an engine does to its executions after the store recorded an intent. It
 /// names no engine; each engine implements it over its own executions.
 ///
-/// Every method is idempotent: reconciliation re-applies an intent whose
-/// acknowledgement a crash lost.
+/// Every method is idempotent: an intent's obligation relay re-delivers an
+/// intent whose acknowledgement a crash lost.
 #[async_trait::async_trait]
 pub trait SessionControlEngine: Send + Sync {
     /// O3: the engine's stalled work becomes lash parks. Every execution the

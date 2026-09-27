@@ -8,6 +8,8 @@ pub mod content_oracle;
 pub mod crash_matrix;
 mod lease;
 #[cfg(test)]
+mod obligation_bounds;
+#[cfg(test)]
 mod oracle_coverage_tests;
 #[cfg(test)]
 mod recorded_reality;

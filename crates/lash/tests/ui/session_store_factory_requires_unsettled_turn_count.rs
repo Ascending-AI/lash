@@ -93,19 +93,21 @@ impl lash::persistence::ControlIntentStore for UncountedFactory {
     async fn acknowledge_intent(
         &self,
         id: lash::persistence::ControlIntentId,
+        claim: &lash::persistence::ClaimToken,
         at_ms: u64,
-    ) -> std::result::Result<(), StoreError> {
-        self.inner.acknowledge_intent(id, at_ms).await
+    ) -> std::result::Result<lash::persistence::IntentSettle, StoreError> {
+        self.inner.acknowledge_intent(id, claim, at_ms).await
     }
 
     async fn record_intent_failure(
         &self,
         id: lash::persistence::ControlIntentId,
+        claim: &lash::persistence::ClaimToken,
         error: &str,
         retryable: bool,
         at_ms: u64,
-    ) -> std::result::Result<lash::persistence::ControlIntent, StoreError> {
-        self.inner.record_intent_failure(id, error, retryable, at_ms).await
+    ) -> std::result::Result<lash::persistence::IntentSettle, StoreError> {
+        self.inner.record_intent_failure(id, claim, error, retryable, at_ms).await
     }
 
     async fn load_intent(

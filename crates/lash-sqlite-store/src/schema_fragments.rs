@@ -204,7 +204,6 @@ CREATE TABLE IF NOT EXISTS control_intents (
     kind_json      TEXT NOT NULL,
     state          TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')),
     state_json     TEXT NOT NULL,
-    attempts       INTEGER NOT NULL,
     created_at_ms  INTEGER NOT NULL,
     engine_ref     TEXT,
     obligation_id  TEXT,
@@ -228,9 +227,6 @@ CREATE INDEX IF NOT EXISTS idx_control_intents_obligation_due
 CREATE INDEX IF NOT EXISTS idx_control_intents_obligation_stalled
     ON control_intents(obligation_id)
     WHERE obligation_state = 'stalled';
-
-CREATE INDEX IF NOT EXISTS idx_control_intents_open
-    ON control_intents(intent_id) WHERE state IN ('pending', 'failed_retryable');
 
 CREATE INDEX IF NOT EXISTS idx_control_intents_session
     ON control_intents(session_id, kind);

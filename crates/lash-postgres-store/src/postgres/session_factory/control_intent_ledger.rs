@@ -5,37 +5,37 @@
 
 use super::*;
 use lash_core_execution::store::{
-    ControlIntent, ControlIntentId, ControlIntentStore, IntentApplication,
-    decide_intent_acknowledgement, decide_intent_application, decide_intent_failure,
+    ClaimToken, ControlIntent, ControlIntentId, ControlIntentState, ControlIntentStore,
+    IntentApplication, IntentSettle, decide_intent_acknowledgement, decide_intent_application,
+    decide_intent_failure,
 };
 
-use crate::session_roots::{begin_session_close_tx, load_intent_conn, write_intent_state_conn};
+use crate::session_roots::{
+    begin_session_close_tx, load_intent_conn, settle_intent_claimed_conn, write_intent_state_conn,
+};
 
 /// How many times a lifecycle write re-reads an intent another writer moved
 /// between its read and its compare-and-set before it reports contention.
 const INTENT_WRITE_ATTEMPTS: usize = 8;
 
 impl PostgresSessionStoreFactory {
-    /// Apply `write` to intent `id`'s stored record: read it, decide, and
-    /// compare-and-set the decision in one transaction, re-reading when
-    /// another writer moved the row first. `write` answers the record to
-    /// store, or `None` to leave it.
-    async fn rewrite_intent<T>(
+    /// Settle intent `id`'s engine half under obligation claim `claim`:
+    /// read it, compare the claim, decide, and compare-and-set the decision
+    /// in one transaction, re-reading when another writer moved the row
+    /// first. `decide` answers the state to write over the stored one, or
+    /// `None` to leave it.
+    async fn settle_intent_claimed(
         &self,
         id: ControlIntentId,
-        write: impl Fn(ControlIntent) -> (Option<ControlIntent>, T) + Send + Sync,
-    ) -> Result<T, StoreError> {
+        claim: &ClaimToken,
+        decide: impl Fn(&ControlIntentState) -> Option<ControlIntentState> + Send + Sync,
+    ) -> Result<IntentSettle, StoreError> {
         for _ in 0..INTENT_WRITE_ATTEMPTS {
             let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-            let stored = load_intent_conn(&mut tx, id)
-                .await?
-                .ok_or(StoreError::ControlIntentUnknown { intent: id })?;
-            let (rewritten, answer) = write(stored.clone());
-            if let Some(rewritten) = rewritten
-                && !write_intent_state_conn(&mut tx, &stored, &rewritten).await?
-            {
+            let Some(answer) = settle_intent_claimed_conn(&mut tx, id, claim, &decide).await?
+            else {
                 continue;
-            }
+            };
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(answer);
         }
@@ -108,13 +108,14 @@ impl ControlIntentStore for PostgresSessionStoreFactory {
         Err(StoreError::Contended)
     }
 
-    async fn acknowledge_intent(&self, id: ControlIntentId, at_ms: u64) -> Result<(), StoreError> {
-        self.rewrite_intent(id, |mut stored| {
-            let rewritten = decide_intent_acknowledgement(&stored.state, at_ms).map(|state| {
-                stored.state = state;
-                stored
-            });
-            (rewritten, ())
+    async fn acknowledge_intent(
+        &self,
+        id: ControlIntentId,
+        claim: &ClaimToken,
+        at_ms: u64,
+    ) -> Result<IntentSettle, StoreError> {
+        self.settle_intent_claimed(id, claim, |stored| {
+            decide_intent_acknowledgement(stored, at_ms)
         })
         .await
     }
@@ -122,18 +123,13 @@ impl ControlIntentStore for PostgresSessionStoreFactory {
     async fn record_intent_failure(
         &self,
         id: ControlIntentId,
+        claim: &ClaimToken,
         error: &str,
         retryable: bool,
         _at_ms: u64,
-    ) -> Result<ControlIntent, StoreError> {
-        self.rewrite_intent(id, |mut stored| {
-            match decide_intent_failure(&stored.state, error, retryable) {
-                Some(state) => {
-                    stored.state = state;
-                    (Some(stored.clone()), stored)
-                }
-                None => (None, stored),
-            }
+    ) -> Result<IntentSettle, StoreError> {
+        self.settle_intent_claimed(id, claim, |stored| {
+            decide_intent_failure(stored, error, retryable)
         })
         .await
     }

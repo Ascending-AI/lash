@@ -2,19 +2,22 @@
 //! decision about a logical root or a session, persisted as a versioned
 //! record in the transaction that applies its store half.
 //!
-//! The engine half runs after that transaction, idempotently, and is
-//! acknowledged; a failure is retained as a failed intent that reconciliation
-//! retries. A `CloseSession` intent outlives its session: it is the positive
-//! deletion tombstone the factory answers a deleted session's roots from.
+//! The engine half is a `ControlIntent` obligation (ADR 0109): the
+//! transaction that records the intent arms it on the intent's row, a relay
+//! delivers it immediately and retries it with backoff, and every write that
+//! settles the engine half — its acknowledgement or its failure — compares
+//! the obligation's claim token, so a claim another relay retook never
+//! settles the intent. A `CloseSession` intent outlives its session: it is
+//! the positive deletion tombstone the factory answers a deleted session's
+//! roots from.
 //!
 //! The ledger is [`ControlIntentStore`], carried by the session store
 //! factory rather than a session's own store: a `CloseSession` intent's engine
-//! half is acknowledged, or retried by reconciliation, after its session is
-//! gone.
+//! half is acknowledged, or retried by its relay, after its session is gone.
 
 use serde::{Deserialize, Serialize};
 
-use super::{EnginePark, ParkId};
+use super::{ClaimToken, EnginePark, ObligationId, ParkId};
 use crate::{SessionId, TurnId};
 
 /// The registered durable format of a [`ControlIntent`] record.
@@ -107,7 +110,8 @@ impl ControlIntentState {
         }
     }
 
-    /// Whether reconciliation still owes this intent its engine half.
+    /// Whether this intent's engine half is still owed: the relay delivers
+    /// it, and while a cancel or fork is open its session admits nothing.
     #[must_use]
     pub const fn is_open(&self) -> bool {
         matches!(
@@ -130,12 +134,16 @@ pub struct ControlIntent {
     pub format: u32,
     pub kind: ControlIntentKind,
     pub state: ControlIntentState,
-    pub attempts: u32,
     pub created_at_ms: u64,
     /// The engine's handle on the root's stopped execution, copied from its
     /// park by a verb whose store half deletes the park (a cancel or a
     /// fork), so the engine half can still find the execution to release.
     pub engine: Option<EnginePark>,
+    /// The `ControlIntent` obligation the recording transaction armed on
+    /// the intent's row (ADR 0109): its engine half, delivered under this
+    /// id. Its attempts, due time and stall live on the obligation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obligation: Option<ObligationId>,
 }
 
 impl ControlIntent {
@@ -163,9 +171,9 @@ impl ControlIntent {
         format: u32,
         kind_json: &str,
         state_json: &str,
-        attempts: u32,
         created_at_ms: u64,
         engine: Option<String>,
+        obligation: Option<String>,
     ) -> Result<Self, super::StoreError> {
         if format != CONTROL_INTENT_FORMAT {
             return Err(super::StoreError::UnsupportedRecordSchemaVersion {
@@ -186,9 +194,9 @@ impl ControlIntent {
                 .map_err(|error| corrupt(format!("control intent kind: {error}")))?,
             state: serde_json::from_str(state_json)
                 .map_err(|error| corrupt(format!("control intent state: {error}")))?,
-            attempts,
             created_at_ms,
             engine: engine.map(EnginePark::new),
+            obligation: obligation.map(ObligationId::new),
         })
     }
 }
@@ -204,8 +212,8 @@ impl ControlIntent {
     }
 
     /// The instant-free identity of the intent's decision: its id, session
-    /// and kind. A retried writer answers the same decision at another
-    /// attempt count or state.
+    /// and kind. A retried writer answers the same decision in another
+    /// state.
     #[must_use]
     pub fn same_decision(&self, other: &Self) -> bool {
         self.id == other.id && self.session_id == other.session_id && self.kind == other.kind
@@ -217,8 +225,7 @@ impl ControlIntent {
 /// transaction, so an intent a later one superseded never reaches its engine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntentApplication {
-    /// The intent is open: run its engine half. The answer carries the
-    /// intent with its attempt counted.
+    /// The intent is open: run its engine half.
     Apply(ControlIntent),
     /// A later intent superseded it before it applied: run nothing.
     Superseded(ControlIntent),
@@ -269,9 +276,7 @@ pub fn decide_intent_application(
                 settled.state = ControlIntentState::Acknowledged { at_ms };
                 return IntentApplication::Done(settled);
             }
-            let mut claimed = stored;
-            claimed.attempts = claimed.attempts.saturating_add(1);
-            IntentApplication::Apply(claimed)
+            IntentApplication::Apply(stored)
         }
         ControlIntentState::Superseded { .. } => IntentApplication::Superseded(stored),
         ControlIntentState::Acknowledged { .. }
@@ -279,6 +284,21 @@ pub fn decide_intent_application(
             retryable: false, ..
         } => IntentApplication::Done(stored),
     }
+}
+
+/// What a claim-fenced write of an intent's engine half answers (ADR 0109
+/// §1.3): [`ControlIntentStore::acknowledge_intent`] and
+/// [`ControlIntentStore::record_intent_failure`] compare the intent's
+/// obligation claim token before they write.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IntentSettle {
+    /// The claim held: the intent as stored after the write — unchanged
+    /// when it was no longer open.
+    Held(ControlIntent),
+    /// The obligation is no longer claimed under the caller's token: another
+    /// relay retook it after the claim lapsed, or it settled. Nothing was
+    /// written.
+    ClaimLost,
 }
 
 /// The state an acknowledgement writes over `stored`: `None` when the intent
@@ -519,7 +539,7 @@ pub trait ControlIntentStore: Send + Sync {
     ///   open queued run;
     /// - supersedes every open intent of the session;
     /// - inserts the `CloseSession { roots }` intent, `Pending`, naming the
-    ///   roots it ended.
+    ///   roots it ended, with its `ControlIntent` obligation armed due now.
     ///
     /// Idempotent: a retry finds the session's intent and answers it, also
     /// after the session is deleted (the intent is its tombstone). `None`
@@ -531,34 +551,42 @@ pub trait ControlIntentStore: Send + Sync {
         at_ms: u64,
     ) -> Result<Option<ControlIntent>, super::StoreError>;
 
-    /// Claim the application of intent `id`'s engine half at `at_ms`:
+    /// Decide the application of intent `id`'s engine half at `at_ms`:
     /// re-read its state, and for a redrive its session's park, in one
-    /// transaction, and write what [`decide_intent_application`] decides —
-    /// the attempt counted when it applies, or a redrive the root ran past
-    /// settled. An unknown id is `StoreError::ControlIntentUnknown`.
+    /// transaction, and write what [`decide_intent_application`] decides — a
+    /// redrive the root ran past settled. An unknown id is
+    /// `StoreError::ControlIntentUnknown`.
     async fn claim_intent_application(
         &self,
         id: ControlIntentId,
         at_ms: u64,
     ) -> Result<IntentApplication, super::StoreError>;
 
-    /// Acknowledge intent `id`'s engine half. A no-op once it is not open.
+    /// Acknowledge intent `id`'s engine half under the obligation claim
+    /// `claim`, in one transaction that compares it: [`IntentSettle::ClaimLost`]
+    /// and nothing written when the obligation is no longer claimed under
+    /// `claim`. A no-op once the intent is not open.
     async fn acknowledge_intent(
         &self,
         id: ControlIntentId,
+        claim: &ClaimToken,
         at_ms: u64,
-    ) -> Result<(), super::StoreError>;
+    ) -> Result<IntentSettle, super::StoreError>;
 
-    /// Retain the failure of intent `id`'s engine half: a retryable failure
-    /// leaves it open for reconciliation, a permanent one is visible for an
-    /// operator. A no-op once it is not open. Answers the stored intent.
+    /// Retain the failure of intent `id`'s engine half under the obligation
+    /// claim `claim`, compared as [`acknowledge_intent`](Self::acknowledge_intent)
+    /// compares it: a retryable failure leaves the intent open for its
+    /// relay's next attempt, a permanent one closes it `Failed { retryable:
+    /// false }`, visible for an operator, until its obligation is re-armed.
+    /// A no-op once it is not open.
     async fn record_intent_failure(
         &self,
         id: ControlIntentId,
+        claim: &ClaimToken,
         error: &str,
         retryable: bool,
         at_ms: u64,
-    ) -> Result<ControlIntent, super::StoreError>;
+    ) -> Result<IntentSettle, super::StoreError>;
 
     /// Intent `id` as stored, if it exists.
     async fn load_intent(
@@ -585,7 +613,7 @@ pub trait ControlIntentStore: Send + Sync {
     ///   mints their root. The cause is `Forked`.
     ///
     /// The intent is `Pending`, carrying the park's engine handle for the
-    /// engine half.
+    /// engine half, with its `ControlIntent` obligation armed due now.
     ///
     /// A factory with no verb store answers `UnsupportedStoreOperation`.
     async fn open_root_intent(
@@ -613,20 +641,20 @@ mod tests {
                 roots: vec![TurnId::from("r")],
             },
             state,
-            attempts: 0,
             created_at_ms: 1,
             engine: None,
+            obligation: None,
         }
     }
 
     #[test]
-    fn an_open_intent_is_applied_with_its_attempt_counted_and_a_closed_one_is_not() {
+    fn an_open_intent_is_applied_unchanged_and_a_closed_one_is_not() {
         let IntentApplication::Apply(applied) =
             decide_intent_application(intent(ControlIntentState::Pending), None, 7)
         else {
             panic!("a pending intent applies");
         };
-        assert_eq!(applied.attempts, 1);
+        assert_eq!(applied, intent(ControlIntentState::Pending));
         assert!(matches!(
             decide_intent_application(
                 intent(ControlIntentState::Failed {
@@ -721,7 +749,6 @@ mod tests {
                 panic!("a redrive its park does not name never applies");
             };
             assert_eq!(settled.state, ControlIntentState::Acknowledged { at_ms: 7 });
-            assert_eq!(settled.attempts, 0);
         }
     }
 
@@ -787,8 +814,8 @@ mod tests {
             CONTROL_INTENT_FORMAT,
             &kind_json,
             &state_json,
-            0,
             1,
+            None,
             None,
         )
         .expect("decode");

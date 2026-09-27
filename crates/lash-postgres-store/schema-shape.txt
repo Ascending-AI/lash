@@ -69,7 +69,6 @@ table lash_checkpoint_blob_refs
   foreign-key (blob_ref) references lash_blobs (hash) on delete no action
   foreign-key (checkpoint_ref) references lash_blobs (hash) on delete cascade
 table lash_control_intents
-  column attempts bigint not-null
   column created_at_ms bigint not-null
   column engine_ref text nullable
   column format bigint not-null

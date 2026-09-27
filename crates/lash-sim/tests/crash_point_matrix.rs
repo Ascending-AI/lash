@@ -55,7 +55,7 @@ crash_matrix! {
     control_intent_after_state_commit => (ControlIntent, AfterStateCommit);
     control_intent_during_engine_delivery => (ControlIntent, DuringEngineDelivery);
     control_intent_after_delivery_before_settle => (ControlIntent, AfterDeliveryBeforeSettle);
-    #[ignore = "FIG-3849 F1, then FIG-3600 S8-C"]
+    #[ignore = "FIG-3600 S8-I"]
     control_intent_delivery_retryable_forever => (ControlIntent, DeliveryRetryableForever);
 
     scope_close_after_state_commit => (ScopeClose, AfterStateCommit);

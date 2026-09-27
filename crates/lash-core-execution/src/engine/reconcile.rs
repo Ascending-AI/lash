@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use super::control::{EngineCursor, ParkReconcileReport};
 use crate::SessionId;
-use crate::store::{ControlIntentId, ControlIntentState};
 
 /// Where the next tick resumes each paged arm. `None` starts an arm at its
 /// beginning; an arm whose listing ran out wraps to `None`.
@@ -23,9 +22,6 @@ pub struct ReconcileCursor {
     /// The engine's position in its own stalled-work listing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parks: Option<EngineCursor>,
-    /// The last open intent the previous tick applied.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub intents: Option<ControlIntentId>,
     /// The last live session the previous tick's drive arm read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drives: Option<SessionId>,
@@ -76,8 +72,6 @@ impl ReconcileTicks {
 pub enum ReconcileArm {
     /// The engine's stalled work into lash parks (O3).
     Parks,
-    /// Open control intents re-applied (O4).
-    Intents,
     /// Sessions with open ingress re-asked for a drive (O2).
     Drives,
     /// The FIG-3822 parent-end plan slot.
@@ -142,8 +136,6 @@ pub struct ReconcileTick {
     pub next: ReconcileCursor,
     /// The engine's park reconcile, when it answered.
     pub parks: Option<ParkReconcileReport>,
-    /// Each open intent this tick applied, with the state it reached.
-    pub intents: Vec<(ControlIntentId, ControlIntentState)>,
     /// The drive arm.
     pub drives: DriveReconcileReport,
     /// The FIG-3822 slot.

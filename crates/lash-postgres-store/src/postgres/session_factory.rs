@@ -768,15 +768,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         Ok(rows.into_iter().map(SessionId::from).collect())
     }
 
-    async fn list_open_control_intents(
-        &self,
-        after: Option<lash_core_execution::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
-        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
-        crate::session_roots::open_control_intents_conn(&mut connection, after, limit.get()).await
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: lash_core_execution::store::ParkFeedCursor,

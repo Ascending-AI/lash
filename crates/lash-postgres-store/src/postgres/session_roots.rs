@@ -9,10 +9,11 @@
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    EnginePark, ParkCancelCause, ParkEventKind, RootStore, RootTerminal, RootTerminalCause,
-    RootTerminalKind, RootTerminalWriteDecision, close_admission, decide_root_terminal_write,
-    root_binding_conflict, stored_intent_kind, stored_intent_state,
+    CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
+    ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
+    RootStore, RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWriteDecision,
+    close_admission, decide_root_terminal_write, root_binding_conflict, stored_intent_kind,
+    stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
@@ -209,9 +210,9 @@ pub(crate) fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent
     let format: i64 = row.try_get(2).map_err(store_sqlx_error)?;
     let kind_json: String = row.try_get(3).map_err(store_sqlx_error)?;
     let state_json: String = row.try_get(4).map_err(store_sqlx_error)?;
-    let attempts: i64 = row.try_get(5).map_err(store_sqlx_error)?;
-    let created_at_ms: i64 = row.try_get(6).map_err(store_sqlx_error)?;
-    let engine_ref: Option<String> = row.try_get(7).map_err(store_sqlx_error)?;
+    let created_at_ms: i64 = row.try_get(5).map_err(store_sqlx_error)?;
+    let engine_ref: Option<String> = row.try_get(6).map_err(store_sqlx_error)?;
+    let obligation_id: Option<String> = row.try_get(7).map_err(store_sqlx_error)?;
     let corrupt = |field: &str| StoreError::StoredDataCorrupt {
         record_kind: "ControlIntent",
         message: format!("{field} out of range"),
@@ -222,9 +223,9 @@ pub(crate) fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent
         u32::try_from(format).map_err(|_| corrupt("format"))?,
         &kind_json,
         &state_json,
-        u32::try_from(attempts).map_err(|_| corrupt("attempts"))?,
         u64_from_sql("ControlIntent", "created_at_ms", created_at_ms)?,
         engine_ref,
+        obligation_id,
     )
 }
 
@@ -242,24 +243,6 @@ pub(crate) async fn close_session_intent_conn(
         .as_ref()
         .map(decode_intent)
         .transpose()
-}
-
-/// Open control intents after `after`, at most `limit`, read on `conn`.
-pub(crate) async fn open_control_intents_conn(
-    conn: &mut PgConnection,
-    after: Option<ControlIntentId>,
-    limit: usize,
-) -> Result<Vec<ControlIntent>, StoreError> {
-    let rows = sqlx::query(session_roots_sql().intents.select_open_after.sql())
-        .bind(sql_i64(
-            "control intent cursor",
-            after.map_or(0, ControlIntentId::sequence),
-        )?)
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(store_sqlx_error)?;
-    rows.iter().map(decode_intent).collect()
 }
 
 /// Intent `id`, read on `conn`.
@@ -297,7 +280,8 @@ pub(crate) async fn open_verbs_by_session_conn(
 }
 
 /// Record a new intent of `session_id` in the caller's transaction: `kind`,
-/// `Pending`, no attempt yet. Answers it with its allocated id.
+/// `Pending`, with its `ControlIntent` obligation armed due at `at_ms` on the
+/// same row (ADR 0109). Answers it with its allocated id.
 pub(crate) async fn insert_intent_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
@@ -319,21 +303,31 @@ pub(crate) async fn insert_intent_conn(
         .fetch_one(&mut *conn)
         .await
         .map_err(store_sqlx_error)?;
+    let id = ControlIntentId::from_sequence(u64_from_sql("ControlIntent", "intent_id", id)?);
+    let obligation = crate::obligation_ledger::arm_obligation_tx(
+        conn,
+        &ObligationKey::ControlIntent { intent_id: id },
+        at_ms,
+    )
+    .await?
+    .ok_or_else(|| StoreError::StoredDataCorrupt {
+        record_kind: "ControlIntent",
+        message: "a freshly recorded intent already carries an obligation".into(),
+    })?;
     Ok(ControlIntent {
-        id: ControlIntentId::from_sequence(u64_from_sql("ControlIntent", "intent_id", id)?),
+        id,
         session_id: session_id.clone(),
         format: CONTROL_INTENT_FORMAT,
         kind,
         state,
-        attempts: 0,
         created_at_ms: at_ms,
         engine: engine.cloned(),
+        obligation: Some(obligation),
     })
 }
 
-/// Move intent `prior` to `next`'s state and attempt count in the caller's
-/// transaction, if it is still as `prior` read it. `false` when another
-/// writer moved it first.
+/// Move intent `prior` to `next`'s state in the caller's transaction, if it
+/// is still as `prior` read it. `false` when another writer moved it first.
 pub(crate) async fn write_intent_state_conn(
     conn: &mut PgConnection,
     prior: &ControlIntent,
@@ -345,9 +339,7 @@ pub(crate) async fn write_intent_state_conn(
         .bind(sql_i64("control intent id", next.id.sequence())?)
         .bind(state_code)
         .bind(state_json)
-        .bind(i64::from(next.attempts))
         .bind(prior_json)
-        .bind(i64::from(prior.attempts))
         .execute(&mut *conn)
         .await
         .map_err(store_sqlx_error)?
@@ -358,6 +350,59 @@ pub(crate) async fn write_intent_state_conn(
         crate::session_delete_ledger::arm_on_close_acknowledged_conn(conn, prior, next).await?;
     }
     Ok(changed == 1)
+}
+
+/// One attempt to settle intent `id`'s engine half under obligation claim
+/// `claim` in the caller's transaction (ADR 0109 claim fencing):
+/// [`IntentSettle::ClaimLost`] and nothing written when the obligation is no
+/// longer claimed under `claim`; otherwise `decide` answers the state to
+/// write over the stored one, or `None` to leave it. `None` when another
+/// writer moved the row between the read and the compare-and-set: the
+/// caller retries on a fresh transaction.
+pub(crate) async fn settle_intent_claimed_conn(
+    conn: &mut PgConnection,
+    id: ControlIntentId,
+    claim: &ClaimToken,
+    decide: impl FnOnce(&ControlIntentState) -> Option<ControlIntentState>,
+) -> Result<Option<IntentSettle>, StoreError> {
+    let sql = session_roots_sql();
+    let intent_id = sql_i64("control intent id", id.sequence())?;
+    let held: i64 = sqlx::query_scalar(sql.intents.select_claim_held.sql())
+        .bind(intent_id)
+        .bind(claim.as_str())
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    let stored = load_intent_conn(conn, id)
+        .await?
+        .ok_or(StoreError::ControlIntentUnknown { intent: id })?;
+    if held == 0 {
+        return Ok(Some(IntentSettle::ClaimLost));
+    }
+    let Some(state) = decide(&stored.state) else {
+        return Ok(Some(IntentSettle::Held(stored)));
+    };
+    let (state_code, state_json) = stored_intent_state(&state)?;
+    let (_, prior_json) = stored_intent_state(&stored.state)?;
+    let changed = sqlx::query(sql.intents.update_state_claimed.sql())
+        .bind(intent_id)
+        .bind(state_code)
+        .bind(state_json)
+        .bind(prior_json)
+        .bind(claim.as_str())
+        .execute(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+    if changed != 1 {
+        return Ok(None);
+    }
+    let mut settled = stored.clone();
+    settled.state = state;
+    // A session close's acknowledgement owes its physical delete (ADR 0109
+    // §4), armed in this transaction.
+    crate::session_delete_ledger::arm_on_close_acknowledged_conn(conn, &stored, &settled).await?;
+    Ok(Some(IntentSettle::Held(settled)))
 }
 
 /// The store half of session `session_id`'s close, in the caller's

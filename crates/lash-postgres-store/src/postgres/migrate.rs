@@ -101,7 +101,6 @@ CREATE TABLE IF NOT EXISTS lash_control_intents (
     kind_json TEXT NOT NULL,
     state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')),
     state_json TEXT NOT NULL,
-    attempts BIGINT NOT NULL,
     created_at_ms BIGINT NOT NULL,
     engine_ref TEXT,
     obligation_id TEXT,
@@ -114,8 +113,6 @@ CREATE TABLE IF NOT EXISTS lash_control_intents (
     obligation_settled_at_ms BIGINT,
     CONSTRAINT ck_control_intents_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL))
 );
-CREATE INDEX IF NOT EXISTS idx_lash_control_intents_open
-    ON lash_control_intents(intent_id) WHERE state IN ('pending', 'failed_retryable');
 CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
     ON lash_control_intents(session_id, kind);";
 
@@ -808,7 +805,7 @@ mod tests {
             .map(|statement| statement.trim_end_matches(';'))
             .filter(|statement| statement.starts_with("CREATE"))
             .collect();
-        assert_eq!(created.len(), 5, "three tables and two indexes");
+        assert_eq!(created.len(), 4, "three tables and an index");
         for statement in created {
             assert!(
                 SCHEMA_DDL.contains(statement),

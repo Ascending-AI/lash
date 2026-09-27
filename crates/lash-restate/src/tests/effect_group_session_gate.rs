@@ -135,16 +135,6 @@ impl SessionStoreFactory for OneSessionCatalog {
         })
     }
 
-    async fn list_open_control_intents(
-        &self,
-        _after: Option<lash_core::store::ControlIntentId>,
-        _limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<Vec<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::list_open_control_intents",
-        })
-    }
-
     async fn compact_turn_park_feed(
         &self,
         _through: lash_core::store::ParkFeedCursor,
@@ -180,8 +170,9 @@ impl lash_core::store::ControlIntentStore for OneSessionCatalog {
     async fn acknowledge_intent(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _claim: &lash_core::store::ClaimToken,
         _at_ms: u64,
-    ) -> std::result::Result<(), StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::acknowledge_intent",
         })
@@ -190,10 +181,11 @@ impl lash_core::store::ControlIntentStore for OneSessionCatalog {
     async fn record_intent_failure(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _claim: &lash_core::store::ClaimToken,
         _error: &str,
         _retryable: bool,
         _at_ms: u64,
-    ) -> std::result::Result<lash_core::store::ControlIntent, StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::record_intent_failure",
         })

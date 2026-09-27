@@ -5,11 +5,14 @@
 
 use super::*;
 use lash_core_execution::store::{
-    ControlIntent, ControlIntentId, ControlIntentStore, IntentApplication,
-    decide_intent_acknowledgement, decide_intent_application, decide_intent_failure,
+    ClaimToken, ControlIntent, ControlIntentId, ControlIntentState, ControlIntentStore,
+    IntentApplication, IntentSettle, decide_intent_acknowledgement, decide_intent_application,
+    decide_intent_failure,
 };
 
-use crate::session_roots::{begin_session_close_conn, load_intent_conn, write_intent_state_conn};
+use crate::session_roots::{
+    begin_session_close_conn, load_intent_conn, settle_intent_claimed_conn, write_intent_state_conn,
+};
 
 impl SqliteSessionStoreFactory {
     /// A writer on the durable core, or `None` when the catalog was never
@@ -28,32 +31,24 @@ impl SqliteSessionStoreFactory {
         Ok(Some(conn))
     }
 
-    /// Apply `write` to intent `id`'s stored record in one write
-    /// transaction: `write` answers the record to store, or `None` to leave
-    /// it.
-    async fn rewrite_intent<T, F>(&self, id: ControlIntentId, write: F) -> Result<T, StoreError>
+    /// Settle intent `id`'s engine half under obligation claim `claim` in
+    /// one write transaction: `decide` answers the state to write over the
+    /// stored one, or `None` to leave it.
+    async fn settle_intent_claimed<F>(
+        &self,
+        id: ControlIntentId,
+        claim: &ClaimToken,
+        decide: F,
+    ) -> Result<IntentSettle, StoreError>
     where
-        T: Send + 'static,
-        F: FnOnce(ControlIntent) -> (Option<ControlIntent>, T) + Send + 'static,
+        F: FnOnce(&ControlIntentState) -> Option<ControlIntentState> + Send + 'static,
     {
         let Some(conn) = self.control_ledger().await? else {
             return Err(StoreError::ControlIntentUnknown { intent: id });
         };
+        let claim = claim.clone();
         conn.write_flow(move |tx| {
-            let outcome = (|| {
-                let stored = load_intent_conn(tx, id)?
-                    .ok_or(StoreError::ControlIntentUnknown { intent: id })?;
-                let (rewritten, answer) = write(stored.clone());
-                if let Some(rewritten) = rewritten
-                    && !write_intent_state_conn(tx, &stored, &rewritten)?
-                {
-                    // The write transaction is exclusive: nothing else can
-                    // move the row between the read and the write.
-                    return Err(StoreError::Contended);
-                }
-                Ok(answer)
-            })();
-            Ok(match outcome {
+            Ok(match settle_intent_claimed_conn(tx, id, &claim, decide) {
                 Ok(answer) => TxOutcome::Commit(Ok(answer)),
                 Err(error) => TxOutcome::Rollback(Err(error)),
             })
@@ -151,13 +146,14 @@ impl ControlIntentStore for SqliteSessionStoreFactory {
         .map_err(sqlite_error)?
     }
 
-    async fn acknowledge_intent(&self, id: ControlIntentId, at_ms: u64) -> Result<(), StoreError> {
-        self.rewrite_intent(id, move |mut stored| {
-            let rewritten = decide_intent_acknowledgement(&stored.state, at_ms).map(|state| {
-                stored.state = state;
-                stored
-            });
-            (rewritten, ())
+    async fn acknowledge_intent(
+        &self,
+        id: ControlIntentId,
+        claim: &ClaimToken,
+        at_ms: u64,
+    ) -> Result<IntentSettle, StoreError> {
+        self.settle_intent_claimed(id, claim, move |stored| {
+            decide_intent_acknowledgement(stored, at_ms)
         })
         .await
     }
@@ -165,19 +161,14 @@ impl ControlIntentStore for SqliteSessionStoreFactory {
     async fn record_intent_failure(
         &self,
         id: ControlIntentId,
+        claim: &ClaimToken,
         error: &str,
         retryable: bool,
         _at_ms: u64,
-    ) -> Result<ControlIntent, StoreError> {
+    ) -> Result<IntentSettle, StoreError> {
         let error = error.to_string();
-        self.rewrite_intent(id, move |mut stored| {
-            match decide_intent_failure(&stored.state, &error, retryable) {
-                Some(state) => {
-                    stored.state = state;
-                    (Some(stored.clone()), stored)
-                }
-                None => (None, stored),
-            }
+        self.settle_intent_claimed(id, claim, move |stored| {
+            decide_intent_failure(stored, &error, retryable)
         })
         .await
     }

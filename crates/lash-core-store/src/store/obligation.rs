@@ -244,7 +244,10 @@ fn next_integer(
 }
 
 /// The stable id of one armed obligation, minted when the row is armed.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct ObligationId(String);
 
 impl ObligationId {

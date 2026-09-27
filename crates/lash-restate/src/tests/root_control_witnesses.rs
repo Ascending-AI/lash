@@ -131,6 +131,33 @@ struct Fixture {
     driver: Arc<Driver>,
     work: crate::RestateSessionWork,
     factory: Arc<dyn lash_core::SessionStoreFactory>,
+    /// The law stores' `ControlIntent` obligation ledger.
+    intents: Arc<dyn ObligationLedger>,
+}
+/// The session work of `work` with its control engine replaced: an engine
+/// half that fails where the fixture injects it.
+struct WithControl {
+    work: crate::RestateSessionWork,
+    control: Arc<dyn SessionControlEngine>,
+}
+#[async_trait::async_trait]
+impl SessionWorkEngine for WithControl {
+    fn schedule_drive(&self, session: &SessionId, request: DriveRequestId) {
+        self.work.schedule_drive(session, request);
+    }
+    async fn request_drive(
+        &self,
+        session: &SessionId,
+        request: DriveRequestId,
+    ) -> Result<(), EngineRefusal> {
+        self.work.request_drive(session, request).await
+    }
+    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        self.work.install_session_driver(driver)
+    }
+    fn control(&self) -> Arc<dyn SessionControlEngine> {
+        Arc::clone(&self.control)
+    }
 }
 impl Fixture {
     async fn new(server: HarnessServer, admission: bool) -> Self {
@@ -177,12 +204,51 @@ impl Fixture {
         work.send_drive(&driver.session, DriveRequestId::new("initial"))
             .await
             .expect("send");
+        let intents = harness
+            .law_stores()
+            .obligation_ledger(ObligationKind::ControlIntent);
         Self {
             harness,
             driver,
             work,
             factory,
+            intents,
         }
+    }
+    /// The `ControlIntent` relay over the fixture's ledger and engine —
+    /// its control engine replaced by `control` when given — closing
+    /// scopes through `scopes`.
+    fn relay(
+        &self,
+        control: Option<Arc<dyn SessionControlEngine>>,
+        scopes: Arc<dyn ScopeCloseSink>,
+    ) -> lash_core::drive::ControlIntentRelay {
+        self.relay_on(
+            control,
+            scopes,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+    }
+    fn relay_on(
+        &self,
+        control: Option<Arc<dyn SessionControlEngine>>,
+        scopes: Arc<dyn ScopeCloseSink>,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> lash_core::drive::ControlIntentRelay {
+        let work: Arc<dyn SessionWorkEngine> = match control {
+            Some(control) => Arc::new(WithControl {
+                work: self.work.clone(),
+                control,
+            }),
+            None => Arc::new(self.work.clone()),
+        };
+        lash_core::drive::ControlIntentRelay::new(
+            Arc::clone(&self.intents),
+            Arc::clone(&self.factory),
+            work,
+            scopes,
+            clock,
+        )
     }
     async fn reconcile_until(&self, admission: bool) -> ParkReconcileReport {
         let clock = lash_core::facade_support::SystemClock;
@@ -276,17 +342,10 @@ async fn pause_resume(server: HarnessServer) {
         )
         .await
         .expect("redrive");
-    lash_core::drive::apply_control_intent(
-        f.factory.as_ref(),
-        f.work.control().as_ref(),
-        &f.work,
-        &NoScopeClose,
-        None,
-        &intent,
-        &clock,
-    )
-    .await
-    .expect("apply");
+    f.relay(None, Arc::new(NoScopeClose))
+        .deliver_intent(&intent)
+        .await
+        .expect("apply");
     let outcome = f
         .work
         .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
@@ -453,28 +512,24 @@ async fn crash_gaps(server: HarnessServer) {
             // The build is restored: were the parked execution resumed
             // rather than released, it would commit.
             f.driver.restored.store(true, Ordering::SeqCst);
-            let clock = lash_core::facade_support::SystemClock;
-            let scopes = InterruptedClose {
+            let scopes = Arc::new(InterruptedClose {
                 interrupt: AtomicBool::new(gap == 2),
                 calls: AtomicUsize::new(0),
                 factory: f.factory.clone(),
-            };
+            });
             if gap != 0 {
-                let engine = InterruptedRelease {
+                let engine = Arc::new(InterruptedRelease {
                     inner: f.work.control(),
                     interrupt: AtomicBool::new(gap == 1),
-                };
-                let state = lash_core::drive::apply_control_intent(
-                    f.factory.as_ref(),
-                    &engine,
-                    &f.work,
-                    &scopes,
-                    None,
-                    &intent,
-                    &clock,
-                )
-                .await
-                .expect("interrupted apply");
+                });
+                let state = f
+                    .relay(Some(engine), scopes.clone())
+                    .deliver_intent(&intent)
+                    .await
+                    .expect("interrupted apply");
+                // No `ScopeClose` relay is wired here, so a missed scope
+                // close has no obligation to own its retry and stays on the
+                // intent, like a lost release.
                 assert!(matches!(
                     state,
                     ControlIntentState::Failed {
@@ -484,16 +539,21 @@ async fn crash_gaps(server: HarnessServer) {
                 ));
             }
             // Reconstruct recovery from the durable ledger after dropping the
-            // interrupted caller. The engine's retained invocation is shared.
+            // interrupted caller, an hour on, past the failed attempt's
+            // backoff. The engine's retained invocation is shared.
+            let later = LaterClock(3_600_000);
+            let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![Arc::new(
+                f.relay_on(None, scopes.clone(), Arc::new(LaterClock(3_600_000))),
+            )];
             let report = lash_core::drive::reconcile_once(
                 &lash_core::drive::ReconcileParts {
                     sessions: f.factory.as_ref(),
                     work: &f.work,
-                    scopes: &scopes,
+                    scopes: scopes.as_ref(),
                     processes: None,
-                    clock: &clock,
+                    clock: &later,
                     duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
-                    relays: &[],
+                    relays: &relays,
                 },
                 &ReconcileCursor::default(),
                 NonZeroUsize::MIN.saturating_add(15),
@@ -588,17 +648,10 @@ async fn released_then_next(server: HarnessServer) {
     let next = TurnId::from("next");
     *f.driver.next.lock().expect("next") = Some(next.clone());
     f.driver.restored.store(true, Ordering::SeqCst);
-    lash_core::drive::apply_control_intent(
-        f.factory.as_ref(),
-        f.work.control().as_ref(),
-        &f.work,
-        &NoScopeClose,
-        None,
-        &intent,
-        &lash_core::facade_support::SystemClock,
-    )
-    .await
-    .expect("release");
+    f.relay(None, Arc::new(NoScopeClose))
+        .deliver_intent(&intent)
+        .await
+        .expect("release");
     let outcome = f
         .work
         .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
@@ -646,17 +699,10 @@ async fn released_then_repeated(server: HarnessServer) {
         .expect("cancel");
     f.driver.repeat_released.store(true, Ordering::SeqCst);
     f.driver.restored.store(true, Ordering::SeqCst);
-    lash_core::drive::apply_control_intent(
-        f.factory.as_ref(),
-        f.work.control().as_ref(),
-        &f.work,
-        &NoScopeClose,
-        None,
-        &intent,
-        &lash_core::facade_support::SystemClock,
-    )
-    .await
-    .expect("release");
+    f.relay(None, Arc::new(NoScopeClose))
+        .deliver_intent(&intent)
+        .await
+        .expect("release");
     let outcome = f
         .work
         .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
@@ -844,4 +890,24 @@ async fn recovery_tick_ids_are_unique_across_processes() {
         "a restarted process's ticks never reuse the previous run's ids"
     );
     drop((installed, next));
+}
+
+/// The system clock its `0` milliseconds on: a reconcile tick run after a failed
+/// attempt's backoff elapsed.
+#[derive(Debug)]
+struct LaterClock(u64);
+#[async_trait::async_trait]
+impl lash_core::Clock for LaterClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc::now() + chrono::Duration::milliseconds(i64::try_from(self.0).expect("offset"))
+    }
+    async fn sleep(&self, duration: std::time::Duration) {
+        tokio::time::sleep(duration).await;
+    }
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
 }

@@ -30,8 +30,9 @@ impl lash_core::store::ControlIntentStore for ReusableStoreFactory {
     async fn acknowledge_intent(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _claim: &lash_core::store::ClaimToken,
         _at_ms: u64,
-    ) -> std::result::Result<(), lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::acknowledge_intent",
         })
@@ -40,10 +41,11 @@ impl lash_core::store::ControlIntentStore for ReusableStoreFactory {
     async fn record_intent_failure(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _claim: &lash_core::store::ClaimToken,
         _error: &str,
         _retryable: bool,
         _at_ms: u64,
-    ) -> std::result::Result<lash_core::store::ControlIntent, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::record_intent_failure",
         })
@@ -84,8 +86,9 @@ impl lash_core::store::ControlIntentStore for RecordingStoreFactory {
     async fn acknowledge_intent(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _claim: &lash_core::store::ClaimToken,
         _at_ms: u64,
-    ) -> std::result::Result<(), lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::acknowledge_intent",
         })
@@ -94,10 +97,11 @@ impl lash_core::store::ControlIntentStore for RecordingStoreFactory {
     async fn record_intent_failure(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _claim: &lash_core::store::ClaimToken,
         _error: &str,
         _retryable: bool,
         _at_ms: u64,
-    ) -> std::result::Result<lash_core::store::ControlIntent, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::record_intent_failure",
         })

@@ -500,6 +500,25 @@ impl SessionWorkEngine for RestateSessionWork {
         });
     }
 
+    /// Send `request`'s drive and answer once Restate accepted it, under
+    /// the request's idempotency key: a repeated request attaches to its
+    /// first invocation. A send that did not reach Restate is retryable.
+    async fn request_drive(
+        &self,
+        session: &SessionId,
+        request: DriveRequestId,
+    ) -> Result<(), lash_core::engine::EngineRefusal> {
+        self.send_drive(session, request.clone())
+            .await
+            .map(|_| ())
+            .map_err(|error| {
+                lash_core::engine::EngineRefusal::Retryable(format!(
+                    "drive `{}` of session `{session}` was not accepted: {error}",
+                    request.as_str()
+                ))
+            })
+    }
+
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
         // One recovery interval per installed driver: a re-install that
         // keeps the live driver starts none, and the interval of a dropped

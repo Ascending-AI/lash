@@ -3,10 +3,10 @@
 //!
 //! A session's close is the one control intent whose store half is itself a
 //! recorded step: [`close_session`] asks every refusal of a deletion, records
-//! `BeginSessionClose` under the session's `SessionDelete` scope, and then
-//! applies the intent it answered through
-//! [`apply_control_intent`](crate::drive::apply_control_intent), the one
-//! engine-half body the verbs and reconciliation also run.
+//! `BeginSessionClose` under the session's `SessionDelete` scope, whose
+//! store half arms the intent's `ControlIntent` obligation (ADR 0109), and
+//! then delivers it through [`ControlIntentRelay`], the one engine-half body
+//! the verbs and the reconcile tick's relay pass also run.
 //!
 //! It is deletion code, not the session drive: it runs under the deletion's
 //! `SessionDelete` scope, never a drive's. It names no engine: the engine's
@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use crate::drive::apply_control_intent;
+use crate::drive::ControlIntentRelay;
 use crate::drive::relay::ObligationRelay;
 use crate::engine::{ScopeCloseSink, begin_session_close_replay_key};
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
@@ -28,8 +28,8 @@ use crate::{
 };
 
 /// What a session's close runs against besides its catalog: the engine whose
-/// executions it releases, the owner of the scopes it closes, and the clock
-/// its intent is stamped by.
+/// executions it releases, the owner of the scopes it closes, the ledger its
+/// engine half is delivered through, and the clock its intent is stamped by.
 #[derive(Clone)]
 pub struct SessionCloseServices {
     pub work: Arc<dyn SessionWorkEngine>,
@@ -41,6 +41,8 @@ pub struct SessionCloseServices {
     /// 0109 §3): each closed root's obligation gets its immediate delivery
     /// here. `None` on a host without an obligation substrate.
     pub scope_close_obligations: Option<Arc<dyn ObligationRelay>>,
+    /// The store set's `ControlIntent` obligation ledger (ADR 0109).
+    pub intents: Arc<dyn crate::store::ObligationLedger>,
     pub clock: Arc<dyn Clock>,
     /// The session-delete obligation's stores: the close's acknowledgement
     /// arms it, and the delete's relay delivers it (ADR 0109 §4).
@@ -54,7 +56,7 @@ pub struct SessionClosed {
     pub intent: ControlIntent,
     /// Where its engine half stands after this attempt: `Acknowledged`, or
     /// retained (`Pending` when the ledger did not answer, `Failed`
-    /// otherwise) for reconciliation to finish.
+    /// otherwise) for its obligation's relay to finish.
     pub applied: ControlIntentState,
 }
 
@@ -84,10 +86,11 @@ pub enum SessionCloseError {
 ///    `CloseSession` intent is recorded. This is the point of no return:
 ///    after it the deletion only retries, and a retried deletion replays the
 ///    recorded step.
-/// 3. [`apply_control_intent`] runs its engine half: every closed root's
-///    execution is released and the session's scope is closed. A failure is
-///    retained on the intent and never fails the close: reconciliation
-///    finishes it. The acknowledgement arms the session's physical delete
+/// 3. [`ControlIntentRelay`] delivers its engine half now: every closed
+///    root's execution is released and the session's scope is closed. A
+///    failure is retained on the intent and its obligation and never fails
+///    the close: the obligation's relay finishes it. The acknowledgement
+///    arms the session's physical delete
 ///    ([`session_delete`](crate::session_delete), ADR 0109 §4), so the
 ///    delete waits for it.
 ///
@@ -170,27 +173,24 @@ pub async fn close_session(
     let Some(intent) = intent else {
         return Ok(None);
     };
-    let engine = services.work.control();
-    let applied = match apply_control_intent(
-        stores.as_ref(),
-        engine.as_ref(),
-        services.work.as_ref(),
-        services.scopes.as_ref(),
-        services.scope_close_obligations.as_deref(),
-        &intent,
-        services.clock.as_ref(),
+    let relay = ControlIntentRelay::new(
+        Arc::clone(&services.intents),
+        Arc::clone(stores),
+        Arc::clone(&services.work),
+        Arc::clone(&services.scopes),
+        Arc::clone(&services.clock),
     )
-    .await
-    {
+    .with_scope_close(services.scope_close_obligations.clone());
+    let applied = match relay.deliver_intent(&intent).await {
         Ok(state) => state,
         Err(error) => {
-            // The ledger did not answer: the intent stays open, and
-            // reconciliation re-applies it.
+            // The ledger did not answer: the intent stays open, and its
+            // obligation's relay delivers it.
             tracing::warn!(
                 session_id = session_id.as_str(),
                 intent = %intent.id,
                 error = %error,
-                "the session close's engine half is left to reconciliation"
+                "the session close's engine half is left to its obligation's relay"
             );
             intent.state.clone()
         }

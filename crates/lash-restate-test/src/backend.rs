@@ -573,6 +573,14 @@ impl SessionWorkEngine for ExplicitlyReconciledSessionWork {
         self.inner.schedule_drive(session, request);
     }
 
+    async fn request_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> Result<(), lash_core::engine::EngineRefusal> {
+        self.inner.request_drive(session, request).await
+    }
+
     /// The same get-or-init [`RestateSessionWork::install_session_driver`]
     /// answers, without its spawned interval: the driver a core installs
     /// serves every drive and answers [`SessionDriver::reconcile`] when a

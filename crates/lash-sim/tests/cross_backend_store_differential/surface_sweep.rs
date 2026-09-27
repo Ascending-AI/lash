@@ -43,6 +43,9 @@ pub(super) struct SurfaceScratch {
     /// session: ids are the backend's own clock, so answers compare it by
     /// identity, never by value.
     pub(super) close_intent: Option<lash_core::store::ControlIntentId>,
+    /// The claim this backend's run took on the close intent's obligation:
+    /// the engine-half writes compare it (ADR 0109).
+    pub(super) intent_claim: Option<lash_core::store::ClaimToken>,
 }
 
 /// One fallible store-trait method, driven as a compared differential step.
@@ -152,10 +155,12 @@ pub(super) enum SurfaceMethod {
         known: bool,
     },
     /// [`ControlIntentStore::record_intent_failure`](lash_core::store::ControlIntentStore::record_intent_failure)
-    /// of the case's close intent, retryable.
+    /// of the case's close intent, retryable, under the claim the run took
+    /// on its obligation.
     RecordIntentFailure,
     /// [`ControlIntentStore::acknowledge_intent`](lash_core::store::ControlIntentStore::acknowledge_intent)
-    /// of the case's close intent, or of an id no ledger minted.
+    /// of the case's close intent under the claim the run took on its
+    /// obligation, or of an id no ledger minted.
     AcknowledgeIntent {
         known: bool,
     },
@@ -461,14 +466,14 @@ fn control_intent_summary(
         other => format!("{other:?}"),
     };
     format!(
-        "own={} own_session={} format={} kind={kind} state={state} attempts={} created_at_ms={} \
-         engine={:?}",
+        "own={} own_session={} format={} kind={kind} state={state} created_at_ms={} \
+         engine={:?} obligation_armed={}",
         Some(intent.id) == own,
         intent.session_id == *session_id,
         intent.format,
-        intent.attempts,
         intent.created_at_ms,
         intent.engine,
+        intent.obligation.is_some(),
     )
 }
 
@@ -1634,22 +1639,34 @@ impl BackendRunner {
                 )
             }
             SurfaceMethod::RecordIntentFailure => {
-                let intent = self
+                let claim = self.intent_claim(true).await?;
+                match self
                     .factory()
                     .record_intent_failure(
                         self.case_intent(true),
+                        &claim,
                         "fig-3600 engine half refused",
                         true,
                         CLOSE_FAILED_AT_MS,
                     )
-                    .await?;
-                control_intent_summary(&intent, &session_id, self.surface.close_intent)
+                    .await?
+                {
+                    lash_core::store::IntentSettle::Held(intent) => {
+                        control_intent_summary(&intent, &session_id, self.surface.close_intent)
+                    }
+                    lash_core::store::IntentSettle::ClaimLost => "claim_lost".to_string(),
+                }
             }
             SurfaceMethod::AcknowledgeIntent { known } => {
-                self.factory()
-                    .acknowledge_intent(self.case_intent(known), CLOSE_ACKNOWLEDGED_AT_MS)
-                    .await?;
-                "acknowledged".to_string()
+                let claim = self.intent_claim(known).await?;
+                match self
+                    .factory()
+                    .acknowledge_intent(self.case_intent(known), &claim, CLOSE_ACKNOWLEDGED_AT_MS)
+                    .await?
+                {
+                    lash_core::store::IntentSettle::Held(_) => "acknowledged".to_string(),
+                    lash_core::store::IntentSettle::ClaimLost => "claim_lost".to_string(),
+                }
             }
             SurfaceMethod::RecordRootPark => {
                 let park = store
@@ -1746,6 +1763,36 @@ impl BackendRunner {
         };
         self.surface.answer = Some(answer);
         Ok(None)
+    }
+
+    /// The claim this run holds on the case's close-intent obligation,
+    /// taken on first use; a token no ledger minted for an unknown intent.
+    async fn intent_claim(
+        &mut self,
+        known: bool,
+    ) -> Result<lash_core::store::ClaimToken, lash_core::StoreError> {
+        if !known {
+            return Ok(lash_core::store::ClaimToken::new(
+                "differential-unknown-claim",
+            ));
+        }
+        if let Some(claim) = &self.surface.intent_claim {
+            return Ok(claim.clone());
+        }
+        let obligation = self
+            .factory()
+            .load_intent(self.case_intent(true))
+            .await?
+            .and_then(|intent| intent.obligation)
+            .ok_or_else(|| StoreError::Backend("the close armed no obligation".into()))?;
+        let claimed = self
+            .lifecycle_backend
+            .obligation_ledger(lash_core::store::ObligationKind::ControlIntent)
+            .claim(&obligation, CLOSE_CLAIMED_AT_MS, 3_600_000)
+            .await?
+            .ok_or_else(|| StoreError::Backend("the close's obligation is not due".into()))?;
+        self.surface.intent_claim = Some(claimed.token.clone());
+        Ok(claimed.token)
     }
 
     /// The case's close intent, or an id no ledger minted.

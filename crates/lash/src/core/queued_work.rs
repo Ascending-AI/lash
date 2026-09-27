@@ -81,16 +81,33 @@ impl NativeQueuedWorkRunHandle {
     }
 
     /// Every obligation kind's relay this tick claims due rows for.
-    async fn relays(&self) -> Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> {
+    async fn relays(
+        &self,
+        work: &Arc<dyn lash_core::SessionWorkEngine>,
+    ) -> Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> {
+        let backend = self.config.env.core.backend();
         let mut relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
             Vec::new();
-        if let Some(relay) = lash_core::runtime::drive::scope_close_relay(
-            self.config.env.core.control.scope_close_obligations.clone(),
-            Arc::clone(&self.config.store_factory),
-            Arc::clone(&self.config.env.core.control.scope_close),
-        ) {
-            relays.push(Arc::new(relay));
-        }
+        let scope_close: Option<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
+            lash_core::runtime::drive::scope_close_relay(
+                self.config.env.core.control.scope_close_obligations.clone(),
+                Arc::clone(&self.config.store_factory),
+                Arc::clone(&self.config.env.core.control.scope_close),
+            )
+            .map(|relay| {
+                Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
+            });
+        relays.push(Arc::new(
+            lash_core::runtime::drive::ControlIntentRelay::new(
+                backend.obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
+                Arc::clone(&self.config.store_factory),
+                Arc::clone(work),
+                Arc::clone(&self.config.env.core.control.scope_close),
+                Arc::clone(&self.config.env.core.clock),
+            )
+            .with_scope_close(scope_close.clone()),
+        ));
+        relays.extend(scope_close);
         if let Some(source) = self.administration.get()
             && let Some(administration) = source.administration().await
         {
@@ -406,7 +423,7 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         let duties = self.config.recovery.duties().await;
         // The process-terminal relay needs this tick's process port, so it
         // joins the relays the core registers without one.
-        let mut relays = self.relays().await;
+        let mut relays = self.relays(&work).await;
         if let (Some(registry), Some(port)) =
             (self.config.env.process_registry(), process_port.as_ref())
         {

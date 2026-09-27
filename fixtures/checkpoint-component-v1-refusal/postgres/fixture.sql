@@ -130,7 +130,6 @@ CREATE TABLE lash_durable_read_fixture.lash_control_intents (
     kind_json text NOT NULL,
     state text NOT NULL,
     state_json text NOT NULL,
-    attempts bigint NOT NULL,
     created_at_ms bigint NOT NULL,
     engine_ref text,
     obligation_id text,
@@ -2224,13 +2223,6 @@ CREATE UNIQUE INDEX idx_lash_control_intents_obligation_id ON lash_durable_read_
 --
 
 CREATE INDEX idx_lash_control_intents_obligation_stalled ON lash_durable_read_fixture.lash_control_intents USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
-
-
---
--- Name: idx_lash_control_intents_open; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_control_intents_open ON lash_durable_read_fixture.lash_control_intents USING btree (intent_id) WHERE (state = ANY (ARRAY['pending'::text, 'failed_retryable'::text]));
 
 
 --

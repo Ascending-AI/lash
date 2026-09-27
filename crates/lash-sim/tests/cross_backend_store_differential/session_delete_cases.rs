@@ -85,8 +85,24 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         "close application applies -> {}",
         matches!(application, IntentApplication::Apply(_))
     ));
+    // The acknowledgement is claim-fenced: the relay's claim on the close's
+    // `ControlIntent` obligation.
+    let claim = stores
+        .obligation_ledger(ObligationKind::ControlIntent)
+        .claim(
+            intent
+                .obligation
+                .as_ref()
+                .expect("the close armed its obligation"),
+            T0 + 1,
+            60_000,
+        )
+        .await
+        .expect("claim the close's obligation")
+        .expect("the close's obligation is due")
+        .token;
     factory
-        .acknowledge_intent(intent.id, T0 + 2)
+        .acknowledge_intent(intent.id, &claim, T0 + 2)
         .await
         .expect("acknowledge the close");
     let armed = ledger
@@ -99,7 +115,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         armed.state
     ));
     factory
-        .acknowledge_intent(intent.id, T0 + 3)
+        .acknowledge_intent(intent.id, &claim, T0 + 3)
         .await
         .expect("acknowledge again");
     let kept = ledger

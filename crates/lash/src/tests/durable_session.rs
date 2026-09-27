@@ -143,14 +143,6 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
         self.inner.root_terminal(session_id, root).await
     }
 
-    async fn list_open_control_intents(
-        &self,
-        after: Option<lash_core::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<Vec<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.list_open_control_intents(after, limit).await
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: lash_core::store::ParkFeedCursor,
@@ -180,20 +172,22 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
     async fn acknowledge_intent(
         &self,
         id: lash_core::store::ControlIntentId,
+        claim: &lash_core::store::ClaimToken,
         at_ms: u64,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        self.inner.acknowledge_intent(id, at_ms).await
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
+        self.inner.acknowledge_intent(id, claim, at_ms).await
     }
 
     async fn record_intent_failure(
         &self,
         id: lash_core::store::ControlIntentId,
+        claim: &lash_core::store::ClaimToken,
         error: &str,
         retryable: bool,
         at_ms: u64,
-    ) -> std::result::Result<lash_core::store::ControlIntent, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
         self.inner
-            .record_intent_failure(id, error, retryable, at_ms)
+            .record_intent_failure(id, claim, error, retryable, at_ms)
             .await
     }
 
@@ -1204,14 +1198,6 @@ impl SessionStoreFactory for NoByIdLookupFactory {
         self.inner.root_terminal(session_id, root).await
     }
 
-    async fn list_open_control_intents(
-        &self,
-        after: Option<lash_core::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<Vec<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.list_open_control_intents(after, limit).await
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: lash_core::store::ParkFeedCursor,
@@ -1241,20 +1227,22 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
     async fn acknowledge_intent(
         &self,
         id: lash_core::store::ControlIntentId,
+        claim: &lash_core::store::ClaimToken,
         at_ms: u64,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        self.inner.acknowledge_intent(id, at_ms).await
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
+        self.inner.acknowledge_intent(id, claim, at_ms).await
     }
 
     async fn record_intent_failure(
         &self,
         id: lash_core::store::ControlIntentId,
+        claim: &lash_core::store::ClaimToken,
         error: &str,
         retryable: bool,
         at_ms: u64,
-    ) -> std::result::Result<lash_core::store::ControlIntent, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
         self.inner
-            .record_intent_failure(id, error, retryable, at_ms)
+            .record_intent_failure(id, claim, error, retryable, at_ms)
             .await
     }
 

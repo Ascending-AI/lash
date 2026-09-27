@@ -6,7 +6,8 @@ Accepted 2026-09-27 (FIG-3600 S8). It records Sam's S8 rulings of that date.
 **Not yet implemented** beyond the foundation (§1's vocabulary, relay loop and
 leader lease). The per-ledger slices under *Slice plan* build the rest, and
 each slice updates this status when it lands. Landed: S8-D, the two-phase
-session delete (§4); S8-S, scope close on the root row (§3, §6).
+session delete (§4); S8-S, scope close on the root row (§3, §6); S8-C,
+control intents.
 
 **S8-T (process terminal publication) is implemented.** Every transaction
 that makes a process terminal arms the row's `ProcessTerminal` obligation;
@@ -369,7 +370,12 @@ and is not a second ingress.
 | `ProcessTerminal` | `processes` | the terminal transaction | the engine's terminal promise resolved | nothing (S-14 had no owner) |
 
 At the ceiling an intent stalls and is written `Failed{retryable: false}`,
-which unwedges admission; re-arm reopens it. A parent-end plan records each
+which unwedges admission; re-arm reopens it. The intent's acknowledgement
+and its failure compare the obligation's claim token, so a delivery whose
+claim lapsed and was retaken never settles the intent. A cancel's or fork's
+delivery does not wait on its root's scope close: a child whose cancel keeps
+failing is the scope close's to retry, never a reason to hold the session's
+verb open. A parent-end plan records each
 child that refused, so one unreachable child stalls its plan, never the rows
 behind it. On SQLite `parent_end_plans` and `processes` live in the registry
 file: they are armed in that file's transaction, not the catalog's.

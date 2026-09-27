@@ -46,7 +46,7 @@ mod root;
 pub mod scope_close;
 mod turn_config;
 
-pub use control::apply_control_intent;
+pub use control::{ControlIntentRelay, intent_drive_request};
 pub use park::StoreParkRecovery;
 pub use reconcile::{
     DrainHandOverPass, ReconcileParts, ReconcileProcesses, drain_hand_over_slot,

@@ -1,5 +1,6 @@
 //! Operator verbs over the durable control-intent ledger.
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use lash_core::store::{
     ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState, ParkId,
@@ -221,15 +222,15 @@ impl ParkedWork {
                 self.clock.timestamp_ms(),
             )
             .await?;
-        let state = lash_core::runtime::drive::apply_control_intent(
-            self.store_factory.as_ref(),
-            self.work.control().as_ref(),
-            self.work.as_ref(),
-            self.scopes.as_ref(),
-            self.scope_close_obligations.as_deref(),
-            &intent,
-            self.clock.as_ref(),
+        let state = lash_core::runtime::drive::ControlIntentRelay::new(
+            Arc::clone(&self.intents),
+            Arc::clone(&self.store_factory),
+            Arc::clone(&self.work),
+            Arc::clone(&self.scopes),
+            Arc::clone(&self.clock),
         )
+        .with_scope_close(self.scope_close_obligations.clone())
+        .deliver_intent(&intent)
         .await?;
         Ok((
             intent,

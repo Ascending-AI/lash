@@ -576,18 +576,6 @@ pub trait SessionStoreFactory:
         })
     }
 
-    /// List the deployment's open control intents (pending, or failed and
-    /// retryable) strictly after `after`, in id order, at most `limit`
-    /// (FIG-3600 S7, ADR 0104 O4): what reconciliation re-applies, including
-    /// a deleted session's `CloseSession`.
-    ///
-    /// Required, with no default, like [`Self::root_terminal`].
-    async fn list_open_control_intents(
-        &self,
-        after: Option<crate::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::store::ControlIntent>, crate::StoreError>;
-
     /// Open an existing session when only its durable routing identity is
     /// known, without creating one.
     ///

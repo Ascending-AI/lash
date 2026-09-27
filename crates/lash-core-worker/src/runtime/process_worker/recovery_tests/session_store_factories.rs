@@ -107,14 +107,6 @@ impl SessionStoreFactory for NoByIdLookupSessionStoreFactory {
         self.inner.root_terminal(session_id, root).await
     }
 
-    async fn list_open_control_intents(
-        &self,
-        after: Option<crate::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<Vec<crate::store::ControlIntent>, crate::StoreError> {
-        self.inner.list_open_control_intents(after, limit).await
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: crate::store::ParkFeedCursor,
@@ -144,20 +136,22 @@ impl crate::store::ControlIntentStore for NoByIdLookupSessionStoreFactory {
     async fn acknowledge_intent(
         &self,
         id: crate::store::ControlIntentId,
+        claim: &crate::store::ClaimToken,
         at_ms: u64,
-    ) -> std::result::Result<(), crate::StoreError> {
-        self.inner.acknowledge_intent(id, at_ms).await
+    ) -> std::result::Result<crate::store::IntentSettle, crate::StoreError> {
+        self.inner.acknowledge_intent(id, claim, at_ms).await
     }
 
     async fn record_intent_failure(
         &self,
         id: crate::store::ControlIntentId,
+        claim: &crate::store::ClaimToken,
         error: &str,
         retryable: bool,
         at_ms: u64,
-    ) -> std::result::Result<crate::store::ControlIntent, crate::StoreError> {
+    ) -> std::result::Result<crate::store::IntentSettle, crate::StoreError> {
         self.inner
-            .record_intent_failure(id, error, retryable, at_ms)
+            .record_intent_failure(id, claim, error, retryable, at_ms)
             .await
     }
 

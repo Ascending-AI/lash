@@ -43,6 +43,9 @@ pub struct ParkedWork {
     /// obligation's immediate delivery.
     pub(crate) scope_close_obligations:
         Option<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>>,
+    /// The store set's `ControlIntent` obligation ledger: a verb's engine
+    /// half is delivered through it (ADR 0109).
+    pub(crate) intents: Arc<dyn lash_core::store::ObligationLedger>,
 }
 
 impl std::fmt::Debug for ParkedWork {

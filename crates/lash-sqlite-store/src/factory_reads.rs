@@ -163,28 +163,4 @@ impl SqliteSessionStoreFactory {
         .await
         .map_err(sqlite_error)?
     }
-
-    /// [`SessionStoreFactory::list_open_control_intents`] over the durable
-    /// core.
-    pub(crate) async fn read_open_control_intents(
-        &self,
-        after: Option<lash_core_execution::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
-        if !self.core.target().exists() {
-            return Ok(Vec::new());
-        }
-        let conn = SqliteConnection::open_readonly(self.core.target())
-            .await
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        conn.read(move |conn| {
-            Ok(crate::session_roots::open_control_intents_conn(
-                conn,
-                after,
-                limit.get(),
-            ))
-        })
-        .await
-        .map_err(sqlite_error)?
-    }
 }

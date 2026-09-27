@@ -590,14 +590,6 @@ impl SessionStoreFactory for CrashSessionFactory {
         self.inner.list_reconcilable_sessions(after, limit).await
     }
 
-    async fn list_open_control_intents(
-        &self,
-        after: Option<lash_core::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> StoreResult<Vec<lash_core::store::ControlIntent>> {
-        self.inner.list_open_control_intents(after, limit).await
-    }
-
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
@@ -702,8 +694,9 @@ impl lash_core::store::ControlIntentStore for CrashSessionFactory {
     async fn acknowledge_intent(
         &self,
         id: lash_core::store::ControlIntentId,
+        claim: &lash_core::store::ClaimToken,
         at_ms: u64,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<lash_core::store::IntentSettle> {
         match self
             .faults
             .take(HostSite::AcknowledgeIntentBefore, &id.to_string())
@@ -712,19 +705,20 @@ impl lash_core::store::ControlIntentStore for CrashSessionFactory {
             Some(effect) => Err(lash_core::StoreError::Backend(format!(
                 "crash matrix: {effect:?} at the intent acknowledgement"
             ))),
-            None => self.inner.acknowledge_intent(id, at_ms).await,
+            None => self.inner.acknowledge_intent(id, claim, at_ms).await,
         }
     }
 
     async fn record_intent_failure(
         &self,
         id: lash_core::store::ControlIntentId,
+        claim: &lash_core::store::ClaimToken,
         error: &str,
         retryable: bool,
         at_ms: u64,
-    ) -> StoreResult<lash_core::store::ControlIntent> {
+    ) -> StoreResult<lash_core::store::IntentSettle> {
         self.inner
-            .record_intent_failure(id, error, retryable, at_ms)
+            .record_intent_failure(id, claim, error, retryable, at_ms)
             .await
     }
 

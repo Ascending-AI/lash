@@ -202,6 +202,20 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
             let at_ms = world.now_ms();
             let _ = delete_session(&world, &session).await;
             world.trip().fire("fault:release-root-retryable-forever");
+            // A release that fails on every attempt never ends the held
+            // root's execution, and the session's scope close follows the
+            // release inside the engine half: what the ceiling owes is the
+            // typed stall, surfaced for an operator, never another attempt.
+            // A stalled close arms no physical delete (ADR 0109 §4), so the
+            // input its root claimed stays claimed: the ingress probe counts
+            // it in flight until S8-I's ingress ledger types it as held by
+            // the stalled close. The cell is ignored for S8-I until then.
+            expected.closed_scopes.clear();
+            expected.closed_sessions.clear();
+            expected.custom.push((
+                "control_intent_ceiling",
+                stalled_at_ceiling(session.clone()),
+            ));
             Some(at_ms)
         }
         (seam, other) => return Err(format!("{seam:?} has no {other:?} cell")),
@@ -211,5 +225,78 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
         notes: Vec::new(),
         expected,
         origin_ms,
+    })
+}
+
+/// Every control intent of `session` failed for good and its obligation
+/// stalled typed at exactly the attempt ceiling: the ceiling ended the
+/// retries, never an earlier refusal.
+fn stalled_at_ceiling(session: SessionId) -> crate::crash_matrix::invariants::CustomCheck {
+    Arc::new(move |world: &CrashWorld| {
+        let session = session.clone();
+        Box::pin(async move {
+            let intents = match world
+                .backend()
+                .session_store_factory()
+                .list_control_intents(None, std::num::NonZeroUsize::MIN.saturating_add(63))
+                .await
+            {
+                Ok(intents) => intents,
+                Err(error) => return vec![format!("list control intents: {error}")],
+            };
+            let ledger = world
+                .backend()
+                .obligation_ledger(lash_core::store::ObligationKind::ControlIntent);
+            let page = std::num::NonZeroUsize::MIN.saturating_add(63);
+            let stalled = match ledger.list_stalled(None, page).await {
+                Ok(stalled) => stalled,
+                Err(error) => return vec![format!("list stalled control intents: {error}")],
+            };
+            let ceiling = lash_core::runtime::drive::relay::RelayPolicy::default()
+                .attempt_ceiling
+                .get();
+            let mut violations = Vec::new();
+            let mut seen = 0_usize;
+            for intent in intents
+                .into_iter()
+                .filter(|intent| intent.session_id == session)
+            {
+                seen += 1;
+                if !matches!(
+                    intent.state,
+                    lash_core::store::ControlIntentState::Failed {
+                        retryable: false,
+                        ..
+                    }
+                ) {
+                    violations.push(format!(
+                        "intent {} is {:?}, not failed for good",
+                        intent.id, intent.state
+                    ));
+                }
+                let Some(obligation) = intent.obligation.as_ref() else {
+                    violations.push(format!("intent {} has no obligation", intent.id));
+                    continue;
+                };
+                match stalled.iter().find(|entry| &entry.id == obligation) {
+                    Some(entry)
+                        if entry.reason == lash_core::store::StallReason::AttemptsExhausted
+                            && entry.attempts == ceiling => {}
+                    Some(entry) => violations.push(format!(
+                        "intent {} stalled {:?} after {} attempt(s), not at the ceiling of {ceiling}",
+                        intent.id, entry.reason, entry.attempts
+                    )),
+                    None => violations.push(format!(
+                        "intent {}'s obligation is not stalled: {:?}",
+                        intent.id,
+                        ledger.state(obligation).await
+                    )),
+                }
+            }
+            if seen == 0 {
+                violations.push(format!("`{session}` recorded no control intent"));
+            }
+            violations
+        })
     })
 }

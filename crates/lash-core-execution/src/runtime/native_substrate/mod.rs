@@ -36,6 +36,24 @@ pub trait SessionWorkEngine: Send + Sync {
     /// is handed to the engine, not once the drive ran.
     fn schedule_drive(&self, session: &SessionId, request: crate::engine::DriveRequestId);
 
+    /// Ask the engine to drive `session` for `request` and answer once the
+    /// engine accepted the ask (ADR 0109): the delivery of an obligation
+    /// whose effect is a drive, never fire-and-forget. Idempotent under a
+    /// repeated `request`: the engine dedupes it as
+    /// [`schedule_drive`](Self::schedule_drive) does. A refusal is the
+    /// obligation's attempt failing; its relay retries it.
+    ///
+    /// The default is an engine that drives in this process: the ask is
+    /// accepted once it is scheduled.
+    async fn request_drive(
+        &self,
+        session: &SessionId,
+        request: crate::engine::DriveRequestId,
+    ) -> Result<(), crate::engine::EngineRefusal> {
+        self.schedule_drive(session, request);
+        Ok(())
+    }
+
     /// Install the core's drive: get-or-init. One engine can back several
     /// cores, and exactly one driver serves it, so a caller hands in a
     /// candidate and uses whatever comes back (the precedent is

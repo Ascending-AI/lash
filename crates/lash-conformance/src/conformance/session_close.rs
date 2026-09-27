@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use lash_core::engine::{NoScopeClose, ScopeCloseSink};
 use lash_core::store::{
     AdmissionId, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    DriveEpochSeal, RootStartNonce, RootTerminalCause, RootTerminalKind, RootTerminalWrite,
-    TurnCommitId, TurnParkWrite,
+    DriveEpochSeal, ObligationKind, ObligationState, RootStartNonce, RootTerminalCause,
+    RootTerminalKind, RootTerminalWrite, TurnCommitId, TurnParkWrite,
 };
 use lash_core::{
     NoSessionWork, SessionAdministration, SessionDeleteContext, SessionDeleteExecution, SessionId,
@@ -99,11 +99,28 @@ pub(super) fn administration(
                     scopes,
                 ),
             )),
+            intents: stores.obligation_ledger(ObligationKind::ControlIntent),
             clock: stores.clock(),
             deletes: lash_core::session_delete::SessionDeleteStores::of_store_set(Arc::clone(
                 stores,
             )),
         },
+    )
+}
+
+/// The `ControlIntent` relay a deployment's reconcile tick runs, over the
+/// store set's ledger and `scopes`, on `clock`.
+fn intent_relay(
+    stores: &Arc<dyn StoreSet>,
+    scopes: Arc<dyn ScopeCloseSink>,
+    clock: Arc<dyn lash_core::Clock>,
+) -> lash_core::drive::ControlIntentRelay {
+    lash_core::drive::ControlIntentRelay::new(
+        stores.obligation_ledger(ObligationKind::ControlIntent),
+        stores.session_store_factory(),
+        Arc::new(NoSessionWork::new()),
+        scopes,
+        clock,
     )
 }
 
@@ -386,7 +403,7 @@ pub async fn a_refused_deletion_closes_nothing(
     ));
     assert!(
         factory
-            .list_open_control_intents(None, std::num::NonZeroUsize::new(10).expect("positive"))
+            .list_control_intents(None, std::num::NonZeroUsize::new(10).expect("positive"))
             .await
             .expect("intent list")
             .is_empty()
@@ -400,8 +417,9 @@ pub async fn a_refused_deletion_closes_nothing(
 
 /// L-D3: a retried deletion replays its recorded close and answers the same
 /// intent; an engine half that failed is retained on the intent, retryable,
-/// and still finishes after the session is deleted; the intent then answers
-/// the deleted session's roots as its tombstone.
+/// its obligation due again, and its relay still finishes it after the
+/// session is deleted; the intent then answers the deleted session's roots
+/// as its tombstone.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -416,7 +434,8 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
     let factory = stores.session_store_factory();
     let sink = CloseSink::new(Arc::clone(&factory), 2);
     let admin = administration(host, &stores, sink.clone());
-    let retained = |intent: Option<ControlIntent>, attempts: u32| {
+    let intents = stores.obligation_ledger(ObligationKind::ControlIntent);
+    let retained = async |intent: Option<ControlIntent>, calls: usize| {
         let intent = intent.expect("the close intent is kept");
         assert!(
             matches!(
@@ -428,17 +447,25 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
             ),
             "a failed engine half is retained, retryable: {intent:?}"
         );
-        assert_eq!(intent.attempts, attempts);
+        assert_eq!(
+            intents
+                .state(intent.obligation.as_ref().expect("armed by the close"))
+                .await
+                .expect("obligation state"),
+            Some(ObligationState::Due),
+            "its obligation is handed back for its next attempt"
+        );
+        assert_eq!(sink.calls().len(), calls, "one engine half per attempt");
     };
     let first = close(&admin, &id, runner.as_ref()).await;
-    retained(factory.load_intent(first.id).await.expect("load intent"), 1);
+    retained(factory.load_intent(first.id).await.expect("load intent"), 1).await;
     let again = close(&admin, &id, runner.as_ref()).await;
     assert_eq!(
         again.id, first.id,
         "a retried deletion answers the same close"
     );
     assert_eq!(again.kind, first.kind);
-    retained(factory.load_intent(first.id).await.expect("load intent"), 2);
+    retained(factory.load_intent(first.id).await.expect("load intent"), 2).await;
     assert_eq!(
         factory
             .begin_session_close(&id, 999)
@@ -452,18 +479,8 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
         .delete_session(&id)
         .await
         .expect("delete after close");
-    let (work, clock) = (NoSessionWork::new(), stores.clock());
-    let apply = || {
-        lash_core::drive::apply_control_intent(
-            factory.as_ref(),
-            &lash_core::engine::NoEngineControl,
-            &work,
-            sink.as_ref(),
-            None,
-            &first,
-            clock.as_ref(),
-        )
-    };
+    let relay = intent_relay(&stores, sink.clone(), stores.clock());
+    let apply = || relay.deliver_intent(&first);
     assert!(matches!(
         apply()
             .await
@@ -649,18 +666,8 @@ pub async fn session_delete_writes_exactly_one_close_row_via_its_intent(
         "the deletion itself writes no close row: the intent is its one owner"
     );
 
-    let (work, clock) = (NoSessionWork::new(), stores.clock());
-    let apply = || {
-        lash_core::drive::apply_control_intent(
-            factory.as_ref(),
-            &lash_core::engine::NoEngineControl,
-            &work,
-            sink.as_ref(),
-            None,
-            &intent,
-            clock.as_ref(),
-        )
-    };
+    let relay = intent_relay(&stores, sink.clone(), stores.clock());
+    let apply = || relay.deliver_intent(&intent);
     assert!(matches!(
         apply().await.expect("re-apply the retained close"),
         ControlIntentState::Acknowledged { .. }
@@ -722,10 +729,12 @@ impl ScopeCloseSink for CrashingRegistryClose {
 /// roots are answered from (ADR 0108 §5).
 ///
 /// The crash lands inside the close's engine half: the store half already
-/// ended the session's roots and stopped it admitting. The open intent is
-/// listed for reconciliation, and the tier's recovery — the engine's
-/// redelivery of its `SessionDelete` handler, or a retried deletion in
-/// process — answers the same intent, closes the session's scope and
+/// ended the session's roots and stopped it admitting, and the crashed
+/// delivery's claim on the intent's obligation is left to lapse. The tier's
+/// recovery — the engine's redelivery of its `SessionDelete` handler, or a
+/// retried deletion in process — answers the same intent, and the
+/// obligation's relay retakes the lapsed claim (ADR 0109 §1.8: by
+/// `claimed_at + claim_ttl + T`), closes the session's scope and
 /// acknowledges it.
 #[expect(
     clippy::expect_used,
@@ -757,12 +766,19 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
     close_until_crash(&admin, &id, runner.as_ref(), &crash).await;
     assert!(crash.has_fired(), "the close died inside its engine half");
     let open = factory
-        .list_open_control_intents(None, std::num::NonZeroUsize::new(64).expect("positive"))
+        .list_control_intents(None, std::num::NonZeroUsize::new(64).expect("positive"))
         .await
-        .expect("list the open intents")
+        .expect("list the intents")
         .into_iter()
         .find(|intent| intent.session_id == id)
-        .expect("the interrupted close is open and listed for reconciliation");
+        .expect("the interrupted close is kept");
+    let intents = stores.obligation_ledger(ObligationKind::ControlIntent);
+    let obligation = open.obligation.clone().expect("armed by the close");
+    assert_eq!(
+        intents.state(&obligation).await.expect("obligation state"),
+        Some(ObligationState::Claimed),
+        "the crashed delivery's claim holds the obligation until it lapses"
+    );
     assert_eq!(
         open.kind,
         ControlIntentKind::CloseSession {
@@ -784,11 +800,38 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
         "the crash took the scope close"
     );
 
-    // The tier's recovery finishes the same close.
+    // The tier's recovery answers the same close, and the relay retakes
+    // its lapsed claim and finishes it.
     let recovered = close(&admin, &id, runner.as_ref()).await;
     assert_eq!(
         recovered.id, open.id,
         "recovery answers the interrupted close"
+    );
+    let policy = lash_core::drive::relay::RelayPolicy::default();
+    let later: Arc<dyn lash_core::Clock> =
+        super::root_control::ShiftedClock::new(stores.clock(), policy.claim_ttl_ms + 10_000);
+    let relay = intent_relay(
+        &stores,
+        Arc::new(crate::RegistryScopeClose::new(
+            Arc::clone(&registry),
+            stores.clock(),
+        )),
+        Arc::clone(&later),
+    );
+    let pass = lash_core::drive::relay::relay_due(
+        &relay,
+        later.as_ref(),
+        std::num::NonZeroUsize::new(64).expect("positive"),
+    )
+    .await
+    .expect("relay pass");
+    assert!(
+        pass.delivered >= 1,
+        "the relay retook the lapsed claim: {pass:?}"
+    );
+    assert_eq!(
+        intents.state(&obligation).await.expect("obligation state"),
+        Some(ObligationState::Delivered)
     );
     assert!(
         matches!(
@@ -801,15 +844,6 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
             ControlIntentState::Acknowledged { .. }
         ),
         "recovery acknowledged the close"
-    );
-    assert!(
-        factory
-            .list_open_control_intents(None, std::num::NonZeroUsize::new(64).expect("positive"))
-            .await
-            .expect("list the open intents")
-            .iter()
-            .all(|intent| intent.id != open.id),
-        "an acknowledged close is no longer open"
     );
     assert!(
         close_row(registry.as_ref(), &session_scope).await.is_some(),

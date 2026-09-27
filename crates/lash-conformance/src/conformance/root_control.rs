@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 
 struct Control {
     fail: AtomicBool,
+    /// Releases that fail retryably before one succeeds.
+    fail_releases: AtomicUsize,
     permanent: AtomicBool,
     /// The engine resumes the root, then its reply is lost: the admin call
     /// timed out after the server acted.
@@ -53,7 +55,14 @@ impl SessionControlEngine for Control {
                 message: "permanent engine refusal".into(),
             });
         }
-        if self.fail.swap(false, Ordering::SeqCst) {
+        if self.fail.swap(false, Ordering::SeqCst)
+            || self
+                .fail_releases
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.checked_sub(1)
+                })
+                .is_ok()
+        {
             return Err(EngineRefusal::Retryable("release interrupted".into()));
         }
         self.events.lock().expect("events").push("release");
@@ -77,10 +86,32 @@ impl StalledExecution for Execution {
         Ok(self.stopped)
     }
 }
-struct Work(Arc<Control>);
+struct Work(Arc<Control>, AtomicUsize);
+#[async_trait::async_trait]
 impl crate::SessionWorkEngine for Work {
     fn schedule_drive(&self, _: &SessionId, _: DriveRequestId) {
         self.0.events.lock().expect("events").push("schedule");
+    }
+    /// Refuses as many asks as the fixture armed, then accepts each.
+    async fn request_drive(
+        &self,
+        session: &SessionId,
+        request: DriveRequestId,
+    ) -> Result<(), EngineRefusal> {
+        if self
+            .1
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok()
+        {
+            self.0.events.lock().expect("events").push("drive-refused");
+            return Err(EngineRefusal::Retryable(
+                "the drive ask was not accepted".into(),
+            ));
+        }
+        self.schedule_drive(session, request);
+        Ok(())
     }
     fn install_session_driver(
         &self,
@@ -122,10 +153,48 @@ impl ScopeCloseSink for Close {
         panic!("root verb cannot close session")
     }
 }
+/// A clock `offset_ms` ahead of `inner`: a reconcile tick run after an
+/// obligation's backoff has elapsed.
+#[derive(Debug)]
+pub(super) struct ShiftedClock {
+    pub(super) inner: Arc<dyn crate::Clock>,
+    pub(super) offset_ms: std::sync::atomic::AtomicU64,
+}
+impl ShiftedClock {
+    pub(super) fn new(inner: Arc<dyn crate::Clock>, offset_ms: u64) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            offset_ms: std::sync::atomic::AtomicU64::new(offset_ms),
+        })
+    }
+}
+#[async_trait::async_trait]
+impl crate::Clock for ShiftedClock {
+    fn now(&self) -> std::time::Instant {
+        self.inner.now()
+    }
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        self.inner.timestamp_datetime()
+            + chrono::Duration::milliseconds(
+                i64::try_from(self.offset_ms.load(Ordering::SeqCst)).expect("offset"),
+            )
+    }
+    async fn sleep(&self, duration: std::time::Duration) {
+        self.inner.sleep(duration).await;
+    }
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        self.inner.sleep_until(deadline).await;
+    }
+}
+/// A reconcile tick's clock: an hour on, past every backoff a law's
+/// failed attempts left.
+const LATER_MS: u64 = 3_600_000;
 struct Fixture {
     parts: DriveParts,
     factory: Arc<dyn crate::SessionStoreFactory>,
     stores: Arc<dyn crate::StoreSet>,
+    /// The store set's `ControlIntent` obligation ledger.
+    intents: Arc<dyn ObligationLedger>,
     root: TurnId,
     input: crate::InputId,
     park: TurnPark,
@@ -192,6 +261,7 @@ impl Fixture {
             parts,
             factory: stores.session_store_factory(),
             stores: stores.clone(),
+            intents: stores.obligation_ledger(ObligationKind::ControlIntent),
             root,
             input,
             park,
@@ -210,21 +280,25 @@ impl Fixture {
             )
             .await
     }
-    fn control(&self, fail_release: bool, fail_close: bool) -> (Work, Close) {
+    fn control(&self, fail_release: bool, fail_close: bool) -> (Arc<Work>, Arc<Close>) {
         let events = Arc::new(Mutex::new(Vec::new()));
         (
-            Work(Arc::new(Control {
-                fail: AtomicBool::new(fail_release),
-                permanent: AtomicBool::new(false),
-                lose_resume_reply: AtomicBool::new(false),
-                cancel_on_resume: Mutex::new(None),
-                events: events.clone(),
-            })),
-            Close {
+            Arc::new(Work(
+                Arc::new(Control {
+                    fail: AtomicBool::new(fail_release),
+                    fail_releases: AtomicUsize::new(0),
+                    permanent: AtomicBool::new(false),
+                    lose_resume_reply: AtomicBool::new(false),
+                    cancel_on_resume: Mutex::new(None),
+                    events: events.clone(),
+                }),
+                AtomicUsize::new(0),
+            )),
+            Arc::new(Close {
                 store: self.parts.store.clone(),
                 fail: Arc::new(AtomicBool::new(fail_close)),
                 events,
-            },
+            }),
         )
     }
 
@@ -243,35 +317,51 @@ impl Fixture {
             ..lash_core::runtime::drive::relay::RelayPolicy::default()
         })
     }
+    /// The `ControlIntent` relay over this fixture's ledger, engine and
+    /// scope owner, on `clock`.
+    fn relay(
+        &self,
+        work: &Arc<Work>,
+        close: &Arc<Close>,
+        clock: Arc<dyn crate::Clock>,
+    ) -> lash_core::runtime::drive::ControlIntentRelay {
+        lash_core::runtime::drive::ControlIntentRelay::new(
+            Arc::clone(&self.intents),
+            Arc::clone(&self.factory),
+            Arc::clone(work) as Arc<dyn crate::SessionWorkEngine>,
+            Arc::clone(close) as Arc<dyn ScopeCloseSink>,
+            clock,
+        )
+        .with_scope_close(Some(Arc::new(self.scope_close_relay(close))))
+    }
+    /// The verb's own immediate delivery of `intent`'s obligation.
     async fn apply(
         &self,
-        work: &Work,
-        close: &Close,
+        work: &Arc<Work>,
+        close: &Arc<Close>,
         intent: &ControlIntent,
     ) -> ControlIntentState {
-        let relay = self.scope_close_relay(close);
-        lash_core::runtime::drive::apply_control_intent(
-            self.factory.as_ref(),
-            work.0.as_ref(),
-            work,
-            close,
-            Some(&relay),
-            intent,
-            self.parts.host.clock.as_ref(),
-        )
-        .await
-        .expect("apply intent")
+        self.relay(work, close, Arc::clone(&self.parts.host.clock))
+            .deliver_intent(intent)
+            .await
+            .expect("deliver intent")
     }
-    async fn reconcile(&self, work: &Work, close: &Close, tick: &str) -> ReconcileTick {
-        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
-            vec![Arc::new(self.scope_close_relay(close))];
+    /// One reconcile tick an hour on, with the `ControlIntent` relay
+    /// claiming its due obligations.
+    async fn reconcile(&self, work: &Arc<Work>, close: &Arc<Close>, tick: &str) -> ReconcileTick {
+        let later: Arc<dyn crate::Clock> =
+            ShiftedClock::new(Arc::clone(&self.parts.host.clock), LATER_MS);
+        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> = vec![
+            Arc::new(self.relay(work, close, Arc::clone(&later))),
+            Arc::new(self.scope_close_relay(close)),
+        ];
         lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: self.factory.as_ref(),
-                work,
-                scopes: close,
+                work: work.as_ref(),
+                scopes: close.as_ref(),
                 processes: None,
-                clock: self.parts.host.clock.as_ref(),
+                clock: later.as_ref(),
                 duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
                 relays: &relays,
             },
@@ -280,6 +370,21 @@ impl Fixture {
             tick,
         )
         .await
+    }
+    /// The relay's pass over the `ControlIntent` due index in `tick`.
+    fn intent_pass(tick: &ReconcileTick) -> RelayPass {
+        tick.obligations
+            .iter()
+            .find(|(kind, _)| *kind == ObligationKind::ControlIntent)
+            .map(|(_, pass)| *pass)
+            .expect("the tick claimed control-intent obligations")
+    }
+    /// Where `intent`'s obligation stands.
+    async fn obligation(&self, intent: &ControlIntent) -> Option<ObligationState> {
+        self.intents
+            .state(intent.obligation.as_ref().expect("armed by its verb"))
+            .await
+            .expect("obligation read")
     }
     async fn park(&self) -> Option<TurnPark> {
         self.parts
@@ -719,10 +824,13 @@ pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    for gap in 0..3 {
+    // Gap 0: the verb's own delivery never ran. Gap 1: it ran and the
+    // engine's release failed. Either way the obligation stays due, and the
+    // relay's due pass completes it.
+    for gap in 0..2 {
         let f = Fixture::new(prefix, &format!("intent-gap-{gap}"), &host, &stores).await;
         let intent = f.verb(RootVerb::Cancel).await.expect("cancel");
-        let (work, close) = f.control(gap == 1, gap == 2);
+        let (work, close) = f.control(gap == 1, false);
         if gap > 0 {
             assert!(matches!(
                 f.apply(&work, &close, &intent).await,
@@ -732,24 +840,14 @@ pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
                 }
             ));
         }
-        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
-            vec![Arc::new(f.scope_close_relay(&close))];
-        let report = lash_core::runtime::drive::reconcile_once(
-            &lash_core::runtime::drive::ReconcileParts {
-                sessions: f.factory.as_ref(),
-                work: &work,
-                scopes: &close,
-                processes: None,
-                clock: f.parts.host.clock.as_ref(),
-                duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
-                relays: &relays,
-            },
-            &ReconcileCursor::default(),
-            NonZeroUsize::MIN.saturating_add(63),
-            "recover",
-        )
-        .await;
+        assert_eq!(f.obligation(&intent).await, Some(ObligationState::Due));
+        let report = f.reconcile(&work, &close, "recover").await;
         assert!(report.failures.is_empty(), "{:?}", report.failures);
+        assert_eq!(Fixture::intent_pass(&report).delivered, 1);
+        assert_eq!(
+            f.obligation(&intent).await,
+            Some(ObligationState::Delivered)
+        );
         assert!(matches!(
             f.factory
                 .load_intent(intent.id)
@@ -780,13 +878,22 @@ pub async fn engine_refusals_are_retained_and_listed(
             ..
         }
     ));
-    assert!(
-        f.factory
-            .list_open_control_intents(None, NonZeroUsize::MIN)
-            .await
-            .expect("retry list")
-            .is_empty()
-    );
+    // Its obligation stalled `refused`, listed for an operator; nothing
+    // retries it until one re-arms it.
+    assert_eq!(f.obligation(&intent).await, Some(ObligationState::Stalled));
+    let stalled = f
+        .intents
+        .list_stalled(None, NonZeroUsize::MIN.saturating_add(63))
+        .await
+        .expect("stalled list");
+    assert!(stalled.iter().any(|stalled| {
+        Some(&stalled.id) == intent.obligation.as_ref()
+            && stalled.reason == StallReason::Refused
+            && stalled.key
+                == Ok(ObligationKey::ControlIntent {
+                    intent_id: intent.id,
+                })
+    }));
     let retained = f
         .factory
         .list_control_intents(None, NonZeroUsize::MIN)
@@ -799,10 +906,11 @@ pub async fn engine_refusals_are_retained_and_listed(
     // store half ended the root and raised the epoch, so the unreleased
     // execution is fenced, and the session drives the next send.
     assert!(!f.parts.epoch().await.control_pending);
-    // Reconciliation does not retry it, and closes the ended root's scope.
+    // The relay does not retry it, and the scope owner closes the ended
+    // root's scope.
     let report = f.reconcile(&work, &close, "after-refusal").await;
     assert!(report.failures.is_empty(), "{:?}", report.failures);
-    assert!(report.intents.is_empty());
+    assert_eq!(Fixture::intent_pass(&report).claimed, 0);
     assert!(work.0.events.lock().expect("events").contains(&"close"));
     let next = f
         .parts
@@ -1355,14 +1463,31 @@ pub async fn a_parked_session_is_asked_to_drive_only_once_its_park_resolves(
         "a parked session is not asked to drive"
     );
     let cancel = f.verb(RootVerb::Cancel).await.expect("cancel");
-    // The engine half ran and was acknowledged; the drive ask after it was
-    // lost with the process.
-    f.factory
-        .acknowledge_intent(cancel.id, 3)
+    // The engine half ran and was acknowledged under the verb's claim; the
+    // drive ask after it was lost with the process, so the claim lapses
+    // unsettled.
+    let claim = f
+        .intents
+        .claim(cancel.obligation.as_ref().expect("armed"), 3, 0)
         .await
-        .expect("acknowledge");
+        .expect("claim")
+        .expect("due");
+    assert!(matches!(
+        f.factory
+            .acknowledge_intent(cancel.id, &claim.token, 3)
+            .await
+            .expect("acknowledge"),
+        IntentSettle::Held(ControlIntent {
+            state: ControlIntentState::Acknowledged { .. },
+            ..
+        })
+    ));
     let resolved = f.reconcile(&work, &close, "resolved").await;
     assert!(resolved.failures.is_empty(), "{:?}", resolved.failures);
+    // The follow-on drive is the obligation's to deliver: the relay retakes
+    // the lapsed claim and asks for it.
+    assert_eq!(Fixture::intent_pass(&resolved).delivered, 1);
+    assert!(work.0.events.lock().expect("events").contains(&"schedule"));
     assert!(
         resolved.drives.scheduled.contains(&f.parts.session_id),
         "the resolved session's open send is asked again"
@@ -1604,15 +1729,16 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
         }
         None => {}
     }
-    // Reconcile's redrive/park arm settles the lost intent within a tick.
+    // The intent's obligation relay settles the lost intent within a tick.
     let report = f.reconcile(&work, &close, "lost-ack").await;
     assert!(report.failures.is_empty(), "{:?}", report.failures);
+    assert_eq!(Fixture::intent_pass(&report).delivered, 1);
     assert!(
-        report.intents.iter().any(|(id, state)| {
-            *id == intent.id && matches!(state, ControlIntentState::Acknowledged { .. })
-        }),
-        "reconcile settled the lost acknowledgement: {:?}",
-        report.intents
+        matches!(
+            f.intent_state(intent.id).await,
+            ControlIntentState::Acknowledged { .. }
+        ),
+        "the relay settled the lost acknowledgement"
     );
     let _ = settled.send(true);
     // After the tick the queued send is admitted: the held input drives
@@ -1639,4 +1765,301 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
         ]
     );
     assert_eq!(f.parts.calls(), 2);
+}
+
+/// A clock that stands still until a law moves it.
+#[derive(Debug)]
+struct ManualClock(std::sync::atomic::AtomicU64);
+#[async_trait::async_trait]
+impl crate::Clock for ManualClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.0.load(Ordering::SeqCst)),
+        )
+    }
+    async fn sleep(&self, duration: std::time::Duration) {
+        tokio::time::sleep(duration).await;
+    }
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+}
+
+/// S8-C (ADR 0109 §3): a cancel's or fork's delivery is done once the old
+/// execution is released. The root's scope close — its children's cancel —
+/// is not the intent's to finish: a child whose cancel keeps failing leaves
+/// the intent acknowledged, its obligation delivered and its session
+/// admitting, and the root scope's own recovery owner closes the scope.
+pub async fn a_failing_child_cancel_never_wedges_its_roots_cancel_or_fork(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    for verb in [RootVerb::Cancel, RootVerb::Fork] {
+        let f = Fixture::new(prefix, &format!("child-cancel-{verb:?}"), &host, &stores).await;
+        let next = f.parts.enqueue("behind", Some("behind-root")).await;
+        let intent = f.verb(verb).await.expect("verb");
+        // The root's scope close fails: a child's cancel did not go through.
+        let (work, close) = f.control(false, true);
+        assert!(
+            matches!(
+                f.apply(&work, &close, &intent).await,
+                ControlIntentState::Acknowledged { .. }
+            ),
+            "{verb:?}: a failed child cancel holds the verb open"
+        );
+        assert!(
+            !f.parts.epoch().await.control_pending,
+            "{verb:?}: the session admits again"
+        );
+        assert_eq!(
+            f.obligation(&intent).await,
+            Some(ObligationState::Delivered)
+        );
+        assert_eq!(
+            *work.0.events.lock().expect("events"),
+            ["release", "schedule"]
+        );
+        // The ended root's scope is its recovery owner's to close.
+        let report = f.reconcile(&work, &close, "child-cancel").await;
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+        assert!(work.0.events.lock().expect("events").contains(&"close"));
+        if verb == RootVerb::Cancel {
+            let outcome = drive(&f, &runner, "after-child-cancel").await;
+            assert_eq!(outcome.stop, DriveStop::Idle);
+            assert_eq!(
+                f.parts.applications().await,
+                vec![(next, TurnId::from("behind-root"))]
+            );
+        }
+    }
+}
+
+/// S8-C (ADR 0109 §1.3): every write that settles an intent's engine half
+/// compares its obligation's claim. A delivery whose claim lapsed and was
+/// retaken by another relay neither acknowledges nor fails the intent; the
+/// live claim does.
+pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "retaken-claim", &host, &stores).await;
+    let intent = f.verb(RootVerb::Cancel).await.expect("cancel");
+    let id = intent
+        .obligation
+        .clone()
+        .expect("the verb armed its obligation");
+    // A relay claims it with a claim that lapses at once...
+    let stale = f
+        .intents
+        .claim(&id, 3, 0)
+        .await
+        .expect("claim")
+        .expect("due");
+    // ...and another relay retakes it through the due index.
+    let fresh = f
+        .intents
+        .claim_due(4, 60_000, NonZeroUsize::MIN.saturating_add(63))
+        .await
+        .expect("due claim");
+    let [fresh] = fresh
+        .into_iter()
+        .filter(|claimed| claimed.id == id)
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("the lapsed claim is retaken");
+    assert_ne!(fresh.token, stale.token);
+    assert_eq!(fresh.attempts, 2);
+    assert_eq!(
+        f.factory
+            .acknowledge_intent(intent.id, &stale.token, 5)
+            .await
+            .expect("stale acknowledgement"),
+        IntentSettle::ClaimLost
+    );
+    assert_eq!(
+        f.factory
+            .record_intent_failure(intent.id, &stale.token, "late refusal", false, 5)
+            .await
+            .expect("stale failure"),
+        IntentSettle::ClaimLost
+    );
+    assert_eq!(f.intent_state(intent.id).await, ControlIntentState::Pending);
+    assert!(f.parts.epoch().await.control_pending);
+    assert!(matches!(
+        f.factory
+            .acknowledge_intent(intent.id, &fresh.token, 6)
+            .await
+            .expect("live acknowledgement"),
+        IntentSettle::Held(ControlIntent {
+            state: ControlIntentState::Acknowledged { at_ms: 6 },
+            ..
+        })
+    ));
+    assert!(!f.parts.epoch().await.control_pending);
+}
+
+/// S8-C (ADR 0109 §1.4, §3): an intent whose engine half keeps failing is
+/// retried after a capped exponential backoff, never before, and at the
+/// kind's attempt ceiling its obligation stalls and the intent closes
+/// `Failed { retryable: false }` — surfaced, never a wedge: its session
+/// drives the next root. Re-arming the stalled obligation reopens the
+/// intent, and its next delivery completes it.
+pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "intent-ceiling", &host, &stores).await;
+    let next = f.parts.enqueue("behind", Some("behind-root")).await;
+    let intent = f.verb(RootVerb::Cancel).await.expect("cancel");
+    let id = intent.obligation.clone().expect("armed");
+    let (work, close) = f.control(false, false);
+    work.0.fail_releases.store(usize::MAX, Ordering::SeqCst);
+    let clock = Arc::new(ManualClock(std::sync::atomic::AtomicU64::new(
+        f.parts.host.clock.timestamp_ms(),
+    )));
+    let policy = lash_core::runtime::drive::relay::RelayPolicy {
+        attempt_ceiling: std::num::NonZeroU32::new(3).expect("ceiling"),
+        ..Default::default()
+    };
+    let relay = f
+        .relay(&work, &close, Arc::clone(&clock) as Arc<dyn crate::Clock>)
+        .with_policy(policy);
+    let page = NonZeroUsize::MIN.saturating_add(63);
+    // Attempt 1: the verb's own.
+    assert!(matches!(
+        relay.deliver_intent(&intent).await.expect("deliver"),
+        ControlIntentState::Failed {
+            retryable: true,
+            ..
+        }
+    ));
+    assert!(f.parts.epoch().await.control_pending);
+    for attempt in 2..=3_u32 {
+        // Never before its backoff...
+        let early = lash_core::runtime::drive::relay::relay_due(&relay, clock.as_ref(), page)
+            .await
+            .expect("early pass");
+        assert_eq!(early.claimed, 0, "attempt {attempt} waits for its backoff");
+        clock
+            .0
+            .fetch_add(policy.backoff_ms(attempt - 1), Ordering::SeqCst);
+        // ...and taken once it elapsed.
+        let pass = lash_core::runtime::drive::relay::relay_due(&relay, clock.as_ref(), page)
+            .await
+            .expect("pass");
+        assert_eq!(pass.claimed, 1, "attempt {attempt}");
+        if attempt < 3 {
+            assert_eq!(pass.retried, 1);
+            assert!(f.parts.epoch().await.control_pending);
+        } else {
+            assert_eq!(pass.stalled, 1);
+        }
+    }
+    let stalled = f
+        .intents
+        .list_stalled(None, page)
+        .await
+        .expect("stalled")
+        .into_iter()
+        .find(|stalled| stalled.id == id)
+        .expect("the obligation stalled");
+    assert_eq!(stalled.reason, StallReason::AttemptsExhausted);
+    assert_eq!(stalled.attempts, 3);
+    assert!(matches!(
+        f.intent_state(intent.id).await,
+        ControlIntentState::Failed {
+            retryable: false,
+            ..
+        }
+    ));
+    // Stalled, not a wedge: the session drives its next root.
+    assert!(!f.parts.epoch().await.control_pending);
+    assert!(work.0.events.lock().expect("events").contains(&"schedule"));
+    let outcome = drive(&f, &runner, "after-ceiling").await;
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(
+        f.parts.applications().await,
+        vec![(next, TurnId::from("behind-root"))]
+    );
+    // Nothing retries a stalled obligation...
+    clock.0.fetch_add(policy.max_backoff_ms, Ordering::SeqCst);
+    let idle = lash_core::runtime::drive::relay::relay_due(&relay, clock.as_ref(), page)
+        .await
+        .expect("idle pass");
+    assert_eq!(idle.claimed, 0);
+    // ...until an operator re-arms it: that reopens the intent, and its
+    // next delivery completes it.
+    work.0.fail_releases.store(0, Ordering::SeqCst);
+    assert!(
+        f.intents
+            .rearm(&id, clock.0.load(Ordering::SeqCst))
+            .await
+            .expect("rearm")
+    );
+    assert_eq!(f.intent_state(intent.id).await, ControlIntentState::Pending);
+    let pass = lash_core::runtime::drive::relay::relay_due(&relay, clock.as_ref(), page)
+        .await
+        .expect("re-armed pass");
+    assert_eq!(pass.delivered, 1);
+    assert!(matches!(
+        f.intent_state(intent.id).await,
+        ControlIntentState::Acknowledged { .. }
+    ));
+    assert_eq!(
+        f.obligation(&intent).await,
+        Some(ObligationState::Delivered)
+    );
+}
+
+/// S8-C (ADR 0109 §3): a cancel's follow-on drive is part of its delivery,
+/// not a fire-and-forget ask. An ask the engine did not accept leaves the
+/// intent acknowledged and its obligation due; the relay's next pass asks
+/// again and only then delivers it.
+pub async fn a_refused_follow_on_drive_keeps_the_intents_obligation_due(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "refused-follow-on", &host, &stores).await;
+    let intent = f.verb(RootVerb::Cancel).await.expect("cancel");
+    let (work, close) = f.control(false, false);
+    work.1.store(1, Ordering::SeqCst);
+    assert!(matches!(
+        f.apply(&work, &close, &intent).await,
+        ControlIntentState::Acknowledged { .. }
+    ));
+    assert!(!f.parts.epoch().await.control_pending);
+    assert_eq!(f.obligation(&intent).await, Some(ObligationState::Due));
+    assert_eq!(
+        *work.0.events.lock().expect("events"),
+        ["release", "close", "drive-refused"]
+    );
+    let report = f.reconcile(&work, &close, "follow-on").await;
+    assert!(report.failures.is_empty(), "{:?}", report.failures);
+    assert_eq!(Fixture::intent_pass(&report).delivered, 1);
+    assert_eq!(
+        f.obligation(&intent).await,
+        Some(ObligationState::Delivered)
+    );
+    let events = work.0.events.lock().expect("events").clone();
+    assert_eq!(
+        events[..4],
+        ["release", "close", "drive-refused", "schedule"],
+        "the redelivery asks for the drive again"
+    );
+    assert_eq!(
+        events.iter().filter(|event| **event == "release").count(),
+        1,
+        "the redelivery releases nothing twice"
+    );
 }

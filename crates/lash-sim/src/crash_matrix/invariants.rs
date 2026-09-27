@@ -110,8 +110,8 @@ impl std::fmt::Debug for Expected {
 
 /// One obligation ledger the settled-or-stalled invariant reads.
 ///
-/// Today's probes read the ledgers `main` has: open control intents, pending
-/// parent-end plans and in-flight turns. An S8 slice that arms an ADR 0109
+/// Today's probes read the ledgers `main` has: control intents' obligations,
+/// pending parent-end plans and in-flight turns. An S8 slice that arms an ADR 0109
 /// obligation on its ledger adds a probe here that reads its
 /// `ObligationLedger`: a `due` or `claimed` row is unsettled, a `delivered`
 /// row settled, and a `stalled` row with its `StallReason` is a typed stall
@@ -126,8 +126,9 @@ pub trait ObligationProbe: Send + Sync {
     async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String>;
 }
 
-/// Open control intents: pending, or failed retryably. A permanent failure
-/// is retained typed for an operator, which ADR 0109 counts as stalled.
+/// Control intents whose ADR 0109 `ControlIntent` obligation is neither
+/// delivered nor stalled with a typed reason: `due` or `claimed`, or never
+/// armed at all.
 struct ControlIntentProbe;
 
 #[async_trait::async_trait]
@@ -137,21 +138,42 @@ impl ObligationProbe for ControlIntentProbe {
     }
 
     async fn unsettled(&self, world: &CrashWorld) -> Result<Vec<String>, String> {
-        let open = world
+        let intents = world
             .backend()
             .session_store_factory()
-            .list_open_control_intents(None, PAGE)
+            .list_control_intents(None, PAGE)
             .await
-            .map_err(|error| format!("list open control intents: {error}"))?;
-        Ok(open
-            .into_iter()
-            .map(|intent| {
-                format!(
-                    "control intent {} of `{}` is open after {} attempt(s): {:?}",
-                    intent.id, intent.session_id, intent.attempts, intent.state
+            .map_err(|error| format!("list control intents: {error}"))?;
+        let ledger = world
+            .backend()
+            .obligation_ledger(lash_core::store::ObligationKind::ControlIntent);
+        let mut unsettled = Vec::new();
+        for intent in intents {
+            let Some(obligation) = intent.obligation.as_ref() else {
+                unsettled.push(format!(
+                    "control intent {} of `{}` has no obligation: {:?}",
+                    intent.id, intent.session_id, intent.state
+                ));
+                continue;
+            };
+            let state = ledger
+                .state(obligation)
+                .await
+                .map_err(|error| format!("read obligation {obligation}: {error}"))?;
+            if !matches!(
+                state,
+                Some(
+                    lash_core::store::ObligationState::Delivered
+                        | lash_core::store::ObligationState::Stalled
                 )
-            })
-            .collect())
+            ) {
+                unsettled.push(format!(
+                    "control intent {} of `{}` is {:?} with its obligation {state:?}",
+                    intent.id, intent.session_id, intent.state
+                ));
+            }
+        }
+        Ok(unsettled)
     }
 }
 
@@ -661,8 +683,8 @@ pub async fn diagnose(world: &CrashWorld) -> Vec<String> {
     {
         Ok(intents) => lines.extend(intents.into_iter().map(|intent| {
             format!(
-                "intent: {} of `{}` {:?} {:?} attempts={}",
-                intent.id, intent.session_id, intent.kind, intent.state, intent.attempts
+                "intent: {} of `{}` {:?} {:?} obligation={:?}",
+                intent.id, intent.session_id, intent.kind, intent.state, intent.obligation
             )
         })),
         Err(error) => lines.push(format!("control intents unreadable: {error}")),

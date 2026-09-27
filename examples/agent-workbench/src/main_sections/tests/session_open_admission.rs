@@ -394,15 +394,6 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
         self.inner.root_terminal(session_id, root).await
     }
 
-    async fn list_open_control_intents(
-        &self,
-        after: Option<lash::persistence::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<Vec<lash::persistence::ControlIntent>, lash::persistence::StoreError>
-    {
-        self.inner.list_open_control_intents(after, limit).await
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: lash::persistence::ParkFeedCursor,
@@ -432,20 +423,22 @@ impl lash::persistence::ControlIntentStore for GatedSessionStoreFactory {
     async fn acknowledge_intent(
         &self,
         id: lash::persistence::ControlIntentId,
+        claim: &lash::persistence::ClaimToken,
         at_ms: u64,
-    ) -> Result<(), lash::persistence::StoreError> {
-        self.inner.acknowledge_intent(id, at_ms).await
+    ) -> Result<lash::persistence::IntentSettle, lash::persistence::StoreError> {
+        self.inner.acknowledge_intent(id, claim, at_ms).await
     }
 
     async fn record_intent_failure(
         &self,
         id: lash::persistence::ControlIntentId,
+        claim: &lash::persistence::ClaimToken,
         error: &str,
         retryable: bool,
         at_ms: u64,
-    ) -> Result<lash::persistence::ControlIntent, lash::persistence::StoreError> {
+    ) -> Result<lash::persistence::IntentSettle, lash::persistence::StoreError> {
         self.inner
-            .record_intent_failure(id, error, retryable, at_ms)
+            .record_intent_failure(id, claim, error, retryable, at_ms)
             .await
     }
 

@@ -143,6 +143,10 @@ impl AdministrationSource {
                 .map(|relay| {
                     Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
                 }),
+                intents: resolved_env
+                    .core
+                    .backend()
+                    .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
                 clock: Arc::clone(&resolved_env.core.clock),
                 deletes: lash_core::session_delete::SessionDeleteStores::of(
                     resolved_env.core.backend(),
@@ -358,6 +362,9 @@ impl LashCore {
             .map(|relay| {
                 Arc::new(relay) as Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>
             }),
+            intents: self
+                .backend
+                .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
             store_factory: Arc::clone(&self.store_factory),
             process_registry: Arc::clone(&self.process_registry),
             clock: Arc::clone(&self.env.core.clock),

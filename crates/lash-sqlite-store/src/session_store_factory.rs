@@ -648,14 +648,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         .map_err(sqlite_error)
     }
 
-    async fn list_open_control_intents(
-        &self,
-        after: Option<lash_core_execution::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
-        self.read_open_control_intents(after, limit).await
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: lash_core_execution::store::ParkFeedCursor,

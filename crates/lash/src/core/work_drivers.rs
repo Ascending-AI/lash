@@ -229,6 +229,14 @@ impl SessionWorkEngine for ResolvedQueuedWork {
         self.port.schedule_drive(session, request);
     }
 
+    async fn request_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> std::result::Result<(), lash_core::engine::EngineRefusal> {
+        self.port.request_drive(session, request).await
+    }
+
     fn install_session_driver(
         &self,
         driver: Arc<dyn lash_core::SessionDriver>,

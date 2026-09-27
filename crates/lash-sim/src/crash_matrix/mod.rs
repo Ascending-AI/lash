@@ -257,6 +257,12 @@ pub enum DetectionBound {
     LostImmediateSqliteFailover,
     /// A claim the crash left lapsed: `claimed_at + claim_ttl (60 s) + T`.
     LapsedClaim,
+    /// A lapsed claim whose delivery arms the next obligation of a chain,
+    /// which its own bound allows one more tick: a session close whose host
+    /// died before the release, then the physical delete that waits for the
+    /// released root's engine work (ADR 0109 §4). `claimed_at + claim_ttl +
+    /// 2T`.
+    LapsedClaimThenArmed,
     /// Undecodable or refused: stalled in the pass that claims it, one tick.
     StalledInClaimingPass,
     /// Retryable failure: `stalled` after `attempt_ceiling` attempts at the
@@ -273,6 +279,7 @@ impl DetectionBound {
         match self {
             Self::LostImmediateSqliteFailover => tick + Duration::from_millis(20_500),
             Self::LapsedClaim => Duration::from_secs(60) + tick,
+            Self::LapsedClaimThenArmed => Duration::from_secs(60) + tick * 2,
             Self::StalledInClaimingPass => tick,
             Self::AttemptCeiling => {
                 // Attempts 1..=16 at min(2^(n-1) s, 15 min), each plus a tick.
@@ -289,6 +296,7 @@ impl DetectionBound {
         match self {
             Self::LostImmediateSqliteFailover => "lost immediate attempt, SQLite failover",
             Self::LapsedClaim => "lapsed claim",
+            Self::LapsedClaimThenArmed => "lapsed claim, then the obligation it arms",
             Self::StalledInClaimingPass => "stalled in the claiming pass",
             Self::AttemptCeiling => "attempt ceiling",
         }
@@ -324,23 +332,6 @@ const fn today(
         seam,
         point,
         activation: Activation::Today,
-        bound,
-        summary,
-    }
-}
-
-const fn blocked(
-    finding: Finding,
-    then: Option<S8Slice>,
-    seam: Seam,
-    point: CrashPoint,
-    bound: DetectionBound,
-    summary: &'static str,
-) -> CaseSpec {
-    CaseSpec {
-        seam,
-        point,
-        activation: Activation::Finding { finding, then },
         bound,
         summary,
     }
@@ -403,16 +394,22 @@ pub const MATRIX: &[CaseSpec] = &[
     // retires the claim with the session's storage through the
     // `SessionDelete` obligation (ADR 0109 §4). The ingress invariant reads
     // the claim until then, so a delete that never finishes fails the cell.
+    // The close's own attempt claims its `ControlIntent` obligation before
+    // the engine half runs, so a host that dies at or after the release
+    // leaves the claim to lapse: those cells are bounded by the lapsed claim.
+    // A host that died before the release leaves the root's engine work to
+    // wind down after the retaken close releases it, so the delete that
+    // waits for that work lands one tick later.
     today(
         Seam::ControlIntent,
         CrashPoint::AfterStateCommit,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaimThenArmed,
         "a session close whose intent committed before the host died has its engine half applied by the recovery tick",
     ),
     today(
         Seam::ControlIntent,
         CrashPoint::DuringEngineDelivery,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaim,
         "a session close whose root release the host died inside is re-applied and acknowledged",
     ),
     // The acknowledgement the host died before is re-applied in bound, but
@@ -425,9 +422,8 @@ pub const MATRIX: &[CaseSpec] = &[
         DetectionBound::LapsedClaim,
         "a session close whose release ran but whose acknowledgement was lost is acknowledged once",
     ),
-    blocked(
-        Finding::F1,
-        Some(S8Slice::C),
+    s8(
+        S8Slice::I,
         Seam::ControlIntent,
         CrashPoint::DeliveryRetryableForever,
         DetectionBound::AttemptCeiling,
@@ -498,7 +494,7 @@ pub const MATRIX: &[CaseSpec] = &[
     today(
         Seam::SessionDelete,
         CrashPoint::AfterStateCommit,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaimThenArmed,
         "a deletion whose close committed before the host died finishes deleting the session without a caller retry",
     ),
     // The host died inside a delivery of the delete obligation, which holds

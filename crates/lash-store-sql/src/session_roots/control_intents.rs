@@ -1,48 +1,41 @@
 //! `control_intents`: an operator's verb on a parked root, or a session's
 //! close, as a versioned record (ADR 0104 O4). The store half of the intent
-//! commits in the transaction that inserts the row; `state` tracks the engine
-//! half. A `close_session` row outlives its session: it is the deletion
-//! tombstone a deleted session's roots answer from.
+//! commits in the transaction that inserts the row and arms the row's
+//! `ControlIntent` obligation (ADR 0109); `state` tracks the engine half, and
+//! every write that settles it compares the obligation's claim token. A
+//! `close_session` row outlives its session: it is the deletion tombstone a
+//! deleted session's roots answer from.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "control_intents";
 
 /// Every column a row decoder reads, in the order both backends index.
-pub const ROW_COLUMNS: &str =
-    "intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref";
+pub const ROW_COLUMNS: &str = "intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id";
 
 /// What recording an intent writes: [`ROW_COLUMNS`] minus the allocated
 /// `intent_id`, plus the `kind`/`state` tags beside their JSON bodies so a
 /// reader filters on the tag without decoding.
 pub const INSERT_COLUMNS: &str =
-    "session_id, format, kind, kind_json, state, state_json, attempts, created_at_ms, engine_ref";
+    "session_id, format, kind, kind_json, state, state_json, created_at_ms, engine_ref";
 
 crate::statements! {
     /// `control_intents` statements both backends issue verbatim.
     pub struct ControlIntentStatements @ "control_intent" {
-        /// Open intents (pending, or failed and retryable) after id `?1`, in
-        /// id order, at most `?2`.
-        select_open_after = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
-             FROM control_intents
-             WHERE intent_id > ?1 AND state IN ('pending', 'failed_retryable')
-             ORDER BY intent_id
-             LIMIT ?2";
-
         /// Session `?1`'s `close_session` intent: its deletion tombstone.
-        select_close_session = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+        select_close_session = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
              FROM control_intents
              WHERE session_id = ?1 AND kind = 'close_session'
              ORDER BY intent_id
              LIMIT 1";
 
         /// Intent `?1`.
-        select_by_id = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+        select_by_id = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
              FROM control_intents
              WHERE intent_id = ?1";
 
         /// Session `?1`'s open verbs (pending, or failed and retryable), in
         /// id order: what its close supersedes.
-        select_open_verbs_by_session = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+        select_open_verbs_by_session = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
              FROM control_intents
              WHERE session_id = ?1 AND kind <> 'close_session'
                AND state IN ('pending', 'failed_retryable')
@@ -52,16 +45,29 @@ crate::statements! {
         /// JSON `?4`, state `?5` with JSON `?6`, instant `?7`, engine handle
         /// `?8`), answering its allocated id.
         insert = "INSERT INTO control_intents
-                 (session_id, format, kind, kind_json, state, state_json, attempts, created_at_ms, engine_ref)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)
+                 (session_id, format, kind, kind_json, state, state_json, created_at_ms, engine_ref)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              RETURNING intent_id";
 
-        /// Move intent `?1` to state `?2` (JSON `?3`) at attempt count `?4`,
-        /// if it is still at state JSON `?5` and attempt count `?6`: a
-        /// compare-and-set, so zero rows means another writer moved it first.
+        /// Move intent `?1` to state `?2` (JSON `?3`) if it is still at
+        /// state JSON `?4`: a compare-and-set, so zero rows means another
+        /// writer moved it first.
         update_state = "UPDATE control_intents
-             SET state = ?2, state_json = ?3, attempts = ?4
-             WHERE intent_id = ?1 AND state_json = ?5 AND attempts = ?6";
+             SET state = ?2, state_json = ?3
+             WHERE intent_id = ?1 AND state_json = ?4";
+
+        /// Settle intent `?1`'s engine half: move it to state `?2` (JSON
+        /// `?3`) if it is still at state JSON `?4` and its obligation is
+        /// still claimed under token `?5` (ADR 0109 claim fencing). Zero rows
+        /// means another writer moved it, or the claim was lost.
+        update_state_claimed = "UPDATE control_intents
+             SET state = ?2, state_json = ?3
+             WHERE intent_id = ?1 AND state_json = ?4
+               AND obligation_state = 'claimed' AND obligation_claim_token = ?5";
+
+        /// Whether intent `?1`'s obligation is claimed under token `?2`.
+        select_claim_held = "SELECT COUNT(*) FROM control_intents
+             WHERE intent_id = ?1 AND obligation_state = 'claimed' AND obligation_claim_token = ?2";
 
         /// Every intent of session `?1` but its `close_session` tombstone:
         /// the part of its deletion that forgets the verbs.
@@ -74,7 +80,7 @@ crate::statements! {
     /// Statements for parked-root control and recovery.
     pub struct ControlVerbStatements @ "control_intent" {
         set_kind = "UPDATE control_intents SET kind_json = ?2 WHERE intent_id = ?1";
-        intents = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+        intents = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
             FROM control_intents WHERE intent_id > ?1 ORDER BY intent_id LIMIT ?2";
     }
 }
@@ -151,9 +157,13 @@ crate::statements! {
                AND obligation_claim_token = ?2";
 
         /// Re-arm stalled obligation `?1`, due at `?2`, its attempts reset.
+        /// An intent its stall closed `failed` reopens `pending` (ADR 0109
+        /// §3: re-arm reopens it), so its engine half runs again.
         obligation_rearm = "UPDATE control_intents
              SET obligation_state = 'due', obligation_attempts = 0, obligation_due_at_ms = ?2,
-                 obligation_stall_reason = NULL, obligation_settled_at_ms = NULL
+                 obligation_stall_reason = NULL, obligation_settled_at_ms = NULL,
+                 state = CASE WHEN state = 'failed' THEN 'pending' ELSE state END,
+                 state_json = CASE WHEN state = 'failed' THEN '{\"state\":\"pending\"}' ELSE state_json END
              WHERE obligation_id = ?1 AND obligation_state = 'stalled'";
 
         /// At most `?2` stalled obligations after id `?1`, in id order.

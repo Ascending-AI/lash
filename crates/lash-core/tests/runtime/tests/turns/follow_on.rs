@@ -741,15 +741,16 @@ pub(super) async fn fig3848_a_parked_root_owing_a_follow_on_is_cleared_when_the_
         )
         .await
         .expect("redrive under the restored build");
-    lash_core::drive::apply_control_intent(
-        factory.as_ref(),
-        &lash_core::engine::NoEngineControl,
-        &lash_core::NoSessionWork::new(),
-        &lash_core::engine::NoScopeClose,
-        None,
-        &redrive,
-        owed_run.clock.as_ref(),
+    lash_core::drive::ControlIntentRelay::new(
+        owed_run
+            .backend
+            .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
+        Arc::clone(&factory),
+        Arc::new(lash_core::NoSessionWork::new()),
+        Arc::new(lash_core::engine::NoScopeClose),
+        owed_run.clock.clone() as Arc<dyn lash_core::Clock>,
     )
+    .deliver_intent(&redrive)
     .await
     .expect("apply the redrive");
 

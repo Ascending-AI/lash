@@ -595,7 +595,6 @@ CREATE TABLE IF NOT EXISTS lash_control_intents (
     kind_json TEXT NOT NULL,
     state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')),
     state_json TEXT NOT NULL,
-    attempts BIGINT NOT NULL,
     created_at_ms BIGINT NOT NULL,
     engine_ref TEXT,
     obligation_id TEXT,
@@ -619,8 +618,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_control_intents_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_control_intents_obligation_stalled
     ON lash_control_intents(obligation_id)
     WHERE obligation_state = 'stalled';
-CREATE INDEX IF NOT EXISTS idx_lash_control_intents_open
-    ON lash_control_intents(intent_id) WHERE state IN ('pending', 'failed_retryable');
 CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
     ON lash_control_intents(session_id, kind);
 
