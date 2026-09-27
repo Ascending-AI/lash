@@ -431,11 +431,10 @@ async fn async_main() -> anyhow_like::Result<()> {
         let restate_task = {
             let mut shutdown = host_shutdown.subscribe();
             tokio::spawn(async move {
-                restate_sdk::http_server::HttpServer::new(endpoint)
-                    .serve_with_cancel(restate_listener, async move {
-                        while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
-                    })
-                    .await;
+                lash::restate::serve_endpoint(restate_listener, endpoint, async move {
+                    while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
+                })
+                .await;
             })
         };
         // This example's first drain step is to stop admitting. Axum's graceful

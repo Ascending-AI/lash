@@ -67,7 +67,9 @@
 //!
 //! An endpoint that serves lash work starts from
 //! [`RestateEngine::endpoint_builder`], which binds every Restate service lash
-//! itself serves; the host binds only its own services on it. Among lash's are
+//! itself serves; the host binds only its own services on it, and serves the
+//! endpoint with [`serve_endpoint`], which turns Nagle's algorithm off on every
+//! connection so journal frames are not held for delayed ACKs. Among lash's are
 //! the durable-wait workflow, which owns exact-address promises and durable
 //! deadline timers for every [`ExecutionScope`](lash_core::ExecutionScope),
 //! and the durable-wait index, which indexes session-owned waits so
@@ -90,6 +92,7 @@ mod process;
 mod process_attach;
 mod process_stop;
 mod sentinel;
+mod serve;
 mod services;
 mod session_administration;
 mod session_control;
@@ -146,6 +149,7 @@ pub use process::{
     SegmentStarted, reconcile_process_parks, resume_parked_process,
 };
 pub use process_attach::RestateProcessAttachRequest;
+pub use serve::serve_endpoint;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use session_driver::{
     LASH_SESSION_DRIVE_VERSION, RestateSessionDriveRequest, RestateSessionDriverSlot,

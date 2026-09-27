@@ -71,9 +71,7 @@ pub(crate) async fn run(args: LatencyWorkerArgs) -> Result<()> {
         .with_context(|| format!("bind the latency worker endpoint at {}", args.endpoint_bind))?;
     let addr = listener.local_addr()?;
     tokio::spawn(async move {
-        let _ = restate_sdk::http_server::HttpServer::new(endpoint)
-            .serve(listener)
-            .await;
+        lash::restate::serve_endpoint(listener, endpoint, std::future::pending::<()>()).await;
     });
     engine
         .register_deployment(&format!("http://{addr}"))

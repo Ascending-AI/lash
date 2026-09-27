@@ -1238,8 +1238,7 @@ async fn async_main() -> Result<()> {
         .endpoint_builder(processes)
         .bind(E2eTurnWorkflowImpl::new(state, core).serve())
         .build();
-    restate_sdk::http_server::HttpServer::new(endpoint)
-        .listen_and_serve(addr)
-        .await;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    lash::restate::serve_endpoint(listener, endpoint, tokio::signal::ctrl_c()).await;
     Ok(())
 }

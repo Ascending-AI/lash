@@ -22,7 +22,6 @@ use lash_core::{
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::endpoint::Endpoint;
 use restate_sdk::errors::{HandlerResult, TerminalError};
-use restate_sdk::http_server::HttpServer;
 use restate_sdk::serde::Json;
 
 use super::live_turn_probe::ConformanceTurnProbe as _;
@@ -663,11 +662,10 @@ impl LiveConformanceHarness {
                     .expect("bind Restate effect-group endpoint");
                 let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
                 let server = tokio::spawn(async move {
-                    HttpServer::new(endpoint)
-                        .serve_with_cancel(listener, async {
-                            let _ = shutdown_rx.await;
-                        })
-                        .await;
+                    crate::serve_endpoint(listener, endpoint, async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await;
                 });
                 wait_for_endpoint(bind_addr).await;
                 register_deployment(&admin_url, &endpoint_url).await;

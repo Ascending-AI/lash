@@ -166,7 +166,7 @@ impl RestateEngine {
     /// effect-group index, payload and dispatcher, and the session driver
     /// (`LashSession`, `LashTurn`) that runs every session's turns. The host
     /// binds only its own services — its triggers and cron — on the builder,
-    /// then builds it.
+    /// then builds it and serves it with [`crate::serve_endpoint`].
     ///
     /// There is no other way to bind lash's services, so an endpoint cannot
     /// serve a subset of them. A process that only submits work to Restate

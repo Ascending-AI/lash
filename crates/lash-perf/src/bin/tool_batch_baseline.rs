@@ -451,7 +451,6 @@ async fn run_restate(
     let authority = lash_restate::RestateAuthorityId::new(RESTATE_AUTHORITY)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
-    use restate_sdk::http_server::HttpServer;
     let (backend, process_worker) =
         restate_deployment(&ingress_url, &admin_url, &authority).await?;
     let endpoint = backend
@@ -467,7 +466,11 @@ async fn run_restate(
         )
         .build();
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    let server = tokio::spawn(HttpServer::new(endpoint).serve(listener));
+    let server = tokio::spawn(lash::restate::serve_endpoint(
+        listener,
+        endpoint,
+        std::future::pending::<()>(),
+    ));
     wait_for_endpoint(bind).await?;
     backend
         .register_deployment(&endpoint_url)

@@ -24,11 +24,15 @@ lash-core-worker = { workspace = true }
 lash-trace = { workspace = true }
 lash-http-transport = { workspace = true }
 restate-sdk = { workspace = true }
+# The endpoint server (`serve_endpoint`): the SDK's HTTP/2 serving, with
+# TCP_NODELAY on every accepted connection.
+hyper = { version = "1", features = ["http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http2"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 # The segment-admission nonce (FIG-3588) is drawn from OS randomness: Restate

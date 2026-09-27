@@ -347,11 +347,10 @@ async fn run_witnesses(target: WitnessServer) {
                 .expect("bind EG0 Restate endpoint");
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
             let server = tokio::spawn(async move {
-                HttpServer::new(endpoint)
-                    .serve_with_cancel(listener, async {
-                        let _ = shutdown_rx.await;
-                    })
-                    .await;
+                crate::serve_endpoint(listener, endpoint, async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
             });
             wait_for_endpoint(bind_addr).await;
             register_deployment(&admin_url, &endpoint_url).await;

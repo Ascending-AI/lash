@@ -102,11 +102,10 @@ mod restate_tests {
             .build();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
-            restate_sdk::http_server::HttpServer::new(endpoint)
-                .serve_with_cancel(listener, async {
-                    let _ = shutdown_rx.await;
-                })
-                .await;
+            lash::restate::serve_endpoint(listener, endpoint, async {
+                let _ = shutdown_rx.await;
+            })
+            .await;
         });
         let app_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await

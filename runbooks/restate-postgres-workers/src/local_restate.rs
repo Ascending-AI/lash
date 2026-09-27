@@ -79,11 +79,10 @@ impl LocalRestate {
         let uri = format!("http://{}", listener.local_addr()?);
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let serving = tokio::spawn(async move {
-            restate_sdk::http_server::HttpServer::new(endpoint)
-                .serve_with_cancel(listener, async move {
-                    let _ = stopped.await;
-                })
-                .await;
+            lash::restate::serve_endpoint(listener, endpoint, async move {
+                let _ = stopped.await;
+            })
+            .await;
         });
         engine
             .register_deployment(&uri)
