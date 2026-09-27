@@ -733,6 +733,7 @@ impl ModelStore {
                     observations: vec![lash_core::Observation {
                         text: output.clone(),
                         projection: Default::default(),
+                        is_model_view: false,
                     }],
                     calls: Vec::new(),
                     printed_images: Vec::new(),

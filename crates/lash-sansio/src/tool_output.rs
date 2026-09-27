@@ -19,6 +19,9 @@ pub struct ToolCallOutput {
     pub outcome: ToolCallOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<ToolControl>,
+    /// Text to show when a program prints the whole successful result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_view: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -193,6 +196,7 @@ impl ToolCallOutput {
         Self {
             outcome: ToolCallOutcome::Success(value),
             control: None,
+            model_view: None,
         }
     }
 
@@ -200,6 +204,7 @@ impl ToolCallOutput {
         Self {
             outcome: ToolCallOutcome::Failure(failure),
             control: None,
+            model_view: None,
         }
     }
 
@@ -207,7 +212,17 @@ impl ToolCallOutput {
         Self {
             outcome: ToolCallOutcome::Cancelled(cancellation),
             control: None,
+            model_view: None,
         }
+    }
+
+    /// Sets the text shown to the model when the whole successful result is printed.
+    /// The program and recorded call continue to use the structured value.
+    pub fn with_model_view(mut self, model_view: impl Into<String>) -> Self {
+        if self.is_success() {
+            self.model_view = Some(model_view.into());
+        }
+        self
     }
 
     pub fn with_control(mut self, control: ToolControl) -> Self {
@@ -1158,6 +1173,29 @@ mod tests {
     use crate::{AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType};
     use proptest::collection::{btree_map, vec};
     use proptest::prelude::*;
+
+    #[test]
+    fn model_view_is_optional_and_does_not_replace_the_recorded_value() {
+        let value = serde_json::json!({"items": [{"id": "a"}]});
+        let plain = ToolCallOutput::success(value.clone());
+        assert!(
+            serde_json::to_value(&plain)
+                .expect("serialize plain output")
+                .get("model_view")
+                .is_none()
+        );
+        let viewed = plain.clone().with_model_view("0. a: complete excerpt");
+        assert_eq!(viewed.value_for_projection(), value);
+        assert_eq!(viewed.model_view.as_deref(), Some("0. a: complete excerpt"));
+        assert_eq!(plain.value_for_projection(), viewed.value_for_projection());
+        assert_eq!(
+            serde_json::from_value::<ToolCallOutput>(
+                serde_json::to_value(&viewed).expect("serialize viewed output")
+            )
+            .expect("deserialize viewed output"),
+            viewed
+        );
+    }
 
     fn attachment_source(id: &str) -> AttachmentSource {
         AttachmentSource::stored(AttachmentRef::new(

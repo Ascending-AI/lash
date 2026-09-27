@@ -282,6 +282,7 @@ impl From<lash_core::ToolCallOutput> for RemoteToolCallOutcome {
         let lash_core::ToolCallOutput {
             outcome,
             control: _,
+            model_view: _,
         } = value;
         match outcome {
             lash_core::ToolCallOutcome::Success(value) => Self::Success(value.to_json_value()),

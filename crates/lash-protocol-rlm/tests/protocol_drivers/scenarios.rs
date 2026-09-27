@@ -123,6 +123,12 @@ const TYPED_SCHEMA_MISMATCH_ANY_OF: RlmProtocolScenarioCoverage = rlm_protocol_c
     "Typed schema validation checks anyOf mismatches."
 );
 
+const TOOL_RESULT_MODEL_VIEW: RlmProtocolScenarioCoverage = rlm_protocol_coverage!(
+    rlm_protocol_scenario_tool_result_model_view_survives_checkpoint,
+    "tool result model view survives checkpoint",
+    "A printed whole tool result uses its model view after a durable checkpoint, while an unviewed result keeps compacted history."
+);
+
 const TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY: RlmProtocolScenarioCoverage = rlm_protocol_coverage!(
     rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary,
     "typed schema repair survives a cell checkpoint boundary",
@@ -150,12 +156,13 @@ const RLM_PROTOCOL_SCENARIO_COVERAGE: &[RlmProtocolScenarioCoverage] = &[
     NATURAL_FINAL_VALUE,
     TYPED_SCHEMA_MISMATCH_REPAIR,
     TYPED_SCHEMA_MISMATCH_ANY_OF,
+    TOOL_RESULT_MODEL_VIEW,
     TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY,
 ];
 
 #[test]
 fn rlm_protocol_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 21);
+    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 22);
     let mut names = BTreeSet::new();
     for coverage in RLM_PROTOCOL_SCENARIO_COVERAGE {
         let _declared_test = coverage.declared_test;
@@ -662,6 +669,131 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
             ..RlmProtocolExpectations::default()
         })
         .run();
+}
+
+#[test]
+fn rlm_protocol_scenario_tool_result_model_view_survives_checkpoint() {
+    const CODE: &str =
+        "const r = await search.find({ query: \"keys\" }); print(r); print(r.items[0].id);";
+    let structured = serde_json::json!({
+        "items": (0..12).map(|n| serde_json::json!({
+            "id": format!("item-{n}"),
+            "detail": { "excerpt": format!("complete passage {n}") }
+        })).collect::<Vec<_>>()
+    });
+    let view = (0..12)
+        .map(|n| format!("{n}. item-{n}: complete passage {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for with_view in [false, true] {
+        let output = match with_view {
+            true => lash_core::ToolCallOutput::success(structured.clone()).with_model_view(&view),
+            false => lash_core::ToolCallOutput::success(structured.clone()),
+        };
+        let printed = if with_view {
+            view.clone()
+        } else {
+            serde_json::to_string(&structured).expect("structured fixture serializes")
+        };
+        let response = lash_sansio::ExecResponse {
+            observations: vec![
+                lash_sansio::Observation {
+                    text: printed.clone(),
+                    projection: Default::default(),
+                    is_model_view: with_view,
+                },
+                lash_sansio::Observation {
+                    text: "item-0".to_string(),
+                    projection: Default::default(),
+                    is_model_view: false,
+                },
+            ],
+            calls: vec![lash_core::ExecutedCall {
+                operation: "search.find".to_string(),
+                outcome: lash_core::ExecutedCallOutcome::Ok,
+                host_record: Some(lash_core::ToolCallRecord {
+                    call_id: Some("search-1".to_string()),
+                    tool: "search.find".to_string(),
+                    args: serde_json::json!({"query": "keys"}),
+                    output,
+                }),
+            }],
+            printed_images: Vec::new(),
+            error: None,
+            degraded_bindings: Vec::new(),
+            terminal_finish: None,
+        };
+        let run = RlmProtocolScenario::new(TOOL_RESULT_MODEL_VIEW.display_name)
+            .user_message("find keys")
+            .project_rlm_history()
+            .llm_response(vec![text_part(&typescript_block(CODE))])
+            .exec_result(response)
+            .checkpoint_round_trip()
+            .checkpoint()
+            .expect(RlmProtocolExpectations {
+                exec_codes: vec![CODE],
+                checkpoints: vec![CheckpointKind::AfterWork, CheckpointKind::AfterWork],
+                llm_call_count: Some(2),
+                trajectory_last: Some(RlmTrajectoryExpectation {
+                    code: CODE,
+                    output: vec![printed, "item-0".to_string()],
+                    outcome: lash_rlm_types::CellOutcome::Running,
+                }),
+                ..RlmProtocolExpectations::default()
+            })
+            .run();
+        assert_eq!(run.round_trips, 1);
+        assert_eq!(run.recorded_tool_outputs.len(), 1);
+        assert_eq!(
+            run.recorded_tool_outputs[0].value_for_projection(),
+            structured
+        );
+        assert_eq!(
+            run.recorded_tool_outputs[0].model_view.as_deref(),
+            with_view.then_some(view.as_str())
+        );
+
+        let next_prompt = run.llm_requests[1]
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            next_prompt.contains("item-0"),
+            "next prompt:\n{next_prompt}"
+        );
+        let output_start = next_prompt
+            .find("output[0] (")
+            .expect("printed history header");
+        let excerpt_start = next_prompt[..output_start]
+            .rfind("history[")
+            .expect("printed history reference");
+        let excerpt_end = next_prompt[output_start..]
+            .find("\n\nCalls:")
+            .map(|end| output_start + end)
+            .expect("executed call summary");
+        println!(
+            "{}:\n{}",
+            if with_view { "after" } else { "before" },
+            &next_prompt[excerpt_start..excerpt_end]
+        );
+        if with_view {
+            assert!(next_prompt.contains("11. item-11: complete passage 11"));
+            assert!(!next_prompt.contains("preview only"));
+            assert!(!next_prompt.contains("__truncated__"));
+            assert!(!next_prompt.contains("max depth"));
+        } else {
+            assert!(next_prompt.contains("preview only"));
+            assert!(next_prompt.contains("items omitted"));
+            assert!(!next_prompt.contains("complete passage 9"));
+        }
+    }
 }
 
 #[test]

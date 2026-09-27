@@ -801,6 +801,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
         result: Ok(lash_sansio::ExecResponse {
             observations: vec![lash_sansio::Observation {
                 text: "hi\n".to_string(),
+                is_model_view: false,
                 projection: Default::default(),
             }],
             calls: vec![lash_core::ExecutedCall {
@@ -1147,6 +1148,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
         result: Ok(lash_sansio::ExecResponse {
             observations: vec![lash_sansio::Observation {
                 text: "fanout done".to_string(),
+                is_model_view: false,
                 projection: Default::default(),
             }],
             calls: vec![

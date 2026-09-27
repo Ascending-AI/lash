@@ -24,7 +24,11 @@ impl RemoteTurnActivity {
 fn encode_remote_tool_call_output(
     output: lash_core::ToolCallOutput,
 ) -> Result<serde_json::Value, RemoteProtocolError> {
-    let lash_core::ToolCallOutput { outcome, control } = output;
+    let lash_core::ToolCallOutput {
+        outcome,
+        control,
+        model_view: _,
+    } = output;
     let (status, payload) = match outcome {
         lash_core::ToolCallOutcome::Success(value) => ("success", value.to_json_value()),
         lash_core::ToolCallOutcome::Failure(failure) => ("failure", failure.to_json_value()),

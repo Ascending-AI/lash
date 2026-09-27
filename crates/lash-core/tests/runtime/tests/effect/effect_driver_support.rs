@@ -63,6 +63,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
             observations: vec![lash_core::Observation {
                 text: "exec output".to_string(),
                 projection: Default::default(),
+                is_model_view: false,
             }],
             calls: Vec::new(),
             printed_images: Vec::new(),

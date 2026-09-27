@@ -894,17 +894,25 @@ impl HostBridge<'_> {
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {
         let attachment_store = self.ctx.attachment_store();
         let images = collect_printed_images(&value, attachment_store.as_ref()).await?;
+        let is_model_view =
+            matches!(&value, FlowValue::Projected(projected) if projected.has_model_view());
+        let display_value = if is_model_view {
+            value.clone()
+        } else {
+            materialize_nested_model_views(&value)
+        };
         let projected_text = {
             let _phase = self.ctx.named_phase("rlm_lashlang.print_project");
             self.print_projector
-                .project(ValueProjectionContext::new(&value))
+                .project(ValueProjectionContext::new(&display_value))
         };
-        let raw_text = format_output_value(&value);
+        let raw_text = format_output_value(&display_value);
         let projection =
             crate::rlm_support::observation_projection_metadata(&raw_text, &projected_text);
         self.observations.lock_recover().push(Observation {
             text: raw_text,
             projection,
+            is_model_view,
         });
         if !images.is_empty() {
             self.printed_images.lock_recover().extend(images);
@@ -1010,6 +1018,36 @@ impl HostBridge<'_> {
                 Box::pin(async move { Ok(AbilityResult::Value(value)) })
             }
         }
+    }
+}
+
+fn materialize_nested_model_views(value: &FlowValue) -> FlowValue {
+    match value {
+        FlowValue::Projected(projected) if projected.has_model_view() => projected
+            .materialize()
+            .map(|value| materialize_nested_model_views(&value))
+            .unwrap_or_else(|_| value.clone()),
+        FlowValue::List(items) => FlowValue::List(
+            items
+                .iter()
+                .map(materialize_nested_model_views)
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        FlowValue::Tuple(items) => FlowValue::Tuple(
+            items
+                .iter()
+                .map(materialize_nested_model_views)
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        FlowValue::Record(record) => FlowValue::Record(Arc::new(
+            record
+                .iter()
+                .map(|(key, value)| (key.to_string(), materialize_nested_model_views(value)))
+                .collect(),
+        )),
+        _ => value.clone(),
     }
 }
 

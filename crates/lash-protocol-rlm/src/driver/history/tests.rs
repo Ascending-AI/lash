@@ -56,6 +56,7 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             protocol_iteration: 0,
             code: code.to_string(),
             output: vec!["ok".to_string()],
+            model_view_outputs: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
@@ -106,6 +107,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         protocol_iteration: 0,
         code: "print chart".to_string(),
         output: Vec::new(),
+        model_view_outputs: Vec::new(),
         images: vec![lash_core::AttachmentRef {
             id: "chart".parse().expect("valid attachment id"),
             media_type: "image/png".parse().expect("valid media type"),
@@ -203,6 +205,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
             code: "first = await module.ok({ secret: 1 })\nsecond = await module.fail({})"
                 .to_string(),
             output: Vec::new(),
+            model_view_outputs: Vec::new(),
             images: Vec::new(),
             calls: vec![
                 lash_rlm_types::RlmExecutedCall {
@@ -252,6 +255,7 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
             protocol_iteration: 0,
             code: "value = module.ok()".to_string(),
             output: Vec::new(),
+            model_view_outputs: Vec::new(),
             images: Vec::new(),
             calls: vec![lash_rlm_types::RlmExecutedCall {
                 operation: "module.ok".to_string(),
@@ -279,6 +283,7 @@ fn legacy_unredacted_trajectory_errors_render_verbatim() {
             protocol_iteration: 0,
             code: "value = read()".to_string(),
             output: Vec::new(),
+            model_view_outputs: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
@@ -299,6 +304,7 @@ fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord 
             protocol_iteration: 0,
             code: code.to_string(),
             output: Vec::new(),
+            model_view_outputs: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,

@@ -32,6 +32,7 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
             } else {
                 vec![output.to_string()]
             },
+            model_view_outputs: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
@@ -53,6 +54,7 @@ fn terminal_step_event(
             protocol_iteration,
             code: code.to_string(),
             output,
+            model_view_outputs: Vec::new(),
             images,
             calls: Vec::new(),
             calls_omitted: 0,
@@ -714,6 +716,7 @@ fn printed_images_render_as_llm_image_blocks() {
             protocol_iteration: 1,
             code: "print img".to_string(),
             output: vec![r#"{"type":"image","id":"img"}"#.to_string()],
+            model_view_outputs: Vec::new(),
             images: vec![lash_core::AttachmentRef {
                 id: lash_core::AttachmentId::parse("img-ref").expect("valid attachment id"),
                 media_type: lash_core::MediaType::parse("image/png").unwrap(),

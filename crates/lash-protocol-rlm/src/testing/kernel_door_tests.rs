@@ -50,6 +50,44 @@ fn echo_definition() -> lash_core::ToolDefinition {
 
 struct EchoToolProvider;
 
+fn viewed_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:search",
+        "search",
+        "Return search matches",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object" }),
+    )
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["search"], "find"))
+}
+
+struct ViewedToolProvider;
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ViewedToolProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![viewed_definition().manifest()]
+    }
+
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        (id == &lash_core::ToolId::from("tool:search")).then(|| viewed_definition().manifest())
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<std::sync::Arc<lash_core::ToolContract>> {
+        (name == "search" || name == "tool:search")
+            .then(|| std::sync::Arc::new(viewed_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolAttemptOutcome::done_without_intents(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({
+                "items": [{"id": "item-0", "detail": {"excerpt": "complete passage"}}]
+            }))
+            .with_model_view("Search results\n0. item-0: complete passage"),
+        )
+    }
+}
+
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for EchoToolProvider {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -142,6 +180,51 @@ async fn a_cell_on_the_doubles_lent_ports_runs_its_tool_calls_in_the_handler() {
     let response = run_echo_cell(context).await;
     assert_echo_cell_answered(&response);
     handler.close().await.expect("close the cell's handler");
+}
+
+#[tokio::test]
+async fn a_tool_model_view_prints_without_changing_the_program_result() {
+    let double = super::kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(super::default_cell_scope())
+        .await
+        .expect("open the handler");
+    let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+        super::double_ports(&double, &handler),
+        std::sync::Arc::new(ViewedToolProvider),
+        lash_core::ToolCatalog::from_tool_definitions(vec![viewed_definition()]),
+    );
+    let response = run_cell(
+        context,
+        "const r = await search.find({}); print(r); print(r.items[0].id); print([r]); finish(r.items[0].id);",
+    )
+    .await;
+    assert_eq!(response.error, None);
+    assert_eq!(response.terminal_finish, Some(serde_json::json!("item-0")));
+    assert_eq!(response.observations.len(), 3);
+    assert_eq!(
+        response.observations[0].text,
+        "Search results\n0. item-0: complete passage"
+    );
+    assert!(response.observations[0].is_model_view);
+    assert_eq!(response.observations[1].text, "item-0");
+    assert!(!response.observations[1].is_model_view);
+    assert!(response.observations[2].text.contains("\"items\""));
+    assert!(!response.observations[2].text.contains("Search results"));
+    assert!(!response.observations[2].is_model_view);
+    let record = response.calls[0]
+        .host_record
+        .as_ref()
+        .expect("recorded tool call");
+    assert_eq!(
+        record.output.value_for_projection()["items"][0]["id"],
+        "item-0"
+    );
+    assert_eq!(
+        record.output.model_view.as_deref(),
+        Some("Search results\n0. item-0: complete passage")
+    );
+    handler.close().await.expect("close the handler");
 }
 
 /// A cell whose context installs its own parent invocation claims that

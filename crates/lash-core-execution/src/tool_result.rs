@@ -244,6 +244,16 @@ impl ToolOutcome {
         Self::from_output(crate::ToolCallOutput::success(result))
     }
 
+    /// Shows this text when the whole successful result is printed in RLM code mode.
+    pub fn with_model_view(mut self, model_view: impl Into<String>) -> Self {
+        if let Self::Done(output) = &mut self
+            && output.is_success()
+        {
+            output.model_view = Some(model_view.into());
+        }
+        self
+    }
+
     /// Constructs an error-as-result JSON outcome for protocol and process-engine implementors
     /// returning from an authorized tool call.
     pub fn err(result: serde_json::Value) -> Self {

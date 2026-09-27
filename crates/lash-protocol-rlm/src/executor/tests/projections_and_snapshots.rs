@@ -2,6 +2,73 @@ use super::*;
 
 use lashlang::testing::ast_builders as b;
 
+#[test]
+fn tool_result_model_view_survives_state_restore_and_keeps_indexing() {
+    block_on(async {
+        let structured = serde_json::json!({"items": [{"id": "item-0"} ]});
+        let output = lash_core::ToolCallOutput::success(structured.clone())
+            .with_model_view("Search results\n0. item-0");
+        let value = lash_lashlang_runtime::protocol_tool_output_to_lashlang_value(
+            &output,
+            "tool-key",
+            &lash_lashlang_runtime::ExecutionCancellation::new(),
+        )
+        .expect("project successful result");
+        let FlowValue::Projected(projected) = &value else {
+            panic!("model view result must keep its durable projection");
+        };
+        assert_eq!(
+            projected.render().expect("render whole result"),
+            "Search results\n0. item-0"
+        );
+        assert_eq!(
+            serde_json::to_value(projected.materialize().expect("structured result"))
+                .expect("serialize structured result"),
+            structured
+        );
+
+        let mut state = lashlang::State::new();
+        state.insert_global("r", value).expect("store tool result");
+        let bytes = state
+            .snapshot()
+            .to_canonical_bytes()
+            .expect("durable snapshot");
+        state = lashlang::State::from_snapshot(
+            lashlang::Snapshot::from_canonical_bytes(&bytes).expect("restore snapshot"),
+        );
+        rehydrate_projected_globals(
+            &mut state,
+            Arc::new(ProjectionRegistry::new()) as Arc<dyn ProjectionResolver>,
+        )
+        .await
+        .expect("restore self-contained tool result");
+        let restored = state.snapshot();
+        let Some(FlowValue::Projected(projected)) = restored.globals().get("r") else {
+            panic!("restored result must retain its model view");
+        };
+        assert_eq!(
+            projected.render().expect("render after restore"),
+            "Search results\n0. item-0"
+        );
+        let program =
+            lashlang::testing::harness::try_compile_program(&b::program(vec![b::finish(
+                b::field(b::index(b::field(b::var("r"), "items"), b::num(0.0)), "id"),
+            )]))
+            .expect("compile navigation");
+        let result = execute_with_projected(&program, &mut state, &ProjectedBindings::new())
+            .await
+            .expect("navigate restored result");
+        let ExecutionOutcome::Finished(value) = result else {
+            panic!("navigation must finish");
+        };
+        let value = match value {
+            FlowValue::Projected(projected) => projected.materialize().expect("indexed value"),
+            value => value,
+        };
+        assert_eq!(value, FlowValue::String("item-0".into()));
+    });
+}
+
 const SEED: u64 = 0x5_2c05;
 
 /// `finish { <name>: <expr>, .. }` — the shape every projection witness reads

@@ -567,7 +567,15 @@ pub(crate) fn step_output_text(
 ) -> String {
     let mut out = String::new();
     for (output_index, item) in entry.output.iter().enumerate() {
-        let (preview, projected_lossy) = project_history_output(item);
+        let (preview, projected_lossy) = if entry.model_view_outputs.contains(&output_index) {
+            let projected = crate::rlm_support::print_history_projector().project(
+                ValueProjectionContext::new(&FlowValue::String(item.clone().into())),
+            );
+            let lossy = projected != *item;
+            (projected, lossy)
+        } else {
+            project_history_output(item)
+        };
         let raw_len = item.chars().count();
         let full_ref = projected_ref(
             vocabulary,

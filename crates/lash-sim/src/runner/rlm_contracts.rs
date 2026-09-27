@@ -815,6 +815,7 @@ fn rlm_exec_response(
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
                 projection: Default::default(),
+                is_model_view: false,
             })
             .collect(),
         calls: Vec::new(),
@@ -851,6 +852,7 @@ fn rlm_exec_response_with_tool_calls(
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
                 projection: Default::default(),
+                is_model_view: false,
             })
             .collect(),
         calls,

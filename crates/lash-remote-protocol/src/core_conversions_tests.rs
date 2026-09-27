@@ -22,6 +22,29 @@ mod registration_parity;
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
+fn remote_process_tool_output_preserves_optional_model_view() {
+    let structured = serde_json::json!({"items": [{"id": "a"}]});
+    let core = lash_core::ToolCallOutput::success(structured.clone())
+        .with_model_view("0. a: complete excerpt");
+    let remote = RemoteProcessToolCallOutput::try_from(core.clone()).expect("remote output");
+    assert_eq!(remote.model_view.as_deref(), Some("0. a: complete excerpt"));
+    let restored = lash_core::ToolCallOutput::try_from(remote).expect("core output");
+    assert_eq!(restored, core);
+    assert_eq!(restored.value_for_projection(), structured);
+
+    let absent = RemoteProcessToolCallOutput::try_from(lash_core::ToolCallOutput::success(
+        serde_json::json!({"ok": true}),
+    ))
+    .expect("remote output without view");
+    assert!(
+        serde_json::to_value(absent)
+            .expect("serialize remote output")
+            .get("model_view")
+            .is_none()
+    );
+}
+
+#[test]
 fn runtime_replay_round_trip_retains_minting_emission_key() {
     let replay = lash_core::runtime::RuntimeReplay {
         key: "tool-intent:derived".to_string(),

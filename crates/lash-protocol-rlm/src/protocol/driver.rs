@@ -548,6 +548,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 state.images.extend(response.printed_images);
                 for observation in response.observations {
                     if !observation.text.is_empty() {
+                        if observation.is_model_view {
+                            state.model_view_outputs.push(state.output.len());
+                        }
                         state.output.push(observation.text);
                     }
                 }
@@ -951,7 +954,11 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
             failure: bounded_tool_failure(failure),
         },
     });
-    ToolCallOutput { outcome, control }
+    ToolCallOutput {
+        outcome,
+        control,
+        model_view: output.model_view.clone(),
+    }
 }
 
 fn bounded_tool_failure(failure: &ToolFailure) -> ToolFailure {
@@ -1045,6 +1052,7 @@ fn trajectory_entry(
         protocol_iteration,
         code: state.code.clone(),
         output: state.output.clone(),
+        model_view_outputs: state.model_view_outputs.clone(),
         images: state.images.clone(),
         calls: state.calls.clone(),
         calls_omitted: state.calls_omitted,

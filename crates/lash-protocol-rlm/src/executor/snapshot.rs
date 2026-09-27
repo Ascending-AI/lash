@@ -7,6 +7,8 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v27 carries the model-view output indices in the RLM driver state. A replay
+// must retain the print mode of each output across a checkpoint.
 // v26 carries Lashlang snapshot v13 and VM continuation v25, whose heaps may
 // hold a binding cell (FIG-3707). A v25 body embeds the v12/v24 substrate
 // shapes this reader does not decode, so the boundary is a version.
@@ -65,7 +67,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 26;
+pub const RLM_SNAPSHOT_VERSION: u32 = 27;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

@@ -26,6 +26,8 @@ pub(super) struct RlmDriverState {
     /// concatenated `combined_output: String` and a sibling
     /// `observations: Vec<String>` — the two carried the same content.
     pub(super) output: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) model_view_outputs: Vec<usize>,
     /// What the cell resolved to. Parked as the `error` / `terminal_finish`
     /// key pair recorded states already carry.
     #[serde(flatten)]

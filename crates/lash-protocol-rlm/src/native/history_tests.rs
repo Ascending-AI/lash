@@ -9,6 +9,7 @@ fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
         protocol_iteration: 0,
         code: "finish 1".to_string(),
         output: vec!["observed".to_string()],
+        model_view_outputs: Vec::new(),
         images: Vec::new(),
         calls: Vec::new(),
         calls_omitted: 0,

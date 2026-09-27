@@ -138,6 +138,9 @@ pub struct RlmTrajectoryEntry {
     /// the same content twice, wasting tokens on every history-bearing
     /// iteration.
     pub output: Vec<String>,
+    /// Indices in `output` authored by tools as model views.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_view_outputs: Vec<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<AttachmentRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -322,6 +325,7 @@ mod rlm_step_serde_tests {
             protocol_iteration: 3,
             code: "print('hello')".to_string(),
             output: vec!["hello".to_string()],
+            model_view_outputs: Vec::new(),
             images: vec![lash_sansio::AttachmentRef {
                 id: "image-1".parse().expect("valid attachment id"),
                 media_type: "image/png".parse().expect("valid media type"),
@@ -410,6 +414,7 @@ mod rlm_step_serde_tests {
             protocol_iteration: 0,
             code: "".to_string(),
             output: Vec::new(),
+            model_view_outputs: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,

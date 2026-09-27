@@ -1,5 +1,5 @@
 use lash_core::ToolCallOutcome;
-use lashlang::{ExecutionHostError, Value as LashlangValue};
+use lashlang::{ExecutionHostError, ProjectedValue, Value as LashlangValue};
 use tokio_util::sync::CancellationToken;
 
 use crate::LashlangHostError;
@@ -64,7 +64,7 @@ pub fn protocol_tool_reply_to_lashlang_value(
         }
         ToolCallOutcome::Success(_) => {}
     }
-    Ok(lashlang::from_json(output.into_value_for_projection()))
+    Ok(success_value(&output))
 }
 
 /// The borrowed twin of [`protocol_tool_reply_to_lashlang_value`], for callers
@@ -75,7 +75,7 @@ pub fn protocol_tool_output_to_lashlang_value(
     cancellation: &ExecutionCancellation,
 ) -> Result<LashlangValue, ExecutionHostError> {
     match &output.outcome {
-        ToolCallOutcome::Success(_) => Ok(lashlang::from_json(output.value_for_projection())),
+        ToolCallOutcome::Success(_) => Ok(success_value(output)),
         ToolCallOutcome::Failure(failure) => {
             Err(ExecutionHostError::from_tool_failure(failure, replay_key))
         }
@@ -83,6 +83,56 @@ pub fn protocol_tool_output_to_lashlang_value(
             Err(cancelled_tool_terminal(cancelled, cancellation))
         }
     }
+}
+
+const TOOL_RESULT_MODEL_VIEW_KIND: &str = "tool_result_model_view";
+
+fn success_value(output: &lash_core::ToolCallOutput) -> LashlangValue {
+    let value = output.value_for_projection();
+    match &output.model_view {
+        Some(view) => {
+            LashlangValue::Projected(tool_result_model_view_projection(value, view.clone()))
+        }
+        None => lashlang::from_json(value),
+    }
+}
+
+/// A self-contained projection reference survives both Lashlang durable writers.
+pub fn tool_result_model_view_projection(value: serde_json::Value, view: String) -> ProjectedValue {
+    let reference = serde_json::json!({
+        "kind": TOOL_RESULT_MODEL_VIEW_KIND,
+        "key": { "value": value, "view": view },
+        "descriptor_type": TOOL_RESULT_MODEL_VIEW_KIND,
+    });
+    ProjectedValue::scalar_with_model_view(
+        TOOL_RESULT_MODEL_VIEW_KIND,
+        lashlang::from_json(value),
+        reference,
+    )
+}
+
+/// Rebuild a tool result from the reference in a resumed Lashlang value.
+pub fn restore_tool_result_model_view_projection(
+    reference: &serde_json::Value,
+) -> Option<Result<ProjectedValue, String>> {
+    if reference.get("kind")?.as_str()? != TOOL_RESULT_MODEL_VIEW_KIND {
+        return None;
+    }
+    Some(
+        (|| {
+            let key = reference.get("key").ok_or("missing model view key")?;
+            let value = key
+                .get("value")
+                .cloned()
+                .ok_or("missing structured value")?;
+            let view = key
+                .get("view")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("missing model view text")?;
+            Ok(tool_result_model_view_projection(value, view.to_string()))
+        })()
+        .map_err(str::to_string),
+    )
 }
 
 /// Ends the execution and names the cancellation, in that order: the error is

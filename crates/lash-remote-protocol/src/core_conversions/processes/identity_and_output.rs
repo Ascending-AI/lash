@@ -310,7 +310,11 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::ToolCallOutput) -> Result<Self, Self::Error> {
-        let lash_core::ToolCallOutput { outcome, control } = value;
+        let lash_core::ToolCallOutput {
+            outcome,
+            control,
+            model_view,
+        } = value;
         let outcome = match outcome {
             lash_core::ToolCallOutcome::Success(value) => RemoteProcessToolCallOutcome::Success(
                 encode_remote_json(value, "RemoteProcessAwaitOutput", "output.outcome.success")?,
@@ -366,6 +370,7 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
         };
         Ok(Self {
             outcome,
+            model_view,
             control: control
                 .map(|control| {
                     encode_remote_json(control, "RemoteProcessAwaitOutput", "output.control")
@@ -379,7 +384,11 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessToolCallOutput) -> Result<Self, Self::Error> {
-        let RemoteProcessToolCallOutput { outcome, control } = value;
+        let RemoteProcessToolCallOutput {
+            outcome,
+            control,
+            model_view,
+        } = value;
         let outcome = match outcome {
             RemoteProcessToolCallOutcome::Success(value) => lash_core::ToolCallOutcome::Success(
                 decode_remote_json(value, "RemoteProcessAwaitOutput", "output.outcome.success")?,
@@ -435,6 +444,7 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
         };
         Ok(Self {
             outcome,
+            model_view,
             control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
         })
     }

@@ -879,7 +879,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-26 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-27 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -890,9 +890,9 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_26_root_encodes_to_golden_bytes() {
+fn version_27_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "86a776657273696f6e1aa6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "86a776657273696f6e1ba6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
         "0ea7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
         "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
         "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
@@ -979,7 +979,7 @@ fn version_26_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-26 root encoding changed; decide on a version bump before updating the golden"
+        "the version-27 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =

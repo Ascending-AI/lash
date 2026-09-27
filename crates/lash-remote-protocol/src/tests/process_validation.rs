@@ -31,6 +31,7 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
     non_terminal_with_outcome.outcome = Some(RemoteProcessAwaitOutput::Settled {
         output: RemoteProcessToolCallOutput {
             outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
+            model_view: None,
             control: None,
         },
     });
@@ -52,6 +53,7 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
                 source: RemoteProcessToolFailureSource::Cancellation,
                 raw: None,
             }),
+            model_view: None,
             control: None,
         },
     });
@@ -68,6 +70,7 @@ fn settled_success() -> RemoteProcessAwaitOutput {
     RemoteProcessAwaitOutput::Settled {
         output: RemoteProcessToolCallOutput {
             outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
+            model_view: None,
             control: None,
         },
     }
@@ -82,6 +85,7 @@ fn settled_cancelled() -> RemoteProcessAwaitOutput {
                 source: RemoteProcessToolFailureSource::Cancellation,
                 raw: None,
             }),
+            model_view: None,
             control: None,
         },
     }
@@ -149,6 +153,7 @@ fn settled_failed() -> RemoteProcessAwaitOutput {
                 retry: RemoteProcessToolRetryStatus::Never,
                 raw: None,
             }),
+            model_view: None,
             control: None,
         },
     }

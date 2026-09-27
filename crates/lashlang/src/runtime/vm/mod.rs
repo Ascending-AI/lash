@@ -76,6 +76,14 @@ use super::{
     unwrap_type_value,
 };
 
+fn materialize_except_model_view(value: Value) -> Result<Value, RuntimeError> {
+    if matches!(&value, Value::Projected(projected) if projected.has_model_view()) {
+        Ok(value)
+    } else {
+        materialize_value(value)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct SlotState {
     values: Vec<Option<Value>>,
@@ -137,7 +145,7 @@ impl SlotState {
         projected_bindings: Option<&ProjectedBindings>,
     ) -> Result<(), RuntimeError> {
         self.ensure_assignable(slot, slot_names, projected_bindings)?;
-        self.values[slot] = Some(materialize_value(value)?);
+        self.values[slot] = Some(materialize_except_model_view(value)?);
         Ok(())
     }
 
@@ -209,7 +217,7 @@ impl SlotState {
                     extras.insert_symbolized(
                         name.symbol,
                         name.text.clone(),
-                        materialize_value(value)?,
+                        materialize_except_model_view(value)?,
                     );
                 }
                 None => {

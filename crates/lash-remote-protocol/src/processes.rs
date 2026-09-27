@@ -363,7 +363,7 @@ impl RemoteProcessStatus {
     /// this used to validate is gone, and the label now lives only in
     /// `lash_core::ProcessStatus`. It is kept so the agreement test below can
     /// still prove the two vocabularies have not diverged.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "core-conversions"))]
     fn label(self) -> &'static str {
         match self {
             Self::Running => "running",

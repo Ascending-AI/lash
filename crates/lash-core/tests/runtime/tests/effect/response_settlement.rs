@@ -90,6 +90,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
             observations: vec![lash_core::Observation {
                 text: "next cell executed".to_string(),
                 projection: Default::default(),
+                is_model_view: false,
             }],
             calls: Vec::new(),
             printed_images: Vec::new(),

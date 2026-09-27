@@ -346,6 +346,7 @@ pub(crate) fn exec_response(
             .iter()
             .map(|item| lash_sansio::Observation {
                 text: (*item).to_string(),
+                is_model_view: false,
                 projection: Default::default(),
             })
             .collect(),
@@ -416,6 +417,7 @@ pub(crate) struct RlmProtocolScenario {
     pub(crate) termination: RlmTermination,
     pub(crate) protocol_turn_options: Option<lash_core::ProtocolTurnOptions>,
     pub(crate) max_turns: Option<usize>,
+    pub(crate) project_rlm_history: bool,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     pub(crate) steps: Vec<RlmProtocolStep>,
     pub(crate) expectations: RlmProtocolExpectations,
@@ -429,6 +431,7 @@ impl RlmProtocolScenario {
             termination: RlmTermination::default(),
             protocol_turn_options: None,
             max_turns: None,
+            project_rlm_history: false,
             plugin_factories: Vec::new(),
             steps: Vec::new(),
             expectations: RlmProtocolExpectations::default(),
@@ -452,6 +455,11 @@ impl RlmProtocolScenario {
 
     pub(crate) fn max_turns(mut self, max_turns: usize) -> Self {
         self.max_turns = Some(max_turns);
+        self
+    }
+
+    pub(crate) fn project_rlm_history(mut self) -> Self {
+        self.project_rlm_history = true;
         self
     }
 
@@ -529,6 +537,21 @@ impl RlmProtocolScenario {
                 .max_turns
                 .map(lash_core::TurnBudget::bounded)
                 .unwrap_or(lash_core::TurnBudget::Unbounded);
+            if self.project_rlm_history {
+                let preamble = lash_protocol_rlm::build_rlm_preamble(
+                    lash_core::ProtocolBuildInput {
+                        tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(
+                            Vec::new(),
+                        )),
+                        plugin_extensions: Default::default(),
+                        trigger_events: Default::default(),
+                        extra_prompt_contributions: Vec::new(),
+                        writer_formats: lash_core::build_newest_writer_formats(),
+                    },
+                    lash_protocol_rlm::RlmProjectorConfig::default(),
+                );
+                config.projector = preamble.config.projector;
+            }
             config
         };
         let config = build_config();
@@ -956,6 +979,7 @@ pub(crate) struct RlmProtocolRun {
     pub(crate) turn_outcomes: Vec<lash_sansio::TurnOutcome>,
     pub(crate) final_message_event: bool,
     pub(crate) tool_call_event: bool,
+    pub(crate) recorded_tool_outputs: Vec<lash_core::ToolCallOutput>,
     pub(crate) assistant_conversation_progress: bool,
     pub(crate) plugin_stream_visible_texts: Vec<String>,
     pub(crate) plugin_spliced_response_texts: Vec<String>,
@@ -980,8 +1004,9 @@ impl RlmProtocolRun {
                 Effect::Emit(SessionStreamEvent::Message { kind, .. }) if kind == "final" => {
                     self.final_message_event = true;
                 }
-                Effect::Emit(SessionStreamEvent::ToolCall { .. }) => {
+                Effect::Emit(SessionStreamEvent::ToolCall { output, .. }) => {
                     self.tool_call_event = true;
+                    self.recorded_tool_outputs.push(output.clone());
                 }
                 Effect::Progress { event_delta, .. } => {
                     self.assistant_conversation_progress |= event_delta.iter().any(|event| {

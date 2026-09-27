@@ -708,7 +708,11 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
             failure: bounded_tool_failure(failure),
         },
     });
-    ToolCallOutput { outcome, control }
+    ToolCallOutput {
+        outcome,
+        control,
+        model_view: output.model_view.clone(),
+    }
 }
 
 fn bounded_tool_failure(failure: &ToolFailure) -> ToolFailure {
@@ -802,6 +806,7 @@ fn trajectory_entry(
         protocol_iteration,
         code: state.code.clone(),
         output: state.output.clone(),
+        model_view_outputs: Vec::new(),
         images: state.images.clone(),
         calls: state.calls.clone(),
         calls_omitted: state.calls_omitted,

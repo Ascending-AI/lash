@@ -477,6 +477,14 @@ impl ToolOutcomeDone {
         Self::from_output(crate::ToolCallOutput::success(result))
     }
 
+    /// Shows this text when the whole successful result is printed in RLM code mode.
+    pub fn with_model_view(mut self, model_view: impl Into<String>) -> Self {
+        if self.0.is_success() {
+            self.0.model_view = Some(model_view.into());
+        }
+        self
+    }
+
     pub fn failure(failure: crate::ToolFailure) -> Self {
         Self::from_output(crate::ToolCallOutput::failure(failure))
     }

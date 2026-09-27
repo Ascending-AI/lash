@@ -165,6 +165,12 @@ impl<'de> serde::Deserialize<'de> for ExecCodeFailure {
 pub struct Observation {
     pub text: String,
     pub projection: TextProjectionMetadata,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_model_view: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

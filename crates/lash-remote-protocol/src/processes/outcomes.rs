@@ -50,6 +50,8 @@ pub struct RemoteProcessToolCallOutput {
     pub outcome: RemoteProcessToolCallOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_view: Option<String>,
 }
 
 impl RemoteProcessToolCallOutput {
