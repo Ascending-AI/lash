@@ -692,8 +692,9 @@ async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result
     Ok(())
 }
 
+/// A per-send prompt layer shapes its own root and nothing after it: the next
+/// root runs on the session prompt, which the layer never wrote.
 #[tokio::test]
-#[ignore = "FIG-3838: per-turn prompt layers require RunSpec on send()"]
 async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -704,17 +705,22 @@ async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("per-turn-prompt").open().await?;
-    let mut first = TurnInput::text("first");
-    lash_core::facade_support::TurnContextFacadeOps::add_prompt_contribution(
-        &mut first.turn_context,
-        PromptContribution::guidance("Turn", "turn guidance"),
-    );
-    session.send(first).output().await?;
+    session
+        .send(TurnInput::text("first"))
+        .prompt_layer(
+            crate::prompt::PromptLayer::new()
+                .with_contribution(PromptContribution::guidance("Turn", "turn guidance")),
+        )
+        .output()
+        .await?;
     session.send(TurnInput::text("second")).output().await?;
-    let prompts = seen.lock_recover();
+    let prompts = seen.lock_recover().clone();
     assert_eq!(prompts.len(), 2);
     assert!(prompts[0].contains("turn guidance"));
-    assert!(!prompts[1].contains("turn guidance"));
+    assert!(
+        !prompts[1].contains("turn guidance"),
+        "a per-send layer never reaches the session prompt the next root runs on"
+    );
     Ok(())
 }
 

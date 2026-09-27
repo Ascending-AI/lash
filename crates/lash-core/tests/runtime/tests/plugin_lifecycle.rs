@@ -93,7 +93,6 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),

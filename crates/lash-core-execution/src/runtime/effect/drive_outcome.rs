@@ -92,9 +92,9 @@ impl RuntimeEffectOutcome {
 
     pub fn into_resolve_turn_config(
         self,
-    ) -> Result<crate::PersistedSessionConfig, RuntimeEffectControllerError> {
+    ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
         match self {
-            Self::ResolveTurnConfig { config } => Ok(*config),
+            Self::ResolveTurnConfig { resolved } => Ok(*resolved),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::ResolveTurnConfig,
                 other.kind(),

@@ -147,6 +147,10 @@ pub use lash_core::{
 /// [`LashCore::builder`] requires one; the engine crates behind the
 /// feature-gated modules (`restate`, `sqlite`, `postgres`) build one.
 pub use lash_core::{Backend, EffectEngine, StoreBindingId, StoreSet};
+/// The shape a sent input runs under (FIG-3838): a [`RunSpec`] set on
+/// [`SendBuilder::run`], or through its one-shot setters, and the
+/// [`RunDefinition`]s a [`LashCoreBuilder`] registers for specs to name.
+pub use lash_core::{DefinitionRef, RunDefinition, RunOverrides, RunShapeError, RunSpec};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle; re-exported so embedders hold one
 /// without depending on `tokio-util` themselves.

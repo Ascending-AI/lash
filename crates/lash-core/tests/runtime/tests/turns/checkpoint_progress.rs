@@ -52,7 +52,6 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -116,7 +115,6 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
                 items: vec![InputItem::Text {
                     text: "/yolopush\n\n<skill>\nbody\n</skill>".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -220,7 +218,6 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -286,7 +283,6 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -348,7 +344,6 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -417,7 +412,6 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -530,7 +524,6 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -630,7 +623,6 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1005,7 +997,6 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),

@@ -213,7 +213,6 @@ async fn presentation_step_only_changes_model_observation() {
                 items: vec![InputItem::Text {
                     text: "run the tool".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -319,7 +318,6 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
                 items: vec![InputItem::Text {
                     text: "where did this go?".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -962,7 +960,6 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 items: vec![InputItem::Text {
                     text: "where did this go?".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),

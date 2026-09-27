@@ -711,8 +711,14 @@ impl RuntimeHandle {
         source_key: Option<String>,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
         let (ops, store) = self.durable_queue()?;
-        ops.enqueue_turn_input(&store, input, ingress, source_key)
-            .await
+        ops.enqueue_turn_input(
+            &store,
+            input,
+            ingress,
+            source_key,
+            crate::RunSpec::default(),
+        )
+        .await
     }
 
     pub async fn cancel_pending_turn_input(

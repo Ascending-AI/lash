@@ -618,6 +618,11 @@ pub struct RuntimeSessionAuthority {
     /// Boxed under `authority` so carrying it costs resident state nothing.
     #[serde(skip)]
     pub committed_config: Option<Box<crate::PersistedSessionConfig>>,
+    /// The snapshot the running root's spec resolved against (FIG-3838),
+    /// while its recorded view is installed: the configuration its queued
+    /// run was admitted under. Cleared with `committed_config`.
+    #[serde(skip)]
+    pub root_snapshot: Option<Box<crate::PersistedSessionConfig>>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1321,6 +1326,17 @@ pub fn adopt_root_execution_config(
     adopt_session_config(state, config);
 }
 
+/// Install a root's recorded [`ResolvedRun`](crate::run_spec::ResolvedRun):
+/// its config becomes the execution view, the sticky config stays what
+/// commits write, and its snapshot is kept as the root's admission config.
+pub fn adopt_resolved_run(
+    state: &mut RuntimeSessionState,
+    resolved: &crate::run_spec::ResolvedRun,
+) {
+    adopt_root_execution_config(state, resolved.config());
+    state.authority.root_snapshot = Some(Box::new(resolved.base.clone()));
+}
+
 /// Adopt the durable head config's carried fields onto resident state: the
 /// policy-homed values plus the config compare-and-set revision, which moves
 /// only with the config itself (ADR 0101 §12).
@@ -1459,6 +1475,7 @@ pub fn adopt_durable_head(
         .collect();
     adopt_session_config(state, &head.config);
     state.authority.committed_config = None;
+    state.authority.root_snapshot = None;
     state.policy.session_id = live_owned.session_id;
     state.policy.turn_budget = live_owned.turn_budget;
     // The config adopted the commanded head value before the checkpoint

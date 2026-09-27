@@ -20,6 +20,7 @@ pub(crate) struct PendingTurnInputRow {
     claim_owner: Option<LeaseOwnerIdentity>,
     claim_token: Option<String>,
     claim_session_lease_generation: u64,
+    run_spec_hash: Option<String>,
 }
 
 impl PendingTurnInputRow {
@@ -98,6 +99,7 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
             "claim_session_lease_generation",
             row.get("claim_session_lease_generation"),
         )?,
+        run_spec_hash: row.get("run_spec_hash"),
     })
 }
 
@@ -112,6 +114,9 @@ pub(crate) fn pending_turn_input_from_row(
         state: row.state,
         enqueued_at_ms: row.enqueued_at_ms,
         input: store_decode_json(&row.input_json, "turn input")?,
+        run_spec: row
+            .run_spec_hash
+            .map(lash_core_execution::RunSpecHash::from_stored),
     })
 }
 

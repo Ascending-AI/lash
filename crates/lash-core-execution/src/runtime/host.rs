@@ -69,6 +69,9 @@ pub struct RuntimeDurabilityConfig {
 #[derive(Clone)]
 pub struct RuntimeProviderConfig {
     pub provider_resolver: Arc<dyn crate::RuntimeProviderResolver>,
+    /// The run definitions this deployment registers (FIG-3838): a root
+    /// whose spec names a definition resolves it here, by exact reference.
+    pub run_definitions: crate::RunDefinitions,
 }
 
 #[derive(Clone)]
@@ -213,6 +216,7 @@ impl RuntimeHostConfig {
             process_engines: ProcessEngineRegistry::new(),
             providers: RuntimeProviderConfig {
                 provider_resolver: Arc::new(crate::EmptyProviderResolver),
+                run_definitions: crate::RunDefinitions::default(),
             },
             prompt: RuntimePromptConfig {
                 prompt: crate::PromptLayer::new(),

@@ -35,6 +35,10 @@
     "verdict": "deliberately-excluded",
     "reason": "TurnInput includes host-facing content and attachments and has no bounded JsonSchema durability contract yet."
   },
+  "lash_session_run_specs.spec_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "RunSpec is stored as its canonical JSON, named by the versioned blake3 hash of those bytes in spec_hash and in every lash_pending_turn_inputs.run_spec_hash that interns it; the row is immutable, so its identity is the hash, not a schemars shape. It carries the same prompt, model and protocol-option payloads lash_sessions.head_json does, and enrolls with them."
+  },
   "lash_turn_cancel_closure_authorizations.authorization_json": {
     "verdict": "deliberately-excluded",
     "reason": "TurnCancelClosureAuthorization is an exact operation record covered by the reject-and-recreate component-87 boundary; it is validated structurally and against indexed session, turn, binding, fence, scope, keys, and intent before use."

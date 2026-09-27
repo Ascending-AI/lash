@@ -68,12 +68,12 @@ async fn runtime_with_foreign_replay(
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     trace_path: &std::path::Path,
 ) -> LashRuntime {
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
+    let mut runtime = Box::pin(runtime_with_plugins_and_tools_and_host(
         plugins,
         Arc::new(EmptyTools),
         provider,
         test_host_config_with_trace_path(backend, trace_path.to_path_buf()),
-    )
+    ))
     .await;
     append_message(&mut runtime.state, foreign_replay_message());
     runtime

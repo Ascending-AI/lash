@@ -287,6 +287,7 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     claim_session_lease_generation bigint DEFAULT 0 NOT NULL,
     claim_bound_turn_id text,
     claim_bound_receipt_input_id text,
+    run_spec_hash text,
     CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((((claim_bound_turn_id IS NULL) AND (claim_bound_receipt_input_id IS NULL)) OR ((claim_bound_turn_id IS NOT NULL) AND (claim_bound_receipt_input_id IS NOT NULL) AND (claim_token IS NOT NULL) AND (state = 'deferred_next_turn'::text)))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((((claim_id IS NULL) AND (claim_owner_id IS NULL) AND (claim_owner_incarnation_id IS NULL) AND (claim_token IS NULL)) OR ((claim_id IS NOT NULL) AND (claim_owner_id IS NOT NULL) AND (claim_owner_incarnation_id IS NOT NULL) AND (claim_token IS NOT NULL)))),
     CONSTRAINT ck_pending_turn_inputs_state CHECK ((state = ANY (ARRAY['pending_active'::text, 'deferred_next_turn'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))),
@@ -740,6 +741,17 @@ CREATE TABLE lash_durable_read_fixture.lash_session_roots (
 
 
 --
+-- Name: lash_session_run_specs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_session_run_specs (
+    session_id text NOT NULL,
+    spec_hash text NOT NULL,
+    spec_json text NOT NULL
+);
+
+
+--
 -- Name: lash_sessions; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1150,7 +1162,7 @@ INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', '
 -- Data for Name: lash_pending_turn_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (2, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', 1700000000000, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (2, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', 1700000000000, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL);
 
 
 --
@@ -1331,6 +1343,12 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 
 --
 -- Data for Name: lash_session_roots; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_session_run_specs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1882,6 +1900,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_root_inputs
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_session_roots
     ADD CONSTRAINT lash_session_roots_pkey PRIMARY KEY (session_id, root);
+
+
+--
+-- Name: lash_session_run_specs lash_session_run_specs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_run_specs
+    ADD CONSTRAINT lash_session_run_specs_pkey PRIMARY KEY (session_id, spec_hash);
 
 
 --

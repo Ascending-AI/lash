@@ -52,6 +52,8 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     // trigger-delivery process id (`lash.trigger-delivery-process`) are
     // retired with it and stay reserved above.
     "lash.process-start-key",
+    // FIG-3838: the name of one interned run spec.
+    "lash.run-spec",
 ];
 
 /// Grandfathered families whose preimages omit the framing header (ADR 0097).

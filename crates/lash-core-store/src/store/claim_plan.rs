@@ -359,8 +359,22 @@ pub fn plan_turn_input_claim(
     claiming_generation: u64,
     now_epoch_ms: u64,
     mode: crate::TurnInputClaimMode,
-    rows: Vec<TurnInputClaimRow>,
+    mut rows: Vec<TurnInputClaimRow>,
 ) -> Result<ClaimPlanDecision<TurnInputClaimPlan>, StoreError> {
+    let Some(spec) = rows.first().map(|head| head.input.run_spec.clone()) else {
+        return Ok(ClaimPlanDecision::Empty);
+    };
+    // A claim never mixes run specs (FIG-3838): the next-turn prefix stops,
+    // never skips, at the first row whose spec differs from its head's. A
+    // checkpoint claim delivers into a running root whose shape is already
+    // recorded, and admission refused every differing explicit spec there.
+    if matches!(&mode, crate::TurnInputClaimMode::NextTurn) {
+        let same_spec = rows
+            .iter()
+            .take_while(|row| row.input.run_spec == spec)
+            .count();
+        rows.truncate(same_spec);
+    }
     let Some(head) = rows.first() else {
         return Ok(ClaimPlanDecision::Empty);
     };

@@ -15,8 +15,9 @@ fn a_recorded_turn_config_round_trips_whole() {
     config.prompt = Some(crate::PromptLayer::default());
     config.protocol_turn_options = Some(crate::ProtocolTurnOptions::default());
     config.config_revision = 3;
+    let resolved = crate::ResolvedRun::snapshot(config);
     let recorded = RuntimeEffectOutcome::ResolveTurnConfig {
-        config: Box::new(config.clone()),
+        resolved: Box::new(resolved.clone()),
     };
     let wire = serde_json::to_value(&recorded).expect("encode the recorded config");
     let decoded: RuntimeEffectOutcome =
@@ -25,6 +26,6 @@ fn a_recorded_turn_config_round_trips_whole() {
         decoded
             .into_resolve_turn_config()
             .expect("a turn-config outcome"),
-        config
+        resolved
     );
 }

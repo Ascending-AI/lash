@@ -789,6 +789,8 @@ pub struct LashCoreBuilder {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     session_spec: SessionSpec,
     provider: Option<ProviderHandle>,
+    /// The run definitions sent inputs' specs may name (FIG-3838).
+    run_definitions: lash_core::RunDefinitions,
     /// The one substrate every persistence port and the effect host come from.
     backend: Backend,
     commit_budget: Option<facade_support::CommitBudget>,
@@ -828,6 +830,7 @@ impl LashCoreBuilder {
             protocol_factory: None,
             session_spec: SessionSpec::new().turn_budget(turn_budget),
             provider: None,
+            run_definitions: lash_core::RunDefinitions::default(),
             backend,
             commit_budget: None,
             queued_work_batching: None,
@@ -857,6 +860,16 @@ impl LashCoreBuilder {
 
     pub fn protocol_plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.protocol_factory = Some(plugin);
+        self
+    }
+
+    /// Register a run definition a sent input's [`RunSpec`](crate::RunSpec)
+    /// may name by its exact [`DefinitionRef`](crate::DefinitionRef). A root
+    /// whose spec names a revision this deployment does not register retries
+    /// and parks, and recovers once a deployment registers it; no other
+    /// revision is ever used in its place.
+    pub fn run_definition(mut self, definition: impl crate::RunDefinition + 'static) -> Self {
+        self.run_definitions.register(Arc::new(definition));
         self
     }
 

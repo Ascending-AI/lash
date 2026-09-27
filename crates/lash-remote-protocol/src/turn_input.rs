@@ -48,8 +48,6 @@ pub struct RemoteTurnInput {
     #[serde(default)]
     pub items: Vec<RemoteInputItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_turn_options: Option<RemoteProtocolTurnOptions>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_turn_id: Option<TurnId>,
 }
 
@@ -57,7 +55,6 @@ impl RemoteTurnInput {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
             items: vec![RemoteInputItem::Text { text: text.into() }],
-            protocol_turn_options: None,
             trace_turn_id: None,
         }
     }
@@ -109,6 +106,11 @@ pub struct RemoteTurnRequest {
     /// tool results, usage, and activity.
     pub turn_id: TurnId,
     pub input: RemoteTurnInput,
+    /// Protocol turn options for this input's root only: the send's run
+    /// spec overrides, merged over the session's options. They never become
+    /// the session's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_turn_options: Option<RemoteProtocolTurnOptions>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_grants: Vec<RemoteToolGrant>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

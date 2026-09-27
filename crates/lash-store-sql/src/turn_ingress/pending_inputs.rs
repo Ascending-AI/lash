@@ -11,17 +11,17 @@ pub const TABLE: &str = "pending_turn_inputs";
 pub const COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json,
      state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
      claim_owner_id, claim_owner_incarnation_id,
-     claim_token, claim_session_lease_generation";
+     claim_token, claim_session_lease_generation, run_spec_hash";
 
 /// The columns written after allocation under the session lock.
 pub const INSERT_COLUMNS: &str =
     "enqueue_seq, input_id, session_id, source_key, ingress_json, state,
-     input_json, submitted_ingress_json, submission_digest, enqueued_at_ms";
+     input_json, submitted_ingress_json, submission_digest, enqueued_at_ms, run_spec_hash";
 
 /// The columns written by the PostgreSQL insert.
 pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, input_id, session_id, source_key,
      ingress_json, state, input_json, submitted_ingress_json, submission_digest,
-     enqueued_at_ms";
+     enqueued_at_ms, run_spec_hash";
 
 /// The facts source-key replay consults (FIG-3544).
 ///
@@ -73,6 +73,11 @@ pub const CLAIM_IDENTITY_COLUMNS: &str = "claim_id, claim_token";
 /// already read through [`COLUMNS`].
 pub const BINDING_COLUMNS: &str = "claim_bound_turn_id, claim_bound_receipt_input_id";
 
+/// The facts the steering admission check consults about the input an
+/// addressed turn was started by (FIG-3838): whether it is still undelivered,
+/// and the spec it runs under.
+pub const RUN_SPEC_COLUMNS: &str = "state, run_spec_hash";
+
 /// The ordering key the pending-work comparison reads.
 ///
 /// Narrow because the comparison is only ever between this pair and the queued
@@ -92,7 +97,7 @@ crate::statements! {
         select_by_id = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
@@ -100,7 +105,14 @@ crate::statements! {
         select_by_source_key = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND source_key = ?2";
+
+        /// The lifecycle state and run spec of the input session `?1` filed
+        /// under source key `?2`: the input that started the root a steering
+        /// input addresses (FIG-3838).
+        select_run_spec_by_source_key = "SELECT state, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
@@ -115,7 +127,7 @@ crate::statements! {
         list_undelivered = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, claim_bound_turn_id,
+                    claim_token, claim_session_lease_generation, run_spec_hash, claim_bound_turn_id,
                     claim_bound_receipt_input_id,
                     (SELECT sel.lease_expires_at_ms
                      FROM session_execution_leases sel

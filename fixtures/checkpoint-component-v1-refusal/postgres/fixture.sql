@@ -288,6 +288,7 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     claim_session_lease_generation bigint DEFAULT 0 NOT NULL,
     claim_bound_turn_id text,
     claim_bound_receipt_input_id text,
+    run_spec_hash text,
     CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((((claim_bound_turn_id IS NULL) AND (claim_bound_receipt_input_id IS NULL)) OR ((claim_bound_turn_id IS NOT NULL) AND (claim_bound_receipt_input_id IS NOT NULL) AND (claim_token IS NOT NULL) AND (state = 'deferred_next_turn'::text)))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((((claim_id IS NULL) AND (claim_owner_id IS NULL) AND (claim_owner_incarnation_id IS NULL) AND (claim_token IS NULL)) OR ((claim_id IS NOT NULL) AND (claim_owner_id IS NOT NULL) AND (claim_owner_incarnation_id IS NOT NULL) AND (claim_token IS NOT NULL)))),
     CONSTRAINT ck_pending_turn_inputs_state CHECK ((state = ANY (ARRAY['pending_active'::text, 'deferred_next_turn'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))),
@@ -738,6 +739,17 @@ CREATE TABLE lash_durable_read_fixture.lash_session_roots (
     terminal_at_ms bigint,
     claim_result_json text,
     CONSTRAINT ck_session_roots_terminal CHECK ((((terminal_kind IS NULL) AND (terminal_cause_json IS NULL) AND (terminal_head_revision IS NULL) AND (terminal_at_ms IS NULL)) OR ((terminal_kind = ANY (ARRAY['answered'::text, 'failed'::text, 'cancelled'::text])) AND (terminal_cause_json IS NOT NULL) AND (terminal_at_ms IS NOT NULL))))
+);
+
+
+--
+-- Name: lash_session_run_specs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_session_run_specs (
+    session_id text NOT NULL,
+    spec_hash text NOT NULL,
+    spec_json text NOT NULL
 );
 
 
@@ -1324,6 +1336,12 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 
 
 --
+-- Data for Name: lash_session_run_specs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1867,6 +1885,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_root_inputs
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_session_roots
     ADD CONSTRAINT lash_session_roots_pkey PRIMARY KEY (session_id, root);
+
+
+--
+-- Name: lash_session_run_specs lash_session_run_specs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_run_specs
+    ADD CONSTRAINT lash_session_run_specs_pkey PRIMARY KEY (session_id, spec_hash);
 
 
 --

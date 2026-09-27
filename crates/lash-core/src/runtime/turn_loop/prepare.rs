@@ -11,6 +11,10 @@ use super::*;
 /// fields are the phase's inputs in the order the phase reads them.
 pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) input: TurnInput,
+    /// Protocol turn options this physical turn runs under beyond its root's
+    /// recorded view: a follow-on's recorded options. A root's own options
+    /// come from its resolved run spec, never from here.
+    pub(in crate::runtime) protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) local_stop: LocalTurnStop,
@@ -66,6 +70,7 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
             mut input,
+            protocol_turn_options,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop,
@@ -446,7 +451,7 @@ impl LashRuntime {
                 turn: PreparedLogicalTurn {
                     messages,
                     previous_prompt_usage,
-                    protocol_turn_options: input.protocol_turn_options.clone(),
+                    protocol_turn_options,
                     protocol_extension: input.protocol_extension.clone(),
                     turn_context: input.turn_context.clone(),
                     initial_turn_causes,

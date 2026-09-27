@@ -395,6 +395,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
     claim_bound_turn_id TEXT,
     claim_bound_receipt_input_id TEXT,
+    run_spec_hash TEXT,
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
@@ -408,6 +409,17 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
     ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_claim
     ON lash_pending_turn_inputs(session_id, claim_id, claim_token);
+
+-- One row per run spec a session's inputs carry (FIG-3838), interned once per
+-- hash in the transaction that admits the input naming it, immutable, and
+-- owned by the session: reclaimed when the session is deleted. The default
+-- spec is never interned; its inputs carry a NULL `run_spec_hash`.
+CREATE TABLE IF NOT EXISTS lash_session_run_specs (
+    session_id TEXT NOT NULL,
+    spec_hash TEXT NOT NULL,
+    spec_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, spec_hash)
+);
 
 -- The one session ingress (ADR 0101): one row per admitted item, one
 -- per-session order taken under the session history lock, two class-level

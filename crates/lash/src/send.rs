@@ -40,6 +40,7 @@ use crate::support::{
     TurnActivitySink, TurnInput, TurnOutcome,
 };
 use crate::turn::{TurnOutput, TurnReport};
+use lash_core::{GenerationOptions, ModelSpec, PromptLayer, RunSpec};
 
 use lash_core::facade_support::{TurnCancelDisposition, TurnCancelMode, TurnCancelReceipt};
 use lash_core::runtime::PendingTurnInputCancelReceipt;
@@ -150,13 +151,15 @@ impl SendTarget {
 
 /// Refuse process-local turn context before anything is accepted: it cannot
 /// survive durable acceptance (the same rule the remote boundary enforces).
+/// Everything a send shapes its root with is durable data on its
+/// [`RunSpec`](lash_core::RunSpec).
 fn refuse_live_turn_context(input: &TurnInput) -> Result<()> {
     let what = if input.protocol_extension.is_some() {
         Some("a live protocol turn extension")
     } else if input.turn_context.has_live_plugin_inputs() {
         Some("a live plugin turn input")
     } else if !input.turn_context.prompt_layer().is_empty() {
-        Some("per-turn prompt")
+        Some("a live per-turn prompt; set it with `SendBuilder::prompt_layer`")
     } else {
         None
     };
@@ -174,13 +177,19 @@ fn refuse_live_turn_context(input: &TurnInput) -> Result<()> {
 ///
 /// Awaiting it commits the acceptance and asks the engine for a drive; it
 /// yields a [`SendHandle`]. [`output`](Self::output) is the one-call form.
+///
+/// The shape the input runs under is its [`RunSpec`]: the default is the
+/// session config as it stands when the input's root starts, after every
+/// config command queued ahead of that boundary. [`run`](Self::run) and the
+/// one-shot setters shape this input's root only; nothing they set reaches
+/// the session config. Inputs whose specs differ never share a turn.
 #[must_use = "a SendBuilder does nothing until awaited"]
 pub struct SendBuilder {
     pub(crate) target: SendTarget,
     pub(crate) input: TurnInput,
     pub(crate) id: Option<TurnId>,
     pub(crate) ingress: TurnInputIngress,
-    pub(crate) protocol_turn_options: Option<ProtocolTurnOptions>,
+    pub(crate) run_spec: RunSpec,
 }
 
 impl SendBuilder {
@@ -190,7 +199,7 @@ impl SendBuilder {
             input,
             id: None,
             ingress: TurnInputIngress::NextTurn,
-            protocol_turn_options: None,
+            run_spec: RunSpec::default(),
         }
     }
 
@@ -208,13 +217,64 @@ impl SendBuilder {
 
     /// Where the input applies: [`TurnInputIngress::NextTurn`] (the default)
     /// or an active turn's checkpoint.
+    ///
+    /// An input steered into a running turn joins that turn's recorded
+    /// shape: leave its spec default to inherit it. An explicit spec that
+    /// differs from the running turn's is refused before acceptance
+    /// ([`RuntimeErrorCode::RunSpecMismatch`](lash_core::RuntimeErrorCode::RunSpecMismatch)).
     pub fn ingress(mut self, ingress: TurnInputIngress) -> Self {
         self.ingress = ingress;
         self
     }
 
+    /// The whole spec this input runs under, replacing anything set before.
+    /// The spec is part of the input's submission: a retry under the same
+    /// [`id`](Self::id) must carry the same spec.
+    pub fn run(mut self, spec: RunSpec) -> Self {
+        self.run_spec = spec;
+        self
+    }
+
+    /// A prompt layer for this input's root only, stacked on the session
+    /// prompt with the usual precedence. Layers set twice stack.
+    pub fn prompt_layer(mut self, layer: PromptLayer) -> Self {
+        let overrides = std::mem::take(&mut *self.run_spec.overrides);
+        *self.run_spec.overrides = lash_core::RunOverrides {
+            prompt: Some(layer),
+            ..lash_core::RunOverrides::default()
+        }
+        .over(overrides);
+        self
+    }
+
+    /// The provider route this input's root runs on. The session's model and
+    /// variant stay unless [`model`](Self::model) is set too.
+    pub fn provider_id(mut self, provider_id: impl Into<String>) -> Self {
+        self.run_spec.overrides.provider_id = Some(provider_id.into());
+        self
+    }
+
+    /// The model this input's root runs on.
+    pub fn model(mut self, model: ModelSpec) -> Self {
+        self.run_spec.overrides.model = Some(model);
+        self
+    }
+
+    /// The generation options this input's root runs with.
+    pub fn generation(mut self, generation: GenerationOptions) -> Self {
+        self.run_spec.overrides.generation = Some(generation);
+        self
+    }
+
+    /// Protocol turn options for this input's root, merged over the
+    /// session's key by key; options set twice merge the same way.
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
-        self.protocol_turn_options = Some(options);
+        let overrides = std::mem::take(&mut *self.run_spec.overrides);
+        *self.run_spec.overrides = lash_core::RunOverrides {
+            protocol_turn_options: Some(options),
+            ..lash_core::RunOverrides::default()
+        }
+        .over(overrides);
         self
     }
 
@@ -241,13 +301,10 @@ impl SendBuilder {
             mut input,
             id,
             ingress,
-            protocol_turn_options,
+            run_spec,
         } = self;
         refuse_live_turn_context(&input)?;
         let context = target.context().await?;
-        if let Some(options) = protocol_turn_options {
-            input.protocol_turn_options = Some(options);
-        }
         // The host id names the root; the drive runs the root's turns under
         // it, so the input carries no turn id of its own. An input sent
         // without one gets a fresh id, so its row is keyed and its root named
@@ -264,6 +321,7 @@ impl SendBuilder {
                 input,
                 ingress,
                 id.as_ref().map(ToString::to_string),
+                run_spec,
             )
             .await?;
         let receipt = TurnInputAcceptanceReceipt::from(&enqueued);

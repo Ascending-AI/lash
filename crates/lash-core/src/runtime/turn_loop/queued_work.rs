@@ -695,13 +695,13 @@ impl LashRuntime {
             });
         }
         self.queued_run_reacquired = Default::default();
-        let (mut input, claims) = self.queued_run_input(selection, true)?;
+        let (mut input, options, claims) = self.queued_run_input(selection, true)?;
         if selected.is_some() {
             input.turn_context.mark_selected_queued_work_drain();
         }
         let start = match exhausted_follow_on {
             Some(owed) => LogicalTurnStart::ExhaustedFollowOn(owed),
-            None => LogicalTurnStart::Input(input),
+            None => LogicalTurnStart::Input(input, options),
         };
         let mut lease = Some(lease);
         let mut result = self
@@ -752,8 +752,16 @@ impl LashRuntime {
         &mut self,
         selected: crate::store::SelectedQueuedRun,
         announce_claims: bool,
-    ) -> Result<(TurnInput, LogicalTurnClaims), RuntimeError> {
+    ) -> Result<
+        (
+            TurnInput,
+            Option<crate::ProtocolTurnOptions>,
+            LogicalTurnClaims,
+        ),
+        RuntimeError,
+    > {
         let mut input = TurnInput::items(Vec::new());
+        let mut options = None;
         for member in selected.admission.members.as_deref().unwrap_or_default() {
             match member {
                 crate::store::QueuedRunMember::Input(id) => {
@@ -769,9 +777,6 @@ impl LashRuntime {
                             )
                         })?;
                     input.items.extend(pending.input.items.clone());
-                    if input.protocol_turn_options.is_none() {
-                        input.protocol_turn_options = pending.input.protocol_turn_options.clone();
-                    }
                 }
                 // A batch's work reaches the turn as its turn causes,
                 // materialized from the claim at prepare.
@@ -800,7 +805,7 @@ impl LashRuntime {
             .filter(|owed| owed.is_turn(&selected.admission.position.turn_id))
         {
             input.items.push(crate::InputItem::text(owed.task.clone()));
-            input.protocol_turn_options = owed.options.as_deref().cloned();
+            options = owed.options.as_deref().cloned();
         }
         if announce_claims {
             let turn_index =
@@ -857,6 +862,7 @@ impl LashRuntime {
         self.queued_run = Some(Box::new(selected.admission));
         Ok((
             input,
+            options,
             LogicalTurnClaims::new(selected.queued, selected.inputs),
         ))
     }

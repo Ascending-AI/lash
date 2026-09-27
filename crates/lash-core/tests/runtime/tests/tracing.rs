@@ -431,7 +431,6 @@ async fn provider_spans_are_children_of_the_turn_span() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -521,7 +520,6 @@ async fn assert_standard_tool_lifecycle(
                 items: vec![InputItem::Text {
                     text: "call the tool".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -983,7 +981,6 @@ async fn standard_runtime_trace_records_stream_event_entries() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1199,7 +1196,6 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1330,7 +1326,6 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
                     items: vec![InputItem::Text {
                         text: "hello".to_string(),
                     }],
-                    protocol_turn_options: None,
                     trace_turn_id: None,
                     protocol_extension: None,
                     turn_context: lash_core::TurnContext::default(),
@@ -1421,7 +1416,6 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1502,7 +1496,6 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),

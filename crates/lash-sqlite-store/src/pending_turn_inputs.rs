@@ -41,6 +41,7 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) claim_owner: Option<LeaseOwnerIdentity>,
     pub(crate) claim_token: Option<String>,
     pub(crate) claim_session_lease_generation: u64,
+    pub(crate) run_spec_hash: Option<String>,
 }
 
 pub(crate) fn pending_turn_input_row_from_sql(
@@ -70,6 +71,7 @@ pub(crate) fn pending_turn_input_row_from_sql(
             "claim_session_lease_generation",
             row.get(13)?,
         )?,
+        run_spec_hash: row.get(14)?,
     })
 }
 
@@ -87,11 +89,11 @@ pub(crate) fn pending_turn_input_read_row_from_sql(
 ) -> rusqlite::Result<PendingTurnInputReadRow> {
     let input = pending_turn_input_row_from_sql(row)?;
     let lease_expires_at_ms = row
-        .get::<_, Option<i64>>(16)?
+        .get::<_, Option<i64>>(17)?
         .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
         .transpose()?;
-    let bound_turn_id: Option<String> = row.get(14)?;
-    let bound_receipt_input_id: Option<String> = row.get(15)?;
+    let bound_turn_id: Option<String> = row.get(15)?;
+    let bound_receipt_input_id: Option<String> = row.get(16)?;
     Ok(PendingTurnInputReadRow {
         row: input,
         lease_expires_at_ms,
@@ -111,6 +113,9 @@ pub(crate) fn pending_turn_input_from_row(
         state: decode_turn_input_state(row.state, ingress)?,
         enqueued_at_ms: row.enqueued_at_ms,
         input: decode_turn_input(row.input_json)?,
+        run_spec: row
+            .run_spec_hash
+            .map(lash_core_execution::RunSpecHash::from_stored),
     })
 }
 

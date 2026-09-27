@@ -469,6 +469,7 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
     claim_bound_turn_id TEXT,
     claim_bound_receipt_input_id TEXT,
+    run_spec_hash     TEXT,
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
@@ -486,6 +487,17 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_input_order
 
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_claim
     ON pending_turn_inputs(session_id, claim_id, claim_token);
+
+-- One row per run spec a session's inputs carry (FIG-3838), interned once per
+-- hash in the transaction that admits the input naming it, immutable, and
+-- owned by the session: reclaimed when the session is deleted. The default
+-- spec is never interned; its inputs carry a NULL `run_spec_hash`.
+CREATE TABLE IF NOT EXISTS session_run_specs (
+    session_id TEXT NOT NULL,
+    spec_hash  TEXT NOT NULL,
+    spec_json  TEXT NOT NULL,
+    PRIMARY KEY (session_id, spec_hash)
+);
 
 -- `write_id` is the identity of the write attempt that currently owns a row,
 -- minted by `begin_attachment_write`; completion and abort are matched on it,

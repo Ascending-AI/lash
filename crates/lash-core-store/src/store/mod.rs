@@ -44,6 +44,11 @@ mod root;
 pub mod runtime_commit;
 mod runtime_commit_plan;
 mod semantic_boundary;
+mod session_config_views;
+pub use session_config_views::{
+    execution_session_config_from_state, persisted_session_config_from_state,
+    root_snapshot_config_from_state,
+};
 pub mod session_execution_lease;
 mod session_ingress;
 pub mod session_ingress_plan;
@@ -452,27 +457,6 @@ impl SessionHeadMeta {
             current_frame_node_id: self.current_frame_node_id.clone(),
         }
     }
-}
-
-pub fn persisted_session_config_from_state(
-    state: &crate::RuntimeSessionState,
-) -> crate::PersistedSessionConfig {
-    if let Some(config) = &state.authority.committed_config {
-        return (**config).clone();
-    }
-    execution_session_config_from_state(state)
-}
-
-/// The config used by the running root, including its recorded execution view.
-pub fn execution_session_config_from_state(
-    state: &crate::RuntimeSessionState,
-) -> crate::PersistedSessionConfig {
-    let mut config = crate::PersistedSessionConfig::from(&state.policy);
-    config.tool_access = state.authority.tool_access.clone();
-    config.subagent = state.authority.subagent.clone();
-    config.protocol_turn_options = Some(state.protocol_turn_options.clone());
-    config.config_revision = state.config_revision;
-    config
 }
 
 #[derive(Clone, Debug)]
@@ -1562,10 +1546,31 @@ pub trait TurnInputStore: Send + Sync {
     /// [`StoreError::PendingTurnInputIdConflict`]. A journaled turn acceptance
     /// provisions its id this way, so re-running its body never admits a
     /// second row (ADR 0069 §6).
+    ///
+    /// A draft with a non-default [`RunSpec`](crate::run_spec::RunSpec) interns
+    /// the spec in the session's spec table in the same transaction, once per
+    /// hash; different bytes under an interned hash are refused as
+    /// [`StoreError::RunSpecHashCollision`]. An input addressed to a running
+    /// turn whose explicit spec differs from that turn's is refused as
+    /// [`StoreError::PendingTurnInputRunSpecMismatch`] (FIG-3838). Either
+    /// refusal stores nothing.
     async fn enqueue_pending_turn_input(
         &self,
         input: crate::PendingTurnInputDraft,
     ) -> Result<crate::PendingTurnInput, StoreError>;
+
+    /// The run spec `session_id` interned under `hash`, if it holds one
+    /// (FIG-3838). Spec rows are immutable and live until their session is
+    /// deleted.
+    async fn load_run_spec(
+        &self,
+        _session_id: &SessionId,
+        _hash: &crate::run_spec::RunSpecHash,
+    ) -> Result<Option<crate::run_spec::RunSpec>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "load_run_spec",
+        })
+    }
 
     /// List open user inputs for reconciliation or queue preview.
     ///

@@ -47,6 +47,7 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
             mut input,
+            protocol_turn_options,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop,
@@ -94,6 +95,7 @@ impl LashRuntime {
             .bind_turn_scoped(turn_id);
         Box::pin(self.stream_turn_inner(TurnPrepareContext {
             input: input.clone(),
+            protocol_turn_options,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop: local_stop.clone(),
@@ -190,7 +192,7 @@ impl LashRuntime {
             let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
             let mut session_execution_lease = self.claim_session_execution_lease().await?;
             let result = Box::pin(self.drive_logical_turn(
-                LogicalTurnStart::Input(input),
+                LogicalTurnStart::Input(input, None),
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 opts.scoped_effect_controller(),

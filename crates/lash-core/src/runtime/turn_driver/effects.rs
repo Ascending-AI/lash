@@ -845,6 +845,7 @@ mod claim_authority_tests {
             }),
             enqueued_at_ms: 0,
             input: crate::TurnInput::text("fig905 input"),
+            run_spec: None,
         }
     }
 

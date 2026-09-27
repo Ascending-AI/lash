@@ -6,6 +6,7 @@ mod append_identity;
 mod attachment_owner_sql;
 mod process_lifecycle_sql;
 pub mod required_constraints;
+mod run_spec_admission;
 mod session_ingress;
 mod session_meta;
 mod turn_input_lifecycle_sql;
@@ -19,6 +20,7 @@ pub use process_lifecycle_sql::{
     retired_process_status_predicate_sql, undelivered_wake_delivery_state_predicate_sql,
     wake_delivery_state_sql_literal,
 };
+pub use run_spec_admission::{RunSpecAdmission, check_steering_run_spec, steering_run_spec_target};
 pub use session_ingress::{
     SessionIngressAdmission, SessionIngressAdmissionFacts, SessionIngressInsert,
     SessionIngressRowColumns, SessionIngressStoredClaim, SessionIngressStoredRow,

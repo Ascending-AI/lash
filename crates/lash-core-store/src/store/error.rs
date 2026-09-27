@@ -632,6 +632,24 @@ pub enum StoreError {
         session_id: SessionId,
         input_id: InputId,
     },
+    /// Different run spec bytes arrived under a hash the session already
+    /// interned (FIG-3838). Nothing was stored.
+    #[error("run spec `{hash}` of session `{session_id}` is already interned with different bytes")]
+    RunSpecHashCollision { session_id: SessionId, hash: String },
+    /// An input addressed to running turn `turn_id` carried an explicit run
+    /// spec that differs from the one that turn's root runs under
+    /// (FIG-3838). Steering joins the running root's shape: omit the spec to
+    /// inherit it. Nothing was stored.
+    #[error(
+        "input addressed to running turn `{turn_id}` of session `{session_id}` carries a run spec that differs from the turn's; omit the spec to inherit the running root's shape"
+    )]
+    PendingTurnInputRunSpecMismatch {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
+    /// A root named run spec `hash`, which its session does not hold.
+    #[error("run spec `{hash}` of session `{session_id}` is not interned")]
+    RunSpecMissing { session_id: SessionId, hash: String },
     #[error(
         "process wake `{process_id}` sequence {sequence} for session `{session_id}` has no live receiver row and is at or below the receiver allocation floor {allocation_floor}; the sender store may have been restored or rewound"
     )]
@@ -937,6 +955,9 @@ impl StoreError {
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
             Self::PendingTurnInputIdConflict { .. } => "PendingTurnInputIdConflict",
+            Self::RunSpecHashCollision { .. } => "RunSpecHashCollision",
+            Self::PendingTurnInputRunSpecMismatch { .. } => "PendingTurnInputRunSpecMismatch",
+            Self::RunSpecMissing { .. } => "RunSpecMissing",
             Self::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
             Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
             Self::SessionExecutionLeaseRenewalRefused { .. } => {

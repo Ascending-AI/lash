@@ -218,10 +218,6 @@ impl LashRuntime {
                 .iter()
                 .any(|input| input.input_id == **input_id)
         }) {
-            driven.protocol_turn_options = live
-                .protocol_turn_options
-                .clone()
-                .or(driven.protocol_turn_options);
             driven.protocol_extension = live.protocol_extension.clone();
             driven.turn_context = live.turn_context.clone();
         }
@@ -237,7 +233,7 @@ impl LashRuntime {
         // dropping the settlement and answering them twice.
         self.journaled_drive_claims.insert(claim.claim_id.clone());
         let result = Box::pin(self.drive_logical_turn(
-            LogicalTurnStart::Input(driven),
+            LogicalTurnStart::Input(driven, None),
             sinks.events,
             sinks.turn_events,
             root_controller.clone(),

@@ -145,6 +145,7 @@ pub const TABLES: &[&str] = &[
     turn_ingress::queued_run_members::TABLE,
     turn_ingress::closure_participants::TABLE,
     turn_ingress::pending_inputs::TABLE,
+    turn_ingress::run_specs::TABLE,
     turn_ingress::queued_batches::TABLE,
     turn_ingress::queued_items::TABLE,
     turn_ingress::retired_scopes::TABLE,

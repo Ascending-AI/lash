@@ -444,7 +444,7 @@ pub(crate) async fn preflight(
     let mut failures = Vec::with_capacity(PREFLIGHT_ATTEMPTS);
     let mut probes = Vec::new();
     for attempt in 0..PREFLIGHT_ATTEMPTS {
-        let (_, evidence) = run_task(
+        let (_, evidence) = Box::pin(run_task(
             &probe,
             model,
             api_key,
@@ -454,7 +454,7 @@ pub(crate) async fn preflight(
             turn_wall_limit_secs,
             provider_retries,
             dump_dir,
-        )
+        ))
         .await;
         if crate::grading::grade(&probe, &probe.seed, &evidence, f64::INFINITY).passed
             && evidence.tool_call_count == 0

@@ -135,6 +135,10 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
         "SELECT * FROM pending_turn_inputs WHERE session_id = ?1",
     ),
     (
+        "session_run_specs",
+        "SELECT * FROM session_run_specs WHERE session_id = ?1",
+    ),
+    (
         "queued_work_batches",
         "SELECT * FROM queued_work_batches WHERE session_id = ?1",
     ),
@@ -255,6 +259,10 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
     (
         "pending_turn_inputs",
         "SELECT to_jsonb(t)::text FROM lash_pending_turn_inputs t WHERE session_id = $1",
+    ),
+    (
+        "session_run_specs",
+        "SELECT to_jsonb(t)::text FROM lash_session_run_specs t WHERE session_id = $1",
     ),
     (
         "queued_work_batches",

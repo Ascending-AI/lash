@@ -7,6 +7,7 @@ fn main() {
         session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         input,
+        protocol_turn_options: None,
         tool_grants: Vec::new(),
         metadata: std::collections::HashMap::new(),
     });

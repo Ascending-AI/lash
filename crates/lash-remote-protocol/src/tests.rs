@@ -319,11 +319,11 @@ fn remote_turn_request_json_round_trips() {
                     },
                 },
             ],
-            protocol_turn_options: Some(RemoteProtocolTurnOptions {
-                payload: serde_json::json!({ "answer": "raw" }),
-            }),
             trace_turn_id: Some(TurnId::from("trace")),
         },
+        protocol_turn_options: Some(RemoteProtocolTurnOptions {
+            payload: serde_json::json!({ "answer": "raw" }),
+        }),
         tool_grants: vec![demo_grant("demo", "tools", "search")],
         metadata: HashMap::new(),
     };

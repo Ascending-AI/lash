@@ -469,6 +469,14 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         self.inner.enqueue_pending_turn_input(input).await
     }
 
+    async fn load_run_spec(
+        &self,
+        session_id: &SessionId,
+        hash: &lash_core::RunSpecHash,
+    ) -> Result<Option<lash_core::RunSpec>, lash_core::StoreError> {
+        self.inner.load_run_spec(session_id, hash).await
+    }
+
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,

@@ -34,6 +34,7 @@ pub mod process_identity;
 pub mod protocol_turn_options;
 pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
+pub mod run_spec;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;

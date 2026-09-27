@@ -152,6 +152,7 @@ statement = "session_core.delete_process_session_rows"
 owner = "crates/lash-postgres-store/src/postgres/session_sql.rs"
 touches = [
     "pending_turn_inputs",
+    "session_run_specs",
     "queued_run_members",
     "queued_runs",
     "queued_work_batches",
@@ -716,6 +717,7 @@ tables = [
     "turn_parks",
     "turn_park_clock",
     "turn_park_events",
+    "session_run_specs",
 ]
 statement_prefixes = [
     "turn_ingress",
@@ -734,6 +736,7 @@ statement_prefixes = [
     "turn_park",
     "turn_park_clock",
     "turn_park_event",
+    "session_run_spec",
 ]
 shared = [
     "crates/lash-store-sql/src/turn_ingress.rs",
@@ -748,6 +751,7 @@ shared = [
     "crates/lash-store-sql/src/turn_ingress/queued_runs.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs",
     "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs",
+    "crates/lash-store-sql/src/turn_ingress/run_specs.rs",
     "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs",
     "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs",
     "crates/lash-store-sql/src/turn_ingress/turn_park_clock.rs",
@@ -823,6 +827,7 @@ turn_cancellation_bindings = "crates/lash-store-sql/src/turn_ingress/cancellatio
 turn_parks = "crates/lash-store-sql/src/turn_ingress/turn_parks.rs"
 turn_park_clock = "crates/lash-store-sql/src/turn_ingress/turn_park_clock.rs"
 turn_park_events = "crates/lash-store-sql/src/turn_ingress/turn_park_events.rs"
+session_run_specs = "crates/lash-store-sql/src/turn_ingress/run_specs.rs"
 
 # `state` is this family's lifecycle column. Its partitions are generated from
 # `TurnInputStateKind`, so a statement names one as a `{{term(column)}}` token

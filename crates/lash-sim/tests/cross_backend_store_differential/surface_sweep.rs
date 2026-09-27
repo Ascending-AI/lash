@@ -112,6 +112,14 @@ pub(super) enum SurfaceMethod {
     /// [`RootStore::root_of_input`](lash_core::store::RootStore::root_of_input)
     /// of the sweep's next-turn input.
     RootOfInput,
+    /// [`TurnInputStore::enqueue_pending_turn_input`] of a keyed next-turn
+    /// input under a non-default run spec, which interns the spec (FIG-3838).
+    EnqueueRunSpecInput,
+    /// [`TurnInputStore::load_run_spec`] of the spec the sweep interned
+    /// (`known`), or of a hash no input names.
+    LoadRunSpec {
+        known: bool,
+    },
     /// [`RootStore::bind_root_inputs`](lash_core::store::RootStore::bind_root_inputs)
     /// of the sweep's next-turn input: to the sweep root, and then to another
     /// root (`conflicting`), which every backend refuses without residue.
@@ -220,6 +228,9 @@ impl SurfaceMethod {
             Self::RootTerminal => "surface:root_terminal",
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
+            Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
+            Self::LoadRunSpec { known: true } => "surface:load_run_spec",
+            Self::LoadRunSpec { known: false } => "surface:load_run_spec_unknown",
             Self::BindRootInputs { conflicting: false } => "surface:bind_root_inputs",
             Self::BindRootInputs { conflicting: true } => "surface:bind_root_inputs_conflicting",
             Self::BeginSessionClose {
@@ -307,6 +318,22 @@ fn surface(method: SurfaceMethod) -> StoreOperation {
 }
 
 const UNKNOWN_BATCH_ID: &str = "fig-2841-unknown-batch";
+/// A run-spec hash no input names.
+const UNKNOWN_RUN_SPEC_HASH: &str = "run-spec:v1:blake3:unknown";
+
+/// The run spec the sweep's spec input carries (FIG-3838).
+fn surface_run_spec() -> lash_core::RunSpec {
+    lash_core::RunSpec::overrides(lash_core::RunOverrides {
+        provider_id: Some("surface-run-spec-route".to_string()),
+        ..lash_core::RunOverrides::default()
+    })
+}
+
+/// The hash [`surface_run_spec`] is interned under. A spec that cannot be
+/// hashed has none, and the reads comparing against it disagree loudly.
+fn surface_run_spec_hash() -> Option<lash_core::RunSpecHash> {
+    surface_run_spec().hash().ok().flatten()
+}
 /// A turn id no case ever commits. Paired with [`SURFACE_COMMITTED_TURN_ID`]
 /// so the membership read is driven over both answers, not just the one a
 /// backend could return by refusing to look.
@@ -515,6 +542,13 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::BindRootInputs { conflicting: false }),
             surface(SurfaceMethod::BindRootInputs { conflicting: true }),
             surface(SurfaceMethod::RootBinding),
+            // A spec is unknown until an input naming it is admitted, then
+            // reads back exactly; a retry interns nothing new.
+            surface(SurfaceMethod::LoadRunSpec { known: true }),
+            surface(SurfaceMethod::EnqueueRunSpecInput),
+            surface(SurfaceMethod::EnqueueRunSpecInput),
+            surface(SurfaceMethod::LoadRunSpec { known: true }),
+            surface(SurfaceMethod::LoadRunSpec { known: false }),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
@@ -1450,6 +1484,37 @@ impl BackendRunner {
                 match store.root_of_input(&session_id, &input).await? {
                     Some(root) => format!("root={root}"),
                     None => "root=none".to_string(),
+                }
+            }
+            SurfaceMethod::EnqueueRunSpecInput => {
+                let input = store
+                    .enqueue_pending_turn_input(
+                        PendingTurnInputDraft::new(
+                            &session_id,
+                            TurnInputIngress::NextTurn,
+                            TurnInput::text("input under a run spec"),
+                        )
+                        .with_source_key("surface:run-spec-input")
+                        .with_input_id(format!("{session_id}:run-spec-input"))
+                        .with_run_spec(surface_run_spec()),
+                    )
+                    .await?;
+                format!(
+                    "run_spec_is_interned_hash={}",
+                    input.run_spec == surface_run_spec_hash()
+                )
+            }
+            SurfaceMethod::LoadRunSpec { known } => {
+                let hash = if known {
+                    surface_run_spec_hash().unwrap_or_else(|| {
+                        lash_core::RunSpecHash::from_stored(UNKNOWN_RUN_SPEC_HASH)
+                    })
+                } else {
+                    lash_core::RunSpecHash::from_stored(UNKNOWN_RUN_SPEC_HASH)
+                };
+                match store.load_run_spec(&session_id, &hash).await? {
+                    Some(spec) => format!("spec_matches={}", spec == surface_run_spec()),
+                    None => "spec=none".to_string(),
                 }
             }
             SurfaceMethod::BindRootInputs { conflicting } => {

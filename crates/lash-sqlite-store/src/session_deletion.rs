@@ -218,6 +218,7 @@ pub(super) async fn delete_session_from_catalog(
                 queued_runs.delete_members.sql(),
                 queued_runs.delete_runs.sql(),
                 turn_ingress.pending_inputs.delete_by_session.sql(),
+                turn_ingress.run_specs.delete_session.sql(),
                 crate::session_ingress::session_ingress_sql()
                     .shared
                     .delete_by_session

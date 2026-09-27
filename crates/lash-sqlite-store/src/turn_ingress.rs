@@ -26,7 +26,7 @@ use lash_store_sql::turn_ingress::{
     closure_authorizations::ClosureAuthorizationStatements,
     closure_participants::ClosureParticipantStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
-    retired_scopes::RetiredScopeStatements,
+    retired_scopes::RetiredScopeStatements, run_specs::RunSpecStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
     tool_intent_submissions::ToolIntentSubmissionStatements,
     turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
@@ -106,6 +106,8 @@ pub(crate) struct TurnIngressSql {
     pub(crate) pending_inputs: PendingInputStatements,
     /// `pending_turn_inputs`, SQLite only.
     pub(crate) pending_inputs_sqlite: PendingInputSqliteStatements,
+    /// `session_run_specs`, shared.
+    pub(crate) run_specs: RunSpecStatements,
     /// `queued_work_batches`, shared.
     pub(crate) queued_batches: QueuedBatchStatements,
     /// `queued_work_batches`, SQLite only.
@@ -151,6 +153,7 @@ impl TurnIngressSql {
             family_sqlite: TurnIngressSqliteStatements::render(dialect),
             pending_inputs: PendingInputStatements::render(dialect),
             pending_inputs_sqlite: PendingInputSqliteStatements::render(dialect),
+            run_specs: RunSpecStatements::render(dialect),
             queued_batches: QueuedBatchStatements::render(dialect),
             queued_batches_sqlite: QueuedBatchSqliteStatements::render(dialect),
             queued_items: QueuedItemStatements::render(dialect),

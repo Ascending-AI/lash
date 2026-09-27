@@ -428,6 +428,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         "lash_queued_work_items",
         "lash_queued_work_batches",
         "lash_pending_turn_inputs",
+        "lash_session_run_specs",
         "lash_session_ingress",
         "lash_session_ingress_sequence",
     ] {
@@ -440,6 +441,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         "lash_queued_work_batches",
         "lash_queued_work_items",
         "lash_pending_turn_inputs",
+        "lash_session_run_specs",
         "lash_session_ingress_sequence",
         "lash_session_ingress",
     ] {

@@ -88,10 +88,7 @@ fn turn_input_round_trips_remote_safe_fields() {
             lash_core::MediaType::parse("image/png").unwrap(),
             vec![1, 2, 3],
         )),
-    ])
-    .with_protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(
-        serde_json::json!({ "mode": "remote" }),
-    ));
+    ]);
     input.trace_turn_id = Some(TurnId::from("trace-1"));
 
     let remote = RemoteTurnInput::try_from(input).expect("remote conversion");
@@ -103,10 +100,6 @@ fn turn_input_round_trips_remote_safe_fields() {
         } if data_base64 == "AQID"
     ));
     assert_eq!(remote.trace_turn_id.as_deref(), Some("trace-1"));
-    assert_eq!(
-        remote.protocol_turn_options.as_ref().unwrap().payload,
-        serde_json::json!({ "mode": "remote" })
-    );
 
     let core = lash_core::TurnInput::try_from(remote).expect("core conversion");
     assert!(matches!(
@@ -116,8 +109,29 @@ fn turn_input_round_trips_remote_safe_fields() {
         } if bytes == &[1, 2, 3]
     ));
     assert_eq!(core.trace_turn_id.as_deref(), Some("trace-1"));
+}
+
+#[test]
+fn a_turn_request_carries_its_protocol_turn_options_as_its_run_spec() {
+    let mut request = RemoteTurnRequest {
+        session_id: SessionId::from("session"),
+        turn_id: TurnId::from("turn"),
+        input: RemoteTurnInput::text("hello"),
+        protocol_turn_options: None,
+        tool_grants: Vec::new(),
+        metadata: std::collections::HashMap::new(),
+    };
+    assert!(request.run_spec().is_default());
+    request.protocol_turn_options = Some(RemoteProtocolTurnOptions {
+        payload: serde_json::json!({ "mode": "remote" }),
+    });
     assert_eq!(
-        core.protocol_turn_options.unwrap().payload,
+        request
+            .run_spec()
+            .overrides
+            .protocol_turn_options
+            .expect("options")
+            .payload,
         serde_json::json!({ "mode": "remote" })
     );
 }

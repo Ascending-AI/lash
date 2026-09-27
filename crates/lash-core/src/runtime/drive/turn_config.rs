@@ -1,17 +1,22 @@
-//! The session config a logical turn runs under (FIG-3600 S6, D3 §2).
+//! The shape a logical turn runs under (FIG-3600 S6, D3 §2; FIG-3838).
 //!
-//! A root resolves its config once, as a recorded step at the top of the
+//! A root resolves its shape once, as a recorded step at the top of the
 //! logical-turn funnel: after the boundary's command drain and the root's
 //! claim, before the first physical turn's first effect. Its first execution
-//! records the whole config (D3 Q2) the root is about to run under: the
-//! resident config, which is the durable head's, adopted head-authoritatively
-//! under the root's lease one step earlier (the claim's refresh for an input
-//! root, the drain's commit for a queued one). Every replay decodes that
-//! record instead of reading any live config. So a config change that lands after the root started
-//! never reaches the root, a redrive of a committed root replays under the
-//! model, prompt and options it ran under, and an input sent after a config
-//! command runs under the new config. Every physical turn of the root reuses
-//! the one record: commands apply only at turn boundaries.
+//! resolves the root's [`RunSpec`](crate::RunSpec) (the spec its claimed inputs
+//! share; the default spec for a root of wakes or a follow-on) against the
+//! root's snapshot, the resident config, which is the durable head's, adopted
+//! head-authoritatively under the root's lease one step earlier (the claim's
+//! refresh for an input root, the drain's commit for a queued one), and
+//! records the result as the root's [`ResolvedRun`](crate::ResolvedRun). Every
+//! replay decodes that record instead of reading any live config or spec. So a
+//! config change that lands after the root started never reaches the root, a
+//! redrive of a committed root replays under the model, prompt and options it
+//! ran under, and an input sent after a config command runs under the new
+//! config. Every physical turn of the root reuses the one record: commands
+//! apply only at turn boundaries. The record is the root's execution view
+//! only; commits keep writing the sticky session config, so a spec's
+//! overrides never become the session's.
 //!
 //! The record is data. The route it names is bound to a live provider handle
 //! after the step, on every execution: a handle is this worker's capability,
@@ -20,6 +25,12 @@
 //! its engine's retry budget parks it (D3 Q3). A config command that changes
 //! the route is validated when it is sent and when it is applied, and is
 //! refused typed if no provider serves it.
+//!
+//! Resolution faults that a redeploy repairs stay out of the record (P3): a
+//! spec read the store did not answer, or a definition revision this worker
+//! does not register, ends the attempt unrecorded, so the root retries, parks
+//! on its engine's budget, and recovers once the worker serves it. Only a
+//! definition's deterministic refusal of the spec's context is recorded.
 
 use crate::provider::{ConfigRefusalCode, RuntimeProviderResolver};
 use crate::runtime::LashRuntime;
@@ -39,12 +50,15 @@ fn turn_config_replay_key(root: &TurnId) -> String {
 }
 
 impl LashRuntime {
-    /// Resolve the config `root`'s logical turn runs under, as one recorded
-    /// step on `controller`, and adopt it as the execution view.
+    /// Resolve the shape `root`'s logical turn runs under, as one recorded
+    /// step on `controller`, and adopt it as the execution view. `spec` is
+    /// the interned spec the root's claimed inputs share, `None` for the
+    /// default spec.
     pub(in crate::runtime) async fn resolve_turn_config(
         &mut self,
         controller: &ScopedEffectController<'_>,
         root: &TurnId,
+        spec: Option<&crate::RunSpecHash>,
     ) -> Result<(), RuntimeError> {
         let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(
@@ -54,11 +68,30 @@ impl LashRuntime {
             RuntimeAttribution::for_turn_admission(self.state.session_id.clone(), root.clone()),
             format!("{root}.turn-config"),
         );
+        let spec = match spec {
+            None => None,
+            Some(hash) => Some(RootSpec {
+                hash: hash.clone(),
+                session_id: self.state.session_id.clone(),
+                store: self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.history_store())
+                    .ok_or_else(|| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::QueuedWork,
+                            format!("a root with run spec `{hash}` needs its session store"),
+                        )
+                    })?,
+                definitions: self.host.core.providers.run_definitions.clone(),
+            }),
+        };
         let runner = ResolveTurnConfigRunner {
             root: root.clone(),
-            config: crate::store::persisted_session_config_from_state(&self.state),
+            snapshot: crate::store::persisted_session_config_from_state(&self.state),
+            spec,
         };
-        let config = controller
+        let resolved = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     invocation,
@@ -69,16 +102,16 @@ impl LashRuntime {
             .await
             .and_then(RuntimeEffectOutcome::into_resolve_turn_config)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        self.apply_turn_config(&config);
+        self.apply_turn_config(&resolved);
         Ok(())
     }
 
     /// Preserve the sticky config before installing the recorded execution
     /// view. A replay may name a config that differs from the current head.
-    fn apply_turn_config(&mut self, config: &PersistedSessionConfig) {
-        crate::runtime::state::adopt_root_execution_config(&mut self.state, config);
+    fn apply_turn_config(&mut self, resolved: &crate::ResolvedRun) {
+        crate::runtime::state::adopt_resolved_run(&mut self.state, resolved);
         debug_assert_eq!(
-            self.state.config_revision, config.config_revision,
+            self.state.config_revision, resolved.base.config_revision,
             "a root's resident config revision moved inside the root"
         );
     }
@@ -194,12 +227,84 @@ pub(crate) fn provider_binding_unavailable(error: SessionError) -> RuntimeError 
     )
 }
 
-/// The first execution of one `ResolveTurnConfig` step: it records the
-/// config captured at the funnel. None of it enters the envelope, which names
-/// only the root.
+/// The first execution of one `ResolveTurnConfig` step: it resolves the
+/// root's spec against the snapshot captured at the funnel and records the
+/// result. None of it enters the envelope, which names only the root.
 struct ResolveTurnConfigRunner {
     root: TurnId,
-    config: PersistedSessionConfig,
+    snapshot: PersistedSessionConfig,
+    spec: Option<RootSpec>,
+}
+
+/// A root's non-default spec, read and resolved only on the step's first
+/// execution.
+struct RootSpec {
+    hash: crate::RunSpecHash,
+    session_id: crate::SessionId,
+    store: std::sync::Arc<dyn crate::store::RuntimePersistence>,
+    definitions: crate::RunDefinitions,
+}
+
+impl RootSpec {
+    /// Resolve this spec against `snapshot`. A fault a redeploy or a retry
+    /// repairs is marked so it never becomes the step's recorded outcome.
+    async fn resolve(
+        self,
+        snapshot: &PersistedSessionConfig,
+    ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
+        let repairable = |code: RuntimeErrorCode, message: String| {
+            RuntimeEffectControllerError::new(code, message).retryable_uncommitted_derivation()
+        };
+        let spec = self
+            .store
+            .load_run_spec(&self.session_id, &self.hash)
+            .await
+            .map_err(|error| {
+                repairable(
+                    RuntimeErrorCode::StoreCommitFailed,
+                    format!("run spec `{}` could not be read: {error}", self.hash),
+                )
+            })?
+            .ok_or_else(|| {
+                repairable(
+                    RuntimeErrorCode::StoreCommitFailed,
+                    format!(
+                        "run spec `{}` is not interned for session `{}`",
+                        self.hash, self.session_id
+                    ),
+                )
+            })?;
+        let definition = match &spec.definition {
+            None => None,
+            Some(reference) => {
+                let definition = self.definitions.get(reference).ok_or_else(|| {
+                    repairable(
+                        RuntimeErrorCode::RunDefinitionUnavailable,
+                        format!(
+                            "run definition `{reference}` is not registered on this worker; the \
+                             root retries until a deployment serves that exact revision"
+                        ),
+                    )
+                })?;
+                Some(
+                    definition
+                        .resolve(snapshot, &spec.context)
+                        .map_err(|refusal| {
+                            RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::RunShapeRefused,
+                                refusal.to_string(),
+                            )
+                        })?,
+                )
+            }
+        };
+        spec.resolve(snapshot, definition).map_err(|error| {
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RunShapeRefused,
+                format!("run spec `{}` could not be resolved: {error}", self.hash),
+            )
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -226,8 +331,12 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
                 ),
             ));
         }
+        let resolved = match self.spec {
+            None => crate::ResolvedRun::snapshot(self.snapshot),
+            Some(spec) => spec.resolve(&self.snapshot).await?,
+        };
         Ok(RuntimeEffectOutcome::ResolveTurnConfig {
-            config: Box::new(self.config),
+            resolved: Box::new(resolved),
         })
     }
 }

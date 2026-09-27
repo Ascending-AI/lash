@@ -88,6 +88,7 @@ mod root_control;
 mod root_start_marker;
 mod root_terminal;
 mod run_shape;
+mod run_spec_drive;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;
 mod segment_redrive;

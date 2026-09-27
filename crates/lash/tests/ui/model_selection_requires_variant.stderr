@@ -22,8 +22,16 @@ error[E0599]: no method named `model_variant` found for struct `LashCoreBuilder`
   | |_________|
   |
 
-error[E0599]: no method named `model` found for struct `SendBuilder` in the current scope
- --> tests/ui/model_selection_requires_variant.rs:9:21
+error[E0308]: mismatched types
+ --> tests/ui/model_selection_requires_variant.rs:9:27
   |
 9 |     let _ = builder.model("model-only");
-  |                     ^^^^^ method not found in `SendBuilder`
+  |                     ----- ^^^^^^^^^^^^ expected `ModelSpec`, found `&str`
+  |                     |
+  |                     arguments to this method are incorrect
+  |
+note: method defined here
+ --> src/send.rs
+  |
+  |     pub fn model(mut self, model: ModelSpec) -> Self {
+  |            ^^^^^

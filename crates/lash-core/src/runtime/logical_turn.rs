@@ -336,7 +336,9 @@ pub(super) struct PreparedLogicalTurn {
 }
 
 pub(super) enum LogicalTurnStart {
-    Input(TurnInput),
+    /// An input, with the protocol turn options a follow-on turn recorded
+    /// beyond its root's view (`None` for a root's own first turn).
+    Input(TurnInput, Option<crate::ProtocolTurnOptions>),
     Prepared(PreparedLogicalTurn),
     /// A recovered follow-on whose recovery bound is spent (ADR 0101 §3): it
     /// never runs, and commits as the failed turn carrying
@@ -353,8 +355,8 @@ impl LogicalTurnStart {
         TurnId,
     ) {
         match self {
-            Self::Input(input) => (
-                input.protocol_turn_options.clone(),
+            Self::Input(input, options) => (
+                options.clone(),
                 input.turn_context.clone(),
                 input
                     .trace_turn_id
@@ -529,8 +531,19 @@ impl LashRuntime {
         } else {
             supplied_trace_turn_id
         };
-        self.resolve_turn_config(&scoped_effect_controller, &turn_trace_turn_id)
-            .await?;
+        // A claim never mixes run specs, so the head input's spec is the
+        // root's; a root of wakes or a follow-on runs the default spec.
+        let root_spec = claims
+            .turn_inputs
+            .first()
+            .and_then(|claim| claim.inputs.first())
+            .and_then(|input| input.run_spec.clone());
+        self.resolve_turn_config(
+            &scoped_effect_controller,
+            &turn_trace_turn_id,
+            root_spec.as_ref(),
+        )
+        .await?;
         let mut turns: Vec<AssembledTurn> = Vec::new();
         // FIG-3157: work claimed at a terminal checkpoint, withheld from the
         // delivery so the committed finish stayed the turn's answer, waiting
@@ -647,11 +660,12 @@ impl LashRuntime {
                 });
             }
             let execution_result = match start {
-                LogicalTurnStart::Input(mut input) => {
+                LogicalTurnStart::Input(mut input, protocol_turn_options) => {
                     input.trace_turn_id = Some(turn_trace_turn_id.clone());
                     Box::pin(self.stream_turn_with_scoped_effect_controller_inner(
                         TurnPrepareContext {
                             input,
+                            protocol_turn_options,
                             sinks: TurnSinks { observer },
                             scoped_effect_controller: turn_effect_controller,
                             local_stop: local_stop.clone(),
@@ -835,7 +849,7 @@ impl LashRuntime {
                             .durability
                             .queued_work_batching
                             .max_turn_input_claim(),
-                        &crate::store::execution_session_config_from_state(&self.state),
+                        &crate::store::root_snapshot_config_from_state(&self.state),
                         self.host
                             .core
                             .durability
@@ -848,7 +862,8 @@ impl LashRuntime {
                 // its start at the boundary that claimed it (FIG-3157), and a
                 // follow-on claims nothing.
                 announce_queued_work = false;
-                let (mut input, next_claims) = self.queued_run_input(selection, false)?;
+                let (mut input, mut options, next_claims) =
+                    self.queued_run_input(selection, false)?;
                 // A follow-on runs under the options its switch recorded.
                 if !self
                     .state
@@ -856,11 +871,11 @@ impl LashRuntime {
                     .as_ref()
                     .is_some_and(|owed| owed.is_turn(&pending.position.turn_id))
                 {
-                    input.protocol_turn_options = follow_protocol_turn_options.clone();
+                    options = follow_protocol_turn_options.clone();
                 }
                 input.turn_context = follow_turn_context.clone();
                 claims = next_claims;
-                start = LogicalTurnStart::Input(input);
+                start = LogicalTurnStart::Input(input, options);
                 carried_withheld = None;
                 continue;
             }
@@ -905,8 +920,8 @@ impl LashRuntime {
                     });
                 }
                 turn_trace_turn_id = owed.follow_on_turn_id.clone();
-                start =
-                    LogicalTurnStart::Input(follow_on_input(&owed, follow_turn_context.clone()));
+                let (input, options) = follow_on_input(&owed, follow_turn_context.clone());
+                start = LogicalTurnStart::Input(input, options);
                 claims = LogicalTurnClaims::new(Vec::new(), Vec::new());
                 continue;
             }
@@ -946,26 +961,24 @@ impl LashRuntime {
             turn_trace_turn_id = next_physical_turn_id(&turn_trace_turn_id)
                 .map_err(super::runtime_error_from_store_commit)?;
             let mut input = TurnInput::items(Vec::new());
-            input.protocol_turn_options = follow_protocol_turn_options.clone();
             input.turn_context = follow_turn_context.clone();
             claims = LogicalTurnClaims::new(withheld.queued, withheld.turn_inputs);
             announce_queued_work = false;
-            start = LogicalTurnStart::Input(input);
+            start = LogicalTurnStart::Input(input, follow_protocol_turn_options.clone());
         }
     }
 }
 
-/// The input of the follow-on `owed`: its task, under the protocol turn
+/// The input of the follow-on `owed`: its task, and the protocol turn
 /// options the switch recorded (ADR 0101 §3).
 pub(super) fn follow_on_input(
     owed: &crate::store::PendingFollowOn,
     turn_context: crate::TurnContext,
-) -> TurnInput {
+) -> (TurnInput, Option<crate::ProtocolTurnOptions>) {
     let mut input = TurnInput::text(owed.task.clone());
-    input.protocol_turn_options = owed.options.as_deref().cloned();
     input.turn_context = turn_context;
     input.trace_turn_id = Some(owed.follow_on_turn_id.clone());
-    input
+    (input, owed.options.as_deref().cloned())
 }
 
 /// The next physical turn of the logical run `current` belongs to.

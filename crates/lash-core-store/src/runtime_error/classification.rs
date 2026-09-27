@@ -200,6 +200,12 @@ impl RuntimeErrorCode {
             Self::ProviderCredentialsMissing => Terminal,
             // the route was validated when it was set; this worker's deployment cannot bind it now.
             Self::ProviderBindingUnavailable => Retryable,
+            // the spec names an exact revision this worker's deployment does not register yet.
+            Self::RunDefinitionUnavailable => Retryable,
+            // a registered definition refuses the same context the same way.
+            Self::RunShapeRefused => Terminal,
+            // the same spec differs from the same running turn's again.
+            Self::RunSpecMismatch => Terminal,
             // a plugin refusal over the same inputs.
             Self::Plugin => Terminal,
             // the selected queued work cannot be admitted; the same selection is refused again.

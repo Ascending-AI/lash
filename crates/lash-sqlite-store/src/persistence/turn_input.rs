@@ -580,6 +580,7 @@ impl TurnInputStore for Store {
                         )
                     });
                     let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
+                    let run_spec = admit_run_spec_conn(tx, &draft)?;
                     tx.execute(
                         crate::turn_ingress::turn_ingress_sql()
                             .pending_inputs_sqlite
@@ -595,6 +596,7 @@ impl TurnInputStore for Store {
                             submission_digest.as_str(),
                             now as i64,
                             crate::session_ingress::allocate_sequence(tx, &draft.session_id)?,
+                            run_spec.column(),
                         ],
                     )
                     .map_err(|err| {
@@ -614,6 +616,44 @@ impl TurnInputStore for Store {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
                 }
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn load_run_spec(
+        &self,
+        session_id: &SessionId,
+        hash: &lash_core_execution::RunSpecHash,
+    ) -> Result<Option<lash_core_execution::RunSpec>, StoreError> {
+        let session_id = session_id.clone();
+        let hash = hash.clone();
+        self.conn
+            .call(move |conn| {
+                let outcome = (|| {
+                    let stored: Option<String> = conn
+                        .query_row(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .run_specs
+                                .select_spec
+                                .sql(),
+                            params![session_id.as_str(), hash.as_str()],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    stored
+                        .map(|json| {
+                            lash_core_execution::RunSpec::from_canonical_json(&json).map_err(
+                                |error| StoreError::StoredDataCorrupt {
+                                    record_kind: "RunSpec",
+                                    message: error.to_string(),
+                                },
+                            )
+                        })
+                        .transpose()
+                })();
+                Ok(outcome)
             })
             .await
             .map_err(sqlite_error)?
@@ -1216,4 +1256,51 @@ impl TurnInputStore for Store {
             .map_err(sqlite_error)?;
         Ok(())
     }
+}
+
+/// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse
+/// a steering spec that differs from its running turn's, then intern a
+/// non-default spec once per hash and refuse different bytes under an
+/// interned hash. Both refusals roll the whole admission back.
+fn admit_run_spec_conn(
+    tx: &Connection,
+    draft: &lash_core_execution::PendingTurnInputDraft,
+) -> Result<lash_core_execution::store_backend_support::RunSpecAdmission, StoreError> {
+    use lash_core_execution::store_backend_support as support;
+    let spec = support::RunSpecAdmission::of(draft)?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    if let Some(turn_id) = support::steering_run_spec_target(draft) {
+        let addressed: Option<(String, Option<String>)> = tx
+            .query_row(
+                sql.pending_inputs.select_run_spec_by_source_key.sql(),
+                params![draft.session_id.as_str(), turn_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        support::check_steering_run_spec(
+            &draft.session_id,
+            turn_id,
+            &spec,
+            addressed
+                .as_ref()
+                .map(|(state, hash)| (state.as_str(), hash.as_deref())),
+        )?;
+    }
+    if let Some((hash, canonical)) = spec.interned() {
+        tx.execute(
+            sql.run_specs.intern.sql(),
+            params![draft.session_id.as_str(), hash, canonical],
+        )
+        .map_err(sqlite_error)?;
+        let stored: String = tx
+            .query_row(
+                sql.run_specs.select_spec.sql(),
+                params![draft.session_id.as_str(), hash],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)?;
+        spec.check_interned(&draft.session_id, &stored)?;
+    }
+    Ok(spec)
 }

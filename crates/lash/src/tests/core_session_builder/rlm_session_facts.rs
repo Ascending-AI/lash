@@ -316,6 +316,8 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
         .require_finish()?;
     assert_eq!(
         attacked
+            .run_spec
+            .overrides
             .protocol_turn_options
             .as_ref()
             .expect("the turn carries protocol options")

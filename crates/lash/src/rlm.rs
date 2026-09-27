@@ -17,31 +17,39 @@ pub trait RlmSendBuilderExt: Sized {
 
 #[cfg(feature = "rlm")]
 impl RlmSendBuilderExt for crate::SendBuilder {
-    fn require_finish(mut self) -> Result<Self> {
-        self.protocol_turn_options = Some(rlm_termination_options(
-            self.protocol_turn_options.as_ref(),
+    fn require_finish(self) -> Result<Self> {
+        with_rlm_termination(
+            self,
             lash_rlm_types::RlmTermination::FinishRequired { schema: None },
-        )?);
-        Ok(self)
+        )
     }
 
-    fn require_finish_schema(mut self, schema: serde_json::Value) -> Result<Self> {
-        self.protocol_turn_options = Some(rlm_termination_options(
-            self.protocol_turn_options.as_ref(),
+    fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self> {
+        with_rlm_termination(
+            self,
             lash_rlm_types::RlmTermination::FinishRequired {
                 schema: Some(schema),
             },
-        )?);
-        Ok(self)
+        )
     }
 
-    fn allow_prose_or_finish(mut self) -> Result<Self> {
-        self.protocol_turn_options = Some(rlm_termination_options(
-            self.protocol_turn_options.as_ref(),
-            lash_rlm_types::RlmTermination::Natural,
-        )?);
-        Ok(self)
+    fn allow_prose_or_finish(self) -> Result<Self> {
+        with_rlm_termination(self, lash_rlm_types::RlmTermination::Natural)
     }
+}
+
+/// `builder` with `termination` recorded in its run spec's protocol turn
+/// options, over whatever options the builder already set.
+#[cfg(feature = "rlm")]
+fn with_rlm_termination(
+    mut builder: crate::SendBuilder,
+    termination: lash_rlm_types::RlmTermination,
+) -> Result<crate::SendBuilder> {
+    builder.run_spec.overrides.protocol_turn_options = Some(rlm_termination_options(
+        builder.run_spec.overrides.protocol_turn_options.as_ref(),
+        termination,
+    )?);
+    Ok(builder)
 }
 
 /// Reads the durable RLM facts a session actually recorded (ADR 0066).

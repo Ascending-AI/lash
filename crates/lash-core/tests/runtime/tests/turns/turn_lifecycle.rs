@@ -1648,13 +1648,13 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store(
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let store = unbound_recording_store(backend).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
-    let runtime = runtime_with_plugins_and_tools_and_host_and_store(
+    let runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
         test_host_config(backend),
         runtime_store,
-    )
+    ))
     .await;
     (runtime, store)
 }
@@ -1682,13 +1682,13 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store_clock(
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let store = unbound_recording_store_with_clock(backend, clock).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
-    let runtime = runtime_with_plugins_and_tools_and_host_and_store(
+    let runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
         test_host_config(backend),
         runtime_store,
-    )
+    ))
     .await;
     (runtime, store)
 }
@@ -1703,13 +1703,13 @@ pub(super) async fn standard_runtime_with_transport_and_double_queue_store(
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
-    let runtime = runtime_with_plugins_and_tools_and_host_and_store(
+    let runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
         test_host_config(&backend),
         runtime_store,
-    )
+    ))
     .await;
     (runtime, store)
 }

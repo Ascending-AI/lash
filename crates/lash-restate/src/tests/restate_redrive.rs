@@ -2455,6 +2455,7 @@ fn journaled_drive_claim(session_lease_generation: u64) -> lash_core::TurnInputC
                 state: lash_core::TurnInputState::DeferredNextTurn,
                 enqueued_at_ms: 0,
                 input: lash_core::TurnInput::text("deploy staging"),
+                run_spec: None,
             }],
             applications: Vec::new(),
         },

@@ -512,6 +512,7 @@ impl TurnInputStore for PostgresSessionStore {
         })?;
         let ingress_json = encode_json(&draft.ingress)?;
         let input_json = encode_json(&draft.input)?;
+        let run_spec = admit_run_spec_tx(&mut tx, &draft).await?;
         let input = if let Some(source_key) = draft.source_key.as_deref() {
             let row = sqlx::query(
                 crate::turn_ingress::turn_ingress_sql()
@@ -528,6 +529,7 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(&input_json)
             .bind(now as i64)
             .bind(&submission_digest)
+            .bind(run_spec.column())
             .fetch_one(&mut *tx)
             .await
             .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;
@@ -558,6 +560,7 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(&input_json)
             .bind(now as i64)
             .bind(&submission_digest)
+            .bind(run_spec.column())
             .fetch_one(&mut *tx)
             .await
             // The `ON CONFLICT (input_id)` arbiter absorbs the id's unique
@@ -585,6 +588,7 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(&input_json)
             .bind(now as i64)
             .bind(&submission_digest)
+            .bind(run_spec.column())
             .execute(&mut *tx)
             .await
             .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;
@@ -596,6 +600,35 @@ impl TurnInputStore for PostgresSessionStore {
         };
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(input)
+    }
+
+    async fn load_run_spec(
+        &self,
+        session_id: &SessionId,
+        hash: &lash_core_execution::RunSpecHash,
+    ) -> Result<Option<lash_core_execution::RunSpec>, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let stored: Option<String> = sqlx::query_scalar(
+            crate::turn_ingress::turn_ingress_sql()
+                .run_specs
+                .select_spec
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .bind(hash.as_str())
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        stored
+            .map(|json| {
+                lash_core_execution::RunSpec::from_canonical_json(&json).map_err(|error| {
+                    StoreError::StoredDataCorrupt {
+                        record_kind: "RunSpec",
+                        message: error.to_string(),
+                    }
+                })
+            })
+            .transpose()
     }
 
     async fn list_pending_turn_inputs(
@@ -1123,4 +1156,60 @@ impl TurnInputStore for PostgresSessionStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(repaired)
     }
+}
+
+/// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse
+/// a steering spec that differs from its running turn's, then intern a
+/// non-default spec once per hash and refuse different bytes under an
+/// interned hash. Both refusals roll the whole admission back.
+///
+/// The session lock the enqueue took to allocate its sequence serializes
+/// concurrent interns of one session, and a spec row is never rewritten, so
+/// the read-back sees the bytes this or an earlier admission interned.
+async fn admit_run_spec_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    draft: &lash_core_execution::PendingTurnInputDraft,
+) -> Result<lash_core_execution::store_backend_support::RunSpecAdmission, StoreError> {
+    use lash_core_execution::store_backend_support as support;
+    let spec = support::RunSpecAdmission::of(draft)?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    if let Some(turn_id) = support::steering_run_spec_target(draft) {
+        let addressed = sqlx::query(sql.pending_inputs.select_run_spec_by_source_key.sql())
+            .bind(draft.session_id.as_str())
+            .bind(turn_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .map(|row| {
+                (
+                    row.get::<String, _>("state"),
+                    row.get::<Option<String>, _>("run_spec_hash"),
+                )
+            });
+        support::check_steering_run_spec(
+            &draft.session_id,
+            turn_id,
+            &spec,
+            addressed
+                .as_ref()
+                .map(|(state, hash)| (state.as_str(), hash.as_deref())),
+        )?;
+    }
+    if let Some((hash, canonical)) = spec.interned() {
+        sqlx::query(sql.run_specs.intern.sql())
+            .bind(draft.session_id.as_str())
+            .bind(hash)
+            .bind(canonical)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let stored: String = sqlx::query_scalar(sql.run_specs.select_spec.sql())
+            .bind(draft.session_id.as_str())
+            .bind(hash)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        spec.check_interned(&draft.session_id, &stored)?;
+    }
+    Ok(spec)
 }

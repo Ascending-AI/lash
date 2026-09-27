@@ -13,12 +13,14 @@ lash_store_sql::statements! {
         ///
         /// `?5` is written to both `ingress_json` (the mutable current scope)
         /// and `submitted_ingress_json` (immutable); `?9` is the submission
-        /// digest.
+        /// digest and `?10` the interned run spec's hash, NULL for the default
+        /// spec (FIG-3838).
         insert_new = "INSERT INTO pending_turn_inputs (
                  enqueue_seq, input_id, session_id, source_key, ingress_json, state,
-                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms,
+                 run_spec_hash
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8, ?10)";
 
         /// Enqueue input `?2`, or hand back the row session `?3` already filed
         /// under the same source key.
@@ -34,15 +36,16 @@ lash_store_sql::statements! {
         /// draft's digest, never the row's mutable current ingress (FIG-3544).
         insert_or_adopt_existing = "INSERT INTO pending_turn_inputs (
                  enqueue_seq, input_id, session_id, source_key, ingress_json, state,
-                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms,
+                 run_spec_hash
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8, ?10)
              ON CONFLICT (session_id, source_key) DO UPDATE
                  SET source_key = pending_turn_inputs.source_key
              RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, submission_digest";
+                    claim_token, claim_session_lease_generation, run_spec_hash, submission_digest";
 
         /// Enqueue input `?2` under the id its draft provisioned, or hand back
         /// the row that id already names.
@@ -55,21 +58,22 @@ lash_store_sql::statements! {
         /// as `insert_new` does.
         insert_or_adopt_by_input_id = "INSERT INTO pending_turn_inputs (
                  enqueue_seq, input_id, session_id, source_key, ingress_json, state,
-                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms,
+                 run_spec_hash
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8, ?10)
              ON CONFLICT (input_id) DO UPDATE
                  SET input_id = pending_turn_inputs.input_id
              RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, submission_digest";
+                    claim_token, claim_session_lease_generation, run_spec_hash, submission_digest";
 
         /// Input `?2` of session `?1`, locked for the caller's transaction.
         select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2 FOR UPDATE";
 
@@ -78,7 +82,7 @@ lash_store_sql::statements! {
         select_by_source_key_for_update = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2 FOR UPDATE";
 
@@ -93,7 +97,7 @@ lash_store_sql::statements! {
         select_suffix = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND enqueue_seq >= ?2
              ORDER BY enqueue_seq ASC
@@ -113,7 +117,7 @@ lash_store_sql::statements! {
         select_active_turn_rows = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{active_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC
@@ -124,7 +128,7 @@ lash_store_sql::statements! {
         select_pending_active = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{pending_active_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC
@@ -139,7 +143,7 @@ lash_store_sql::statements! {
         claim_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{deferred_next_turn_turn_input_state(state)}}
@@ -165,7 +169,7 @@ lash_store_sql::statements! {
         claim_candidates_active_turn_after_work = "SELECT enqueue_seq, input_id, session_id,
                     source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{active_turn_input_state(state)}}
@@ -187,7 +191,7 @@ lash_store_sql::statements! {
         claim_candidates_active_turn_before_completion = "SELECT enqueue_seq, input_id, session_id,
                     source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{active_turn_input_state(state)}}
@@ -210,7 +214,7 @@ lash_store_sql::statements! {
         select_turn_bound = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND claim_bound_turn_id = ?2

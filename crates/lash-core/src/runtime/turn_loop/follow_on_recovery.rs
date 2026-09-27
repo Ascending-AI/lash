@@ -235,13 +235,13 @@ impl LashRuntime {
         lease: SessionExecutionLeaseGuard,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         let (start, owed) = match recovery {
-            crate::store::FollowOnRecovery::Run(owed) => (
-                LogicalTurnStart::Input(crate::runtime::logical_turn::follow_on_input(
+            crate::store::FollowOnRecovery::Run(owed) => {
+                let (input, options) = crate::runtime::logical_turn::follow_on_input(
                     &owed,
                     crate::TurnContext::default(),
-                )),
-                owed,
-            ),
+                );
+                (LogicalTurnStart::Input(input, options), owed)
+            }
             crate::store::FollowOnRecovery::Exhausted(owed) => {
                 (LogicalTurnStart::ExhaustedFollowOn(owed.clone()), owed)
             }

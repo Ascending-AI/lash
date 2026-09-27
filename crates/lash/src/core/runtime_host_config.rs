@@ -68,6 +68,7 @@ impl LashCoreBuilder {
             core.providers.provider_resolver =
                 Arc::new(facade_support::SingleProviderResolver::new(provider));
         }
+        core.providers.run_definitions = self.run_definitions.clone();
         if let Some(filter) = self.process_tool_visibility_filter.take() {
             core.control.process_tool_visibility_filter = Some(filter);
         }

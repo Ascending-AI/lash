@@ -204,6 +204,18 @@ pub enum RuntimeErrorCode {
     /// was set, so this is the worker's deployment, not the session's intent:
     /// the engine retries the root, and its retry budget parks it.
     ProviderBindingUnavailable,
+    /// A root's run spec names a definition revision this worker does not
+    /// register (FIG-3838). It is the deployment, not the input: the root
+    /// retries, its retry budget parks it, and a redeploy that registers the
+    /// revision recovers it. Nothing is recorded, and no other revision is
+    /// ever used instead.
+    RunDefinitionUnavailable,
+    /// A registered run definition refused the spec's context (FIG-3838):
+    /// deterministic, so it is recorded as the root's failure.
+    RunShapeRefused,
+    /// An input addressed to a running turn carried an explicit run spec
+    /// that differs from the turn's (FIG-3838): refused before acceptance.
+    RunSpecMismatch,
     Plugin,
     QueuedWork,
     /// One queued row alone renders larger than the whole model context window,
@@ -440,8 +452,12 @@ pub enum RuntimeErrorCode {
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
-        | crate::store::StoreError::PendingTurnInputIdConflict { .. }) => {
+        | crate::store::StoreError::PendingTurnInputIdConflict { .. }
+        | crate::store::StoreError::RunSpecHashCollision { .. }) => {
             RuntimeError::new(RuntimeErrorCode::DurableIdentityConflict, err.to_string())
+        }
+        err @ crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. } => {
+            RuntimeError::new(RuntimeErrorCode::RunSpecMismatch, err.to_string())
         }
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
@@ -450,7 +466,9 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
-        | crate::store::StoreError::PendingTurnInputIdConflict { .. }) => {
+        | crate::store::StoreError::PendingTurnInputIdConflict { .. }
+        | crate::store::StoreError::RunSpecHashCollision { .. }
+        | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }) => {
             runtime_error_from_turn_input_admission(err)
         }
         crate::store::StoreError::Contended => RuntimeError::new(
@@ -623,6 +641,9 @@ impl RuntimeErrorCode {
             Self::ProviderRouteUnknown => "provider_route_unknown",
             Self::ProviderCredentialsMissing => "provider_credentials_missing",
             Self::ProviderBindingUnavailable => "provider_binding_unavailable",
+            Self::RunDefinitionUnavailable => "run_definition_unavailable",
+            Self::RunShapeRefused => "run_shape_refused",
+            Self::RunSpecMismatch => "run_spec_mismatch",
             Self::Plugin => "plugin",
             Self::QueuedWork => "queued_work",
             Self::QueuedWorkRowExceedsContextWindow => "queued_work_row_exceeds_context_window",
@@ -886,6 +907,9 @@ impl RuntimeErrorCode {
         Self::ProviderRouteUnknown,
         Self::ProviderCredentialsMissing,
         Self::ProviderBindingUnavailable,
+        Self::RunDefinitionUnavailable,
+        Self::RunShapeRefused,
+        Self::RunSpecMismatch,
         Self::Plugin,
         Self::QueuedWork,
         Self::QueuedWorkRowExceedsContextWindow,
@@ -1087,6 +1111,9 @@ impl RuntimeErrorCode {
             "provider_route_unknown" => Self::ProviderRouteUnknown,
             "provider_credentials_missing" => Self::ProviderCredentialsMissing,
             "provider_binding_unavailable" => Self::ProviderBindingUnavailable,
+            "run_definition_unavailable" => Self::RunDefinitionUnavailable,
+            "run_shape_refused" => Self::RunShapeRefused,
+            "run_spec_mismatch" => Self::RunSpecMismatch,
             "plugin" => Self::Plugin,
             "queued_work" => Self::QueuedWork,
             "queued_work_row_exceeds_context_window" => Self::QueuedWorkRowExceedsContextWindow,
@@ -1664,7 +1691,8 @@ impl RuntimeEffectControllerError {
 
     /// Only the host derivations — the assistant-response hooks, the
     /// execution-environment sync and the execution-environment load — and a
-    /// drive's admission and seal, a root's scope close and a session's close,
+    /// drive's admission and seal, a root's resolution (its spec read and its
+    /// definition lookup, FIG-3838), a root's scope close and a session's close,
     /// whose store faults are the attempt's (FIG-3600), and a process command
     /// that marked its registry fault retryable (a session deletion's process
     /// cleanup, after its close) can consume derivation retry authority, as
@@ -1680,6 +1708,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::ClaimAcceptedTurnInput
+                | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose
                 | RuntimeEffectKind::Process

@@ -68,6 +68,10 @@ impl lash_core::TurnInputStore for SnapshotStore {
             source_key: input.source_key,
             state,
             enqueued_at_ms: now_epoch_ms(),
+            run_spec: input
+                .run_spec
+                .hash()
+                .expect("hash the snapshot input's spec"),
             input: input.input,
         };
         self.pending_turn_inputs.lock_recover().push(stored.clone());

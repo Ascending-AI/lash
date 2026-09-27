@@ -30,6 +30,7 @@ pub mod queued_items;
 pub mod queued_run_members;
 pub mod queued_runs;
 pub mod retired_scopes;
+pub mod run_specs;
 pub mod session_execution_leases;
 pub mod tool_intent_submissions;
 pub mod turn_park_clock;

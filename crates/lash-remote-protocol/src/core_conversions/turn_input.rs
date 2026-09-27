@@ -103,7 +103,6 @@ impl TryFrom<RemoteTurnInput> for lash_core::TurnInput {
         value.validate()?;
         let RemoteTurnInput {
             items,
-            protocol_turn_options,
             trace_turn_id,
         } = value;
         let mut input = lash_core::TurnInput::items(
@@ -112,7 +111,6 @@ impl TryFrom<RemoteTurnInput> for lash_core::TurnInput {
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
         );
-        input.protocol_turn_options = protocol_turn_options.map(Into::into);
         input.trace_turn_id = trace_turn_id;
         Ok(input)
     }
@@ -125,15 +123,28 @@ impl TryFrom<RemoteTurnRequest> for lash_core::TurnInput {
         value.validate()?;
         // Identity/routing fields are consumed by the transport layer, not the
         // core turn input; tool grants are applied separately. `turn_id` is
-        // the send's id, which the transport passes beside the input.
+        // the send's id, and the protocol turn options its run spec, which the
+        // transport passes beside the input ([`RemoteTurnRequest::run_spec`]).
         let RemoteTurnRequest {
             session_id: _,
             turn_id: _,
             input,
+            protocol_turn_options: _,
             tool_grants: _,
             metadata: _,
         } = value;
         input.try_into()
+    }
+}
+
+impl RemoteTurnRequest {
+    /// The run spec this request's input is sent under: its protocol turn
+    /// options as one-shot overrides, or the default spec.
+    pub fn run_spec(&self) -> lash_core::RunSpec {
+        lash_core::RunSpec::overrides(lash_core::RunOverrides {
+            protocol_turn_options: self.protocol_turn_options.clone().map(Into::into),
+            ..lash_core::RunOverrides::default()
+        })
     }
 }
 
@@ -145,7 +156,6 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
         // accessors below; new TurnContext fields are not guarded here.
         let lash_core::TurnInput {
             items,
-            protocol_turn_options,
             trace_turn_id,
             protocol_extension,
             turn_context,
@@ -162,8 +172,8 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
             )));
         }
         // A per-turn prompt layer lives in the process-local turn context and
-        // cannot survive durable acceptance; the replacement is the session's
-        // prompt configuration (FIG-3600).
+        // cannot survive durable acceptance; the replacement is the send's
+        // run spec (FIG-3838).
         if !turn_context.prompt_layer().is_empty() {
             return Err(RemoteProtocolError::NonRemoteSafeTurnInput(
                 "per-turn prompt layers cannot cross a remote boundary".to_string(),
@@ -174,7 +184,6 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
-            protocol_turn_options: protocol_turn_options.map(Into::into),
             trace_turn_id,
         })
     }

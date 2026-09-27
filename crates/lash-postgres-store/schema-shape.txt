@@ -149,6 +149,7 @@ table lash_pending_turn_inputs
   column ingress_json text not-null
   column input_id text not-null
   column input_json text not-null
+  column run_spec_hash text nullable
   column session_id text not-null
   column source_key text nullable
   column state text not-null
@@ -677,10 +678,6 @@ table lash_runtime_turn_commits
     shape /definitions/TurnFailurePartialOutput/oneOf/tag:residency=string:%22truncated%22/type object
     shape /definitions/TurnInput/properties/items/items/$ref InputItem
     shape /definitions/TurnInput/properties/items/type array
-    shape /definitions/TurnInput/properties/protocol_turn_options/anyOf/0/$ref ProtocolTurnOptions
-    shape /definitions/TurnInput/properties/protocol_turn_options/anyOf/0/branch schema
-    shape /definitions/TurnInput/properties/protocol_turn_options/anyOf/1/branch schema
-    shape /definitions/TurnInput/properties/protocol_turn_options/anyOf/1/type null
     shape /definitions/TurnInput/properties/trace_turn_id/type null|string
     shape /definitions/TurnInput/required/items field
     shape /definitions/TurnInput/type object
@@ -979,10 +976,6 @@ table lash_runtime_turn_commits
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnFailurePartialOutput/oneOf/tag:residency=string:%22truncated%22/type object
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/properties/items/items/$ref InputItem
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/properties/items/type array
-    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/properties/protocol_turn_options/anyOf/0/$ref ProtocolTurnOptions
-    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/properties/protocol_turn_options/anyOf/0/branch schema
-    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/properties/protocol_turn_options/anyOf/1/branch schema
-    shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/properties/protocol_turn_options/anyOf/1/type null
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/properties/trace_turn_id/type null|string
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/required/items field
     shape /persisted-by/sqlite/runtime_turn_commits.result_json/definitions/TurnInput/type object
@@ -1160,6 +1153,11 @@ table lash_session_roots
   column terminal_head_revision bigint nullable
   column terminal_kind text nullable
   primary-key (session_id, root)
+table lash_session_run_specs
+  column session_id text not-null
+  column spec_hash text not-null
+  column spec_json text not-null
+  primary-key (session_id, spec_hash)
 table lash_sessions
   column checkpoint_ref text nullable
   column head_json text not-null

@@ -1365,7 +1365,6 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1601,7 +1600,6 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
                 items: vec![InputItem::Text {
                     text: "parent turn".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1762,7 +1760,6 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1855,7 +1852,6 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1941,7 +1937,6 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
                     items: vec![InputItem::Text {
                         text: "hello".to_string(),
                     }],
-                    protocol_turn_options: None,
                     trace_turn_id: None,
                     protocol_extension: None,
                     turn_context: lash_core::TurnContext::default(),
@@ -2058,7 +2053,6 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -2168,7 +2162,6 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),

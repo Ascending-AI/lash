@@ -59,6 +59,7 @@ macro_rules! persistence_operations {
                 fn pending_turn_cancel_closures(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
                 fn pending_turn_cancel_closure_pins(&self) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
                 fn enqueue_pending_turn_input(&self, input: crate::PendingTurnInputDraft) -> Result<crate::PendingTurnInput, StoreError>;
+                fn load_run_spec(&self, session_id: &SessionId, hash: &crate::run_spec::RunSpecHash) -> Result<Option<crate::run_spec::RunSpec>, StoreError>;
                 fn list_pending_turn_inputs(&self, session_id: &SessionId) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
                 fn list_turn_input_applications(&self, session_id: &SessionId) -> Result<Vec<crate::TurnInputApplication>, StoreError>;
                 fn cancel_pending_turn_input(&self, session_id: &SessionId, input_id: &str) -> Result<crate::PendingTurnInputCancelOutcome, StoreError>;

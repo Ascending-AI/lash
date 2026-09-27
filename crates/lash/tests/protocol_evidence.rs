@@ -145,12 +145,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::TurnInput| {
         let _ = &value.protocol_extension;
     });
-    // W0037: lash::TurnInput::protocol_turn_options [field]
-    field_witness(|value: &lash::TurnInput| {
-        let _ = &value.protocol_turn_options;
-    });
-    // W0038: lash::TurnInput::with_protocol_turn_options [function]
-    let _ = lash::TurnInput::with_protocol_turn_options;
     // W0039: lash::direct::DirectCompletion [struct]
     type_witness::<lash::direct::DirectCompletion>();
     // W0040: lash::direct::DirectCompletion::llm_call [field]

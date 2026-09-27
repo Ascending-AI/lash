@@ -139,6 +139,13 @@ impl ProtocolTurnOptions {
 }
 impl facade_ops::ProtocolTurnOptionsFacadeOps for ProtocolTurnOptions {
     fn merged_with_override(&self, override_options: &Self) -> Self {
+        self.merged_with(override_options)
+    }
+}
+impl ProtocolTurnOptions {
+    /// `override_options` over `self`, key by key when both are objects;
+    /// otherwise the override replaces.
+    pub(crate) fn merged_with(&self, override_options: &Self) -> Self {
         match (&self.payload, &override_options.payload) {
             (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
                 let mut payload = base.clone();

@@ -455,8 +455,8 @@ pub enum RuntimeEffectCommand {
     SealDriveAdmission {
         admitted: Box<crate::engine::Admitted>,
     },
-    /// Resolve the session config `root` runs under (FIG-3600 S6): once per
-    /// root, keyed by it, so every redrive replays the recorded config.
+    /// Resolve the shape `root` runs under (FIG-3600 S6, FIG-3838): once per
+    /// root, keyed by it, so every redrive replays the recorded shape.
     ResolveTurnConfig {
         root: crate::TurnId,
     },
@@ -1232,9 +1232,10 @@ pub enum RuntimeEffectOutcome {
     SealDriveAdmission {
         verdict: Box<crate::engine::SealVerdict>,
     },
-    /// The whole config the root runs under, read from the durable head.
+    /// The root's recorded shape: its spec resolved against its snapshot
+    /// of the durable head's config (FIG-3838).
     ResolveTurnConfig {
-        config: Box<crate::PersistedSessionConfig>,
+        resolved: Box<crate::ResolvedRun>,
     },
     /// The terminal evidence of the root the close closed.
     CloseRootScope {

@@ -166,9 +166,6 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::DrawRootStart { .. }
-        // A root's session config: the resident config it runs under,
-        // captured at the funnel; nothing it does can fault (FIG-3600 S6).
-        | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
         | RuntimeEffectCommand::PresentToolResult { .. }) => RestateEffectExecution::JournaledRun {
@@ -194,11 +191,16 @@ pub(crate) fn restate_effect_execution(
         // recorded store fault on every later drive. So is a root's scope
         // close: an owner that did not acknowledge it closes it again. So is
         // a session's close: a deletion past it only retries, and a retry
-        // must reach the store, not a recorded fault.
+        // must reach the store, not a recorded fault. So is a root's
+        // resolution: a spec read the store did not answer, or a definition
+        // revision this worker does not register, is repaired by a retry or a
+        // redeploy, and only a definition's refusal of its context is
+        // recorded (FIG-3838).
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
+        | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::CloseRootScope { .. }
         | RuntimeEffectCommand::BeginSessionClose { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }

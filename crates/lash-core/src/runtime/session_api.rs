@@ -665,6 +665,7 @@ impl LashRuntime {
             input,
             ingress,
             source_key,
+            crate::RunSpec::default(),
         )
         .await
     }
@@ -1032,10 +1033,12 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     input: crate::TurnInput,
     ingress: crate::TurnInputIngress,
     source_key: Option<String>,
+    run_spec: crate::RunSpec,
 ) -> Result<crate::PendingTurnInput, RuntimeError> {
     super::turn_loop::ensure_durable_effect_input(&input)?;
     let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
-    let mut draft = crate::PendingTurnInputDraft::new(session_id, ingress, input);
+    let mut draft =
+        crate::PendingTurnInputDraft::new(session_id, ingress, input).with_run_spec(run_spec);
     // A keyed input's id is its key's: a host re-attaches by the key alone.
     if let Some(key) = source_key.as_deref() {
         draft.input_id = Some(crate::PendingTurnInputDraft::keyed_input_id(
@@ -1527,6 +1530,7 @@ impl LashRuntime {
             // Commands explicitly change the sticky config, unlike the
             // recorded execution view of a root.
             next_state.authority.committed_config = None;
+            next_state.authority.root_snapshot = None;
             for command in &commands {
                 let crate::SessionCommand::ApplyConfigPatch { patch } = command else {
                     unreachable!("config-only command group was checked above")

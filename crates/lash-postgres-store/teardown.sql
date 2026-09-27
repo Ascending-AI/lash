@@ -70,6 +70,8 @@ DROP TABLE IF EXISTS lash_wake_redelivery_fences CASCADE;
 
 DROP TABLE IF EXISTS lash_pending_turn_inputs CASCADE;
 
+DROP TABLE IF EXISTS lash_session_run_specs CASCADE;
+
 DROP TABLE IF EXISTS lash_session_ingress_sequence CASCADE;
 
 DROP TABLE IF EXISTS lash_session_ingress CASCADE;

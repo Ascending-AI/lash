@@ -139,6 +139,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
     ),
     pair("session_head", "lash_sessions"),
     pair("session_roots", "lash_session_roots"),
+    pair("session_run_specs", "lash_session_run_specs"),
     pair("session_root_inputs", "lash_session_root_inputs"),
     pair("control_intents", "lash_control_intents"),
     pair("tool_intent_submissions", "lash_tool_intent_submissions"),

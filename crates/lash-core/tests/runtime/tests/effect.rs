@@ -65,7 +65,6 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1106,7 +1105,6 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
                 items: vec![InputItem::Text {
                     text: "use the tool".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1202,7 +1200,6 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
                 items: vec![InputItem::Text {
                     text: "run code".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
@@ -1265,7 +1262,6 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
                 items: vec![InputItem::Text {
                     text: "run code".to_string(),
                 }],
-                protocol_turn_options: None,
                 trace_turn_id: None,
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),

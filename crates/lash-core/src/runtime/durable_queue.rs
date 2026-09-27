@@ -118,7 +118,8 @@ impl DurableSessionOps {
         }
     }
 
-    /// Durably accept host turn input, then wake the queued-work driver.
+    /// Durably accept host turn input under `run_spec`, then wake the
+    /// queued-work driver.
     ///
     /// Success acknowledges durable acceptance only; the wake is a separate
     /// best-effort signal reconciled from the pending row.
@@ -128,6 +129,7 @@ impl DurableSessionOps {
         input: crate::TurnInput,
         ingress: crate::TurnInputIngress,
         source_key: Option<String>,
+        run_spec: crate::RunSpec,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
         let enqueued = super::session_api::enqueue_turn_input_to_store(
@@ -137,6 +139,7 @@ impl DurableSessionOps {
             input,
             ingress,
             source_key,
+            run_spec,
         )
         .await?;
         self.publish_queue_changed(

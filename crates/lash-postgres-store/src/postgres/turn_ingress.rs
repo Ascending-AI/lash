@@ -13,7 +13,7 @@ use lash_store_sql::turn_ingress::{
     cancellation_bindings::CancellationBindingStatements,
     closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
-    retired_scopes::RetiredScopeStatements,
+    retired_scopes::RetiredScopeStatements, run_specs::RunSpecStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
     tool_intent_submissions::ToolIntentSubmissionStatements,
     turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
@@ -97,6 +97,8 @@ pub(crate) struct TurnIngressSql {
     pub(crate) pending_inputs: PendingInputStatements,
     /// `pending_turn_inputs`, PostgreSQL only.
     pub(crate) pending_inputs_postgres: PendingInputPostgresStatements,
+    /// `session_run_specs`, shared.
+    pub(crate) run_specs: RunSpecStatements,
     /// `queued_work_batches`, shared.
     pub(crate) queued_batches: QueuedBatchStatements,
     /// `queued_work_batches`, PostgreSQL only.
@@ -149,6 +151,7 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         family_postgres: TurnIngressPostgresStatements::render(dialect),
         pending_inputs: PendingInputStatements::render(dialect),
         pending_inputs_postgres: PendingInputPostgresStatements::render(dialect),
+        run_specs: RunSpecStatements::render(dialect),
         queued_batches: QueuedBatchStatements::render(dialect),
         queued_batches_postgres: QueuedBatchPostgresStatements::render(dialect),
         queued_items: QueuedItemStatements::render(dialect),

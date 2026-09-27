@@ -4,6 +4,10 @@
 //! payloads, and the checkpoint boundary rule stores filter on. The ingress
 //! driver that normalizes and applies them stays in `lash-core`.
 
+pub use crate::run_spec::{
+    DefinitionRef, ResolvedRun, RunDefinition, RunDefinitions, RunOverrides, RunShapeError,
+    RunSpec, RunSpecHash,
+};
 use crate::{
     CheckpointKind, PluginMessage, RuntimeError, RuntimeErrorCode, SessionId, TurnCause, TurnId,
 };
@@ -304,6 +308,10 @@ pub struct PendingTurnInputDraft {
     pub source_key: Option<String>,
     pub ingress: TurnInputIngress,
     pub input: TurnInput,
+    /// The shape the input runs under (FIG-3838). The default spec is the
+    /// session config and is stored as no spec at all.
+    #[serde(default, skip_serializing_if = "crate::run_spec::RunSpec::is_default")]
+    pub run_spec: crate::run_spec::RunSpec,
 }
 impl PendingTurnInputDraft {
     /// Constructs a `PendingTurnInputDraft` for store and durable-substrate implementors while
@@ -319,7 +327,20 @@ impl PendingTurnInputDraft {
             source_key: None,
             ingress,
             input,
+            run_spec: crate::run_spec::RunSpec::default(),
         }
+    }
+
+    /// Sets the spec the input runs under (FIG-3838).
+    pub fn with_run_spec(mut self, run_spec: crate::run_spec::RunSpec) -> Self {
+        self.run_spec = run_spec;
+        self
+    }
+
+    /// The hash the store interns this draft's spec under: `None` for the
+    /// default spec, which is never interned.
+    pub fn run_spec_hash(&self) -> Result<Option<crate::run_spec::RunSpecHash>, serde_json::Error> {
+        self.run_spec.hash()
     }
 
     /// The input id a keyed submission is accepted under: a function of its
@@ -367,7 +388,10 @@ impl PendingTurnInputDraft {
     /// - the ingress as submitted — scope, and for `active_turn` the turn id
     ///   and minimum checkpoint boundary;
     /// - the input's canonical JSON (the persisted `TurnInput` serde form with
-    ///   object keys sorted and `-0.0` folded to `0.0`), as one opaque leaf.
+    ///   object keys sorted and `-0.0` folded to `0.0`), as one opaque leaf;
+    /// - the input's [`RunSpecHash`](crate::run_spec::RunSpecHash) when its
+    ///   spec is not the default. The default spec adds nothing, so an
+    ///   omitted spec and an explicit default are the same submission.
     ///
     /// Excluded: the session id and source key (the row is found by them), the
     /// generated input id, the enqueue time, and every lifecycle and claim
@@ -375,7 +399,11 @@ impl PendingTurnInputDraft {
     /// at [`TURN_INPUT_SUBMISSION_FAMILY_VERSION`]; the rendered form is
     /// `turn-input-submission:v<family>:blake3:<hex>`.
     pub fn submission_digest(&self) -> Result<String, serde_json::Error> {
-        let preimage = turn_input_submission_preimage(&self.ingress, &self.input)?;
+        let preimage = turn_input_submission_preimage(
+            &self.ingress,
+            &self.input,
+            self.run_spec.hash()?.as_ref(),
+        )?;
         Ok(crate::stable_identity::rendered_hash(
             "turn-input-submission",
             TURN_INPUT_SUBMISSION_FAMILY_VERSION,
@@ -427,10 +455,13 @@ pub const TURN_INPUT_SUBMISSION_FAMILY_VERSION: u8 = 1;
 ///
 /// Ingress scope: 1 `active_turn` (followed by the turn id and the boundary),
 /// 2 `next_turn`. Boundary: 1 `after_work`, 2 `before_completion`. The input
-/// follows as one canonical JSON payload leaf. Retired tags remain burned.
+/// follows as one canonical JSON payload leaf. A non-default run spec follows
+/// last as tag 1 and its hash; the default spec appends nothing. Retired tags
+/// remain burned.
 fn turn_input_submission_preimage(
     ingress: &TurnInputIngress,
     input: &TurnInput,
+    run_spec: Option<&crate::run_spec::RunSpecHash>,
 ) -> Result<Vec<u8>, serde_json::Error> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.turn-input-submission",
@@ -453,6 +484,10 @@ fn turn_input_submission_preimage(
     identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
         input,
     )?));
+    if let Some(run_spec) = run_spec {
+        identity.tag(1);
+        identity.string(run_spec.as_str());
+    }
     Ok(identity.finish())
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -468,6 +503,10 @@ pub struct PendingTurnInput {
     pub state: TurnInputState,
     pub enqueued_at_ms: u64,
     pub input: TurnInput,
+    /// The interned spec the input runs under; `None` for the default spec
+    /// (FIG-3838). A claim never mixes inputs whose specs differ.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_spec: Option<crate::run_spec::RunSpecHash>,
 }
 
 /// Host-facing projection of one open pending turn-input record.
@@ -990,20 +1029,15 @@ fn initial_turn_applications(
 }
 pub fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
     let mut input_items = Vec::new();
-    let mut protocol_turn_options = None;
     let mut trace_turn_id = None;
     for pending in inputs {
         input_items.extend(pending.input.items.clone());
-        if protocol_turn_options.is_none() {
-            protocol_turn_options = pending.input.protocol_turn_options.clone();
-        }
         if trace_turn_id.is_none() {
             trace_turn_id = pending.input.trace_turn_id.clone();
         }
     }
     TurnInput {
         items: input_items,
-        protocol_turn_options,
         trace_turn_id,
         protocol_extension: None,
         turn_context: crate::TurnContext::default(),
@@ -1110,9 +1144,6 @@ impl InputItem {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TurnInput {
     pub items: Vec<InputItem>,
-    /// Per-turn override for protocol-owned turn options.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     /// Internal protocol transport carrier for the facade builder's turn ID.
     ///
     /// All non-advanced facade paths overwrite this field.
@@ -1137,7 +1168,6 @@ impl TurnInput {
     pub fn items(items: impl IntoIterator<Item = InputItem>) -> Self {
         Self {
             items: items.into_iter().collect(),
-            protocol_turn_options: None,
             trace_turn_id: None,
             protocol_extension: None,
             turn_context: TurnContext::default(),
@@ -1148,11 +1178,6 @@ impl TurnInput {
         self.items.push(InputItem::attachment(source));
         self
     }
-
-    pub fn with_protocol_turn_options(mut self, options: crate::ProtocolTurnOptions) -> Self {
-        self.protocol_turn_options = Some(options);
-        self
-    }
 }
 /// Per-turn, in-process side channel of typed plugin inputs.
 ///
@@ -1161,8 +1186,8 @@ impl TurnInput {
 /// survive a process boundary, so durable effect-host runs explicitly reject a
 /// turn that carries any live inputs with
 /// [`RuntimeErrorCode::DurableEffectLivePluginInput`]. Durable callers must
-/// instead encode replayable data in `protocol_turn_options` or persisted
-/// plugin state.
+/// instead encode replayable data in the send's run spec or persisted plugin
+/// state.
 #[derive(Clone, Default)]
 pub struct LiveTurnInputs {
     inputs: HashMap<&'static str, Arc<dyn Any + Send + Sync>>,
@@ -1200,7 +1225,7 @@ impl LiveTurnInputs {
         }
         Err(RuntimeError::new(
             RuntimeErrorCode::DurableEffectLivePluginInput,
-            "durable effect hosts do not support live TurnContext plugin inputs; encode replayable data in protocol_turn_options or persisted plugin state",
+            "durable effect hosts do not support live TurnContext plugin inputs; encode replayable data in the send's run spec or persisted plugin state",
         ))
     }
 }
@@ -1480,7 +1505,6 @@ impl TurnInput {
     pub fn durable_projection(&self) -> Self {
         Self {
             items: self.items.clone(),
-            protocol_turn_options: self.protocol_turn_options.clone(),
             trace_turn_id: None,
             protocol_extension: None,
             turn_context: crate::TurnContext::default(),
