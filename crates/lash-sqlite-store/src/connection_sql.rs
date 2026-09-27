@@ -56,13 +56,8 @@ pub(crate) const READ_ONLY_PRAGMAS: &str = "PRAGMA cache_size = -500;";
 /// `Schema::ProcessRegistry.qualifier()` names.
 ///
 /// `ATTACH` names a schema rather than qualifying a table, so the renderer has
-/// nothing to say about it; both binders — the durable-core open path and the
-/// effect journal's fence binder — issue this one text.
+/// nothing to say about it; the durable-core open path issues this text.
 pub(crate) const ATTACH_PROCESS_REGISTRY: &str = "ATTACH DATABASE ?1 AS process_registry";
-
-/// Attach the effect journal's database under the qualifier
-/// `Schema::EffectJournal.qualifier()` names.
-pub(crate) const ATTACH_EFFECT_JOURNAL: &str = "ATTACH DATABASE ?1 AS effect_journal";
 
 /// The schema generation an attached process registry carries.
 pub(crate) const SELECT_PROCESS_REGISTRY_USER_VERSION: &str =
@@ -98,25 +93,6 @@ pub(crate) const SELECT_FLEET_FORMAT_TABLE_EXISTS: &str =
 pub(crate) const SELECT_TABLE_DDL: &str = "SELECT name, sql
      FROM sqlite_schema
      WHERE type = 'table' AND sql IS NOT NULL";
-
-/// The file backing the connection's own `main` database, or `NULL` for an
-/// in-memory one.
-///
-/// The fence binder asks this before attaching: a journal whose `main` is
-/// already the registry file must not attach it a second time under another
-/// name.
-pub(crate) const SELECT_MAIN_DATABASE_FILE: &str =
-    "SELECT file FROM pragma_database_list WHERE name = 'main'";
-
-/// Whether this connection has a process registry attached: an attach whose
-/// caller was dropped still ran to completion on the connection thread, so
-/// the fence binder looks before it attaches.
-pub(crate) const SELECT_PROCESS_REGISTRY_IS_ATTACHED: &str =
-    "SELECT 1 FROM pragma_database_list WHERE name = 'process_registry'";
-
-/// Detach the process registry, so the fence binder can attach the one it
-/// was asked for in place of an attach it never recorded.
-pub(crate) const DETACH_PROCESS_REGISTRY: &str = "DETACH DATABASE process_registry";
 
 /// The database clock, in epoch milliseconds: what the recovery leader lease
 /// compares against (ADR 0109 §1.6), so hosts with skewed clocks agree on a

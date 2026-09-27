@@ -738,7 +738,7 @@ impl LiveConformanceHarness {
         lash_conformance::ToolChildLawFixture {
             make_world: Arc::new(move |_spec| {
                 let host = Arc::clone(&host);
-                Box::pin(async move { lash_conformance::ToolChildWorld { host, drain: None } })
+                Box::pin(async move { lash_conformance::ToolChildWorld { host } })
             }),
             // Deliberately one registry for every scenario, despite
             // `ToolChildLawFixture::make_processes` promising a fresh one: the

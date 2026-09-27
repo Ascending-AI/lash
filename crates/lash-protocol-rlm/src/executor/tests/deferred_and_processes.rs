@@ -2,17 +2,6 @@ use super::*;
 
 const SEED: u64 = 0x5_2c0a;
 
-/// A fresh SQLite memory backend's effect host: the one journal a
-/// fixture's worker, cell context and process service share.
-pub(super) async fn memory_backend() -> lash_core::Backend {
-    Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a memory backend"),
-    )
-    .into()
-}
-
 /// Runs a deferred tool resolution and then fails its journal commit, in
 /// front of a controller that journals every other effect.
 pub(super) struct FailingDeferredJournalLayer;
@@ -2277,11 +2266,9 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
 pub(super) async fn typescript_restored_process_handle_await_crosses_turn_boundary() {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
-    // The cell runs on a memory backend's effect host; its recorded start
-    // lands in the double's process table, whose workflow runs the body.
-    let backend = memory_backend().await;
-    let effect_host = backend.effect_host();
+    // Both cells run in the double's handler; its process workflow runs the body.
     let table = crate::testing::DoubleProcesses::new(0x7519_0002).await;
+    let effect_host = table.backend().effect_host();
     let registry = table.registry();
     let process_env_store = table.env_store();
     let surface = LashlangSurface::new(
@@ -2321,8 +2308,11 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
+    let handler = table
+        .open_handler(crate::testing::default_cell_scope())
+        .await;
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
+        crate::testing::double_ports(table.double(), &handler),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
@@ -2402,16 +2392,17 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         turn_n_plus_one.terminal_finish,
         Some(serde_json::json!("done"))
     );
+    handler.close().await.expect("close the cell handler");
 }
 
 #[tokio::test]
 pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation() {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
-    let backend = memory_backend().await;
-    let registry = backend.process_registry();
-    let process_env_store = backend.process_env_store();
-    let effect_host = backend.effect_host();
+    let table = crate::testing::DoubleProcesses::new(0x7519_0003).await;
+    let registry = table.registry();
+    let process_env_store = table.env_store();
+    let effect_host = table.backend().effect_host();
     let inspected = Arc::new(std::sync::Mutex::new(None));
     let tool_provider = Arc::new(TypeScriptProcessInspectionToolProvider {
         inspected_process_id: Arc::clone(&inspected),
@@ -2438,8 +2429,11 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
+    let handler = table
+        .open_handler(crate::testing::default_cell_scope())
+        .await;
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
+        crate::testing::double_ports(table.double(), &handler),
         tool_provider,
         tool_catalog,
         None,
@@ -2492,4 +2486,5 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         .clone()
         .expect("inspected process id");
     assert_eq!(finish_id, recorded_pid);
+    handler.close().await.expect("close the cell handler");
 }

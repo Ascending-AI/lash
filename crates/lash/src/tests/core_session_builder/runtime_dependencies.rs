@@ -237,10 +237,12 @@ async fn backend_trigger_store_observes_the_backend_clock_for_the_worker_config(
 async fn a_file_backend_builds_successfully() -> Result<()> {
     // Positive control: a durable file backend supplies every port.
     let dir = tempfile::tempdir().expect("tempdir");
-    let backend = lash_sqlite_store::SqliteBackend::open(dir.path())
-        .await
-        .expect("open the file backend");
-    peer_coherence_builder_over(Arc::new(backend).into())
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(dir.path())
+            .await
+            .expect("open the file store set"),
+    );
+    peer_coherence_builder_over(lash_conformance::recording_backend_over(stores))
         .build(crate::testing::runtime_lease_owner())?;
     Ok(())
 }
@@ -1080,12 +1082,11 @@ async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
     let root = tempfile::tempdir().expect("create SQLite fixture directory");
     duplicate_only_fork_intents_are_canonical(
         "file",
-        Arc::new(
-            lash_sqlite_store::SqliteBackend::open(root.path())
+        lash_conformance::recording_backend_over(Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(root.path())
                 .await
-                .expect("open the file backend"),
-        )
-        .into(),
+                .expect("open the file store set"),
+        )),
     )
     .await
 }

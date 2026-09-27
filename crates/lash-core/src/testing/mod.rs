@@ -78,27 +78,27 @@ std::thread_local! {
     /// databases by name, so a fixture that hands out only a store would
     /// otherwise let those vanish under it. Each test runs on its own thread,
     /// so this holds every backend exactly as long as the test that opened it.
-    static TEST_BACKENDS: std::cell::RefCell<Vec<lash_sqlite_store::SqliteBackend>> =
+    static TEST_BACKENDS: std::cell::RefCell<Vec<lash_sqlite_store::SqliteStoreSet>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// A fresh SQLite memory backend for this crate's unit tests (ADR 0102),
+/// A fresh SQLite memory store set for this crate's unit tests,
 /// held for the rest of the running test. The `testing` feature itself never
 /// links SQLite; only the crate's own test build does, through its
 /// dev-dependency.
 #[cfg(test)]
-pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteBackend {
-    let backend = lash_sqlite_store::SqliteBackend::memory()
+pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteStoreSet {
+    let backend = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a SQLite memory backend");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
     backend
 }
 
-/// [`sqlite_memory_backend`] as the handle a host config takes.
+/// [`sqlite_memory_backend`] behind a recording test effect host.
 #[cfg(test)]
 pub(crate) async fn memory_backend() -> crate::Backend {
-    std::sync::Arc::new(sqlite_memory_backend().await).into()
+    lash_conformance::recording_backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
 /// A fresh Restate server double under `seed` with `config`: lash-restate's
@@ -157,7 +157,7 @@ pub(crate) async fn unbound_recording_store() -> runtime_helpers::RecordingStore
 /// `backend`'s catalog.
 #[cfg(test)]
 pub(crate) async fn unbound_recording_store_on(
-    backend: &lash_sqlite_store::SqliteBackend,
+    backend: &lash_sqlite_store::SqliteStoreSet,
 ) -> runtime_helpers::RecordingStore {
     runtime_helpers::RecordingStore::over(std::sync::Arc::new(
         backend.open_store().await.expect("open an unbound store"),

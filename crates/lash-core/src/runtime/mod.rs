@@ -20,10 +20,7 @@ mod commit_admission;
 pub use commit_admission::run_head_advancing_commit_attempt;
 mod config_ops;
 pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
-pub use effect::await_event_coordinator;
-pub use effect::effect_replay_driver;
-pub use effect::effect_replay_driver::{EffectCommitState, StoredChildArbitration};
-pub use effect::promise_semantics;
+pub use effect::await_event_identity;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::effect;
 #[cfg(not(feature = "testing"))]
@@ -200,30 +197,27 @@ pub use effect::TurnCancelWait;
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
-    CausalRef, CheckpointClaimSet, ChildDrainOutcome, CommandJournalGuard,
-    CompletionKeyPreparation, DrainedChild, EffectAddress, EffectGroupDrainBudget,
-    EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch, GroupDrainReport,
-    GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement,
-    GroupWakePolicy, IndependentEffectWork, LlmRequestSpec, LlmStreamRecord, LoserPolicy,
-    OpenerFinalizationSteps, ProcessCommand, ProcessDriveStep, ProcessEffectOutcome,
-    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
-    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RankedGroupSettlement,
-    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange,
-    Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
-    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    CausalRef, CheckpointClaimSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
+    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
+    ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
+    GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, IndependentEffectWork,
+    LlmRequestSpec, LlmStreamRecord, LoserPolicy, ProcessCommand, ProcessDriveStep,
+    ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
+    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
+    RankedGroupSettlement, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome,
+    RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
     RuntimeSleepOptions, RuntimeSubject, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec, StoreEffectGroupClosing,
-    StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolChildDriver,
-    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, UnsettledEffectGroup,
-    effect_groups_unsupported, refuse_unhonored_group_membership,
+    SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolChildDriver, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
+    TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
+    TurnControlBindingIdError, effect_groups_unsupported, refuse_unhonored_group_membership,
     turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};

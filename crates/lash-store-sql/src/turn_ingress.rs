@@ -11,7 +11,7 @@
 //!   (ADR 0029), so "is this claim still live?" is one question about that
 //!   lease rather than a per-row timer.
 //! * **cancellation** — [`cancellation_bindings`], [`cancel_requests`],
-//!   [`closure_authorizations`], [`closure_participants`] and
+//!   [`closure_authorizations`] and
 //!   [`retired_scopes`] carry the durable cancellation facts a turn's closure
 //!   is settled against.
 //!
@@ -23,7 +23,6 @@ pub mod cancel_affected_inputs;
 pub mod cancel_requests;
 pub mod cancellation_bindings;
 pub mod closure_authorizations;
-pub mod closure_participants;
 pub mod pending_inputs;
 pub mod queued_batches;
 pub mod queued_items;

@@ -1149,8 +1149,7 @@ jobs:
 
       # Trusted events run the workbench browser-projection case in Bazel with
       # a pinned Node interpreter in the test action. Untrusted pull requests
-      # retain the full Cargo workspace suite, including the
-      # `sqlite-await-event-helper` example spawned by store conformance.
+      # retain the full Cargo workspace suite.
       # profile.ci excludes nested-Cargo fault matrices and the trybuild UI
       # binary, which have their own jobs.
       - name: Test workspace
@@ -1170,7 +1169,7 @@ jobs:
                 skip="${skip} & not package(agent-workbench)"
                 excludes+=(--exclude agent-workbench)
               fi
-              build_args=(--workspace "${excludes[@]}" --example sqlite-await-event-helper)
+              build_args=(--workspace "${excludes[@]}")
               nextest_args=(--workspace -E "${skip}")
               # The execution-receipt census below claims exactly the crates
               # whose conformance suites this run executes: the service tiers

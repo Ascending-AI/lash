@@ -34,7 +34,7 @@ use super::{
     RankedGroupSettlement, Resolution, ResolveOutcome, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
-    StoreEffectGroupClosing, ToolChildHost, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolChildHost, ToolIntentOutcomeSink, ToolIntentPreparation,
 };
 use crate::{RuntimeError, RuntimeErrorCode, SessionId};
 
@@ -374,10 +374,6 @@ impl EffectHost for LayeredEffectHost {
         binding: GroupChildBinding,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         self.layered_option(self.inner.scoped_for_group_child(admitted, binding)?)
-    }
-
-    fn effect_group_closing(&self) -> Option<Arc<dyn StoreEffectGroupClosing>> {
-        self.inner.effect_group_closing()
     }
 
     /// The inner host's routing first, then this host's layer: a child an

@@ -22,7 +22,7 @@ const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
 /// Durable substrates record this value as one unit. Replay validation parses
 /// `json` only to explain a mismatch; the hash is always over `json` itself.
 ///
-/// # Moving a command encoding: the domain stays, the store generation moves
+/// # Moving a command encoding
 ///
 /// This type owns the journaled effect encoding, so the decision made for
 /// FIG-2968 and executed by FIG-2983 is recorded here rather than in a store
@@ -37,20 +37,9 @@ const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
 /// domain names the hashing construction, not the vocabulary of commands inside
 /// it; it moves only when the construction itself changes.
 ///
-/// The lever for the rows that genuinely cannot replay is the store generation.
-/// A pre-cutover journal is unchanged bytes, so its recorded hash no longer
-/// reconstructs from the command this build builds, and a redrive surfaces
-/// `ReplayMismatch` deep in the effect driver — a drift report, not the
-/// reject-and-recreate refusal the durable contract promises. Advancing the
-/// SQLite effect generation (`lash-sqlite-store`'s `EFFECT_SCHEMA_VERSION`)
-/// refuses the whole journal at open instead, with a typed message naming the
-/// drain.
-///
-/// So: any change that moves the serialized bytes of a `RuntimeEffectCommand`
-/// variant advances the effect generation in the same change, and leaves this
-/// domain alone. The generation is refusal-only for this class — a resolved
-/// duration cannot be turned back into the deadline the guest asked for, so
-/// there is no migration arm to write.
+/// Recorded shapes that this build cannot replay are refused by
+/// `validate_replayed_effect_envelope` before hash comparison. The Restate
+/// journal owns the durable record; there is no SQL effect generation to bump.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CanonicalRuntimeEffectEnvelope {
     json: String,
@@ -70,17 +59,6 @@ impl CanonicalRuntimeEffectEnvelope {
         let hash =
             crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", json.as_bytes());
         Ok(Self { json, hash })
-    }
-
-    pub(crate) fn decode(encoded: &str) -> Result<Self, RuntimeEffectControllerError> {
-        let canonical: Self = serde_json::from_str(encoded).map_err(|err| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
-                format!("failed to decode canonical runtime effect envelope: {err}"),
-            )
-        })?;
-        canonical.refuse_unsupported_recorded_shape()?;
-        Ok(canonical)
     }
 
     /// Refuses recorded shapes this binary cannot replay before any hash work.
@@ -244,12 +222,10 @@ pub fn validate_replayed_effect_envelope(
     if let Some((recorded_key, reconstructed_key)) =
         tool_intent_key_format_cutover(&recorded_value, &reconstructed_value)
     {
-        return Err(
-            super::effect_replay_driver::tool_intent_replay_key_format_cutover(
-                recorded_key,
-                reconstructed_key,
-            ),
-        );
+        return Err(tool_intent_replay_key_format_cutover(
+            recorded_key,
+            reconstructed_key,
+        ));
     }
     let mut differences = Vec::new();
     collect_differences(
@@ -301,6 +277,18 @@ pub fn validate_replayed_effect_envelope(
         ),
     )
     .with_summary(summary))
+}
+
+fn tool_intent_replay_key_format_cutover(
+    recorded_replay_key: &str,
+    requested_replay_key: &str,
+) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
+        format!(
+            "continuation replay refused at the tool-intent replay-key format cutover: journaled row uses `{recorded_replay_key}` from `tool-intent:v1:`, but this build requested `{requested_replay_key}` from `tool-intent:v2:`; start a fresh post-cutover invocation instead of re-executing the pre-cutover command"
+        ),
+    )
 }
 
 fn tool_intent_key_format_cutover<'a>(
@@ -486,8 +474,18 @@ mod tests {
             "fixture must prove it carries the retired batch command"
         );
 
-        let error = CanonicalRuntimeEffectEnvelope::decode(PREDECESSOR_TOOL_BATCH_ENVELOPE)
-            .expect_err("a journaled tool batch must be refused before replay comparison");
+        let recorded: CanonicalRuntimeEffectEnvelope =
+            serde_json::from_str(PREDECESSOR_TOOL_BATCH_ENVELOPE).expect("recorded envelope");
+        let reconstructed = session_list_envelope()
+            .canonical_form()
+            .expect("reconstructed envelope");
+        let error = validate_replayed_effect_envelope(
+            &recorded,
+            &reconstructed,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
+            None,
+        )
+        .expect_err("a journaled tool batch must be refused before replay comparison");
         assert_eq!(
             error.code,
             crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
@@ -515,8 +513,18 @@ mod tests {
             "fixture must prove it carries the retired pre-cutover list shape"
         );
 
-        let error = CanonicalRuntimeEffectEnvelope::decode(PREDECESSOR_SESSION_LIST_ENVELOPE)
-            .expect_err("v3 journal envelope must be refused before replay comparison");
+        let recorded: CanonicalRuntimeEffectEnvelope =
+            serde_json::from_str(PREDECESSOR_SESSION_LIST_ENVELOPE).expect("recorded envelope");
+        let reconstructed = session_list_envelope()
+            .canonical_form()
+            .expect("reconstructed envelope");
+        let error = validate_replayed_effect_envelope(
+            &recorded,
+            &reconstructed,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
+            None,
+        )
+        .expect_err("v3 journal envelope must be refused before replay comparison");
         assert_eq!(
             error.code,
             crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
@@ -525,13 +533,13 @@ mod tests {
     }
 
     #[test]
-    fn current_session_list_envelope_decode_recapture_is_hash_fixpoint() {
+    fn current_session_list_envelope_recapture_is_hash_fixpoint() {
         let captured = session_list_envelope()
             .canonical_form()
             .expect("capture current session list envelope");
         let encoded = serde_json::to_string(&captured).expect("encode canonical envelope");
-        let decoded = CanonicalRuntimeEffectEnvelope::decode(&encoded)
-            .expect("decode current canonical envelope");
+        let decoded: CanonicalRuntimeEffectEnvelope =
+            serde_json::from_str(&encoded).expect("decode current canonical envelope");
         let reconstructed: RuntimeEffectEnvelope =
             serde_json::from_str(decoded.json()).expect("decode runtime envelope");
         let recaptured = reconstructed
@@ -552,7 +560,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(recorded),
             &canonical(reconstructed),
-            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
         )
         .expect_err("mismatch");
@@ -609,7 +617,7 @@ mod tests {
                 "f0": 1, "f1": 1, "f2": 1, "f3": 1, "f4": 1,
                 "f5": 1, "f6": 1, "f7": 1, "f8": 1, "f9": 1
             })),
-            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
         )
         .expect_err("mismatch");
@@ -654,7 +662,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(json!({"tool_results": [{"value": "a".repeat(3_000)}]})),
             &canonical(json!({"tool_results": [{"value": "b".repeat(3_000)}]})),
-            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             Some(&trace),
         )
         .expect_err("mismatch");
@@ -689,7 +697,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &recorded,
             &reconstructed,
-            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
         )
         .expect_err("canonical invariant failure");
@@ -714,7 +722,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(json!({"value": 1})),
             &canonical(json!({"value": 2})),
-            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             Some(&trace),
         )
         .expect_err("mismatch");
@@ -771,7 +779,7 @@ mod tests {
         validate_replayed_effect_envelope(
             &canonical(json!({"value": 1})),
             &canonical(json!({"value": 2})),
-            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             Some(&trace),
         )
         .expect_err("mismatch emits the relevant effect event");

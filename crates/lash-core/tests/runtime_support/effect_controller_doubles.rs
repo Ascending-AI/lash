@@ -51,7 +51,7 @@ impl StrictReplayJournal {
         validate_replayed_effect_envelope(
             &recorded,
             reconstructed,
-            lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            lash_core::RuntimeErrorCode::EffectReplayDivergence,
             None,
         )?;
         outcome.map(Some)
@@ -119,7 +119,7 @@ impl lash_core::testing::EffectLayer for RejectingEffectController {
         }
         if let Some(summary) = self.mismatch_summary.clone() {
             return Err(RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+                lash_core::RuntimeErrorCode::EffectReplayDivergence,
                 "recorded runtime effect diverged at command.request.model",
             )
             .with_summary(summary));

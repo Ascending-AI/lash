@@ -50,8 +50,8 @@ macro_rules! direct_turn_acceptance_tests {
 /// arm is shared.
 #[macro_export]
 macro_rules! cancelled_turn_withheld_input_tests {
-    ($fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue [] $fixture; [
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::direct_turn_acceptance_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (immediate_cancel_defers_withheld_inject_now_input, "cancel-defers-withheld-input"),
             (immediate_cancel_defers_withheld_process_wakes, "cancel-defers-withheld-wakes"),
         ]);

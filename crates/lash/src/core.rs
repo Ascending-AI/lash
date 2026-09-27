@@ -162,8 +162,7 @@ impl LashCore {
     /// The backend is the builder's only source of ports: there is no
     /// setter for a store, a registry or an effect host, so a core cannot mix
     /// substrates, and there is no in-memory default. The zero-infra
-    /// backend is `lash::sqlite::SqliteBackend::memory()` (feature
-    /// `sqlite`).
+    /// backend for local tests is a Restate engine over a SQLite memory store set.
     pub fn builder(backend: Backend, turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
         LashCoreBuilder::new(backend, turn_budget)
     }

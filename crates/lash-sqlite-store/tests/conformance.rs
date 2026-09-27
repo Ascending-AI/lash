@@ -15,16 +15,13 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use std::path::Path;
 use std::sync::Arc;
 
 use lash_core_execution::{
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventLog as _, ProcessInput,
     ProcessLifecycle as _, ProcessProvenance, ProcessRegistrar as _, ProcessRegistration,
 };
-use lash_sqlite_store::{
-    SqliteEffectHost, SqliteProcessRegistry, SqliteRuntimeEffectController, SqliteTriggerStore,
-};
+use lash_sqlite_store::{SqliteProcessRegistry, SqliteTriggerStore};
 
 #[path = "conformance/backend_fixture.rs"]
 mod backend_fixture;
@@ -37,13 +34,8 @@ const SUBSTRATE: backend_fixture::Substrate = backend_fixture::Substrate::File;
 
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
-#[path = "conformance/cold_process_await_event.rs"]
-mod cold_process_await_event;
 #[path = "conformance/schema_refusal.rs"]
 mod schema_refusal;
-
-use backend_fixture::durable_turn_scope;
-use lash_conformance::cold_process_turn_parent;
 
 #[cfg(feature = "testing")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -172,202 +164,4 @@ fn trigger_subscription_owner_filter_is_pushed_down() {
         "SQLite",
         lash_sqlite_store::testing::trigger_subscription_list_sql,
     );
-}
-
-#[tokio::test]
-async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_serving() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-canonical-envelope-effects.db");
-    let conn = rusqlite::Connection::open(&path).expect("open legacy effect db");
-    conn.pragma_update(None, "user_version", 8)
-        .expect("stamp legacy effect schema");
-    drop(conn);
-
-    let error =
-        match SqliteRuntimeEffectController::open(&path, durable_turn_scope("session", "turn"))
-            .await
-        {
-            Ok(_) => panic!("pre-intent effect stores must be recreated"),
-            Err(error) => error,
-        };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 36"));
-    assert!(message.contains("database reports version 8"));
-    assert!(message.contains(
-        "drain affected sessions and recreate the whole Lash trust domain with this version"
-    ));
-}
-
-#[tokio::test]
-async fn sqlite_effect_controller_rejects_retained_generation_21_schema_before_serving() {
-    // Generation 21 is the pre-SleepSpec-cutover journal this fixture retains;
-    // the boundary has since moved, and every stale stamp is refused alike.
-    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 21;
-    assert!(
-        i64::from(RETAINED_PRIOR_EFFECT_GENERATION)
-            < lash_sqlite_store::SqliteDatabase::EffectReplay.expected_version()
-    );
-
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("retained-generation-21-effects.db");
-    let conn = rusqlite::Connection::open(&path).expect("open retained effect db");
-    conn.pragma_update(None, "user_version", RETAINED_PRIOR_EFFECT_GENERATION)
-        .expect("stamp retained prior effect schema");
-    drop(conn);
-
-    let error =
-        match SqliteRuntimeEffectController::open(&path, durable_turn_scope("session", "turn"))
-            .await
-        {
-            Ok(_) => panic!("retained prior effect stores must be recreated"),
-            Err(error) => error,
-        };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 36"));
-    assert!(message.contains("database reports version 21"));
-}
-
-#[tokio::test]
-async fn sqlite_effect_host_and_controller_reject_non_file_backed_path_spellings() {
-    for path in [
-        "",
-        ":memory:",
-        "file::memory:?cache=shared",
-        "file:temporary",
-    ] {
-        let error = match SqliteEffectHost::open(Path::new(path)).await {
-            Ok(_) => panic!("effect hosts must reject non-file-backed path {path:?}"),
-            Err(error) => error,
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("requires a file-backed database path"),
-            "unexpected error for {path:?}: {error}"
-        );
-
-        let error = match SqliteRuntimeEffectController::open(
-            Path::new(path),
-            durable_turn_scope("guard-session", "guard-turn"),
-        )
-        .await
-        {
-            Ok(_) => panic!("effect controllers must reject non-file-backed path {path:?}"),
-            Err(error) => error,
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("requires a file-backed database path"),
-            "unexpected controller error for {path:?}: {error}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn sqlite_effect_replay_satisfies_cold_process_crash_conformance() {
-    use tokio::process::Command;
-
-    let dir = tempfile::tempdir().expect("cold-process effect replay tempdir");
-    let database = dir.path().join("cold-process-effect-replay.db");
-    let marker = dir.path().join("external-effect.log");
-    let nonce = uuid::Uuid::new_v4().to_string();
-    let run = |action: &'static str| {
-        let database = database.clone();
-        let marker = marker.clone();
-        let nonce = nonce.clone();
-        async move {
-            tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                Command::new(lash_conformance::helper_executable(
-                    "sqlite-await-event-helper",
-                ))
-                .arg(database)
-                .arg(action)
-                .arg(nonce)
-                .arg(marker)
-                .output(),
-            )
-            .await
-            .unwrap_or_else(|_| panic!("{action} helper timed out"))
-            .unwrap_or_else(|error| panic!("spawn {action} helper: {error}"))
-        }
-    };
-
-    let crashed = run("effect_crash").await;
-    assert_eq!(crashed.status.code(), Some(86));
-    assert_eq!(
-        std::fs::read_to_string(&marker)
-            .expect("read crashed effect marker")
-            .lines()
-            .count(),
-        1,
-        "the external effect ran before the owner crashed"
-    );
-
-    let completed = run("effect_complete").await;
-    assert!(
-        completed.status.success(),
-        "successor helper failed: {}",
-        String::from_utf8_lossy(&completed.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(&marker)
-            .expect("read re-executed effect marker")
-            .lines()
-            .count(),
-        2,
-        "an unrecorded external effect is honestly re-executed"
-    );
-
-    let replayed = run("effect_replay").await;
-    assert!(
-        replayed.status.success(),
-        "replay helper failed: {}",
-        String::from_utf8_lossy(&replayed.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(&marker)
-            .expect("read replay effect marker")
-            .lines()
-            .count(),
-        2,
-        "a recorded outcome replays without another external effect"
-    );
-}
-
-#[tokio::test]
-async fn sqlite_real_turn_satisfies_cold_process_crash_matrix() {
-    let dir = tempfile::tempdir().expect("SQLite cold-process real-turn tempdir");
-    let database = dir.path().join("cold-process-real-turn.db");
-    cold_process_turn_parent::assert_real_turn_kill_recovery(
-        dir.path(),
-        |action, nonce, marker| {
-            let mut command = tokio::process::Command::new(lash_conformance::helper_executable(
-                "sqlite-await-event-helper",
-            ));
-            command.arg(&database).arg(action).arg(nonce).arg(marker);
-            command
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn sqlite_queued_run_satisfies_cold_process_persistence_boundaries() {
-    let dir = tempfile::tempdir().expect("SQLite queued-run cold process tempdir");
-    let database = dir.path().join("queued-run-cold.db");
-    lash_conformance::assert_queued_run_cold_process_recovery(
-        dir.path(),
-        |action, nonce, marker| {
-            let mut command = tokio::process::Command::new(lash_conformance::helper_executable(
-                "sqlite-await-event-helper",
-            ));
-            command.arg(&database).arg(action).arg(nonce).arg(marker);
-            command
-        },
-    )
-    .await;
 }

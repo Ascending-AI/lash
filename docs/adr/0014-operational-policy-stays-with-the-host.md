@@ -13,10 +13,12 @@ a defaulted, fallible per-factory release seam through `LashCore::shutdown()` is
 in. An orchestrating drain remains out; intake, ordering, deadlines, active-turn
 handling, and other host policy do not move into Lash.
 
-Amended 2026-09-27 (FIG-3863): process leases and their TTL-gated failover path
-are deleted under [ADR 0110](0110-the-engine-owns-process-recovery.md). The
-*Lease Timings* decision below applies only to the session-execution and
-durable-effect-replay lease lanes.
+Amended 2026-09-27 (FIG-3861, FIG-3863): Restate is the only effect engine.
+The SQL effect-replay and process leases and their failover paths are deleted
+under [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+and [ADR 0110](0110-the-engine-owns-process-recovery.md). The *Lease Timings*
+decision below applies only to the session-execution lease; descriptions of
+the deleted lanes are historical.
 
 ## Decision
 

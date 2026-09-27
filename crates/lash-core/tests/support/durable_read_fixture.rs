@@ -47,7 +47,7 @@
 //! The law compares one artifact: the committed `expected.json`, whose shape is
 //! `ExpectedFixture`. It therefore covers exactly the payloads that struct carries —
 //! runtime commits (session config, graph node payloads, receipt identity), queue
-//! and pending-input identity, process-execution-env specs, await-event keys, and
+//! and pending-input identity, process-execution-env specs, and
 //! wake deliveries — plus everything their content-addressed hashes depend on.
 //!
 //! Trigger and process-registration payloads were that gap until FIG-1485. The
@@ -116,7 +116,6 @@
 //! | Receiver queue | `queued_work_batches`, `queued_work_items`, `pending_turn_inputs`, `wake_redelivery_fences`, `session_execution_leases` | Queue/input payloads, deterministic ids, typed wake-rewind refusal, and the raw expired lease generation |
 //! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
-//! | Effects and awaits (SQLite only: PostgreSQL is storage and journals no effects) | `runtime_effect_replay`, `await_event_meta`, `await_event_waits`, `await_event_revoked_sessions` | Completed effect replay without a local executor, signed await key resolution, and typed late-resolution/revocation behavior |
 //! | Backend metadata | PostgreSQL `lash_schema_versions`; SQLite `user_version` | Exact component/store schema-version comparison before read-back |
 //!
 //! The table names above omit PostgreSQL's `lash_` prefix where the logical name is
@@ -235,8 +234,7 @@ use lash_core::runtime::{
     process_wake_batch_draft, publish_process_execution_env,
 };
 use lash_core::{
-    AdmittedScope, AttachmentId, AttachmentIntent, AttachmentManifest, AwaitEventKey,
-    AwaitEventWaitIdentity, BoundaryReason, Clock, EffectHost, ExecResponse, ExecutionScope,
+    AttachmentId, AttachmentIntent, AttachmentManifest, BoundaryReason, Clock, ExecutionScope,
     LashSchema, LeaseClaimNonce, LeaseOwnerIdentity, MessageOrigin, MessageRole, OperationId,
     PartKind, PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
     ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
@@ -245,16 +243,14 @@ use lash_core::{
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ProtocolTurnOptions, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState, SegmentHandover,
+    ProtocolTurnOptions, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SegmentHandover,
     SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TextProjectionMetadata,
-    TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
-    TriggerDeliveryReservation, TriggerDeliveryReservationOutcome, TriggerInputBinding,
-    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
-    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
-    WaitKind, WaitState,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
+    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
+    WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -311,7 +307,6 @@ fn tombstone_process_id() -> ProcessId {
 /// same start again and be answered with the retained process.
 const WAITING_PROCESS_START_KEY: &str = "durable-read-waiting-process";
 const DELETED_SESSION_ID: &str = "durable-read-deleted-session";
-const REVOKED_SESSION_ID: &str = "durable-read-revoked-session";
 const TRIGGER_KEY: &str = "durable-read-trigger";
 const TRIGGER_REGISTER_OPERATION: &str = "durable-read-trigger-register";
 const QUEUE_WAKE_PROCESS: &str = "durable-read-queue-process";
@@ -402,10 +397,6 @@ pub struct FixtureHandles {
     pub continuations: Arc<dyn ProcessContinuationStore>,
     pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
     pub triggers: Arc<dyn TriggerStore>,
-    /// The engine that journals the fixture's effects and await-event
-    /// promises in the same store, or `None` for a store that is storage only
-    /// (PostgreSQL: its effects journal on Restate, ADR 0104).
-    pub effects: Option<Arc<dyn EffectHost>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -419,10 +410,6 @@ pub struct ExpectedFixture {
     pub queue_batch_id: String,
     pub pending_input_id: String,
     pub process_env_ref: ProcessExecutionEnvRef,
-    /// `None` for a storage-only store, which journals no promises.
-    pub await_event_key: Option<AwaitEventKey>,
-    /// `None` for a storage-only store, which journals no promises.
-    pub revoked_await_event_key: Option<AwaitEventKey>,
     pub wake_delivery: ProcessWakeDelivery,
     /// The trigger subscription, occurrence and delivery payloads as this build
     /// writes them (FIG-1485). One field covers all three tables:
@@ -1108,14 +1095,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("ingest fixture occurrence");
 
-    let (await_event_key, revoked_await_event_key) = match &handles.effects {
-        Some(effects) => {
-            let (key, revoked) = seed_effect_journal(effects.as_ref()).await;
-            (Some(key), Some(revoked))
-        }
-        None => (None, None),
-    };
-
     let wake_batch = handles
         .runtime
         .enqueue_queued_work(process_wake_batch_draft(wake_delivery.clone()))
@@ -1225,88 +1204,10 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         queue_batch_id: queued.batch_id.to_string(),
         pending_input_id: pending.input_id.to_string(),
         process_env_ref,
-        await_event_key,
-        revoked_await_event_key,
         wake_delivery,
         trigger_delivery: trigger_delivery.clone(),
         waiting_process,
     }
-}
-
-/// Seed the engine half of the fixture: a resolved and a revoked await-event
-/// promise, and the code cell that leaves no journal row (ADR 0103).
-async fn seed_effect_journal(effects: &dyn EffectHost) -> (AwaitEventKey, AwaitEventKey) {
-    let scope = ExecutionScope::turn(SESSION_ID, "durable-read-turn");
-    let await_event_key = effects
-        .await_event_key(
-            &scope,
-            AwaitEventWaitIdentity::tool_completion("durable-read-tool-call"),
-        )
-        .await
-        .expect("mint fixture await-event key");
-    assert_eq!(
-        effects
-            .resolve_await_event(
-                &await_event_key,
-                Resolution::Ok(serde_json::json!({"fixture": "resolved"})),
-            )
-            .await
-            .expect("resolve fixture await-event"),
-        ResolveOutcome::Accepted
-    );
-
-    let revoked_await_event_key = effects
-        .await_event_key(
-            &ExecutionScope::turn(REVOKED_SESSION_ID, "durable-read-revoked-turn"),
-            AwaitEventWaitIdentity::tool_completion("durable-read-revoked-tool-call"),
-        )
-        .await
-        .expect("mint fixture await-event key before session revocation");
-    effects
-        .revoke_await_events_for_session(&SessionId::from(REVOKED_SESSION_ID))
-        .await
-        .expect("persist fixture await-event session revocation");
-
-    let effect_envelope = fixture_effect_envelope();
-    effects
-        .scoped(AdmittedScope::turn(SESSION_ID, "durable-read-effect-turn"))
-        .expect("scope fixture effect journal")
-        .controller()
-        .execute_effect(
-            effect_envelope,
-            RuntimeEffectLocalExecutor::testing(|envelope| async move {
-                assert!(matches!(
-                    envelope.command,
-                    RuntimeEffectCommand::ExecCode { ref language, ref code }
-                        if language == "fixture" && code == "return 887"
-                ));
-                Ok(RuntimeEffectOutcome::ExecCode {
-                    result: Box::new(Ok(ExecResponse {
-                        observations: vec![lash_core::Observation {
-                            text: "durable read effect".to_string(),
-                            projection: TextProjectionMetadata {
-                                truncated: false,
-                                original_chars: 19,
-                                projected_chars: 19,
-                                original_lines: 1,
-                                projected_lines: 1,
-                                limit: 50 * 1024,
-                                limit_mode: "bytes".to_string(),
-                                max_lines: 2_000,
-                            },
-                        }],
-                        calls: Vec::new(),
-                        printed_images: Vec::new(),
-                        error: None,
-                        degraded_bindings: Vec::new(),
-                        terminal_finish: Some(serde_json::json!({"fixture": 887})),
-                    })),
-                })
-            }),
-        )
-        .await
-        .expect("run the fixture code cell (ADR 0103: it leaves no journal row)");
-    (await_event_key, revoked_await_event_key)
 }
 
 pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixture) {
@@ -1833,111 +1734,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         TriggerMutationOutcome::Unchanged,
         "durable fixture identity drift: identical trigger re-registration changed meaning"
     );
-
-    match (
-        &handles.effects,
-        &expected.await_event_key,
-        &expected.revoked_await_event_key,
-    ) {
-        (Some(effects), Some(key), Some(revoked)) => {
-            assert_effect_journal(effects.as_ref(), key, revoked).await;
-        }
-        (None, None, None) => {}
-        _ => panic!("durable fixture drift: the fixture's effect journal came or went"),
-    }
-}
-
-/// Read back the engine half of the fixture: the promise keys remint to the
-/// same bytes, the resolved promise and the revocation hold, and the code cell
-/// re-executes over its pre-cutover row (ADR 0103).
-async fn assert_effect_journal(
-    effects: &dyn EffectHost,
-    await_event_key: &AwaitEventKey,
-    revoked_await_event_key: &AwaitEventKey,
-) {
-    let reminted = effects
-        .await_event_key(
-            &ExecutionScope::turn(SESSION_ID, "durable-read-turn"),
-            AwaitEventWaitIdentity::tool_completion("durable-read-tool-call"),
-        )
-        .await
-        .expect("durable fixture identity drift: promise key cannot be reminted");
-    assert_eq!(
-        &reminted, await_event_key,
-        "durable fixture identity drift: promise key bytes changed"
-    );
-    assert_eq!(reminted.promise_key(), await_event_key.promise_key());
-    assert_eq!(
-        effects
-            .peek_await_event(&reminted)
-            .await
-            .expect("durable fixture drift: await-event peek failed"),
-        Some(Resolution::Ok(serde_json::json!({"fixture": "resolved"}))),
-        "durable fixture semantic drift: await-event resolution changed"
-    );
-
-    assert_eq!(
-        effects
-            .resolve_await_event(
-                revoked_await_event_key,
-                Resolution::Ok(serde_json::json!({"fixture": "late"})),
-            )
-            .await
-            .expect("durable fixture drift: revoked await-event resolve failed"),
-        ResolveOutcome::UnknownOrRevoked,
-        "durable fixture semantic drift: await-event session revocation disappeared"
-    );
-    let revoked_error = effects
-        .await_await_event(revoked_await_event_key, Default::default(), None)
-        .await
-        .expect_err("durable fixture drift: revoked await-event unexpectedly remained open");
-    assert_eq!(
-        revoked_error.code.as_str(),
-        "await_event_unknown_or_revoked"
-    );
-
-    // ADR 0103: the fixture's completed `exec_code` row was written before
-    // code cells stopped being journaled. It is inert: replaying the same
-    // envelope never serves it and re-runs the cell instead, which is how a
-    // pre-cutover in-flight turn rebuilds its interpreter state on redrive.
-    let reexecuted = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let reexecuted_by_executor = Arc::clone(&reexecuted);
-    let replayed_effect = effects
-        .scoped(AdmittedScope::turn(SESSION_ID, "durable-read-effect-turn"))
-        .expect("durable fixture drift: scope replayed effect journal")
-        .controller()
-        .execute_effect(
-            fixture_effect_envelope(),
-            RuntimeEffectLocalExecutor::testing(move |_| async move {
-                reexecuted_by_executor.store(true, std::sync::atomic::Ordering::SeqCst);
-                Ok(RuntimeEffectOutcome::ExecCode {
-                    result: Box::new(Ok(ExecResponse {
-                        observations: Vec::new(),
-                        calls: Vec::new(),
-                        printed_images: Vec::new(),
-                        error: None,
-                        degraded_bindings: Vec::new(),
-                        terminal_finish: Some(serde_json::json!("re-executed")),
-                    })),
-                })
-            }),
-        )
-        .await
-        .expect("durable fixture drift: a code cell must re-execute over its pre-cutover row");
-    assert!(
-        reexecuted.load(std::sync::atomic::Ordering::SeqCst),
-        "durable fixture semantic drift: a pre-cutover exec_code row was served instead of re-executing the cell"
-    );
-    let RuntimeEffectOutcome::ExecCode { result } = replayed_effect else {
-        panic!("durable fixture semantic drift: runtime-effect replay outcome kind changed");
-    };
-    assert_eq!(
-        result
-            .expect("durable fixture semantic drift: exec effect became an error")
-            .terminal_finish,
-        Some(serde_json::json!("re-executed")),
-        "durable fixture semantic drift: the re-executed cell's response was replaced by the pre-cutover row"
-    );
 }
 
 /// Requires the committed expectations to equal what this build writes today.
@@ -2202,29 +1998,6 @@ fn fixture_plugin_state() -> PluginState {
             },
         )]),
     }
-}
-
-fn fixture_effect_envelope() -> RuntimeEffectEnvelope {
-    RuntimeEffectEnvelope::new(
-        RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                ExecutionScope::turn(SESSION_ID, "durable-read-effect-turn"),
-                "durable-read-exec-replay",
-            )
-            .expect("valid durable read fixture address"),
-            lash_core::runtime::RuntimeAttribution::for_turn(
-                SESSION_ID,
-                "durable-read-effect-turn",
-                7,
-                0,
-            ),
-            "durable-read-exec-effect",
-        ),
-        RuntimeEffectCommand::ExecCode {
-            language: "fixture".to_string(),
-            code: "return 887".to_string(),
-        },
-    )
 }
 
 fn fixture_record_config_operation() -> OperationId {

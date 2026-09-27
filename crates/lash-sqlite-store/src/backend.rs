@@ -1,47 +1,22 @@
-//! [`SqliteBackend`]: every persistence port and the effect host of one
-//! SQLite substrate, from one typed [`SqliteLocation`] (ADR 0102).
+//! [`SqliteStoreSet`]: every storage port of one SQLite substrate, from one
+//! typed [`SqliteLocation`] (ADR 0102).
 //!
-//! A file backend keeps its four databases under one root directory; a
-//! memory backend keeps them as named `memdb` databases pinned by anchor
-//! connections. Both run the same store, the same replay driver and the same
-//! locking rules: the location decides only where each database is and what
-//! the backend is called. Every component is opened once, bound to the
-//! others by the location rather than by a later path exchange, and handed out
-//! as a shared handle.
+//! A file store set keeps its three databases under one root directory; a
+//! memory store set keeps them as named `memdb` databases pinned by anchor
+//! connections. The location decides where each database is and what the
+//! store set is called. Every component is opened once and handed out as a
+//! shared handle.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use lash_core_execution::{Clock, ExecutionScope};
+use lash_core_execution::Clock;
 
 use crate::location::{DatabaseLocation, MemoryAnchors, SqliteLocation};
 use crate::{
-    BuiltinBlobProfile, SqliteAttachmentStore, SqliteDatabase, SqliteEffectHost,
-    SqliteEffectReplayOptions, SqliteProcessDefinitionRegistry, SqliteProcessRegistry,
-    SqliteRuntimeEffectController, SqliteSessionStoreFactory, SqliteTriggerStore, Store,
-    StoreOptions,
+    BuiltinBlobProfile, SqliteAttachmentStore, SqliteDatabase, SqliteProcessDefinitionRegistry,
+    SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteTriggerStore, Store, StoreOptions,
 };
-
-/// Construction-time choices for a [`SqliteBackend`].
-#[derive(Clone, Debug, Default)]
-pub struct SqliteBackendOptions {
-    /// Blob and connection policy for the durable-core catalog.
-    pub store: StoreOptions,
-    /// Lease timing and drain budget of the effect host.
-    pub effect_replay: SqliteEffectReplayOptions,
-    /// Retention and staleness bounds of the process registry's wake
-    /// deliveries.
-    pub wake_delivery: lash_core_execution::WakeDeliveryConfig,
-    /// Where the process registry mints process ids (ADR 0107): at random,
-    /// unless a test that replays committed bytes needs them deterministic.
-    #[doc(hidden)]
-    pub process_id_mint: lash_core_execution::ProcessIdMint,
-    /// Deterministic transaction faults, installed on every session store the
-    /// backend's factory opens (FIG-2971: production builds do not compile
-    /// the hook).
-    #[cfg(feature = "testing")]
-    pub fault_injector: Option<crate::testing::SqliteFaultInjector>,
-}
 
 /// Construction-time choices for a [`SqliteStoreSet`], which opens no effect
 /// journal and so has no effect-replay options.
@@ -76,68 +51,11 @@ impl SqliteStoreSetOptions {
     }
 }
 
-impl From<SqliteStoreSetOptions> for SqliteBackendOptions {
-    fn from(options: SqliteStoreSetOptions) -> Self {
-        Self {
-            store: options.store,
-            effect_replay: SqliteEffectReplayOptions::default(),
-            wake_delivery: options.wake_delivery,
-            process_id_mint: options.process_id_mint,
-            #[cfg(feature = "testing")]
-            fault_injector: options.fault_injector,
-        }
-    }
-}
-
-impl SqliteBackendOptions {
-    /// The options [`SqliteBackend::memory`] uses: uncompressed blobs,
-    /// since an in-memory catalog spends CPU, not disk, on compression.
-    pub fn memory() -> Self {
-        Self {
-            store: StoreOptions {
-                blob_profile: BuiltinBlobProfile::LowLatency,
-                ..StoreOptions::default()
-            },
-            ..Self::default()
-        }
-    }
-
-    /// The store-set half of these options.
-    fn store_set_options(&self) -> SqliteStoreSetOptions {
-        SqliteStoreSetOptions {
-            store: self.store,
-            wake_delivery: self.wake_delivery,
-            process_id_mint: self.process_id_mint.clone(),
-            #[cfg(feature = "testing")]
-            fault_injector: self.fault_injector.clone(),
-        }
-    }
-}
-
-/// One SQLite substrate: the session-store factory, the effect host, the
-/// process registry, the trigger store, the process-definition registry, the
-/// process-exec-env store and the attachment store, all bound to one
-/// [`SqliteLocation`] and keyed on its one identity.
-///
-/// Cloning shares the backend. A memory backend's databases live until
-/// the backend and every handle taken from it have dropped.
-#[derive(Clone)]
-pub struct SqliteBackend {
-    stores: Arc<SqliteStoreSet>,
-    effect_host: Arc<SqliteEffectHost>,
-    options: SqliteBackendOptions,
-    /// The SQLite effect host runs no processes: its registry, watched once.
-    process_work: lash_core_execution::ProcessWorkWiring,
-}
-
-/// Every persistence port of one SQLite substrate without an effect host:
+/// Every persistence port of one SQLite substrate:
 /// the [`StoreSet`](lash_core_execution::StoreSet) a Restate backend
 /// journals its effects beside (ADR 0102, D2).
 ///
-/// It opens the same databases at the same location as a
-/// [`SqliteBackend`] would, except the effect journal: no SQLite effect
-/// host is opened and no retention sweep reaches a journal, because the
-/// engine that journals the effects keeps them. Cloning shares the store set.
+/// The effect engine owns its journal. Cloning shares the store set.
 #[derive(Clone)]
 pub struct SqliteStoreSet {
     inner: Arc<StoreParts>,
@@ -145,8 +63,8 @@ pub struct SqliteStoreSet {
 
 struct StoreParts {
     location: SqliteLocation,
-    /// The substrate's identity: the one value every component's identity
-    /// is taken from, the effect host's turn-control binding included.
+    /// The substrate's identity: the one value every storage component's
+    /// identity is taken from.
     identity: Arc<str>,
     /// [`Self::identity`] as the store set's binding identity.
     binding: lash_core_execution::StoreBindingId,
@@ -187,212 +105,6 @@ fn system_clock() -> Arc<dyn Clock> {
     Arc::new(lash_core_execution::facade_support::SystemClock)
 }
 
-impl SqliteBackend {
-    /// The file backend under `root`, created if absent.
-    pub async fn open(root: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(root, SqliteBackendOptions::default(), system_clock())
-            .await
-    }
-
-    /// The file backend under `root` with explicit options and clock.
-    pub async fn open_with_options_and_clock(
-        root: impl AsRef<Path>,
-        options: SqliteBackendOptions,
-        clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        let location = file_location(root.as_ref(), "SqliteBackend")?;
-        Self::assemble(location, None, options, clock).await
-    }
-
-    /// A fresh named in-memory backend.
-    ///
-    /// Each of its four databases is a `memdb` database, which SQLite caps at
-    /// 1 GiB (`SQLITE_MEMDB_DEFAULT_MAXSIZE` in the bundled build); a write
-    /// past the cap fails with `SQLITE_FULL`. Attachment bytes live in the
-    /// durable-core database beside the sessions, so a memory backend's
-    /// sessions, checkpoints and attachments share that one gibibyte. A
-    /// workload that needs more belongs on a file backend.
-    pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(SqliteBackendOptions::memory(), system_clock()).await
-    }
-
-    /// A fresh named in-memory backend on `clock`.
-    pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(SqliteBackendOptions::memory(), clock).await
-    }
-
-    /// A fresh named in-memory backend with explicit options and clock.
-    pub async fn memory_with_options_and_clock(
-        options: SqliteBackendOptions,
-        clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        let location = SqliteLocation::fresh_memory();
-        let anchors = MemoryAnchors::pin(&location).map_err(tokio_rusqlite::Error::Error)?;
-        Self::assemble(location, Some(anchors), options, clock).await
-    }
-
-    /// Fresh handles on this backend's databases: every component opened
-    /// again, over the same location, identity, options and clock — what a
-    /// second process over a file root is, and what a second runtime over the
-    /// same memory backend is.
-    pub async fn reopen(&self) -> tokio_rusqlite::Result<Self> {
-        self.reopen_with_clock(Arc::clone(&self.stores.inner.clock))
-            .await
-    }
-
-    /// [`Self::reopen`] on `clock`.
-    pub async fn reopen_with_clock(&self, clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
-        self.reopen_with_options_and_clock(self.options.clone(), clock)
-            .await
-    }
-
-    /// [`Self::reopen`] with other construction-time options: another
-    /// runtime over the same databases, configured differently.
-    pub async fn reopen_with_options_and_clock(
-        &self,
-        options: SqliteBackendOptions,
-        clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        Self::assemble(
-            self.stores.inner.location.clone(),
-            self.stores.inner.anchors.clone(),
-            options,
-            clock,
-        )
-        .await
-    }
-
-    async fn assemble(
-        location: SqliteLocation,
-        anchors: Option<Arc<MemoryAnchors>>,
-        options: SqliteBackendOptions,
-        clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        let identity: Arc<str> = Arc::from(location.identity());
-        let journal = DatabaseLocation::in_backend(
-            &location,
-            &identity,
-            SqliteDatabase::EffectReplay,
-            anchors.as_ref(),
-        );
-        let effect_host = Arc::new(
-            SqliteEffectHost::open_at(&journal, options.effect_replay.clone(), Arc::clone(&clock))
-                .await?,
-        );
-        let stores = SqliteStoreSet::assemble(
-            location,
-            identity,
-            anchors,
-            options.store_set_options(),
-            clock,
-            Some(&journal),
-        )
-        .await?;
-        effect_host.attach_process_registry(
-            stores
-                .database(SqliteDatabase::ProcessRegistry)
-                .target()
-                .clone(),
-        );
-        let process_work =
-            lash_core_execution::ProcessWorkWiring::without_process_work(stores.process_registry());
-        Ok(Self {
-            stores: Arc::new(stores),
-            effect_host,
-            options,
-            process_work,
-        })
-    }
-
-    /// Where this backend's databases are.
-    pub fn location(&self) -> &SqliteLocation {
-        self.stores.location()
-    }
-
-    /// The store set this backend's effect host journals beside.
-    pub fn stores(&self) -> &SqliteStoreSet {
-        &self.stores
-    }
-
-    /// The options this backend was opened with.
-    pub fn options(&self) -> &SqliteBackendOptions {
-        &self.options
-    }
-
-    /// `sqlite:<canonical effect-replay.db path>` or `sqlite-memory:<id>`;
-    /// see [`SqliteLocation::identity`].
-    pub fn identity(&self) -> &str {
-        self.stores.identity()
-    }
-
-    /// The URI a raw SQLite connection opens `database` through. An
-    /// inspection affordance; see [`SqliteLocation::database_uri`].
-    pub fn database_uri(&self, database: SqliteDatabase) -> String {
-        self.stores.database_uri(database)
-    }
-
-    /// The factory every session of this backend is created and reopened
-    /// through, over the durable-core catalog.
-    pub fn session_store_factory(&self) -> Arc<SqliteSessionStoreFactory> {
-        self.stores.session_store_factory()
-    }
-
-    /// The host that journals this backend's effects, with its process
-    /// scope fences kept in the backend's registry.
-    pub fn effect_host(&self) -> Arc<SqliteEffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
-    /// The process registry, pruning process-owned sessions out of the
-    /// backend's own catalog.
-    pub fn process_registry(&self) -> Arc<SqliteProcessRegistry> {
-        self.stores.process_registry()
-    }
-
-    /// The trigger subscriptions and occurrences.
-    pub fn trigger_store(&self) -> Arc<SqliteTriggerStore> {
-        self.stores.trigger_store()
-    }
-
-    /// The named process-definition registry, in the durable-core catalog.
-    pub fn process_definition_registry(&self) -> Arc<SqliteProcessDefinitionRegistry> {
-        self.stores.process_definition_registry()
-    }
-
-    /// The durable-core [`Store`] that serves process execution environments
-    /// and Lashlang artifacts. Unbound to any session.
-    pub fn process_env_store(&self) -> Arc<Store> {
-        self.stores.process_env_store()
-    }
-
-    /// The attachment byte store over the durable-core catalog, beside the
-    /// manifest its garbage collection reads.
-    pub fn attachment_store(&self) -> Arc<SqliteAttachmentStore> {
-        self.stores.attachment_store()
-    }
-
-    /// A new unbound [`Store`] on this backend's durable-core catalog, on
-    /// a connection of its own.
-    pub async fn open_store(&self) -> tokio_rusqlite::Result<Store> {
-        self.stores.open_store().await
-    }
-
-    /// A controller scoped to `scope` over this backend's effect journal,
-    /// on a replay driver of its own, keyed on this backend's identity.
-    pub async fn open_effect_controller(
-        &self,
-        scope: ExecutionScope,
-    ) -> tokio_rusqlite::Result<SqliteRuntimeEffectController> {
-        self.effect_host
-            .open_scoped_controller(
-                scope,
-                self.options.effect_replay.clone(),
-                Arc::clone(&self.stores.inner.clock),
-            )
-            .await
-    }
-}
-
 impl SqliteStoreSet {
     /// The file store set under `root`, created if absent.
     pub async fn open(root: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
@@ -415,11 +127,10 @@ impl SqliteStoreSet {
     ) -> tokio_rusqlite::Result<Self> {
         let location = file_location(root.as_ref(), "SqliteStoreSet")?;
         let identity: Arc<str> = Arc::from(location.identity());
-        Self::assemble(location, identity, None, options, clock, None).await
+        Self::assemble(location, identity, None, options, clock).await
     }
 
-    /// A fresh named in-memory store set; see [`SqliteBackend::memory`]
-    /// for the size cap its databases share.
+    /// A fresh named in-memory store set. SQLite caps each memdb at 1 GiB.
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
         Self::memory_with_clock(system_clock()).await
     }
@@ -437,7 +148,7 @@ impl SqliteStoreSet {
         let location = SqliteLocation::fresh_memory();
         let anchors = MemoryAnchors::pin(&location).map_err(tokio_rusqlite::Error::Error)?;
         let identity: Arc<str> = Arc::from(location.identity());
-        Self::assemble(location, identity, Some(anchors), options, clock, None).await
+        Self::assemble(location, identity, Some(anchors), options, clock).await
     }
 
     /// Fresh handles on this store set's databases: every store opened again
@@ -466,7 +177,6 @@ impl SqliteStoreSet {
             self.inner.anchors.clone(),
             options,
             clock,
-            None,
         )
         .await
     }
@@ -477,7 +187,6 @@ impl SqliteStoreSet {
         anchors: Option<Arc<MemoryAnchors>>,
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
-        journal: Option<&DatabaseLocation>,
     ) -> tokio_rusqlite::Result<Self> {
         let database = |database| {
             DatabaseLocation::in_backend(&location, &identity, database, anchors.as_ref())
@@ -523,7 +232,6 @@ impl SqliteStoreSet {
         let factory = SqliteSessionStoreFactory::at(
             core,
             Some(registry.target().clone()),
-            journal.cloned(),
             options.store,
             Arc::clone(&clock),
         );
@@ -559,9 +267,7 @@ impl SqliteStoreSet {
         &self.inner.location
     }
 
-    /// `sqlite:<canonical effect-replay.db path>` or `sqlite-memory:<id>`;
-    /// see [`SqliteLocation::identity`]. It names the location, not an
-    /// effect host: a store set opens none.
+    /// `sqlite:<canonical durable-core.db path>` or `sqlite-memory:<id>`.
     pub fn identity(&self) -> &str {
         &self.inner.identity
     }
@@ -634,41 +340,6 @@ impl SqliteStoreSet {
             database,
             self.inner.anchors.as_ref(),
         )
-    }
-}
-
-/// The SQLite effect engine: its own replay host and the runtime's
-/// in-process process and queued-work drivers, over its store set. It remains
-/// until FIG-3668 deletes it (ADR 0104).
-impl lash_core_execution::EffectEngine for SqliteBackend {
-    fn stores(&self) -> Arc<dyn lash_core_execution::StoreSet> {
-        self.stores.clone()
-    }
-
-    fn effect_host(&self) -> Arc<dyn lash_core_execution::EffectHost> {
-        SqliteBackend::effect_host(self)
-    }
-
-    fn build_generation(&self) -> &lash_core_execution::engine::BuildGeneration {
-        // The SQLite engine serves no Restate journals, so nothing routes it
-        // by drain generation; it reports a fixed value until FIG-3668
-        // deletes it.
-        static GENERATION: std::sync::OnceLock<lash_core_execution::engine::BuildGeneration> =
-            std::sync::OnceLock::new();
-        GENERATION.get_or_init(|| {
-            lash_core_execution::engine::BuildGeneration::for_test("sqlite-backend")
-        })
-    }
-
-    /// The SQLite effect host runs no processes.
-    fn process_work(&self) -> lash_core_execution::ProcessWorkWiring {
-        self.process_work.clone()
-    }
-
-    /// The SQLite effect host drives no sessions: nothing drives a session
-    /// in process (ADR 0104).
-    fn session_work(&self) -> Arc<dyn lash_core_execution::SessionWorkEngine> {
-        Arc::new(lash_core_execution::NoSessionWork::new())
     }
 }
 
@@ -773,15 +444,6 @@ impl std::fmt::Debug for SqliteStoreSet {
     }
 }
 
-impl std::fmt::Debug for SqliteBackend {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("SqliteBackend")
-            .field("location", self.location())
-            .finish_non_exhaustive()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,17 +459,17 @@ mod tests {
             .expect("read the catalog")
     }
 
-    /// A memory backend's databases live exactly as long as the backend
+    /// A memory stores's databases live exactly as long as the stores
     /// or a handle taken from it: data written through one handle is read
     /// through another after the writer is gone, and the databases disappear
     /// once the last handle drops.
     #[tokio::test]
-    async fn a_memory_backend_lives_until_its_last_handle_drops() {
-        let backend = SqliteBackend::memory()
+    async fn a_memory_stores_lives_until_its_last_handle_drops() {
+        let stores = SqliteStoreSet::memory()
             .await
-            .expect("open the memory backend");
-        let uri = backend.database_uri(SqliteDatabase::DurableCore);
-        let factory = backend.session_store_factory();
+            .expect("open the memory stores");
+        let uri = stores.database_uri(SqliteDatabase::DurableCore);
+        let factory = stores.session_store_factory();
         let request = lash_core_execution::testing::store_fixtures::session_store_request(
             &lash_core_execution::SessionId::from("memory-lifetime"),
             "memory-lifetime",
@@ -819,7 +481,7 @@ mod tests {
                 .expect("create a session"),
         );
         let reopened = lash_core_execution::SessionStoreFactory::open_existing_store(
-            backend
+            stores
                 .reopen()
                 .await
                 .expect("reopen")
@@ -837,102 +499,37 @@ mod tests {
         assert_eq!(catalog_table_count(&uri), 1, "the catalog is alive");
 
         drop(factory);
-        drop(backend);
+        drop(stores);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while catalog_table_count(&uri) != 0 {
             assert!(
                 std::time::Instant::now() < deadline,
-                "dropping the backend and every handle must release its databases"
+                "dropping the stores and every handle must release its databases"
             );
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 
-    /// A file backend keeps its four databases under its root and answers
-    /// to its journal's canonical path; a memory backend answers to its id.
     #[tokio::test]
-    async fn each_location_names_its_databases_and_its_identity() {
-        let dir = tempfile::tempdir().expect("backend root");
-        let file = SqliteBackend::open(dir.path())
-            .await
-            .expect("open the file backend");
-        let root = crate::location::canonical_path(dir.path());
-        assert_eq!(
-            file.location(),
-            &SqliteLocation::File { root: root.clone() }
-        );
-        assert_eq!(
-            file.identity(),
-            format!(
-                "sqlite:{}",
-                root.join(SqliteDatabase::EffectReplay.file_name())
-                    .display()
-            ),
-            "a file backend answers to its journal's canonical path"
-        );
-        for database in SqliteDatabase::ALL {
-            assert!(
-                root.join(database.file_name()).exists(),
-                "{database:?} is created under the root"
-            );
-        }
-        assert_eq!(
-            lash_core_execution::StoreSet::binding_identity(file.stores()).as_str(),
-            file.identity()
-        );
-        assert_eq!(
-            lash_core_execution::EffectHost::turn_control_binding_id(file.effect_host().as_ref()),
-            file.identity(),
-            "the effect host binds turn control to the backend"
-        );
-
-        let memory = SqliteBackend::memory()
-            .await
-            .expect("open the memory backend");
-        let SqliteLocation::Memory { id } = memory.location() else {
-            panic!("a memory backend has a memory location");
-        };
-        assert_eq!(memory.identity(), format!("sqlite-memory:{id}"));
-        assert_eq!(
-            lash_core_execution::EffectHost::turn_control_binding_id(memory.effect_host().as_ref()),
-            memory.identity()
-        );
-        assert_ne!(
-            memory.identity(),
-            SqliteBackend::memory()
-                .await
-                .expect("open another memory backend")
-                .identity(),
-            "two memory backends are two substrates"
-        );
-    }
-
-    /// A store set is every port but the effect journal: a file store set
-    /// creates the three store databases under its root and never the
-    /// effect-replay journal, and its session factory journals nowhere.
-    #[tokio::test]
-    async fn a_store_set_opens_no_effect_journal() {
+    async fn a_store_set_opens_only_its_three_storage_databases() {
         let dir = tempfile::tempdir().expect("store-set root");
         let stores = SqliteStoreSet::open(dir.path())
             .await
-            .expect("open the file store set");
+            .expect("open store set");
         let root = crate::location::canonical_path(dir.path());
         for database in SqliteDatabase::ALL {
-            let exists = root.join(database.file_name()).exists();
-            if database == SqliteDatabase::EffectReplay {
-                assert!(!exists, "a store set never creates the effect journal");
-            } else {
-                assert!(exists, "{database:?} is created under the root");
-            }
+            assert!(
+                root.join(database.file_name()).exists(),
+                "{database:?} is created"
+            );
         }
         assert!(
-            stores.session_store_factory().effect_journal.is_none(),
-            "a store set's session factory has no effect journal"
+            !root.join("effects.db").exists(),
+            "the store set must not recreate the deleted effect journal"
         );
-
-        let memory = SqliteStoreSet::memory()
-            .await
-            .expect("open the memory store set");
-        assert!(memory.session_store_factory().effect_journal.is_none());
+        assert_eq!(
+            lash_core_execution::StoreSet::binding_identity(&stores).as_str(),
+            stores.identity()
+        );
     }
 }

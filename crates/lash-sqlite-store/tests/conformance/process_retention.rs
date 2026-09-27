@@ -212,13 +212,8 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
             .copied()
             .collect::<Vec<_>>(),
     );
-    // Two DDL constraints spell a `status IN` list. `ck_processes_status` is this
-    // law's subject. `ck_runtime_effect_replay_status` is a different column's
-    // vocabulary (`EffectRowStatus`), pinned by the lash-sim congruence registry
-    // and its writer-vocabulary law, so it is counted and skipped here rather
-    // than silently swept into the process-status expectation.
+    // The process-status DDL constraint is this law's subject.
     const VOCABULARY_SITE: &str = "CONSTRAINT ck_processes_status CHECK (";
-    const FOREIGN_VOCABULARY_SITE: &str = "CONSTRAINT ck_runtime_effect_replay_status CHECK (";
     const QUEUED_RUN_VOCABULARY_SITE: &str = "CONSTRAINT ck_queued_runs_status CHECK (";
     // FIG-3384 moved every process-family statement into the family's own
     // owner module, so that is where the query-site half of this inventory
@@ -256,7 +251,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     let mut live_sites = 0usize;
     let mut parameterized_sites = 0usize;
     let mut vocabulary_sites = 0usize;
-    let mut foreign_sites = 0usize;
     let mut queued_run_sites = 0usize;
     for (name, source) in sources {
         for delimiter in ["status IN ", "status NOT IN "] {
@@ -276,10 +270,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
                     continue;
                 }
                 let prefix = &source[..offset];
-                if delimiter == "status IN " && prefix.ends_with(FOREIGN_VOCABULARY_SITE) {
-                    foreign_sites += 1;
-                    continue;
-                }
                 if delimiter == "status IN " && prefix.ends_with(QUEUED_RUN_VOCABULARY_SITE) {
                     assert!(site.starts_with("('pending', 'settled')"));
                     queued_run_sites += 1;
@@ -335,11 +325,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         "expected exactly four live-status list literal sites in the SQLite backend, \
          all partial indexes in schema.rs; a query-site literal belongs in a \
          generated fragment, not here"
-    );
-    assert_eq!(
-        foreign_sites, 1,
-        "expected exactly 1 `ck_runtime_effect_replay_status` vocabulary literal, \
-         which the lash-sim congruence registry owns"
     );
     assert_eq!(
         queued_run_sites, 1,

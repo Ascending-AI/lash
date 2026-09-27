@@ -14,10 +14,6 @@ mod facade_inventory;
 mod integrator_facade;
 #[path = "integration/one_home.rs"]
 mod one_home;
-#[path = "integration/process_scope_fence.rs"]
-mod process_scope_fence;
-#[path = "integration/runtime_operation_retirement.rs"]
-mod runtime_operation_retirement;
 #[path = "integration/stores_evidence.rs"]
 mod stores_evidence;
 #[path = "integration/support.rs"]

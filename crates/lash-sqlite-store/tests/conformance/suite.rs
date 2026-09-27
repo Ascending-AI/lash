@@ -9,11 +9,9 @@
 // No live_replay_tests!: live replay is an in-process cache, not SQLite-backed storage.
 // No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
 
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use lash_conformance::{
@@ -26,73 +24,56 @@ use lash_conformance::{
 };
 use lash_core_execution::store::ConformanceSessionStoreFactory;
 use lash_core_execution::{
-    AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity, ProcessInput,
     ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
-    ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter, Resolution,
-    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimePersistence, SessionCommitStore, SessionStoreFactory,
-    TriggerStore,
+    ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
+    RuntimePersistence, SessionCommitStore, SessionStoreFactory, TriggerStore,
 };
-use lash_sqlite_store::{
-    SqliteBackendOptions, SqliteDatabase, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
-    SqliteStoreSetOptions,
-};
+use lash_sqlite_store::{SqliteDatabase, SqliteStoreSetOptions};
 
 use super::SUBSTRATE;
-use crate::backend_fixture::durable_turn_scope;
-use crate::backend_fixture::{Substrate, TestBackend, TestEngineBackend, sync_await};
+use crate::backend_fixture::{Substrate, TestBackend, sync_await};
+
+/// Engine promise authority for storage laws that cross a turn-control boundary.
+async fn promise_authority() -> (
+    lash_restate_test::RestateTestBackend,
+    Arc<dyn lash_core_execution::EffectHost>,
+) {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seed = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let backend = lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("boot the Restate promise authority");
+    let host: Arc<dyn lash_core_execution::EffectHost> = backend.restate().restate_effect_host();
+    (backend, host)
+}
 
 #[path = "attachment_store.rs"]
 mod attachment_store;
-#[path = "await_event_discovery.rs"]
-mod await_event_discovery;
-#[path = "cancelled_turn_withheld_input.rs"]
-mod cancelled_turn_withheld_input;
 #[path = "claim_atomicity.rs"]
 mod claim_atomicity;
-#[path = "drain_end.rs"]
-mod drain_end;
-#[path = "effect_group.rs"]
-mod effect_group;
-#[path = "effect_group_drain.rs"]
-mod effect_group_drain;
 #[path = "generation_drain.rs"]
 mod generation_drain;
 #[path = "lineage.rs"]
 mod lineage;
-#[path = "lock_order.rs"]
-mod lock_order;
 #[path = "obligation_relay.rs"]
 mod obligation_relay;
-#[path = "pre_frame_key.rs"]
-mod pre_frame_key;
-#[path = "pre_sleep_spec.rs"]
-mod pre_sleep_spec;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
 #[path = "process_retention.rs"]
 mod process_retention;
-#[path = "restored_claim_cede.rs"]
-mod restored_claim_cede;
 #[path = "session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "session_ingress.rs"]
 mod session_ingress;
 #[path = "session_meta.rs"]
 mod session_meta;
-#[path = "sleep_replay.rs"]
-mod sleep_replay;
 #[path = "store_maintenance.rs"]
 mod store_maintenance;
-#[path = "tool_child_invocation.rs"]
-mod tool_child_invocation;
 #[path = "trigger_occurrence_retention.rs"]
 mod trigger_occurrence_retention;
 
 include!("append_identity.rs");
-include!("effect_lease_fencing.rs");
 
 /// A fixture flavor [`Retained`] opens from synchronous code.
 trait BlockingFixture: Clone {
@@ -100,12 +81,6 @@ trait BlockingFixture: Clone {
 }
 
 impl BlockingFixture for TestBackend {
-    fn open_on(substrate: Substrate) -> Self {
-        Self::blocking(substrate)
-    }
-}
-
-impl BlockingFixture for TestEngineBackend {
     fn open_on(substrate: Substrate) -> Self {
         Self::blocking(substrate)
     }
@@ -268,48 +243,6 @@ lash_conformance::abandoned_attachment_recovery_tests!({
         }
     })
 });
-
-fn sqlite_conformance_invocation(
-    controller: SqliteRuntimeEffectController,
-    execution_scope: ExecutionScope,
-) -> lash_conformance::ConformanceInvocation {
-    let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
-    lash_conformance::ConformanceInvocation::new(
-        live,
-        execution_scope,
-        || {},
-        move || {
-            controller.start_replay();
-            Arc::new(controller.clone()) as Arc<dyn RuntimeEffectController>
-        },
-    )
-}
-
-/// A controller over a fresh backend's journal, and the backend that
-/// keeps it alive.
-async fn open_effect_controller(
-    scope: ExecutionScope,
-) -> (TestEngineBackend, SqliteRuntimeEffectController) {
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let controller = backend
-        .open_effect_controller(scope)
-        .await
-        .expect("open the effect controller");
-    (backend, controller)
-}
-
-/// Effect-replay options whose leases last `lease_timings`.
-fn with_lease_timings(
-    lease_timings: lash_core_execution::facade_support::LeaseTimings,
-) -> impl FnOnce(SqliteBackendOptions) -> SqliteBackendOptions {
-    move |options| SqliteBackendOptions {
-        effect_replay: SqliteEffectReplayOptions {
-            lease_timings,
-            ..options.effect_replay.clone()
-        },
-        ..options
-    }
-}
 
 struct SqliteSessionExecutionLeaseRenewalZeroRowInjector {
     backend: TestBackend,
@@ -712,60 +645,6 @@ lash_conformance::artifact_store_reopenable_tests!({
     })
 });
 
-fn value_envelope(
-    scope: ExecutionScope,
-    attribution: lash_core_execution::RuntimeAttribution,
-    replay_key: &str,
-    operation: &str,
-) -> RuntimeEffectEnvelope {
-    RuntimeEffectEnvelope::new(
-        RuntimeEffectInvocation::new(
-            lash_core_execution::EffectAddress::new(scope, replay_key)
-                .expect("valid SQLite effect address"),
-            attribution,
-            replay_key,
-        ),
-        RuntimeEffectCommand::LanguageRuntimeValue {
-            operation: operation.to_string(),
-        },
-    )
-}
-
-fn value_outcome(marker: &str) -> RuntimeEffectOutcome {
-    RuntimeEffectOutcome::LanguageRuntimeValue {
-        value: serde_json::json!(marker),
-    }
-}
-
-fn assert_value_marker(outcome: RuntimeEffectOutcome, expected: &str) {
-    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = outcome else {
-        panic!("expected language-runtime-value outcome");
-    };
-    assert_eq!(value, serde_json::json!(expected));
-}
-
-fn returning_executor(marker: &'static str) -> RuntimeEffectLocalExecutor<'static> {
-    RuntimeEffectLocalExecutor::testing(move |_| async move { Ok(value_outcome(marker)) })
-}
-
-fn failing_executor() -> RuntimeEffectLocalExecutor<'static> {
-    RuntimeEffectLocalExecutor::testing(|_| async move {
-        Err(RuntimeEffectControllerError::foreign(
-            "test_local_executor_called",
-            lash_core::TurnFailureCause::Outcome,
-            "replay must not invoke the local executor",
-        ))
-    })
-}
-
-fn current_epoch_ms_for_test() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before unix epoch")
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64
-}
-
 lash_conformance::process_registry_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_label: &str| {
@@ -956,11 +835,7 @@ lash_conformance::session_store_factory_tests!({
             backend.attachment_store() as Arc<dyn lash_core_execution::AttachmentStore>,
         )
     };
-    // Hosted turn-cancel laws mint and settle real await-event keys: the host
-    // must own a journal, so a dedicated engine backend supplies it while the
-    // laws' stores stay on the storage-only fixture.
-    let engine = TestEngineBackend::open(SUBSTRATE).await;
-    let effect_host = engine.effect_host() as Arc<dyn EffectHost>;
+    let (engine, effect_host) = promise_authority().await;
     (
         (retained, engine),
         "sqlite",
@@ -975,7 +850,7 @@ lash_conformance::session_store_factory_tests!({
 // engine backend keeps its substrate alive and supplies the durable ports the
 // runtime takes from it.
 lash_conformance::session_config_settlement_tests!({
-    let retained: Retained<TestEngineBackend> = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     let make = {
         let retained = retained.clone();
         move || {
@@ -1005,71 +880,11 @@ lash_conformance::session_graph_append_tests!({
     (backend, factory)
 });
 
-lash_conformance::attachment_owner_cold_replay_tests!({
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
-        current_epoch_ms_for_test().saturating_sub(100_000),
-    ));
-    let backend = TestEngineBackend::open_with_clock(
-        SUBSTRATE,
-        clock.clone() as Arc<dyn lash_core_execution::Clock>,
-    )
-    .await;
-    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
-    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    let scope = durable_turn_scope("attachment-owner-cold-replay", "attachment-owner-turn");
-    let first = Arc::new(
-        backend
-            .open_effect_controller(scope.clone())
-            .await
-            .expect("first effect controller"),
-    ) as Arc<dyn RuntimeEffectController>;
-    let reopen_effect_controller = {
-        let backend = backend.clone();
-        Arc::new(move || {
-            let backend = backend.clone();
-            let scope = scope.clone();
-            Box::pin(async move {
-                Arc::new(
-                    backend
-                        .reopen()
-                        .await
-                        .open_effect_controller(scope)
-                        .await
-                        .expect("cold replay effect controller"),
-                ) as Arc<dyn RuntimeEffectController>
-            })
-                as std::pin::Pin<Box<dyn Future<Output = Arc<dyn RuntimeEffectController>> + Send>>
-        })
-    };
-    let advance_clock = {
-        let clock = clock.clone();
-        Arc::new(move |duration_ms| clock.advance(duration_ms)) as Arc<dyn Fn(u64) + Send + Sync>
-    };
-
-    let attachment_store = backend.attachment_store();
-    (
-        backend,
-        lash_conformance::AttachmentOwnerColdReplayBackend {
-            session_store_factory: factory,
-            process_registry: registry,
-            attachment_store,
-            first_effect_controller: Some(first),
-            reopen_effect_controller,
-            clock,
-            advance_clock,
-        },
-    )
-});
-
 lash_conformance::process_prune_session_store_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    // The closure authorizations this law drives carry real minted await-event
-    // keys, so the host is a dedicated engine backend's, kept alive with the
-    // fixture.
-    let engine = TestEngineBackend::open(SUBSTRATE).await;
-    let effect_host = engine.effect_host() as Arc<dyn EffectHost>;
+    let (engine, effect_host) = promise_authority().await;
     ((backend, engine), factory, registry, effect_host)
 });
 
@@ -1197,13 +1012,11 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
 
 lash_conformance::runtime_persistence_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();
-    // Hosted laws mint and settle await-event keys, so each fixture pair gets
-    // a dedicated engine backend for its host, kept alive with the fixture.
-    let engines: Retained<TestEngineBackend> = Retained::default();
+    let (engine, effect_host) = promise_authority().await;
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     (
-        (retained.clone(), engines.clone()),
+        (retained.clone(), engine),
         move |session_id: &str| {
             let request = root_session_request(session_id);
             let clock = store_clock.clone() as Arc<dyn lash_core_execution::Clock>;
@@ -1221,8 +1034,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .expect("created SQLite conformance store exists");
                 (backend, open, reopen)
             });
-            let engine = engines.open_blocking();
-            let effect_host = engine.effect_host() as Arc<dyn EffectHost>;
+            let effect_host = Arc::clone(&effect_host);
             retained.keep(&backend);
             ReopenableRuntimePersistence {
                 open,
@@ -1266,76 +1078,6 @@ lash_conformance::store_recovery_tests!({
         }),
     )
 });
-
-/// One journal for a crash law's scenarios: every turn a law drives, a
-/// drain turn included, binds the same turn-control authority, which is this
-/// journal's. Its effect leases lapse on the recovery timings, so a successor
-/// controller reclaims what a crashed one held.
-fn crash_journal() -> TestEngineBackend {
-    sync_await(async move {
-        TestEngineBackend::open_with(
-            SUBSTRATE,
-            with_lease_timings(
-                lash_core_execution::facade_support::LeaseTimings::new(
-                    std::time::Duration::from_millis(600),
-                    std::time::Duration::from_millis(100),
-                )
-                .expect("crash-law effect lease timings"),
-            ),
-            crate::backend_fixture::system_clock(),
-        )
-        .await
-    })
-}
-
-/// A journaled invocation over `journal`. Its redrive opens a successor
-/// controller over the same journal, the way a restarted process does: its
-/// own group-executor registration, the journal's completed effects replayed.
-fn journaled_crash_invocation(
-    journal: &TestEngineBackend,
-    scope: ExecutionScope,
-) -> lash_conformance::ConformanceInvocation {
-    let open = {
-        let journal = journal.clone();
-        let scope = scope.clone();
-        move || {
-            let journal = journal.clone();
-            let scope = scope.clone();
-            sync_await(async move {
-                journal
-                    .open_effect_controller(scope)
-                    .await
-                    .expect("journaled crash controller")
-            })
-        }
-    };
-    let controller = open();
-    let faults = controller.effect_journal_faults();
-    lash_conformance::ConformanceInvocation::new(
-        Arc::new(controller) as Arc<dyn RuntimeEffectController>,
-        scope,
-        || {},
-        move || Arc::new(open()) as Arc<dyn RuntimeEffectController>,
-    )
-    .with_effect_journal_faults(faults)
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
-    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-    let retained: Retained<TestEngineBackend> = Retained::default();
-    let stores = retained.open_blocking().as_stores();
-    let journal = crash_journal();
-    retained.keep(&journal);
-    Box::pin(
-        lash_conformance::held_turn_input_visibility_survives_claim_holder_crash(
-            stores,
-            |scenario| scenarios.store(scenario),
-            |_, scope| journaled_crash_invocation(&journal, scope),
-        ),
-    )
-    .await;
-}
 
 lash_conformance::checkpoint_component_reopen_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
@@ -1461,6 +1203,11 @@ lash_conformance::append_receipt_rewrite_tests!({
     )
 });
 
+fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
+    conn.query_row(sql, rusqlite::params![name], |row| row.get::<_, i64>(0))
+        .expect("query sqlite_master")
+}
+
 #[tokio::test]
 async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
     let backend = TestBackend::open(SUBSTRATE).await;
@@ -1525,438 +1272,6 @@ async fn sqlite_runtime_turn_receipt_rejects_half_populated_append_identity() {
         Some(rusqlite::ErrorCode::ConstraintViolation)
     );
 }
-
-fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
-    conn.query_row(sql, rusqlite::params![name], |row| row.get::<_, i64>(0))
-        .expect("query sqlite_master")
-}
-
-/// Every store-backed backend issues completion keys: the promise rows
-/// live as long as the backend, file or memory, and a key resolves for
-/// that whole lifetime (ADR 0102).
-#[tokio::test]
-async fn sqlite_backends_issue_completion_keys() {
-    let scope = durable_turn_scope("completion-key-session", "completion-key-turn");
-    let (_backend, controller) = open_effect_controller(scope.clone()).await;
-    assert!(matches!(
-        controller
-            .prepare_completion_key(
-                &scope,
-                lash_core_execution::AwaitEventWaitIdentity::tool_completion("completion-call"),
-                true,
-            )
-            .await
-            .expect("completion-key preparation"),
-        lash_core_execution::CompletionKeyPreparation::Issued(_)
-    ));
-}
-
-#[tokio::test]
-async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let scope = durable_turn_scope("pure-key-session", "pure-key-turn");
-    let wait = AwaitEventWaitIdentity::tool_completion("pure-key-call");
-
-    let (first, second) = tokio::join!(
-        async {
-            backend
-                .reopen()
-                .await
-                .effect_host()
-                .await_event_key(&scope, wait.clone())
-                .await
-                .expect("first concurrent key")
-        },
-        async {
-            backend
-                .reopen()
-                .await
-                .effect_host()
-                .await_event_key(&scope, wait.clone())
-                .await
-                .expect("second concurrent key")
-        },
-    );
-    assert_eq!(
-        first, second,
-        "concurrent openers must read one store secret"
-    );
-
-    let observer = backend.reopen().await.effect_host();
-    assert!(
-        observer
-            .list_outstanding_await_event_keys(&SessionId::from("unknown-pure-key-session"))
-            .await
-            .expect("unknown session read")
-            .is_empty()
-    );
-    assert!(
-        observer
-            .list_outstanding_await_event_keys(&SessionId::from("pure-key-session"))
-            .await
-            .expect("minted-only session read")
-            .is_empty()
-    );
-
-    let connection = backend.raw(SqliteDatabase::EffectReplay);
-    let wait_count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM await_event_waits", [], |row| {
-            row.get(0)
-        })
-        .expect("count await-event waits");
-    assert_eq!(
-        wait_count, 0,
-        "key mint and administrative reads must not register a promise row"
-    );
-    let secret_shape: (i64, i64) = connection
-        .query_row(
-            "SELECT COUNT(*), length(MAX(signing_secret)) FROM await_event_meta",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("inspect await-event signer");
-    assert_eq!(secret_shape, (1, 32));
-}
-
-/// Every promise path reports one decode vocabulary.
-///
-/// The terminal used to be decoded twice in two places: inside the SQL layer on
-/// the resolve path, where a corrupt row surfaced as `sqlite_await_event_store`,
-/// and above it on the observe paths as `sqlite_await_event_decode`. One
-/// coordinator decodes once, so a corrupt row is a decode failure everywhere —
-/// which is also what PostgreSQL always reported.
-#[tokio::test]
-async fn sqlite_await_event_terminal_decode_failures_report_the_decode_vocabulary() {
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let scope = durable_turn_scope("corrupt-terminal-session", "corrupt-terminal-turn");
-    let host = backend.effect_host();
-    let key = host
-        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call"))
-        .await
-        .expect("mint key");
-    assert_eq!(
-        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("winner")))
-            .await
-            .expect("resolve promise"),
-        ResolveOutcome::Accepted
-    );
-
-    let connection = backend.raw(SqliteDatabase::EffectReplay);
-    connection
-        .execute(
-            "UPDATE await_event_waits SET terminal_json = ?2 WHERE key_id = ?1",
-            rusqlite::params![key.key_id.as_str(), "not-json"],
-        )
-        .expect("corrupt the persisted terminal");
-    drop(connection);
-
-    let peek_error = host
-        .peek_await_event(&key)
-        .await
-        .expect_err("corrupt terminal must fail the peek");
-    let resolve_error = host
-        .resolve_await_event(&key, Resolution::Cancelled)
-        .await
-        .expect_err("corrupt terminal must fail the duplicate resolve");
-    for error in [peek_error, resolve_error] {
-        assert_eq!(error.code.as_str(), "sqlite_await_event_decode");
-    }
-}
-
-/// SQLite promise rows are stamped by the host's injected clock.
-///
-/// The store runs in its host's clock domain, so durable await-event records are
-/// reproducible under an injected clock rather than reading the OS clock behind
-/// the host's back.
-#[tokio::test]
-async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
-    const INJECTED_MS: u64 = 1_234_567_890_000;
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
-    let backend = TestEngineBackend::open_with_clock(
-        SUBSTRATE,
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-    )
-    .await;
-    let host = backend.effect_host();
-    let key = host
-        .await_event_key(
-            &durable_turn_scope("injected-clock-session", "injected-clock-turn"),
-            AwaitEventWaitIdentity::tool_completion("call"),
-        )
-        .await
-        .expect("mint key");
-    assert_eq!(
-        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("stamped")))
-            .await
-            .expect("resolve promise"),
-        ResolveOutcome::Accepted
-    );
-
-    let connection = backend.raw(SqliteDatabase::EffectReplay);
-    let stamps: (i64, i64) = connection
-        .query_row(
-            "SELECT created_at_ms, resolved_at_ms FROM await_event_waits WHERE key_id = ?1",
-            rusqlite::params![key.key_id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("read promise stamps");
-    assert_eq!(stamps, (INJECTED_MS as i64, INJECTED_MS as i64));
-}
-
-/// SQLite's authoritative effect-lease clock is the host's injected `Clock`,
-/// because this store shares its host's clock domain. PostgreSQL — the other
-/// implementor of the same shared `StoreEffectReplayDriver` — deliberately reads the
-/// *server* clock instead (the `Clock` contract's database-authoritative lease
-/// boundary, fenced by `postgres_clock_contract`), so
-/// each half of that split needs its own referee now that one driver drives
-/// both. The driver's own clock only sleeps; if it ever stamped a row, the
-/// stamps below would come from the OS clock instead.
-#[tokio::test]
-async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
-    const INJECTED_MS: u64 = 1_234_567_890_000;
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
-    let backend = TestEngineBackend::open_with_clock(
-        SUBSTRATE,
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-    )
-    .await;
-    let controller = backend
-        .open_effect_controller(durable_turn_scope(
-            "injected-clock-effect-session",
-            "injected-clock-effect-turn",
-        ))
-        .await
-        .expect("SQLite effect controller on an injected clock");
-    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
-    let release = Arc::new(tokio::sync::Notify::new());
-    let executor_release = Arc::clone(&release);
-    let executing = tokio::spawn({
-        let controller = controller.clone();
-        async move {
-            controller
-                .execute_effect(
-                    value_envelope(
-                        durable_turn_scope(
-                            "injected-clock-effect-session",
-                            "injected-clock-effect-turn",
-                        ),
-                        lash_core_execution::RuntimeAttribution::for_turn(
-                            "injected-clock-effect-session",
-                            "injected-clock-effect-turn",
-                            1,
-                            0,
-                        ),
-                        "injected-clock-effect",
-                        "first",
-                    ),
-                    RuntimeEffectLocalExecutor::testing(move |_| async move {
-                        let _ = entered_tx.send(());
-                        executor_release.notified().await;
-                        Ok(value_outcome("stamped"))
-                    }),
-                )
-                .await
-        }
-    });
-    entered_rx.await.expect("executor entered under the claim");
-
-    let claim_backend = backend.clone();
-    let (created_at_ms, lease_expires_at_ms) = tokio::task::spawn_blocking(move || {
-        let connection = claim_backend.raw(SqliteDatabase::EffectReplay);
-        connection
-            .query_row(
-                "SELECT created_at_ms, lease_expires_at_ms
-                 FROM runtime_effect_replay WHERE replay_key = ?1",
-                rusqlite::params!["injected-clock-effect"],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .expect("read claimed lease stamps")
-    })
-    .await
-    .expect("read the in-progress claim");
-    assert_eq!(
-        created_at_ms, INJECTED_MS as i64,
-        "the claim stamp must come from the injected clock"
-    );
-    assert_eq!(
-        lease_expires_at_ms,
-        (INJECTED_MS + lash_core_execution::facade_support::LeaseTimings::default().ttl_ms())
-            as i64,
-        "the lease expiry must be derived from the injected claim instant"
-    );
-
-    release.notify_waiters();
-    assert_value_marker(
-        executing
-            .await
-            .expect("execution task joins")
-            .expect("finalize the claimed effect"),
-        "stamped",
-    );
-
-    let connection = backend.raw(SqliteDatabase::EffectReplay);
-    let (updated_at_ms, released_lease): (i64, i64) = connection
-        .query_row(
-            "SELECT updated_at_ms, lease_expires_at_ms
-             FROM runtime_effect_replay WHERE replay_key = ?1",
-            rusqlite::params!["injected-clock-effect"],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("read finalized stamps");
-    assert_eq!(
-        updated_at_ms, INJECTED_MS as i64,
-        "the finalize stamp must come from the injected clock"
-    );
-    assert_eq!(released_lease, 0, "finalizing releases the lease");
-}
-
-// `lash-restate` mounts the engine-neutral terminals leg on its recording
-// context; both laws also keep their SQL-controller leg here: the retry leg
-// asserts the controller surfaces a retryable derivation error to its
-// caller, where a Restate controller retries the journaled step under its
-// own redelivery, and it leaves with the SQL effect engine in B4.
-lash_conformance::effect_controller_response_derivation_tests!({
-    let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
-    let (backend, controller) = open_effect_controller(scope.clone()).await;
-    (backend, move || {
-        sqlite_conformance_invocation(controller.clone(), scope.clone())
-    })
-});
-
-#[tokio::test]
-async fn sqlite_effect_controller_replays_without_local_executor() {
-    let scope = durable_turn_scope("session", "turn");
-    let (_backend, controller) = open_effect_controller(scope.clone()).await;
-    let envelope = value_envelope(
-        scope,
-        lash_core_execution::RuntimeAttribution::for_turn("session", "turn", 1, 0),
-        "exec-replay",
-        "first",
-    );
-    let first = controller
-        .execute_effect(envelope.clone(), returning_executor("recorded"))
-        .await
-        .expect("first effect");
-    assert_value_marker(first, "recorded");
-
-    controller.start_replay();
-    let replayed = controller
-        .execute_effect(envelope, failing_executor())
-        .await
-        .expect("replayed effect");
-    assert_value_marker(replayed, "recorded");
-}
-
-#[tokio::test]
-async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
-    let envelope = RuntimeEffectEnvelope::new(
-        RuntimeEffectInvocation::new(
-            lash_core_execution::EffectAddress::new(
-                scope.clone(),
-                "sqlite-recorded-intent-attempt",
-            )
-            .expect("valid SQLite intent address"),
-            lash_core_execution::RuntimeAttribution::for_turn(
-                "sqlite-intent-session",
-                "sqlite-intent-turn",
-                0,
-                0,
-            ),
-            "sqlite-recorded-intent-attempt",
-        ),
-        RuntimeEffectCommand::ToolAttempt {
-            call: lash_core_execution::PreparedToolCall::from_parts(
-                "sqlite-intent-call",
-                "tool:sqlite_intent_leaf",
-                "sqlite_intent_leaf",
-                serde_json::json!({"value": "record"}),
-                None,
-                serde_json::Value::Null,
-            ),
-            execution_grant: None,
-            attempt: 1,
-            max_attempts: 1,
-        },
-    );
-    let expected = RuntimeEffectOutcome::ToolAttempt {
-        launch: Box::new(lash_core_execution::ToolAttemptLaunch::Done {
-            record: Box::new(lash_core_execution::ToolCallRecord {
-                call_id: Some("sqlite-intent-call".to_string()),
-                tool: "sqlite_intent_leaf".to_string(),
-                args: serde_json::json!({"value": "record"}),
-                output: lash_core_execution::ToolCallOutput::success(serde_json::json!({
-                    "provider": "done"
-                })),
-            }),
-            intents: lash_core_execution::ToolIntents::v3(vec![
-                lash_core_execution::ToolIntent::EmitProcessEvent(
-                    lash_core_execution::EmitProcessEventIntent {
-                        session_id: SessionId::from("sqlite-intent-session"),
-                        process_id: ProcessId::fixture("sqlite-intent-target"),
-                        event_type: "sqlite.intent.recorded".to_string(),
-                        payload: serde_json::json!({"literal": true}),
-                    },
-                ),
-            ]),
-        }),
-        triggers: Vec::new(),
-        capture: None,
-    };
-    let expected_bytes = serde_json::to_vec(&expected).expect("serialize literal intent outcome");
-    let first_controller = backend
-        .open_effect_controller(scope.clone())
-        .await
-        .expect("open first SQLite intent controller");
-    let first = first_controller
-        .execute_effect(
-            envelope.clone(),
-            RuntimeEffectLocalExecutor::testing({
-                let expected = expected.clone();
-                move |_| async move { Ok(expected) }
-            }),
-        )
-        .await
-        .expect("record non-empty intent carrier");
-    assert_eq!(
-        serde_json::to_vec(&first).expect("serialize first SQLite intent outcome"),
-        expected_bytes
-    );
-    drop(first_controller);
-
-    let replay_controller = backend
-        .reopen()
-        .await
-        .open_effect_controller(scope)
-        .await
-        .expect("reopen SQLite intent controller");
-    replay_controller.start_replay();
-    let replayed = replay_controller
-        .execute_effect(
-            envelope,
-            RuntimeEffectLocalExecutor::testing(|_| async {
-                panic!("SQLite replay must not rerun the recorded attempt body")
-            }),
-        )
-        .await
-        .expect("replay non-empty intent carrier");
-    assert_eq!(
-        serde_json::to_vec(&replayed).expect("serialize replayed SQLite intent outcome"),
-        expected_bytes,
-        "SQLite replays the literal non-empty intent carrier byte-for-byte"
-    );
-}
-
-// `effect_host_retirement_tests!` stays out of the Restate double: its laws
-// record a journaled effect and assert the retirement's deleted-row count,
-// and Restate owns invocation-journal retention natively. The mount leaves
-// with the SQL effect journal in B4.
-lash_conformance::effect_host_retirement_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let host = backend.effect_host() as Arc<dyn EffectHost>;
-    (backend, host)
-});
 
 lash_conformance::retention_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;

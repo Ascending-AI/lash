@@ -410,11 +410,11 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             .expect("open the engine's store"),
     ));
     let sink = Arc::new(RecordingSink::default());
-    // The cell runs on a memory backend's effect host; its recorded starts
-    // land in the double's process table, whose workflow runs the bodies.
-    let backend = memory_backend().await;
-    let effect_host = backend.effect_host();
     let table = crate::testing::DoubleProcesses::new(SEED ^ 0x9e37).await;
+    let handler = table
+        .open_handler(crate::testing::default_cell_scope())
+        .await;
+    let effect_host = table.backend().effect_host();
     let registry = table.registry();
     let process_env_store = table.env_store();
     let surface = LashlangSurface::new(
@@ -471,7 +471,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         )),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
+        crate::testing::double_ports(table.double(), &handler),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
@@ -499,6 +499,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         crate::plugin::RlmChannel::Cell,
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     assert!(response.error.is_none(), "{:?}", response.error);
     // Drive every started process to its end: the worker, then the literal
     // nested in it that the worker starts.

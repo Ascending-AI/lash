@@ -231,10 +231,8 @@ mod rlm_testing_inventory {
 #[cfg(feature = "sqlite")]
 mod sqlite_inventory {
     use lash::sqlite::SqliteDatabase as _;
+    use lash::sqlite::SqliteLocation as _;
     use lash::sqlite::SqliteSessionStoreFactory as _;
-    // ADR 0102's zero-infra entry point: one backend, file or memory.
-    use lash::sqlite::{SqliteBackend as _, SqliteBackendOptions as _, SqliteLocation as _};
-    // The store set a Restate backend journals its effects beside.
     use lash::sqlite::SqliteStoreSet as _;
 }
 

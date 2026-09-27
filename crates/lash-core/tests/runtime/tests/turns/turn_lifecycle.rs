@@ -1032,7 +1032,8 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
 
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(false),
         fail_capture: AtomicBool::new(false),
@@ -1048,7 +1049,7 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
         protocol,
         Some(code_executor),
     );
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let failing_transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -1081,17 +1082,15 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain("root", "capture-abort-owner"))
+        .await
+        .expect("open the owner's handler");
     let error = first
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("capture-abort-owner"),
-            ),
-        ))
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect_err("dirty capture aborts before commit");
+    handler.close().await.expect("close the owner's handler");
     assert_eq!(error.code, lash_core::RuntimeErrorCode::QueuedRunPending);
 
     executor.fail_capture.store(false, Ordering::SeqCst);
@@ -1099,31 +1098,37 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     let mut peer = runtime_with_plugins_and_tools_and_host_and_store(
         vec![protocol_factory],
         Arc::new(EmptyTools),
-        mock_provider(Vec::new()),
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "peer reclaimed after abort".to_string(),
+                    response_meta: None,
+                }],
+                ..LlmResponse::default()
+            }),
+        }]),
         test_host_config(&backend),
         store.clone() as Arc<dyn lash_core::RuntimePersistence>,
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain("root", "capture-abort-owner"))
+        .await
+        .expect("open the peer's handler");
     let reclaimed = peer
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("capture-abort-owner"),
-            ),
-        ))
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("peer reclaim must not wait for the lease TTL")
         .ran()
         .expect("peer immediately resumes the admitted input");
-    // The owner's model call crossed the backend's effect journal before its
-    // capture aborted, so the peer's redrive of the same admitted run replays
-    // that response instead of asking its own provider.
+    handler.close().await.expect("close the peer's handler");
+    // The failed owner released the lease and claim, so a peer can drive the
+    // admitted input immediately with its own handler.
     assert_eq!(
         reclaimed.assistant_output.safe_text,
-        "journaled before the abort"
+        "peer reclaimed after abort"
     );
 }
 

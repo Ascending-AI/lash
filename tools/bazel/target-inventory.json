@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 181,
+  "cargo_target_count": 179,
   "feature_lane_units": [
     {
       "features": [
@@ -9305,7 +9305,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_67065270",
+      "label": "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_cc056b78",
       "package": "lash-internal-provider-openai"
     },
     {
@@ -9403,7 +9403,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_67065270",
+      "label": "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_cc056b78",
       "package": "lash-internal-provider-openai"
     },
     {
@@ -10488,7 +10488,7 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_fd9ff782",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_f68749f7",
       "package": "lash-internal-restate-test"
     },
     {
@@ -10501,6 +10501,12 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-restate-test:lash-restate-test__fv_fd9ff782",
+      "package": "lash-internal-restate-test"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_fe3c2baf",
       "package": "lash-internal-restate-test"
     },
     {
@@ -10537,6 +10543,12 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-restate:lash-restate",
+      "package": "lash-internal-restate"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
@@ -12045,7 +12057,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance__test__fv_998117fe",
+      "label": "//crates/lash-sqlite-store:conformance__test__fv_b29cb3b2",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12053,7 +12065,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_998117fe",
+      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_b29cb3b2",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12061,7 +12073,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_998117fe",
+      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_b29cb3b2",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12069,7 +12081,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_998117fe",
+      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_b29cb3b2",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12077,7 +12089,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:integration__test__fv_998117fe",
+      "label": "//crates/lash-sqlite-store:integration__test__fv_b29cb3b2",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12086,6 +12098,12 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_04076328",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_199586c4",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12306,14 +12324,6 @@
     },
     {
       "features": [
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
         "perf-witness"
       ],
       "kind": "lib",
@@ -12333,7 +12343,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_998117fe",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_b29cb3b2",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12341,7 +12351,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_998117fe",
+      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_b29cb3b2",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14693,6 +14703,14 @@
     },
     {
       "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a143ca1f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
         "google"
       ],
       "kind": "lib",
@@ -14735,14 +14753,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_cb7f39b2",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_d9fbc7ff",
       "package": "lash-runtime"
     },
     {
@@ -16294,7 +16304,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 240,
+  "generated_label_count": 238,
   "packages": [
     {
       "declared_features": [
@@ -16402,7 +16412,6 @@
         "async-trait",
         "chrono",
         "futures-util",
-        "hmac",
         "insta",
         "lash-internal-conformance",
         "lash-internal-core-effect",
@@ -16846,6 +16855,7 @@
       "dependencies": [
         "async-trait",
         "chrono",
+        "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-execution",
         "lash-internal-core-worker",
@@ -17414,7 +17424,6 @@
         "lash-internal-trace",
         "lash-internal-typescript",
         "rmp-serde",
-        "rusqlite",
         "serde",
         "serde_bytes",
         "serde_json",
@@ -17726,13 +17735,11 @@
         "lash-internal-provider-openai",
         "lash-internal-restate-test",
         "lash-internal-sansio",
-        "lash-internal-sqlite-store",
         "lash-internal-tool-support",
         "lash-runtime",
         "reqwest",
         "serde",
         "serde_json",
-        "tempfile",
         "tokio",
         "tokio-tungstenite",
         "tracing",
@@ -18382,12 +18389,6 @@
           "kind": "test",
           "label": "//crates/lash-sim:stack_policy__test",
           "tags": []
-        },
-        {
-          "cargo": "two_opener_differential",
-          "kind": "test",
-          "label": "//crates/lash-sim:two_opener_differential__test",
-          "tags": []
         }
       ],
       "test_batch": {
@@ -18401,8 +18402,7 @@
           "//crates/lash-sim:retention_classification__test",
           "//crates/lash-sim:schema_congruence__test",
           "//crates/lash-sim:session_delete_bounds__test",
-          "//crates/lash-sim:signal_replay_key_constructor__test",
-          "//crates/lash-sim:two_opener_differential__test"
+          "//crates/lash-sim:signal_replay_key_constructor__test"
         ]
       }
     },
@@ -18413,12 +18413,12 @@
       ],
       "dependencies": [
         "async-trait",
-        "chrono",
         "flate2",
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-execution",
         "lash-internal-lashlang",
+        "lash-internal-restate-test",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-store-sql",
@@ -18430,7 +18430,6 @@
         "tempfile",
         "tokio",
         "tokio-rusqlite",
-        "tokio-util",
         "tracing",
         "tracing-subscriber",
         "uuid"
@@ -18452,12 +18451,6 @@
           "cargo": "lash_sqlite_store",
           "kind": "unit-test",
           "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
-          "tags": []
-        },
-        {
-          "cargo": "sqlite-await-event-helper",
-          "kind": "example",
-          "label": "//crates/lash-sqlite-store:sqlite-await-event-helper__example",
           "tags": []
         },
         {
@@ -18500,6 +18493,7 @@
       "test_batch": {
         "label": "//crates/lash-sqlite-store:test_batch",
         "members": [
+          "//crates/lash-sqlite-store:conformance__test",
           "//crates/lash-sqlite-store:conformance_memory__test",
           "//crates/lash-sqlite-store:durable_read_fixture__test",
           "//crates/lash-sqlite-store:fencing_backstop__test",
@@ -19116,6 +19110,7 @@
         "chrono",
         "dotenvy",
         "futures-util",
+        "lash-internal-conformance",
         "lash-internal-plugin-process-controls",
         "lash-internal-protocol-rlm",
         "lash-internal-provider-openai",

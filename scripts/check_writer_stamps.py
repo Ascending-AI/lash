@@ -47,7 +47,6 @@ EXEMPT_CONSTANTS = {
     "SCHEMA_VERSION": "catalog DDL stamp; the fleet row lives inside the catalog it admits",
     "PROCESS_SCHEMA_VERSION": "catalog DDL stamp; the fleet row lives inside the catalog it admits",
     "TRIGGER_SCHEMA_VERSION": "catalog DDL stamp; the fleet row lives inside the catalog it admits",
-    "EFFECT_SCHEMA_VERSION": "catalog DDL stamp; the fleet row lives inside the catalog it admits",
     # The row every other writer consults has nothing upstream of it.
     "FLEET_FORMAT_VERSION": "the fleet-format row is what writers consult",
 }

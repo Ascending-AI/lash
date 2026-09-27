@@ -513,6 +513,10 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pending-input-facade-cancel").open().await?;
     let cursor = session.observe().current_observation().cursor;
+    let _hold = held_double(&core)
+        .expect("the core runs on its held double")
+        .hold_session_drive(&SessionId::from("pending-input-facade-cancel"))
+        .await;
 
     let first = session
         .durable()
@@ -1397,14 +1401,13 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         ("memory", double_backend().await),
         (
             "file",
-            Arc::new(
-                lash_sqlite_store::SqliteBackend::open(
+            lash_conformance::recording_backend_over(Arc::new(
+                lash_sqlite_store::SqliteStoreSet::open(
                     sqlite_dir.path().join("managed-create-sessions"),
                 )
                 .await
-                .expect("open the file backend"),
-            )
-            .into(),
+                .expect("open the file store set"),
+            )),
         ),
     ];
 

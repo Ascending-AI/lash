@@ -1,32 +1,9 @@
 //! Shared fixtures for the store-backed tests.
 
-use lash_sqlite_store::SqliteBackend;
-
-std::thread_local! {
-    /// The backends the running test opened. A memory backend's
-    /// databases live while any handle does, but its effect journal reaches
-    /// the registry database by name, so a fixture that hands out only a
-    /// controller or a port would otherwise let the registry vanish under
-    /// it. Each test runs on its own thread, so this holds every backend
-    /// exactly as long as the test that opened it.
-    static TEST_BACKENDS: std::cell::RefCell<Vec<SqliteBackend>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-/// Holds `backend` for the rest of the running test.
-pub fn hold_for_test(backend: &SqliteBackend) {
-    TEST_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
-}
-
-/// A fresh SQLite memory backend, held for the rest of the running test:
-/// every persistence port and the effect host of one named in-memory
-/// substrate.
-pub async fn memory_backend() -> SqliteBackend {
-    let backend = SqliteBackend::memory()
-        .await
-        .expect("open a SQLite memory backend");
-    hold_for_test(&backend);
-    backend
+/// Storage ports over an isolated SQLite memory store set and a recording
+/// controller for tests that do not need a durable engine.
+pub async fn memory_backend() -> lash_core_execution::Backend {
+    memory_store_backend().await
 }
 
 /// A fresh Restate server double under `seed` with `config`: lash-restate's
@@ -100,10 +77,9 @@ pub mod prelude {
 /// The backend host's own controller for `admitted`, as the shared handle
 /// a local executor's nested process commands run through.
 pub fn scoped_controller(
-    backend: &SqliteBackend,
+    backend: &lash_core_execution::Backend,
     admitted: crate::AdmittedScope,
 ) -> std::sync::Arc<dyn crate::RuntimeEffectController> {
-    use crate::EffectHost as _;
     backend
         .effect_host()
         .scoped_static(admitted)

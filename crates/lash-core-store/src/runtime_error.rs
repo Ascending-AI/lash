@@ -397,21 +397,7 @@ pub enum RuntimeErrorCode {
     SessionDeleteScopeMismatch,
     SessionHeadRefresh,
     SessionToolRegistry,
-    SqliteAwaitEventDecode,
-    SqliteAwaitEventEncode,
     /// Process-local; repaired by restart, not by same-process retry.
-    SqliteAwaitEventNotify,
-    SqliteAwaitEventSign,
-    SqliteAwaitEventStore,
-    SqliteEffectJournalRetirement,
-    SqliteEffectReplayCorruptRow,
-    SqliteEffectReplayDecode,
-    SqliteEffectReplayEncode,
-    SqliteEffectReplayHashConflict,
-    SqliteEffectReplayKeyMissing,
-    SqliteEffectReplayLeaseLost,
-    SqliteEffectReplayMissing,
-    SqliteEffectReplayStore,
     ToolCatalogResolutionFailed,
     ToolCompletionKeyMissingCallId,
     ToolDeferralNotDeclared,
@@ -769,20 +755,6 @@ impl RuntimeErrorCode {
             Self::SessionDeleteScopeMismatch => "session_delete_scope_mismatch",
             Self::SessionHeadRefresh => "session_head_refresh",
             Self::SessionToolRegistry => "session_tool_registry",
-            Self::SqliteAwaitEventDecode => "sqlite_await_event_decode",
-            Self::SqliteAwaitEventEncode => "sqlite_await_event_encode",
-            Self::SqliteAwaitEventNotify => "sqlite_await_event_notify",
-            Self::SqliteAwaitEventSign => "sqlite_await_event_sign",
-            Self::SqliteAwaitEventStore => "sqlite_await_event_store",
-            Self::SqliteEffectJournalRetirement => "sqlite_effect_journal_retirement",
-            Self::SqliteEffectReplayCorruptRow => "sqlite_effect_replay_corrupt_row",
-            Self::SqliteEffectReplayDecode => "sqlite_effect_replay_decode",
-            Self::SqliteEffectReplayEncode => "sqlite_effect_replay_encode",
-            Self::SqliteEffectReplayHashConflict => "sqlite_effect_replay_hash_conflict",
-            Self::SqliteEffectReplayKeyMissing => "sqlite_effect_replay_key_missing",
-            Self::SqliteEffectReplayLeaseLost => "sqlite_effect_replay_lease_lost",
-            Self::SqliteEffectReplayMissing => "sqlite_effect_replay_missing",
-            Self::SqliteEffectReplayStore => "sqlite_effect_replay_store",
             Self::ToolCatalogResolutionFailed => "tool_catalog_resolution_failed",
             Self::ToolCompletionKeyMissingCallId => "tool_completion_key_missing_call_id",
             Self::ToolDeferralNotDeclared => "tool_deferral_not_declared",
@@ -808,15 +780,11 @@ impl RuntimeErrorCode {
     /// Whether this code reports that a replayed runtime effect diverged from
     /// the effect envelope recorded by its durable controller.
     ///
-    /// The store-qualified wire codes remain available for display and
-    /// diagnostics. Hosts should use this predicate instead of matching those
-    /// backend-specific strings when choosing alerting or drain policy.
+    /// Hosts use this predicate for alerting and drain policy.
     pub fn is_replay_mismatch(&self) -> bool {
         matches!(
             self,
-            Self::SqliteEffectReplayHashConflict
-                | Self::EngineProcessJournalIdentityDrift
-                | Self::EffectReplayDivergence
+            |Self::EngineProcessJournalIdentityDrift| Self::EffectReplayDivergence
                 | Self::ToolIntentReplayKeyFormatCutover
                 | Self::LashlangCellReplayDivergence
                 | Self::RetiredGeneration
@@ -1003,20 +971,6 @@ impl RuntimeErrorCode {
         Self::SessionDeleteScopeMismatch,
         Self::SessionHeadRefresh,
         Self::SessionToolRegistry,
-        Self::SqliteAwaitEventDecode,
-        Self::SqliteAwaitEventEncode,
-        Self::SqliteAwaitEventNotify,
-        Self::SqliteAwaitEventSign,
-        Self::SqliteAwaitEventStore,
-        Self::SqliteEffectJournalRetirement,
-        Self::SqliteEffectReplayCorruptRow,
-        Self::SqliteEffectReplayDecode,
-        Self::SqliteEffectReplayEncode,
-        Self::SqliteEffectReplayHashConflict,
-        Self::SqliteEffectReplayKeyMissing,
-        Self::SqliteEffectReplayLeaseLost,
-        Self::SqliteEffectReplayMissing,
-        Self::SqliteEffectReplayStore,
         Self::ToolCatalogResolutionFailed,
         Self::ToolCompletionKeyMissingCallId,
         Self::ToolDeferralNotDeclared,
@@ -1235,20 +1189,6 @@ impl RuntimeErrorCode {
             "session_delete_scope_mismatch" => Self::SessionDeleteScopeMismatch,
             "session_head_refresh" => Self::SessionHeadRefresh,
             "session_tool_registry" => Self::SessionToolRegistry,
-            "sqlite_await_event_decode" => Self::SqliteAwaitEventDecode,
-            "sqlite_await_event_encode" => Self::SqliteAwaitEventEncode,
-            "sqlite_await_event_notify" => Self::SqliteAwaitEventNotify,
-            "sqlite_await_event_sign" => Self::SqliteAwaitEventSign,
-            "sqlite_await_event_store" => Self::SqliteAwaitEventStore,
-            "sqlite_effect_journal_retirement" => Self::SqliteEffectJournalRetirement,
-            "sqlite_effect_replay_corrupt_row" => Self::SqliteEffectReplayCorruptRow,
-            "sqlite_effect_replay_decode" => Self::SqliteEffectReplayDecode,
-            "sqlite_effect_replay_encode" => Self::SqliteEffectReplayEncode,
-            "sqlite_effect_replay_hash_conflict" => Self::SqliteEffectReplayHashConflict,
-            "sqlite_effect_replay_key_missing" => Self::SqliteEffectReplayKeyMissing,
-            "sqlite_effect_replay_lease_lost" => Self::SqliteEffectReplayLeaseLost,
-            "sqlite_effect_replay_missing" => Self::SqliteEffectReplayMissing,
-            "sqlite_effect_replay_store" => Self::SqliteEffectReplayStore,
             "tool_catalog_resolution_failed" => Self::ToolCatalogResolutionFailed,
             "tool_completion_key_missing_call_id" => Self::ToolCompletionKeyMissingCallId,
             "tool_deferral_not_declared" => Self::ToolDeferralNotDeclared,

@@ -1298,7 +1298,6 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
         process_envs: process_envs as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,
         // PostgreSQL is storage only: its effects journal on Restate (ADR 0104).
-        effects: None,
     }
 }
 

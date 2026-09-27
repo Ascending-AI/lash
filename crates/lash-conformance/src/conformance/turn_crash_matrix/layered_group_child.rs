@@ -43,7 +43,6 @@ pub async fn a_host_layer_observes_its_group_childrens_effects<F, S>(
     let seam = SeamLayer {
         control: control.clone(),
         executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        journal_faults: None,
     };
     let (reports, mut reported) = tokio::sync::mpsc::unbounded_channel();
     let attempt: crate::ConformanceTurnAttempt = {

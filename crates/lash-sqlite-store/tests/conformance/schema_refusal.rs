@@ -18,7 +18,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     assert!(message.contains("supports schema version 44"));
     assert!(message.contains("database reports version 12"));
     assert!(message.contains(
-        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
+        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
     ));
 }
 
@@ -40,6 +40,6 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
     assert!(message.contains("supports schema version 12"));
     assert!(message.contains("database reports version 1"));
     assert!(message.contains(
-        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
+        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
     ));
 }

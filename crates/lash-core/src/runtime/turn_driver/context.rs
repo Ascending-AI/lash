@@ -83,7 +83,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                         self.children_stop.clone(),
                     )
                     .with_opener_state(self.opener_state.clone())
-                    .with_group_closing(self.host.core.control.effect_host.effect_group_closing())
                     .with_turn_cancel_scope(self.turn_cancel_scope())
                     .with_turn_phase_probe(self.turn_phase_probe.clone())
                     .with_unrecorded_session_sources(self.host.core.control.open_sources)

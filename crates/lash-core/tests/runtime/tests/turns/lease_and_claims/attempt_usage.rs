@@ -6,10 +6,10 @@
 use super::*;
 use lash_core::testing::TestTurnDrive as _;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
-    let sqlite = sqlite_memory_backend().await;
-    let backend: lash_core::Backend = Arc::new(sqlite.clone()).into();
+    let double = kernel_double(0xa771, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -76,7 +76,13 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
         })
         .build();
     // The SQLite store itself, so the test reads its raw usage journal.
-    let store = Arc::new(sqlite.open_store().await.expect("open an unbound store"));
+    let store = Arc::new(
+        double
+            .stores()
+            .open_store()
+            .await
+            .expect("open an unbound store"),
+    );
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
@@ -84,20 +90,18 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
         .build()
         .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "failed-attempt-usage-ledgered"))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .drive_turn(
             TurnInput::text("retry a truncated stream"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("failed-attempt-usage-ledgered"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("retry succeeds");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert_eq!(assembled.assistant_output.safe_text, "success");
@@ -133,10 +137,10 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
     assert_eq!(report.usage.usage.output_tokens, 7);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
-    let sqlite = sqlite_memory_backend().await;
-    let backend: lash_core::Backend = Arc::new(sqlite.clone()).into();
+    let double = kernel_double(0xa772, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -183,7 +187,13 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
         })
         .build();
     // The SQLite store itself, so the test reads its raw usage journal.
-    let store = Arc::new(sqlite.open_store().await.expect("open an unbound store"));
+    let store = Arc::new(
+        double
+            .stores()
+            .open_store()
+            .await
+            .expect("open an unbound store"),
+    );
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
@@ -191,20 +201,21 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
         .build()
         .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            "root",
+            "all-attempts-failed-usage-ledgered",
+        ))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .drive_turn(
             TurnInput::text("every attempt fails"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("all-attempts-failed-usage-ledgered"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("provider failure is returned as an assembled turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert!(matches!(

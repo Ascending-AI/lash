@@ -5,19 +5,9 @@ use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
 
-mod lease_fencing;
 mod response_derivation;
-pub use response_derivation::{
-    effect_controller_response_derivation_retry, effect_controller_response_derivation_terminals,
-};
+pub use response_derivation::effect_controller_response_derivation_terminals;
 mod outstanding_waits;
-pub use lease_fencing::{
-    EffectLeaseControllerFactory, EffectLeaseFencingBackend, EffectLeaseMutator,
-    LeaseFencingController, effect_controller_lease_fencing,
-    effect_lease_renew_errors_past_budget_leave_row_reclaimable,
-    effect_lease_renew_stall_is_abandoned_at_the_deadline,
-    effect_lease_renew_transient_error_keeps_tool_running,
-};
 pub(super) use outstanding_waits::effect_host_lists_registered_unresolved_waits;
 
 /// One scope selected by an [`EffectHost`] and one effect envelope executed
@@ -411,9 +401,9 @@ pub async fn effect_controller_segmentation_vector(
         }
         async fn commit_group_child_final(
             &self,
-            commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+            commit: lash_core::facade_support::GroupChildFinalCommit,
         ) -> Result<
-            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+            lash_core::facade_support::EffectGroupChildCommitOutcome,
             lash_core::RuntimeEffectControllerError,
         > {
             self.inner.commit_group_child_final(commit).await
@@ -526,9 +516,6 @@ pub async fn effect_controller_segmentation_vector(
 pub struct ConformanceInvocation {
     controller: Arc<dyn RuntimeEffectController>,
     execution_scope: ExecutionScope,
-    /// The controller's effect-journal fault injector, when the controller
-    /// exposes one (FIG-3524).
-    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
     end: Arc<dyn Fn() + Send + Sync>,
     redrive: Arc<dyn Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync>,
 }
@@ -544,27 +531,9 @@ impl ConformanceInvocation {
         Self {
             controller,
             execution_scope,
-            journal_faults: None,
             end: Arc::new(end),
             redrive: Arc::new(redrive),
         }
-    }
-
-    /// Attach the controller's effect-journal fault injector (FIG-3524).
-    #[must_use]
-    pub fn with_effect_journal_faults(
-        mut self,
-        faults: lash_core::facade_support::effect_replay_driver::EffectJournalFaults,
-    ) -> Self {
-        self.journal_faults = Some(faults);
-        self
-    }
-
-    /// The live controller's journal fault injector, when it exposes one.
-    pub fn effect_journal_faults(
-        &self,
-    ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults> {
-        self.journal_faults.clone()
     }
 
     /// Borrow the controller bound to the live invocation.
@@ -589,7 +558,6 @@ impl ConformanceInvocation {
         Self {
             controller,
             execution_scope: self.execution_scope,
-            journal_faults: self.journal_faults,
             end: self.end,
             redrive: self.redrive,
         }
@@ -1542,65 +1510,6 @@ pub async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     assert_retirement(host, scope, key, waiter).await;
 }
 
-/// The active-wait witness for a host whose wait registration is a journal
-/// write: the spawned waiter registers its unresolved promise row over a
-/// database round trip, so no amount of scheduler time proves the row exists
-/// when retirement is asked. The witness instead waits for the store's own
-/// quiescence read, the proof the `WhenQuiescent` gate evaluates under its
-/// scope lock, to see the scope as live, and only then asserts the shared
-/// retirement behaviour. Omitting the registration write keeps the scope
-/// quiescent, so the barrier times out instead of passing.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn effect_host_journaled_wait_registration_witness(
-    host: Arc<dyn EffectHost>,
-    assert_retirement: ActiveWaitRetirementAssertion,
-) {
-    let suffix = uuid::Uuid::new_v4().simple();
-    let scope = ExecutionScope::runtime_operation(format!("await-event-journaled-wait-{suffix}"));
-    let key = host
-        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-live"))
-        .await
-        .expect("the operation mints");
-    let journal = host
-        .effect_group_closing()
-        .expect("a journal-backed host exposes its scope quiescence read");
-    assert!(
-        journal
-            .scope_is_quiescent(&scope)
-            .await
-            .expect("read quiescence before the wait registers"),
-        "minting a key registers no wait"
-    );
-    let waiter_host = Arc::clone(&host);
-    let waiter_key = key.clone();
-    let waiter = crate::task::spawn(async move {
-        waiter_host
-            .await_await_event(
-                &waiter_key,
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            )
-            .await
-    });
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while journal
-            .scope_is_quiescent(&scope)
-            .await
-            .expect("read quiescence while the wait registers")
-        {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the waiter journals its unresolved promise");
-    assert!(!waiter.is_finished(), "the wait is still open");
-
-    assert_retirement(host, scope, key, waiter).await;
-}
-
 /// Boxed shared assertion supplied to implementation-owned active-wait
 /// witnesses so backend registration code never names an individual law.
 pub type ActiveWaitRetirementAssertion =
@@ -2338,17 +2247,6 @@ pub(super) fn replay_conformance_value_outcome(effect_id: &str) -> RuntimeEffect
     RuntimeEffectOutcome::LanguageRuntimeValue {
         value: serde_json::json!(effect_id),
     }
-}
-
-fn assert_replay_conformance_value_marker(outcome: RuntimeEffectOutcome, expected: &str) {
-    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = outcome else {
-        panic!("expected language-runtime-value effect outcome");
-    };
-    assert_eq!(
-        value,
-        serde_json::json!(expected),
-        "replayed outcome must come from the matching replay key"
-    );
 }
 
 fn assert_replay_conformance_tool_attempt_marker(

@@ -5,13 +5,9 @@
 //! with a 15-second busy timeout, satisfying the full [`RuntimePersistence`] +
 //! [`AttachmentManifest`] contract from `lash-core-store`.
 //!
-//! This crate is a drop-in replacement for `lash-sqlite-store`: it exposes the
-//! same public surface (`Store`, `SqliteProcessRegistry`,
-//! `SqliteSessionStoreFactory`, `SqliteEffectHost`, the option/descriptor types)
-//! with identical async signatures, so a consumer swaps backends by renaming
-//! the crate path only. The difference is the engine underneath: tokio-rusqlite
-//! over a statically-linked SQLite with real WAL (`-wal`/`-shm` sidecars,
-//! multi-process readers + single writer) instead of the prior store's experimental mvcc.
+//! It provides a `SqliteStoreSet` and storage ports for an effect engine such
+//! as Restate. SQLite uses WAL (`-wal`/`-shm` sidecars) for concurrent
+//! readers and a single writer.
 //!
 //! ## Why this is "the durable backend" not just "an option"
 //!
@@ -104,7 +100,6 @@ use session_deletion::{
 mod artifact_store;
 mod attachment_store;
 mod attachments;
-mod await_event;
 mod blobs;
 mod codec;
 mod conn;
@@ -117,7 +112,6 @@ fn commit_count_entropy_seed() -> u64 {
     (high ^ low) & (u64::MAX >> 1)
 }
 mod backend;
-mod effect_replay;
 mod fleet_format;
 mod forks;
 mod generation_drain;
@@ -141,7 +135,6 @@ mod root_verbs;
 mod schema;
 mod schema_fragments;
 mod schema_layout;
-mod scope_fence;
 mod session_delete_ledger;
 mod session_ingress;
 mod session_listing;
@@ -159,7 +152,7 @@ mod triggers;
 mod turn_ingress;
 
 pub use attachment_store::SqliteAttachmentStore;
-pub use backend::{SqliteBackend, SqliteBackendOptions, SqliteStoreSet, SqliteStoreSetOptions};
+pub use backend::{SqliteStoreSet, SqliteStoreSetOptions};
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 pub use location::SqliteLocation;
 use location::{DatabaseLocation, DatabaseTarget};
@@ -179,9 +172,6 @@ pub(crate) const DURABLE_CORE_DB_FILE: &str = "durable-core.db";
 pub(crate) const SQLITE_BACKEND: &str = "sqlite";
 
 use conn::TxOutcome;
-pub use effect_replay::{
-    SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
-};
 pub use lash_core_execution::store_backend_support::required_constraints::{
     RequiredConstraintFinding, RequiredConstraintReport,
 };
@@ -686,8 +676,6 @@ pub struct StoredSessionCheckpoint {
 mod graph_error_tests;
 #[cfg(test)]
 mod read_failure_tests;
-#[cfg(test)]
-mod rendered_sql_pin_tests;
 
 #[cfg(test)]
 #[path = "tests.rs"]

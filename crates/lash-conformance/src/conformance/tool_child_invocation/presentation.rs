@@ -194,7 +194,7 @@ pub async fn two_presentation_steps_compose_deterministically_on_first_run_and_r
     })
     .await;
 
-    if probe.drain.is_none() {
+    {
         // No journal outlives the process on this tier: the replay arm is the
         // same-host reopen, which serves the journaled settlement verbatim.
         let host = probe.host;
@@ -256,115 +256,7 @@ pub async fn two_presentation_steps_compose_deterministically_on_first_run_and_r
             .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
             .await
             .expect("the reopened group closes");
-        return;
     }
-
-    // The durable arm: the first run happens in a worker that then dies; a
-    // successor over the same journal serves the recorded presentation.
-    let (crash_factories, a_runs, b_runs) = (factories, a_runs, b_runs);
-    let (env_store, env_ref) = (scenario.process_env_store.clone(), scenario.env_ref.clone());
-    crashed_world(fixture, {
-        let scope = scope.clone();
-        let session_id = session_id.clone();
-        let group_key = group_key.clone();
-        let provider = Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>;
-        let registry = Arc::clone(&scenario.registry);
-        let opener = opener.clone();
-        move |world| {
-            Box::pin(async move {
-                let _guard = register_opener_with_extras(
-                    &world.host,
-                    &scope,
-                    provider,
-                    registry,
-                    env_store,
-                    opener,
-                    tokio_util::sync::CancellationToken::new(),
-                    OpenerExtras {
-                        plugin_factories: crash_factories,
-                        attachment_store: None,
-                        clock: None,
-                    },
-                );
-                let group = presentation_group(
-                    &scope,
-                    &session_id,
-                    &group_key,
-                    &env_ref,
-                    LEAF_PLAIN,
-                    ToolChildCompletionRouting::Inline,
-                    recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
-                        .await,
-                );
-                let (scoped, handle, settlement) =
-                    settle_rank_zero(&world.host, &scope, group).await;
-                let presented = presented_text(invocation_settlement(&settlement));
-                assert!(
-                    presented.ends_with("[a][b]"),
-                    "the steps composed in registration order: {presented:?}"
-                );
-                scoped
-                    .controller()
-                    .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-                    .await
-                    .expect("the group closes before the crash");
-            })
-        }
-    })
-    .await;
-    assert_eq!(a_runs.load(Ordering::SeqCst), 1, "step A ran once");
-    assert_eq!(b_runs.load(Ordering::SeqCst), 1, "step B ran once");
-
-    // The successor: same journal, same registered steps. The reopened group
-    // serves the recorded settlement — nothing re-runs.
-    let successor = (fixture.make_world)(ToolChildWorldSpec {
-        lease_ttl_ms: LIVE_LEASE_MS,
-    })
-    .await;
-    install_child_host(&successor.host, &scenario.process_env_store);
-    until_claims_lapse(&successor, &group_key).await;
-    let _guard = register_opener_with_extras(
-        &successor.host,
-        &scope,
-        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
-        Arc::clone(&scenario.registry),
-        Arc::clone(&scenario.process_env_store),
-        opener,
-        tokio_util::sync::CancellationToken::new(),
-        OpenerExtras {
-            plugin_factories: vec![steps_factory(vec![
-                marker_step("a", Arc::clone(&a_runs)),
-                marker_step("b", Arc::clone(&b_runs)),
-            ])],
-            attachment_store: None,
-            clock: None,
-        },
-    );
-    let group = presentation_group(
-        &scope,
-        &session_id,
-        &group_key,
-        &scenario.env_ref,
-        LEAF_PLAIN,
-        ToolChildCompletionRouting::Inline,
-        recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
-    );
-    let (scoped, handle, replayed) = settle_rank_zero(&successor.host, &scope, group).await;
-    let presented = presented_text(invocation_settlement(&replayed));
-    assert!(
-        presented.ends_with("[a][b]"),
-        "the redrive serves the recorded presentation: {presented:?}"
-    );
-    assert_eq!(
-        a_runs.load(Ordering::SeqCst) + b_runs.load(Ordering::SeqCst),
-        2,
-        "the redrive ran no presentation step"
-    );
-    scoped
-        .controller()
-        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-        .await
-        .expect("the successor closes");
 }
 
 /// A changed presentation environment on replay cannot change the recorded
@@ -385,16 +277,15 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-env-group");
-    let call_id = format!("{group_key}-call-0");
     let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
-    let (factories, a_runs, b_runs) = ab_steps();
+    let (factories, _, _) = ab_steps();
 
     let probe = (fixture.make_world)(ToolChildWorldSpec {
         lease_ttl_ms: LIVE_LEASE_MS,
     })
     .await;
 
-    if probe.drain.is_none() {
+    {
         // The engine keeps the journal and no Lash-owned drain: the reopen
         // serves the recorded settlement even after the opener is
         // re-registered under a changed step chain.
@@ -470,131 +361,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
             .await
             .expect("the reopened group closes");
-        return;
     }
-
-    // The durable arm: the child settles under env [a][b] in a worker that
-    // then dies; a successor registering env [a][b2] serves the record.
-    crashed_world(fixture, {
-        let fixture_processes = Arc::clone(&fixture.make_processes);
-        let scope = scope.clone();
-        let session_id = session_id.clone();
-        let group_key = group_key.clone();
-        let call_id = call_id.clone();
-        let provider = Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>;
-        let env_store = Arc::clone(&scenario.process_env_store);
-        let env_ref = scenario.env_ref.clone();
-        let observation = Arc::clone(&scenario.observation);
-        let opener = opener.clone();
-        move |world| {
-            Box::pin(async move {
-                let _guard = register_opener_with_extras(
-                    &world.host,
-                    &scope,
-                    provider,
-                    fixture_processes().await.process_registry(),
-                    env_store,
-                    opener,
-                    tokio_util::sync::CancellationToken::new(),
-                    OpenerExtras {
-                        plugin_factories: factories,
-                        attachment_store: None,
-                        clock: None,
-                    },
-                );
-                let scoped = world
-                    .host
-                    .scoped(crate::admit(scope.clone()))
-                    .expect("the group scope binds");
-                let mut handle = scoped
-                    .controller()
-                    .open_effect_group(presentation_group(
-                        &scope,
-                        &session_id,
-                        &group_key,
-                        &env_ref,
-                        LEAF_DEFERRED,
-                        ToolChildCompletionRouting::Durable,
-                        recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
-                            .await,
-                    ))
-                    .await
-                    .expect("the group opens under the live opener");
-                // The deferred leaf parks; the law resolves it out of band and
-                // the child runs its presentation boundary under env [a][b]
-                // before the worker dies.
-                let key = observation.parked_key(&call_id).await;
-                resolve_when_registered(
-                    &world.host,
-                    key,
-                    crate::Resolution::Ok(serde_json::json!({ "leaf": "presented" })),
-                )
-                .await;
-                let settlement = next_settlement(&scoped, &mut handle, 0).await;
-                assert!(
-                    presented_text(invocation_settlement(&settlement)).ends_with("[a][b]"),
-                    "the child presented under env [a][b] before the crash"
-                );
-            })
-        }
-    })
-    .await;
-    assert_eq!(a_runs.load(Ordering::SeqCst), 1, "step A ran once");
-    assert_eq!(b_runs.load(Ordering::SeqCst), 1, "step B ran once");
-
-    // The successor registers a changed chain. The reopened group serves the
-    // journaled settlement; the changed steps never execute.
-    let successor = (fixture.make_world)(ToolChildWorldSpec {
-        lease_ttl_ms: LIVE_LEASE_MS,
-    })
-    .await;
-    install_child_host(&successor.host, &scenario.process_env_store);
-    until_claims_lapse(&successor, &group_key).await;
-    let (changed_factories, a2_runs, b2_runs) = ab2_steps();
-    let registry = (fixture.make_processes)().await.process_registry();
-    let _guard = register_opener_with_extras(
-        &successor.host,
-        &scope,
-        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
-        registry,
-        Arc::clone(&scenario.process_env_store),
-        opener,
-        tokio_util::sync::CancellationToken::new(),
-        OpenerExtras {
-            plugin_factories: changed_factories,
-            attachment_store: None,
-            clock: None,
-        },
-    );
-    let (scoped, handle, replayed) = settle_rank_zero(
-        &successor.host,
-        &scope,
-        presentation_group(
-            &scope,
-            &session_id,
-            &group_key,
-            &scenario.env_ref,
-            LEAF_DEFERRED,
-            ToolChildCompletionRouting::Durable,
-            recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
-        ),
-    )
-    .await;
-    let presented = presented_text(invocation_settlement(&replayed));
-    assert!(
-        presented.ends_with("[a][b]"),
-        "the recorded presentation survives the changed environment: {presented:?}"
-    );
-    assert_eq!(
-        a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
-        0,
-        "a replay that re-ran the chain would have run the changed steps"
-    );
-    scoped
-        .controller()
-        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-        .await
-        .expect("the successor closes");
 }
 
 /// The real budget plugin and another presentation step compose in one chain

@@ -528,7 +528,7 @@ impl lash_core::AwaitEventResolver for KeyJournalController {
         scope: &lash_core::ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        let key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;
+        let key_id = lash_core::facade_support::await_event_identity::derive_key_id(scope, &wait)?;
         Ok(lash_core::AwaitEventKey {
             scope: scope.clone(),
             wait,

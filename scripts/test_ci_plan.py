@@ -1145,7 +1145,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         for path in (
             # #2106's diff: the effect-group dispatch path and the workers
             # runbook binary.
-            "crates/lash-core-execution/src/runtime/effect/group_drain.rs",
+            "crates/lash-restate/src/controller/group_commit.rs",
             "crates/lash-core-execution/src/tool_dispatch.rs",
             "crates/lash-core-execution/src/session/tool_execution.rs",
             "runbooks/restate-postgres-workers/src/bin/worker.rs",

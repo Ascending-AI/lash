@@ -1,7 +1,7 @@
-//! Where a SQLite backend's four databases live, and the one identity they
+//! Where a SQLite backend's three databases live, and the one identity they
 //! answer to (ADR 0102).
 //!
-//! A backend is a directory of four database files or a named in-memory
+//! A backend is a directory of three database files or a named in-memory
 //! backend of four `memdb` databases. [`SqliteLocation`] owns both facts
 //! every component needs from that choice: how to reach each database (a path
 //! or a `file:/lash-<id>/<db>?vfs=memdb` URI) and the identity the turn-control
@@ -26,9 +26,9 @@ use crate::SqliteDatabase;
 /// `file:` strings are refused by every path-taking constructor.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SqliteLocation {
-    /// Four database files under a canonical directory.
+    /// Three database files under a canonical directory.
     File { root: PathBuf },
-    /// Four named `memdb` databases, alive while the backend is.
+    /// Three named `memdb` databases, alive while the backend is.
     Memory { id: uuid::Uuid },
 }
 
@@ -41,19 +41,14 @@ impl SqliteLocation {
     }
 
     /// The identity every binding this backend writes is keyed on:
-    /// `sqlite:<canonical effect-replay.db path>` or `sqlite-memory:<id>`.
+    /// `sqlite:<canonical durable-core.db path>` or `sqlite-memory:<id>`.
     ///
-    /// A file backend answers to its effect journal's canonical path
-    /// because that is the identity a SQLite effect host has always bound
-    /// turn control to (FIG-2971) and sessions have persisted: a file
-    /// database written by a host opened on `<root>/effect-replay.db` opens
-    /// through the backend with every binding unchanged.
+    /// A file store set answers to its durable-core catalog path.
     pub fn identity(&self) -> String {
         match self {
             Self::File { root } => format!(
                 "sqlite:{}",
-                root.join(SqliteDatabase::EffectReplay.file_name())
-                    .display()
+                root.join(SqliteDatabase::DurableCore.file_name()).display()
             ),
             Self::Memory { id } => format!("sqlite-memory:{id}"),
         }
@@ -166,7 +161,7 @@ pub(crate) struct MemoryAnchors {
 }
 
 impl MemoryAnchors {
-    /// Create the four databases of `location` and pin them.
+    /// Create the three databases of `location` and pin them.
     pub(crate) fn pin(location: &SqliteLocation) -> rusqlite::Result<Arc<Self>> {
         let connections = SqliteDatabase::ALL
             .into_iter()
@@ -192,7 +187,6 @@ impl std::fmt::Debug for MemoryAnchors {
 #[derive(Clone, Debug)]
 pub(crate) struct DatabaseLocation {
     target: DatabaseTarget,
-    identity: Arc<str>,
     /// Held, never read: dropping the last handle releases the databases.
     _anchors: Option<Arc<MemoryAnchors>>,
 }
@@ -202,13 +196,12 @@ impl DatabaseLocation {
     /// and pinned by `anchors` when in memory.
     pub(crate) fn in_backend(
         location: &SqliteLocation,
-        identity: &Arc<str>,
+        _identity: &Arc<str>,
         database: SqliteDatabase,
         anchors: Option<&Arc<MemoryAnchors>>,
     ) -> Self {
         Self {
             target: location.target(database),
-            identity: Arc::clone(identity),
             _anchors: anchors.cloned(),
         }
     }
@@ -219,20 +212,14 @@ impl DatabaseLocation {
     /// journal file answers to the same string (see
     /// [`SqliteLocation::identity`]).
     pub(crate) fn standalone_file(path: &Path) -> Self {
-        let identity = format!("sqlite:{}", canonical_path(path).display());
         Self {
             target: DatabaseTarget::File(path.to_path_buf()),
-            identity: Arc::from(identity),
             _anchors: None,
         }
     }
 
     pub(crate) fn target(&self) -> &DatabaseTarget {
         &self.target
-    }
-
-    pub(crate) fn identity(&self) -> &Arc<str> {
-        &self.identity
     }
 }
 
@@ -252,7 +239,7 @@ pub(crate) fn validate_file_database_path(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
                 Some(format!(
                     "{component} requires a file-backed database path, got `{rendered}`; \
-                     use SqliteBackend::memory() for an in-memory backend"
+                     use SqliteStoreSet::memory() for an in-memory store set"
                 )),
             ),
         ));

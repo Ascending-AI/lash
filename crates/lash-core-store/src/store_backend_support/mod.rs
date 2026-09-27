@@ -281,15 +281,13 @@ pub fn sealed_drive_fence(
 }
 /// One verdict function per fencing decision; see [`crate::store::fencing`].
 pub use crate::store::fencing::{
-    EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority, EffectReplayLeaseFacts,
-    EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
-    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, QueuedWorkSettlementFacts,
-    TurnInputSettlementFacts, WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts,
-    WorkRowClaimability, effect_replay_lease_verdict, fenced_write_applied,
-    head_publication_verdict, queued_work_batch_claimability, require_fenced_write_applied,
-    require_releasable_session_execution_lease, require_renewable_session_execution_lease,
-    require_settleable_queued_work, require_settleable_turn_input,
-    require_single_writer_head_publication, turn_input_claimability,
+    FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FenceTimeAuthority, FencedWrite,
+    HeadPublicationVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
+    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
+    fenced_write_applied, head_publication_verdict, queued_work_batch_claimability,
+    require_fenced_write_applied, require_releasable_session_execution_lease,
+    require_renewable_session_execution_lease, require_settleable_queued_work,
+    require_settleable_turn_input, require_single_writer_head_publication, turn_input_claimability,
     unclaimed_turn_input_is_settleable, wake_delivery_claim_verdict,
 };
 pub use crate::store::session_execution_lease::{

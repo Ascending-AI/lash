@@ -721,6 +721,7 @@ where
             // is gone.
             let step_registry = Arc::clone(&registry);
             let step_process_id = process_id.clone();
+            let step_signal_name = signal_name.clone();
             let JournaledSignalAppend {
                 event,
                 realization,
@@ -732,6 +733,7 @@ where
                 let ordinal = signal_ordinal_for_event(
                     step_registry.as_ref(),
                     &step_process_id,
+                    &step_signal_name,
                     appended.event.event_type.as_str(),
                     appended.event.sequence,
                 )

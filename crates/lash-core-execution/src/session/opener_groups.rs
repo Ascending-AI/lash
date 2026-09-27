@@ -73,7 +73,6 @@ use std::sync::Arc;
 use lash_sansio::sync::MutexExt;
 
 use super::execution_context::RuntimeExecutionContext;
-use super::settlement_incorporation::ContextFinalizationSteps;
 use crate::runtime::effect::LoserPolicy;
 use crate::runtime::effect::executor::RuntimeEffectControllerError;
 
@@ -225,16 +224,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    /// Wire the host's closing seam the opener's end finalizes through.
-    #[must_use]
-    pub fn with_group_closing(
-        mut self,
-        closing: Option<Arc<dyn crate::StoreEffectGroupClosing>>,
-    ) -> Self {
-        self.group_closing = closing;
-        self
-    }
-
     /// Hand a group whose consumer stopped before exhaustion to the opener.
     ///
     /// The handle carries the consumer's cursor, so the prefix the consumer
@@ -276,66 +265,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .insert(handle.group_key().to_string(), handle.children());
         }
         registry.outstanding = handles;
-    }
-
-    /// The opener's start after a worker death: recover the children of every
-    /// live group under its scope that nothing here is running (ADR 0099 W5).
-    /// Worker loss is not an opener end, so this never cancels anything; on a
-    /// tier without a closing seam it has nothing to do — Restate's children
-    /// are `call` children its engine keeps running.
-    pub async fn recover_opener_groups(&self) -> Result<usize, RuntimeEffectControllerError> {
-        let Some(closing) = self.group_closing.clone() else {
-            return Ok(0);
-        };
-        let scope = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .execution_scope()
-            .clone();
-        if closing
-            .read_unsettled_groups(&scope)
-            .await?
-            .iter()
-            .all(|group| group.closing)
-        {
-            return Ok(0);
-        }
-        self.republish_execution_env(&scope).await?;
-        closing.recover_live_groups(&scope).await
-    }
-
-    /// Republish the opener's execution environment before a child no process
-    /// is running is driven: a recovered child resolves the environment its
-    /// request recorded and never invents one (ADR 0099 §3). The publish is
-    /// content-addressed and idempotent, so this is the same reference the
-    /// group's formation published, and an opener whose environment store did
-    /// not survive its worker still resolves it. Without it, a recovered or
-    /// finalized child can settle as a missing-environment failure.
-    async fn republish_execution_env(
-        &self,
-        scope: &crate::ExecutionScope,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.captured_process_execution_env_ref(&crate::ArtifactOwner::execution(scope.clone()))
-            .await
-            .map(drop)
-            .map_err(|error| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                    format!(
-                        "the opener could not republish its execution environment before \
-                         driving a child no process is running: {error}"
-                    ),
-                )
-            })
-    }
-
-    /// The prefix of every group key this opener forms (see
-    /// `tool_child_group_key`): the groups its end is responsible for, as
-    /// against a foreign group under the same scope — an operator's, or one a
-    /// queue drain's end owns.
-    fn own_group_prefix(&self) -> String {
-        self.own_group_key_prefix()
     }
 
     /// The prefix every group key this opener forms carries: `{scope}:group:`.
@@ -387,17 +316,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 break (retained, limit);
             }
         };
-        let accepted = match &self.group_closing {
-            Some(closing) => closing.read_group_lifecycle(group_key).await?.is_some(),
-            None => false,
-        };
-        if accepted {
-            self.opener_groups
-                .lock_recover()
-                .reserved
-                .insert(group_key.to_string(), children);
-            return Ok(());
-        }
         Err(RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::EffectGroupOpenerBoundExceeded,
             format!(
@@ -480,10 +398,8 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub async fn close_opener_groups(
         &self,
     ) -> Result<OpenerGroupsClosed, RuntimeEffectControllerError> {
-        let closing = self.group_closing.clone();
         let held = std::mem::take(&mut self.opener_groups.lock_recover().outstanding);
         let scoped = self.dispatch.effect_controller.scoped();
-        let scope = scoped.execution_scope().clone();
         let controller = scoped.controller();
         let mut closed = OpenerGroupsClosed::default();
         let mut remaining = Vec::with_capacity(held.len());
@@ -495,75 +411,19 @@ impl<'run> RuntimeExecutionContext<'run> {
             closed.groups.push(group.0.clone());
             remaining.push(group);
         }
-        match closing {
-            Some(closing) => {
-                // Every unsettled group this opener formed, beyond the ones it
-                // holds: a `live` one a crashed incarnation's cell opened, a
-                // `closing` one an earlier end recorded and never finished.
-                // A foreign group under the same scope — an operator's, or one
-                // a queue drain's end owns — is not this opener's to finish.
-                let own_prefix = self.own_group_prefix();
-                for group in closing.read_unsettled_groups(&scope).await? {
-                    if !group.group_key.starts_with(&own_prefix)
-                        || closed.groups.contains(&group.group_key)
-                    {
-                        continue;
-                    }
-                    if !group.closing {
-                        let handle = crate::EffectGroupHandle::restored(
-                            group.group_key.clone(),
-                            group.children,
-                            0,
-                        )?;
-                        controller
-                            .close_effect_group(handle, LoserPolicy::Cancel)
-                            .await?;
-                    }
-                    closed.groups.push(group.group_key);
-                }
-                if !closed.groups.is_empty() {
-                    // Finalization's first step may drive a child no process
-                    // is running.
-                    self.republish_execution_env(&scope).await?;
-                }
-                let steps = ContextFinalizationSteps::new(self);
-                for group_key in &closed.groups {
-                    if let crate::GroupFinalizationReport::Pending { .. } =
-                        closing.finalize_group(group_key, &steps).await?
-                    {
-                        closed.pending.push(group_key.clone());
-                    }
-                }
-            }
-            None => {
-                // Restate: the close seated a cancelled rank for every child
-                // whose final record had not committed, and a committed child
-                // ranks once its drain finishes. A group allocates commit
-                // positions `1..=children`, so waiting at the drain barrier
-                // of the position past the last one is step 1 seen from the
-                // opener: every protected obligation is finished before the
-                // opener's outcome and accounting commit. The wait is the
-                // host's, not the caller's: the close just ended the caller's
-                // interest, so an await on the consumer's cursor is refused
-                // (FIG-3676).
-                for (group_key, children) in remaining {
-                    let past_every_commit = u64::try_from(children)
-                        .ok()
-                        .and_then(|children| children.checked_add(1))
-                        .ok_or_else(|| {
-                            RuntimeEffectControllerError::new(
-                                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                                format!(
-                                    "effect group {group_key} has more children than commit \
-                                     positions"
-                                ),
-                            )
-                        })?;
-                    controller
-                        .await_group_child_drain_admission(&group_key, past_every_commit)
-                        .await?;
-                }
-            }
+        for (group_key, children) in remaining {
+            let past_every_commit = u64::try_from(children)
+                .ok()
+                .and_then(|children| children.checked_add(1))
+                .ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        format!("effect group {group_key} has more children than commit positions"),
+                    )
+                })?;
+            controller
+                .await_group_child_drain_admission(&group_key, past_every_commit)
+                .await?;
         }
         for group_key in &closed.groups {
             self.incorporate_group_outcome(group_key).await?;

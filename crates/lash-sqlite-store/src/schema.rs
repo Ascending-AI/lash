@@ -1,7 +1,7 @@
 //! Canonical SQLite schema + the open/ensure helpers built on
 //! [`SqliteConnection`].
 //!
-//! The `SCHEMA` / `PROCESS_SCHEMA` / `EFFECT_SCHEMA` strings are plain SQLite
+//! The `SCHEMA` and `PROCESS_SCHEMA` strings are plain SQLite
 //! and are copied verbatim from the prior store. The only thing that changes in
 //! the rusqlite port is the *open path*: the prior store's `Builder::new_local` +
 //! `experimental_multiprocess_wal` + `PRAGMA journal_mode='mvcc'` is replaced by
@@ -9,9 +9,7 @@
 //! 15-second `busy_timeout` (see `conn.rs`).
 
 use super::*;
-use crate::schema_fragments::{
-    AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE, SESSION_INGRESS_TABLE, SESSION_ROOTS_TABLES,
-};
+use crate::schema_fragments::{SESSION_INGRESS_TABLE, SESSION_ROOTS_TABLES};
 
 #[derive(Clone, Copy)]
 struct SqliteDatabaseDefinition {
@@ -23,7 +21,7 @@ struct SqliteDatabaseDefinition {
     version: i32,
 }
 
-/// One of the four independently versioned SQLite databases a lash backend
+/// One of the three independently versioned SQLite databases a lash backend
 /// can hold.
 ///
 /// The variant is the single table for each database's schema SQL, version,
@@ -36,18 +34,11 @@ pub enum SqliteDatabase {
     ProcessRegistry,
     /// The trigger store.
     Triggers,
-    /// The effect-replay journal and await-event ledger.
-    EffectReplay,
 }
 
 impl SqliteDatabase {
     /// Every database a backend holds.
-    pub(crate) const ALL: [Self; 4] = [
-        Self::DurableCore,
-        Self::ProcessRegistry,
-        Self::Triggers,
-        Self::EffectReplay,
-    ];
+    pub(crate) const ALL: [Self; 3] = [Self::DurableCore, Self::ProcessRegistry, Self::Triggers];
 
     /// The file this database is kept in under a file backend's root.
     pub const fn file_name(self) -> &'static str {
@@ -55,7 +46,6 @@ impl SqliteDatabase {
             Self::DurableCore => crate::DURABLE_CORE_DB_FILE,
             Self::ProcessRegistry => "process-registry.db",
             Self::Triggers => "triggers.db",
-            Self::EffectReplay => "effect-replay.db",
         }
     }
 
@@ -66,7 +56,6 @@ impl SqliteDatabase {
             Self::DurableCore => "core",
             Self::ProcessRegistry => "registry",
             Self::Triggers => "triggers",
-            Self::EffectReplay => "effects",
         }
     }
 
@@ -81,7 +70,7 @@ impl SqliteDatabase {
             Self::ProcessRegistry => SqliteDatabaseDefinition {
                 name: "process registry",
                 schema: PROCESS_SCHEMA,
-                fragments: &[SCOPE_RETIREMENT_TABLE],
+                fragments: &[],
                 version: PROCESS_SCHEMA_VERSION,
             },
             Self::Triggers => SqliteDatabaseDefinition {
@@ -89,12 +78,6 @@ impl SqliteDatabase {
                 schema: TRIGGER_SCHEMA,
                 fragments: &[],
                 version: TRIGGER_SCHEMA_VERSION,
-            },
-            Self::EffectReplay => SqliteDatabaseDefinition {
-                name: "effect replay",
-                schema: EFFECT_SCHEMA,
-                fragments: &[AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE],
-                version: EFFECT_SCHEMA_VERSION,
             },
         }
     }
@@ -1132,9 +1115,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_key
 CREATE INDEX IF NOT EXISTS idx_processes_non_terminal
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
--- The scope-retirement fence this database shares with the effect journal is
--- applied from the shared SCOPE_RETIREMENT_TABLE fragment.
-
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
     ON processes(change_seq);
 CREATE INDEX IF NOT EXISTS idx_processes_originator
@@ -1438,11 +1418,6 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// pending-cancel list reads one column through one partial index instead of
 /// decoding every record. Version-37 registries carry a boolean this schema no
 /// longer has, so they are rejected rather than migrated.
-/// Version 39 moves `effect_scope_retirements` out of this string into the
-/// shared `SCOPE_RETIREMENT_TABLE` fragment (FIG-3260) so the fence is declared
-/// once for both carrying databases. The applied DDL is statement-identical,
-/// but the guarded `PROCESS_SCHEMA` text changed, so a pre-39 registry is
-/// rejected at open and recreated.
 /// Version 40 names the formerly-anonymous CHECKs (FIG-3261) so the
 /// required-constraints gate can see them; a pre-40 registry is rejected at
 /// open and recreated.
@@ -1590,266 +1565,6 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // migrated.
 pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 12;
 
-pub(crate) const EFFECT_SCHEMA: &str = "
-
-CREATE TABLE IF NOT EXISTS runtime_effect_group (
-    group_key          TEXT PRIMARY KEY,
-    scope_id           TEXT NOT NULL,
-    session_id         TEXT,
-    wake               TEXT NOT NULL,
-    loser_disposition  TEXT NOT NULL,
-    expected_children  INTEGER NOT NULL,
-    next_seq           INTEGER NOT NULL DEFAULT 0,
-    next_commit_seq    INTEGER NOT NULL DEFAULT 0,
-    lifecycle          TEXT NOT NULL DEFAULT '{\"type\":\"live\"}',
-    created_at_ms      INTEGER NOT NULL,
-    CONSTRAINT ck_runtime_effect_group_wake CHECK (wake IN ('first', 'first_success', 'all')),
-    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK (loser_disposition IN ('run_to_completion', 'cancel')),
-    CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (json_extract(lifecycle, '$.type') IN ('live', 'closing', 'settled'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_session
-    ON runtime_effect_group(session_id);
-
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_scope
-    ON runtime_effect_group(scope_id);
-
--- One row per accepted child of a group, carrying the request that
--- reconstructs it (ADR 0099 section 3). Retained input only: the section 4/5
--- arbitration state lives on the replay row as commit_state/commit_seq,
--- because the CAS that decides a child runs under the replay row's lock and
--- must not reach a second row to win. `command_version` is the command
--- encoding the retained envelope was minted under, checked at decode.
--- Written with the group row in one transaction, children first
--- (ADR 0065 N2), so a recorded group always has discoverable complete input.
--- No scope_id: the group row owns that fact.
-CREATE TABLE IF NOT EXISTS runtime_effect_group_child (
-    group_key        TEXT NOT NULL,
-    position         INTEGER NOT NULL,
-    replay_key       TEXT NOT NULL,
-    envelope_json    TEXT NOT NULL,
-    command_version  INTEGER NOT NULL,
-    created_at_ms    INTEGER NOT NULL,
-    -- Membership rows are written before their group row inside the open
-    -- transaction (ADR 0065 N2), so the reference must settle at commit, not
-    -- at the statement.
-    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
-    PRIMARY KEY (group_key, position)
-);
-
--- Reopens, drains and the unsettled-children join all reach a membership row
--- by (group_key, replay_key), which the position primary key does not serve.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_group_child_replay_key
-    ON runtime_effect_group_child(group_key, replay_key);
-
-CREATE TABLE IF NOT EXISTS runtime_effect_replay (
-    scope_id             TEXT NOT NULL,
-    session_id           TEXT,
-    replay_key           TEXT NOT NULL,
-    envelope_hash        TEXT NOT NULL,
-    envelope_json        TEXT NOT NULL,
-    status               TEXT NOT NULL,
-    outcome_json         TEXT,
-    error_json           TEXT,
-    lease_owner_id       TEXT,
-    lease_token          TEXT,
-    lease_expires_at_ms  INTEGER NOT NULL DEFAULT 0,
-    due_at_ms            INTEGER,
-    group_key            TEXT,
-    settlement_seq       INTEGER,
-    commit_state         TEXT NOT NULL DEFAULT 'pending',
-    commit_seq           INTEGER,
-    drain_input          TEXT,
-    created_at_ms        INTEGER NOT NULL,
-    updated_at_ms        INTEGER NOT NULL,
-    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
-    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
-    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
-    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
-    CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK ((status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)),
-    CONSTRAINT ck_runtime_effect_replay_error_json CHECK ((status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)),
-    CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK ((settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))),
-    CONSTRAINT fk_runtime_effect_replay_group FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
-    PRIMARY KEY (scope_id, replay_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_lease
-    ON runtime_effect_replay(status, lease_expires_at_ms);
-
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_session
-    ON runtime_effect_replay(session_id);
-
--- Backstop for the group counter, not the allocator. Ranks are allocated by a
--- single-row bump on runtime_effect_group; this index is what makes a
--- regression to a read-then-max allocator fail closed on a constraint violation
--- instead of silently seating two children at one rank. It doubles as the
--- ordered index the rank read scans, which is why its predicate is exactly the
--- read's filter.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_group_seq
-    ON runtime_effect_replay(group_key, settlement_seq)
-    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
-
--- One commit position per child, per group: the §4 linearization point's
--- backstop, the same role the settlement-seq unique index plays for ranks.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_commit_seq
-    ON runtime_effect_replay(group_key, commit_seq)
-    WHERE commit_seq IS NOT NULL;
-
--- The await-event tables this database shares with durable core and the
--- scope-retirement fence it shares with the process registry are applied
--- from the shared AWAIT_EVENT_TABLES and SCOPE_RETIREMENT_TABLE fragments.
-
--- Durable catalogs that may hold an authorized cancellation closure under a
--- physical scope. Owner retirement and participant registration serialize on
--- this database; a participant is released only after its catalog fences new
--- authorizations and proves that none remain.
-CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
-    scope_id       TEXT NOT NULL,
-    participant_id TEXT NOT NULL,
-    scope_json     TEXT NOT NULL,
-    PRIMARY KEY (scope_id, participant_id)
-);
-";
-
-/// Version 6 keys session-owned effects by the permanent session id and removes
-/// the incarnation join column. Effect databases follow the crate's alpha
-/// reject-and-recreate convention rather than carrying a migration chain.
-/// Version 7 rejects live-serde await-event and direct replay identities.
-/// Version 8 rejects the former live-serde tool-batch and process-transfer
-/// replay names.
-/// Version 9 rejects completed tool-attempt outcomes whose frame-switch control
-/// still carries the pre-cutover `frame_id` field.
-/// Version 10 adds the versioned tool-intent carrier to recorded tool-attempt
-/// outcomes and the typed execution outcomes to completed tool batches.
-/// Version 11 adds the durable effect-group journal (FIG-1416, ADR 0065): the
-/// `runtime_effect_group` counter row, the `group_key`/`settlement_seq` columns
-/// that seat a child in its group's settlement order, and the unique backstop
-/// over the pair. Effect databases follow the crate's reject-and-recreate
-/// convention, so an existing effect database is deleted on upgrade rather than
-/// migrated — release-notes material, not a host's discovery.
-/// Version 12 removes the duplicated `LlmResponse.full_text` member from
-/// runtime-effect outcomes. Pre-cutover journal JSON is upgraded only at the
-/// effect replay decode boundary.
-/// Version 13 merges each journaled exec observation with its projection
-/// metadata. Pre-13 effect databases are rejected at open; there is no migration
-/// arm.
-///
-/// The index-only carve-out documented on `SCHEMA_VERSION` applies here for the
-/// same reason and with the same limit: an additive non-unique
-/// `CREATE INDEX IF NOT EXISTS` self-heals into an existing effect database on
-/// open and leaves it readable by an older binary, so it does not bump — while
-/// any table, column, unique index, or semantic change still does.
-/// `idx_runtime_effect_replay_group_unsettled` (FIG-1564) is added under it,
-/// because bumping would delete live effect databases to buy a query plan. That
-/// index serves `read_unsettled_group_children`, whose predicate is the opposite
-/// half of the unique backstop's: without it the read scans the whole effect
-/// journal on every child completion after a close and on every drain pass
-/// (FIG-1536). `replay_key` trails the group key so the read's `ORDER BY` is the
-/// index order and the plan needs no sort.
-///
-/// The rationale lives here rather than beside the statement on purpose: the
-/// version guard's projection elides a *new* index statement but not the SQL
-/// comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
-/// bump the carve-out exists to avoid.
-/// Version 14 switches durable effect identities to domain-tagged BLAKE3.
-/// Version 15 adds the DDL-enforced effect-replay status vocabulary. Existing
-/// effect journals are rejected rather than migrated.
-/// Version 16 merges the two journaled exec dispatch ledgers. Pre-16 effect
-/// databases are rejected at open; there is no compatibility decoder.
-/// Version 17 adds the permanent `effect_scope_retirements` fence (FIG-2499,
-/// FIG-2500): retiring a process or runtime-operation scope deletes its effect
-/// children, groups, and await-event promises in one transaction and leaves a
-/// tombstone every admission path refuses. Pre-17 effect databases are
-/// rejected at open; there is no migration arm.
-/// Version 18 persists the admitted execution scope with every replay key.
-/// Pre-18 journals are rejected because their keys cannot identify the scope
-/// whose authority admitted the effect.
-/// Version 19 rejects the retired trigger-list envelope shape. Older journals
-/// are recreated rather than replayed across this encoding cutover.
-/// Version 20 makes lifecycle evidence own execution-artifact cleanup completion.
-/// Pre-20 effect databases are rejected rather than migrated.
-/// Version 21 adds owner-side cancellation-closure participants. This makes
-/// scope retirement serialize with authorization held in separate session
-/// catalogs; pre-21 effect databases are rejected and recreated.
-/// Version 22 drains journals written before the canonical `SleepSpec` encoding
-/// (FIG-2968, FIG-2983). A sleep row written at generation 21 carries the
-/// resolved `Sleep { duration_ms }` command in `envelope_json`; this build
-/// re-encodes the same intent as `Sleep { spec }`, so the row's replay-hash
-/// fence no longer reconstructs and a redrive reported `ReplayMismatch` instead
-/// of a refusal. The table shape is unchanged — the cutover is in the journaled
-/// command encoding — so the generation moves to refuse those journals at open.
-/// Pre-22 effect databases are rejected and recreated; there is no migration arm
-/// because the resolved duration cannot be turned back into the deadline the
-/// guest asked for.
-/// Version 23 moves the await-event tables and `effect_scope_retirements` out of
-/// this string into the shared `AWAIT_EVENT_TABLES` and `SCOPE_RETIREMENT_TABLE`
-/// fragments (FIG-3260) so each declaration exists once for every carrying
-/// database. The applied DDL is statement-identical, but the guarded
-/// `EFFECT_SCHEMA` text changed, so a pre-23 journal is rejected at open and
-/// recreated.
-/// Version 24 names the formerly-anonymous CHECKs in the shared fragments
-/// (FIG-3261) so the required-constraints gate can see them; a pre-24 journal
-/// is rejected at open and recreated.
-/// Version 25 constrains the effect-group wake and loser-disposition
-/// vocabularies at the DDL level (FIG-2811): both columns held closed enums
-/// enforced only at read time. A pre-25 journal is rejected at open and
-/// recreated.
-/// Version 26 (FIG-3376) moves the `SessionCreateRequest` carried in effect
-/// payloads to the spawn-time plugin-init cutover and drops `usage_source`;
-/// a pre-26 journal is rejected at open and recreated.
-/// Version 27 adds the accepted-membership table `runtime_effect_group_child`
-/// (FIG-3408, ADR 0099 §3). A pre-27 journal is rejected at open and recreated.
-/// Version 28 (FIG-2362) types the journaled `exec_code` outcome failure: the
-/// erased `Err(String)` becomes `Err(ExecCodeFailure { reason, message })` so
-/// the closed reason reaches the trace event on replay. The new decoder still
-/// accepts a bare string as `reason: "erased"`, but the written encoding moved,
-/// so a pre-28 journal is rejected at open and recreated rather than replayed
-/// under mixed spellings.
-/// Version 29 (FIG-3418) rewrites the `ParentScope` nested inside journaled
-/// start declarations from `{turn|process|host}` to `Owned(EffectOpener) |
-/// Host`: a pre-29 journal's command bytes no longer decode to the current
-/// shape, so it is rejected at open and recreated.
-/// Version 30 (FIG-3409) carries ADR 0099 §§4–5: `commit_state`/`commit_seq`
-/// on `runtime_effect_replay` give the §4 arbitration point and the
-/// final-commit order one enum-plus-counter shape, `drain_input` seals the
-/// committed drain input, `next_commit_seq` and `lifecycle` join
-/// `runtime_effect_group`, the group arity column is renamed
-/// `expected_children`, and the membership's `request_version` becomes
-/// `command_version`. A pre-30 journal is rejected at open and recreated.
-/// Version 31 (FIG-3411) is a journaled-encoding cutover with no relational
-/// change: the `ToolAttempt` outcome's `ToolAttemptCapture` usage deltas carry
-/// the `(source, model)` labels the incorporation charge needs, and the
-/// journaled `ToolInvocation` outcome's `ToolDispatchOutcome` carries the
-/// aggregated captures and trigger receipts to the settlement boundary. A
-/// pre-31 journal is rejected at open and recreated rather than replayed
-/// under the old carrier shape.
-/// Generation 32 rejects journaled settlements/captures with the retired message body.
-/// Version 33 (FIG-3410) puts ADR 0099 §7's group lifecycle in service: the
-/// `lifecycle` column version 30 reserved now carries `closing` and `settled`
-/// values beside `live`. No DDL changes — a pre-33 build reads the column as
-/// always `live` and would permit the retries §7 forbids, so a pre-33 journal
-/// is rejected at open and recreated.
-/// Version 34 (FIG-1947) enforces the effect-replay payload, rank, and
-/// group-membership invariants at the DDL level: terminal status now requires
-/// its own payload column (`completed` owns `outcome_json`, `failed` owns
-/// `error_json`, `in_progress` owns neither), a `settlement_seq` rank exists
-/// exactly on `drained`/`cancel_decided` rows, and both `group_key` references
-/// resolve to `runtime_effect_group` rows — the membership table's
-/// children-before-group write order riding a deferred foreign key. A pre-34
-/// journal is rejected at open and recreated.
-/// Version 35 (FIG-3607) moves the serialized bytes of the process commands a
-/// journal holds: a process is named by its minted id (no incarnation), a
-/// start carries its start key instead of a host-chosen id and is addressed by
-/// it, and a process scope names the minted id. A pre-35 journal would decode
-/// its process scopes to no process and its process commands to a replay
-/// mismatch, so it is rejected at open and recreated.
-/// Version 36 (FIG-3600 S7) moves the envelope vocabulary a journal holds: a
-/// session's deletion records the start of its close as a `BeginSessionClose`
-/// command whose outcome is the session's `CloseSession` control intent. No
-/// DDL changes; a pre-36 build cannot decode that entry, so a pre-36 journal
-/// is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 36;
-
 pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<()> {
     // WAL + busy_timeout are already applied in `SqliteConnection::open`. The
     // remaining tuning PRAGMAs match the prior store.
@@ -1988,8 +1703,7 @@ pub(crate) fn unsupported_schema_message(
         "Unsupported lash {} schema: this binary supports schema version {expected_version}, but \
          the database reports version {found_version}. There is no \
          migration chain — drain affected sessions and recreate the whole Lash trust domain with \
-         this version. Reset the tombstones, await-event revocation ledger, effect journal, and \
-         Restate state together; see docs/adr/0049-session-ids-are-used-once.md.{release_clause}",
+         this version. Reset the tombstones and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.{release_clause}",
         database.name()
     )
 }
@@ -2091,7 +1805,6 @@ mod schema_metadata_tests {
             (SqliteDatabase::DurableCore, "durable core"),
             (SqliteDatabase::ProcessRegistry, "process registry"),
             (SqliteDatabase::Triggers, "trigger store"),
-            (SqliteDatabase::EffectReplay, "effect replay"),
         ];
         for (database, name) in cases {
             assert_eq!(database.name(), name);
@@ -2100,8 +1813,7 @@ mod schema_metadata_tests {
                 format!(
                     "Unsupported lash {name} schema: this binary supports schema version 123, but \
                      the database reports version 45. There is no migration chain — drain affected \
-                     sessions and recreate the whole Lash trust domain with this version. Reset the \
-                     tombstones, await-event revocation ledger, effect journal, and Restate state \
+                     sessions and recreate the whole Lash trust domain with this version. Reset the tombstones and Restate state \
                      together; see docs/adr/0049-session-ids-are-used-once.md."
                 )
             );

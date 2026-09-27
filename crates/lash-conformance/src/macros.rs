@@ -1248,30 +1248,6 @@ macro_rules! effect_controller_replay_mismatch_tests {
     };
 }
 
-/// Register the SQL effect-controller lease-fencing law.
-#[macro_export]
-macro_rules! effect_controller_lease_fencing_tests {
-    ($fixture:block) => {
-        $crate::effect_controller_lease_fencing_tests!(@catalogue $fixture; [
-            (effect_controller_lease_fencing, "effect-controller-lease-fencing"),
-            (effect_lease_renew_transient_error_keeps_tool_running, "effect-lease-renew-transient-error"),
-            (effect_lease_renew_errors_past_budget_leave_row_reclaimable, "effect-lease-renew-budget-exhausted"),
-            (effect_lease_renew_stall_is_abandoned_at_the_deadline, "effect-lease-renew-stalled"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, backend) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(backend).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
 /// Register exact journal-retirement laws for SQL effect hosts.
 #[macro_export]
 macro_rules! effect_host_retirement_tests {
@@ -1932,69 +1908,6 @@ macro_rules! attachment_owner_degraded_tests {
                 let (_guard, factory, attachments) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory, attachments).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! store_effect_group_drain_tests {
-    ($fixture:block) => {
-        $crate::store_effect_group_drain_tests!(@catalogue $fixture; [
-            (store_effect_group_drain_conformance, "store-effect-group-drain"),
-            (
-                store_effect_group_crash_matrix_conformance,
-                "store-effect-group-crash-matrix"
-            ),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
-/// Register the durable-closing laws (ADR 0099 §7, FIG-3410) against the same
-/// drain-world factory the drain suite uses: each law builds its own hosts
-/// over the same journal and reaches the closing seam through
-/// `EffectHost::effect_group_closing`.
-#[macro_export]
-macro_rules! store_effect_group_closing_tests {
-    ($fixture:block) => {
-        $crate::store_effect_group_closing_tests!(@catalogue $fixture; [
-            (
-                closing_is_recorded_before_any_cancel_is_issued,
-                "group-closing-before-cancel"
-            ),
-            (
-                a_crash_after_drain_resumes_at_outcome_commit,
-                "group-crash-outcome"
-            ),
-            (
-                a_crash_after_accounting_resumes_at_parent_end,
-                "group-crash-parent-end"
-            ),
-            (
-                a_drain_budget_expiry_leaves_closing_recorded,
-                "group-closing-pending"
-            ),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*

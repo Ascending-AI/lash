@@ -387,7 +387,7 @@ impl RestateTestBackend {
 
     /// The backend a runtime runs on: lash-restate's engine over the store
     /// set, connected to the server double. Hand it to a core wherever a
-    /// test used `SqliteBackend::memory()`.
+    /// test used a SQLite effect backend.
     pub fn lash_backend(&self) -> lash_core::Backend {
         lash_core::Backend::new(self.restate.clone())
     }

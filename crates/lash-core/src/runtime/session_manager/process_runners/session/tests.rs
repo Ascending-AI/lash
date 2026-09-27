@@ -471,6 +471,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
 }
 
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn cancelled_mid_turn_subagent_retains_durable_rows() {
     Box::pin(cancelled_mid_turn_subagent_retains_durable_child_session(
         "mid-turn",
@@ -564,6 +565,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
 /// a terminal tool result, and the retained child keeps its accepted
 /// input open until a redelivery settles it.
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn failed_final_child_commit_cancellation_stays_recoverable() {
     let fixture = Box::pin(parked_session_turn("commit-failure")).await;
     let ParkedSessionTurn {
@@ -655,6 +657,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
 /// the existing child instead of returning blind — the open input is
 /// settled before the cancelled outcome is produced.
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     let fixture = Box::pin(parked_session_turn("crash-redelivery")).await;
     let ParkedSessionTurn {
@@ -735,6 +738,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
 /// task's panic surfaces as `child_turn_panicked`, the process stays
 /// recoverable, and the parent runtime keeps running turns.
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let backend = crate::testing::memory_backend().await;
     let previous = crate::panic_containment::set_loud(false);
@@ -837,6 +841,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
 /// longer upgrades; the durable row remains and reopens through the
 /// ordinary store open.
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn spawned_child_runtime_does_not_outlive_the_process_run() {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("run-scoped-child");
@@ -920,6 +925,7 @@ async fn spawned_child_runtime_does_not_outlive_the_process_run() {
 /// ordinary path — it never trips the "session already exists" create
 /// refusal, and the turn runs on the reopened runtime.
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("redelivered-child");
@@ -1002,6 +1008,7 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
 /// stranded the session retry-proof ("catalog row without a session
 /// head"). The turn then runs on the completed session.
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("metadata-only-child");
@@ -1289,6 +1296,7 @@ fn test_lineage(
 /// the session's engine drives it — records the owner and the owner's own
 /// ancestry above the session.
 #[tokio::test]
+#[ignore = "FIG-3923: port process runner law to the Restate worker conformance tier"]
 async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session() {
     let backend = crate::testing::memory_backend().await;
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(

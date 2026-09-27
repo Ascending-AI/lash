@@ -728,16 +728,6 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
     assert_eq!(
         counted_settlement_attempts(
             &state,
-            &SessionId::from("fig1058-terminal-settlement"),
-            lash::runtime::RuntimeErrorCode::SqliteEffectReplayLeaseLost,
-        )
-        .await,
-        1,
-        "unsafe post-effect lease loss must settle on its first handler attempt"
-    );
-    assert_eq!(
-        counted_settlement_attempts(
-            &state,
             &SessionId::from("fig1058-retryable-settlement"),
             lash::runtime::RuntimeErrorCode::EngineAwaitEventResolve,
         )

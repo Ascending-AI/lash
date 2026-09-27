@@ -145,30 +145,6 @@ pub async fn close_session(
         }
         .into());
     }
-    // ADR 0099 §7 / W16: an accepted or closing effect group keeps its
-    // session until it settles. The journal retirement after the close
-    // refuses the same pins, but only after the session is closed.
-    if let Some(closing) = administration
-        .effect_host()
-        .effect_group_closing()
-        .filter(|_| !closed)
-    {
-        let group_pins = closing
-            .read_session_pins(session_id)
-            .await
-            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        if let Some(first) = group_pins.first() {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::EffectGroupLifecyclePinned,
-                format!(
-                    "session `{session_id}` still owns {} effect group(s) that are live or \
-                     closing (first: `{first}`); session deletion is refused until they settle",
-                    group_pins.len()
-                ),
-            )
-            .into());
-        }
-    }
     let invocation = RuntimeEffectInvocation::new(
         EffectAddress::new(
             controller.execution_scope().clone(),

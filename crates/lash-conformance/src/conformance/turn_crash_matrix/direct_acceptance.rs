@@ -140,7 +140,6 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
                 SeamLayer {
                     control: control.clone(),
                     executions: Arc::clone(&executions),
-                    journal_faults: None,
                 },
                 crashed_turn_timings(),
                 None,
@@ -173,7 +172,6 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
                 SeamLayer {
                     control: SeamControl::default(),
                     executions: Arc::clone(&executions),
-                    journal_faults: None,
                 },
                 nominal_recovery_timings(),
                 Some(turns),

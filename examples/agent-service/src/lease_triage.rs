@@ -202,25 +202,28 @@ mod tests {
     /// here reads and manipulates the lease lane directly, so no turn runs.
     async fn durable_core(dir: &std::path::Path) -> (LashCore, Arc<dyn SessionStoreFactory>) {
         let backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::open(dir.join("sessions"))
+            lash_sqlite_store::SqliteStoreSet::open(dir.join("sessions"))
                 .await
                 .expect("open the scratch SQLite backend"),
         );
         let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
-        let core = LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .model(
-                ModelSpec::builder("mock/model")
-                    .context_window_tokens(8_000)
-                    .build()
-                    .expect("valid model metadata"),
-            )
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "agent-service-lease-triage-test",
-                "agent-service-lease-triage-test-boot",
-            ))
-            .expect("build durable core");
+        let core = LashCore::standard_builder(
+            lash_conformance::recording_backend_over(backend),
+            lash::TurnBudget::Unbounded,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .model(
+            ModelSpec::builder("mock/model")
+                .context_window_tokens(8_000)
+                .build()
+                .expect("valid model metadata"),
+        )
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "agent-service-lease-triage-test",
+            "agent-service-lease-triage-test-boot",
+        ))
+        .expect("build durable core");
         (core, factory)
     }
 

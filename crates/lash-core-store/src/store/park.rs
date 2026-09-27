@@ -459,17 +459,14 @@ impl ParkReason {
             }
             RuntimeErrorCode::RetiredGeneration => Some(Self::of_retired_generation(error)),
             RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
-            RuntimeErrorCode::EffectReplayDivergence
-            | RuntimeErrorCode::SqliteEffectReplayHashConflict => {
-                Some(Self::EffectReplayDivergence {
-                    effect_kind: error
-                        .summary
-                        .as_ref()
-                        .and_then(|summary| summary.effect_kind.clone())
-                        .unwrap_or_else(|| "unknown".to_string()),
-                    message,
-                })
-            }
+            RuntimeErrorCode::EffectReplayDivergence => Some(Self::EffectReplayDivergence {
+                effect_kind: error
+                    .summary
+                    .as_ref()
+                    .and_then(|summary| summary.effect_kind.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                message,
+            }),
             _ => None,
         }
     }
@@ -1112,7 +1109,7 @@ mod tests {
     fn effect_replay_divergence_errors_park() {
         for code in [
             RuntimeErrorCode::EffectReplayDivergence,
-            RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            RuntimeErrorCode::EffectReplayDivergence,
         ] {
             let mut error = RuntimeError::new(code.clone(), "the recorded envelope diverged");
             error.summary = Some(Box::new(crate::RuntimeEffectReplayMismatchReport {

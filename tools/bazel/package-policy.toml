@@ -268,18 +268,6 @@ targets = ["dialect_cost"]
 compile_data = ["//:perf_guard_budgets"]
 
 [[rule]]
-packages = ["lash-internal-sqlite-store"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["conformance"]
-bin_env = { LASH_CONFORMANCE_HELPER_EXE = "sqlite-await-event-helper" }
-
-[[rule]]
-packages = ["lash-internal-sqlite-store"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["sqlite-await-event-helper"]
-compile_data = ["//crates/lash-core:cold_process_drivers"]
-
-[[rule]]
 packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["conformance"]

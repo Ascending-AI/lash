@@ -191,15 +191,6 @@ impl RuntimeSessionServices {
             .with_opener_state(crate::session::OpenerState::new(
                 services.current.host.core.control.opener_work_bound,
             ))
-            .with_group_closing(
-                services
-                    .current
-                    .host
-                    .core
-                    .control
-                    .effect_host
-                    .effect_group_closing(),
-            )
             .with_unrecorded_session_sources(services.current.host.core.control.open_sources);
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);

@@ -16,56 +16,6 @@
 use super::*;
 
 impl<'run> RuntimeTurnDriver<'run> {
-    /// Recover the losers of groups this turn's opener accepted before its
-    /// worker died (ADR 0099 W5): a resumed turn serves its completed cells
-    /// from the journal, so no cell reopens those groups, and their accepted
-    /// children would otherwise wait for the turn's end to cancel them. A dead
-    /// worker is not a closed opener. Building the context registers the turn
-    /// as a live opener first, which is what lets a recovered child resolve
-    /// its runner. Best-effort: a failure is traced, and the turn's end still
-    /// closes every live group under its scope.
-    pub(super) async fn recover_opener_groups(&self, event_tx: &TurnObserver) {
-        // Without a closing seam there is no journal of live groups to read:
-        // the tier answers recovery itself (Restate) or holds nothing that
-        // outlives its process.
-        if self
-            .host
-            .core
-            .control
-            .effect_host
-            .effect_group_closing()
-            .is_none()
-        {
-            return;
-        }
-        // Group recovery's emissions have no host lane — the old code dropped
-        // the channel receiver outright — so the context observes nowhere.
-        let context = match self.execution_context_observing(
-            crate::engine::NullObservationSink::arc(),
-            event_tx,
-            Arc::new(crate::ChronologicalProjection::default()),
-        ) {
-            Ok(context) => context,
-            Err(error) => {
-                tracing::warn!(
-                    session_id = %self.session_id,
-                    turn_id = %self.turn_id,
-                    error = %error,
-                    "a resumed turn could not build the context its group recovery needs",
-                );
-                return;
-            }
-        };
-        if let Err(error) = context.recover_opener_groups().await {
-            tracing::warn!(
-                session_id = %self.session_id,
-                turn_id = %self.turn_id,
-                error = %error,
-                "recovering a resumed turn's live effect groups failed",
-            );
-        }
-    }
-
     /// The opener's end ahead of the turn's terminal checkpoint: close,
     /// finalize and incorporate every group the turn formed, so what the
     /// losers' settlements carry — checkpoint messages, possession, usage —
@@ -124,17 +74,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     }
 
     async fn close_turn_groups(&self, event_tx: &TurnObserver) -> Result<(), RuntimeError> {
-        // Nothing to close: no cursor held, and no closing seam whose journal
-        // could name a group this turn no longer holds.
-        if !self.opener_state.holds_groups()
-            && self
-                .host
-                .core
-                .control
-                .effect_host
-                .effect_group_closing()
-                .is_none()
-        {
+        if !self.opener_state.holds_groups() {
             return Ok(());
         }
         // The closing pass's emissions have no host lane: the old code

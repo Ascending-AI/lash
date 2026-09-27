@@ -480,32 +480,6 @@
   "queue_batch_id": "qwb:7e635522b53e00911b73ffd64e645117fc1b3b5e7950e8687e02ef07885db80a",
   "pending_input_id": "durable-read-pending-input",
   "process_env_ref": "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738",
-  "await_event_key": {
-    "scope": {
-      "type": "turn",
-      "session_id": "durable-read-fixture",
-      "turn_id": "durable-read-turn"
-    },
-    "wait": {
-      "type": "tool_completion",
-      "tool_call_id": "durable-read-tool-call"
-    },
-    "key_id": "await-event:v3:blake3:492da35020886dbeed12174eb9aebf74f00a41d6fc0cec515dc823b68147850e",
-    "signature": "7b44ac25dcca35c6a15d65d08eef76339ed4320a7e5a912fe4067280beb53119"
-  },
-  "revoked_await_event_key": {
-    "scope": {
-      "type": "turn",
-      "session_id": "durable-read-revoked-session",
-      "turn_id": "durable-read-revoked-turn"
-    },
-    "wait": {
-      "type": "tool_completion",
-      "tool_call_id": "durable-read-revoked-tool-call"
-    },
-    "key_id": "await-event:v3:blake3:4a4139f25f145338ec3028bd01d853fd1241a9fb226cbc6ab4cbed01ad5bdbba",
-    "signature": "daea63b63ac72e5c4f6e7410c016de0e0cfa50b2b91409c5a25035f44c85700e"
-  },
   "wake_delivery": {
     "version": 4,
     "wake_id": "wake:v1:blake3:5f8eb7fb2de74745b4f301023356a7a43ea1452d796158036ec9542fde33d409",

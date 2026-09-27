@@ -1,14 +1,11 @@
-pub mod await_event_coordinator;
-pub mod effect_replay_driver;
-pub use effect_replay_driver::{RecordedKeyRange, RecordedKeys};
+mod recorded_keys;
+pub use recorded_keys::{RecordedKeyRange, RecordedKeys};
 mod envelope;
 #[doc(hidden)]
 pub mod executor;
 mod group;
 pub(crate) use group::await_cancelled_error;
-pub mod group_closing;
-pub mod group_drain;
-mod group_journal;
+mod group_executors;
 #[cfg(any(test, feature = "testing"))]
 mod layered_host;
 pub mod scope_status;
@@ -45,7 +42,7 @@ pub use tool_settlement::{
 };
 mod drive_outcome;
 mod outcome;
-pub use lash_core_effect::promise_semantics;
+pub use lash_core_effect::await_event_identity;
 mod validation;
 
 pub use envelope::{
@@ -71,19 +68,13 @@ pub use executor::{
     TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
     turn_control_binding_id_for_scope,
 };
+pub use group::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 pub use group::{
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,
     GroupReopen, GroupSettlement, GroupWakePolicy, IncorporatedGroupRank, LoserPolicy,
     RankedGroupSettlement, RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
-pub use group_closing::{
-    GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
-    StoreEffectGroupClosing, UnsettledEffectGroup,
-};
-pub use group_drain::{
-    ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
-};
-pub use group_journal::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
+pub use group_executors::GroupExecutors;
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
 };

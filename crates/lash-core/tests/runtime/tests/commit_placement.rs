@@ -13,97 +13,6 @@ impl<const ENGINE: bool> lash_core::testing::EffectLayer for JournaledCommitCont
     }
 }
 
-async fn assert_commit_placement(
-    backend: &lash_core::Backend,
-    session_id: &SessionId,
-    effect_host: Arc<dyn lash_core::EffectHost>,
-    expected_entries: usize,
-) {
-    let store = unbound_recording_store(backend).await;
-    let transport = mock_provider(vec![MockCall {
-        stream_events: Vec::new(),
-        response: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: "committed".into(),
-                response_meta: None,
-            }],
-            ..LlmResponse::default()
-        }),
-    }]);
-    let host = EmbeddedRuntimeHost::new(
-        test_runtime_host_config(backend).with_effect_host(Arc::clone(&effect_host)),
-    );
-    let mut runtime = TestRuntime::new(backend, transport)
-        .host(host)
-        .store(store.clone())
-        .with_session_id(session_id)
-        .build()
-        .await;
-    let _ = lash_core::runtime::commit_admission::take_product_commit_admission_observations(
-        session_id,
-    );
-    runtime
-        .drive_turn(
-            TurnInput::text("commit"),
-            lash_core::facade_support::TurnOptions::new(
-                CancellationToken::new(),
-                effect_host
-                    .scoped(lash_core::AdmittedScope::turn(session_id, "placement-turn"))
-                    .unwrap(),
-            ),
-        )
-        .await
-        .expect("commit real turn");
-    let observations =
-        lash_core::runtime::commit_admission::take_product_commit_admission_observations(
-            session_id,
-        );
-    assert_eq!(
-        observations.len(),
-        expected_entries,
-        "turn commit coordinator entries"
-    );
-    enqueue_config_patch_command(
-        store.as_ref(),
-        session_id,
-        lash_core::runtime::ApplyConfigPatch {
-            model: Some(
-                lash_core::ModelSpec::builder("placement-model")
-                    .context_window_tokens(32_000)
-                    .build()
-                    .unwrap(),
-            ),
-            ..lash_core::runtime::ApplyConfigPatch::default()
-        },
-    )
-    .await;
-    let lease = lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        store.as_ref(),
-        session_id,
-        &lease_owner(session_id),
-        "placement-command",
-        lash_core::facade_support::LeaseTimings::default().ttl_ms(),
-    )
-    .await
-    .unwrap()
-    .acquired()
-    .unwrap();
-    runtime
-        .drain_next_session_command(&lease.fence())
-        .await
-        .unwrap()
-        .expect("command receipt");
-    let observations =
-        lash_core::runtime::commit_admission::take_product_commit_admission_observations(
-            session_id,
-        );
-    assert_eq!(
-        observations.len(),
-        expected_entries,
-        "session command coordinator entries"
-    );
-}
-
 /// The host an engine-owned controller is lent through.
 fn engine_commit_host(backend: &lash_core::Backend) -> Arc<dyn lash_core::EffectHost> {
     effect::layered_effect_host(backend, Arc::new(JournaledCommitController::<true>))
@@ -159,30 +68,6 @@ async fn durable_journaled_engine_commits_bypass_local_admission() {
             &session_id,
         );
     assert_eq!(observations.len(), 0, "turn commit coordinator entries");
-}
-
-#[tokio::test]
-async fn store_host_commits_enter_local_admission() {
-    let backend = memory_backend().await;
-    Box::pin(assert_commit_placement(
-        &backend,
-        &SessionId::from("store-host-commit-placement"),
-        backend.effect_host(),
-        1,
-    ))
-    .await;
-}
-
-#[tokio::test]
-async fn store_journaled_commits_keep_native_admission() {
-    let backend = memory_backend().await;
-    Box::pin(assert_commit_placement(
-        &backend,
-        &SessionId::from("store-journaled-commit-placement"),
-        effect::layered_effect_host(&backend, Arc::new(JournaledCommitController::<false>)),
-        1,
-    ))
-    .await;
 }
 
 /// Passes every operation through untouched.

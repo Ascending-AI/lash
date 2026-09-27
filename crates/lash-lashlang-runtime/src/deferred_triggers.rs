@@ -417,10 +417,28 @@ mod tests {
         )
     }
 
-    async fn context(
+    async fn fixture(
+        seed: u64,
+    ) -> (
+        lash_restate_test::RestateTestBackend,
+        lash_restate_test::OpenHandler,
+    ) {
+        let double = lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+            .await
+            .expect("open the Restate double");
+        let handler = double
+            .open_handler(lash_core::AdmittedScope::turn("session", "turn"))
+            .await
+            .expect("open the code cell's handler");
+        (double, handler)
+    }
+
+    fn context<'run>(
         record: &mut DeferredTriggerResolutionRecord,
         replay_key: &str,
-    ) -> lash_core::RuntimeExecutionContext<'static> {
+        double: &lash_restate_test::RestateTestBackend,
+        handler: &'run lash_restate_test::OpenHandler,
+    ) -> lash_core::RuntimeExecutionContext<'run> {
         let invocation = lash_core::testing::exec_code_invocation(
             "session",
             "turn",
@@ -434,7 +452,7 @@ mod tests {
                 .expect("effect invocation has identity"),
         );
         lash_core::testing::code_execution_context_with_invocation(
-            &lash_core::Backend::from(crate::lib_tests::memory_backend().await),
+            lash_core::testing::TestExecutionPorts::lent(&double.lash_backend(), handler.scoped()),
             invocation,
         )
     }
@@ -482,7 +500,13 @@ mod tests {
         let resolver: SharedDeferredTriggerResolver = Arc::new(registry);
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:resident-equivalence").await;
+        let (_double, handler) = fixture(0xd311).await;
+        let ctx = context(
+            &mut record,
+            "exec-code:resident-equivalence",
+            &_double,
+            &handler,
+        );
         let (deferred, _) = resolve_and_fold_deferred_triggers(
             &referenced,
             LashlangSurface::default(),
@@ -526,6 +550,8 @@ mod tests {
             deferred.resources.value_constructors().collect::<Vec<_>>(),
             resident.resources.value_constructors().collect::<Vec<_>>()
         );
+        drop(ctx);
+        handler.close().await.expect("close the code cell handler");
     }
 
     #[tokio::test]
@@ -536,7 +562,8 @@ mod tests {
         let resolver: SharedDeferredTriggerResolver = Arc::new(registry);
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:trigger-replay").await;
+        let (_double, handler) = fixture(0xd312).await;
+        let ctx = context(&mut record, "exec-code:trigger-replay", &_double, &handler);
         let (resolved, captured) = resolve_and_fold_deferred_triggers(
             &referenced,
             LashlangSurface::default(),
@@ -566,7 +593,7 @@ mod tests {
                 event_type("calendar.Change", "different"),
             )
             .expect("changed ambient definition");
-        let replay_ctx = context(&mut record, "exec-code:trigger-replay").await;
+        let replay_ctx = context(&mut record, "exec-code:trigger-replay", &_double, &handler);
         let (replayed, replayed_record) =
             resolve_and_fold_deferred_triggers(&referenced, changed, None, &captured, &replay_ctx)
                 .await
@@ -582,6 +609,9 @@ mod tests {
             TriggerResolution::Resolved(ref grant)
                 if grant.route == serde_json::json!({"route": "calendar-provider"})
         ));
+        drop(replay_ctx);
+        drop(ctx);
+        handler.close().await.expect("close the code cell handler");
     }
 
     #[tokio::test]
@@ -590,7 +620,13 @@ mod tests {
             Arc::new(DeferredTriggerProviderRegistry::new());
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:negative-trigger-replay").await;
+        let (_double, handler) = fixture(0xd313).await;
+        let ctx = context(
+            &mut record,
+            "exec-code:negative-trigger-replay",
+            &_double,
+            &handler,
+        );
         let (_, captured) = resolve_and_fold_deferred_triggers(
             &referenced,
             LashlangSurface::default(),
@@ -614,7 +650,12 @@ mod tests {
                 event_type("calendar.Change", "id"),
             )
             .expect("later ambient definition");
-        let replay_ctx = context(&mut record, "exec-code:negative-trigger-replay").await;
+        let replay_ctx = context(
+            &mut record,
+            "exec-code:negative-trigger-replay",
+            &_double,
+            &handler,
+        );
         let (replayed, replayed_record) =
             resolve_and_fold_deferred_triggers(&referenced, changed, None, &captured, &replay_ctx)
                 .await
@@ -629,6 +670,9 @@ mod tests {
             replayed_record.resolutions["calendar.Changed"],
             TriggerResolution::NotAvailable
         ));
+        drop(replay_ctx);
+        drop(ctx);
+        handler.close().await.expect("close the code cell handler");
     }
 
     #[tokio::test]
@@ -641,7 +685,13 @@ mod tests {
         let resolver: SharedDeferredTriggerResolver = Arc::new(registry);
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:ambiguous-trigger").await;
+        let (_double, handler) = fixture(0xd314).await;
+        let ctx = context(
+            &mut record,
+            "exec-code:ambiguous-trigger",
+            &_double,
+            &handler,
+        );
 
         assert!(matches!(
             resolve_and_fold_deferred_triggers(
@@ -656,5 +706,7 @@ mod tests {
                 if path == "calendar.Changed"
                     && provider_ids == ["a".to_string(), "b".to_string()]
         ));
+        drop(ctx);
+        handler.close().await.expect("close the code cell handler");
     }
 }

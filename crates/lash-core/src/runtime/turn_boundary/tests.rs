@@ -208,9 +208,11 @@ fn frame_switch_commit_input<'a>(
 
 #[tokio::test]
 async fn final_commit_retry_preserves_honoured_after_step_settlement() {
-    let backend = crate::testing::sqlite_memory_backend().await;
-    let host: Arc<dyn crate::EffectHost> = backend.effect_host();
-    let store = Arc::new(crate::testing::unbound_recording_store_on(&backend).await);
+    let double =
+        crate::testing::kernel_double(0x000f_1ca5, lash_restate_test::ServerConfig::default())
+            .await;
+    let host: Arc<dyn crate::EffectHost> = double.lash_backend().effect_host();
+    let store = Arc::new(crate::testing::double_unbound_recording_store(&double).await);
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
     state.session_id = SessionId::from("final-cancel-cas");
     state.ensure_agent_frame_initialized();
@@ -241,9 +243,11 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         crate::runtime::turn_control::ActiveTurnControl::new(host.as_ref(), address.clone())
             .await
             .expect("create turn gate");
-    let scoped = host
-        .scoped(crate::AdmittedScope::new(address.execution_scope().clone()))
-        .expect("scope final-cancel CAS controller");
+    let handler = double
+        .open_handler(crate::AdmittedScope::new(address.execution_scope().clone()))
+        .await
+        .expect("open final-cancel CAS handler");
+    let scoped = handler.scoped();
     let honoured = control
         .observe_pending_cancel(
             &scoped,
@@ -375,6 +379,11 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             .expect("read closure pins")
             .is_empty()
     );
+    drop(scoped);
+    handler
+        .close()
+        .await
+        .expect("close final-cancel CAS handler");
 }
 async fn leased_boundary(
     store: &RecordingStore,

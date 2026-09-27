@@ -5,24 +5,9 @@ use lashlang::testing::ast_builders as b;
 
 const SEED: u64 = 0x1a5_1a9;
 
-thread_local! {
-    /// Backends opened on this test thread, held until the thread ends: a
-    /// memory backend's effect journal reaches its process registry by name,
-    /// so the backend must outlive every context built over its ports.
-    static HELD_BACKENDS: std::cell::RefCell<Vec<lash_sqlite_store::SqliteBackend>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-/// A fresh SQLite memory backend (ADR 0102), held for the rest of the test.
-/// Kept for the durable-journal subjects later lanes still own (FIG-3668 B4:
-/// deferred grant folds dispatch `language_runtime_value` effects through the
-/// journal, which only the real engine host synthesizes).
-pub(crate) async fn memory_backend() -> lash_sqlite_store::SqliteBackend {
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a memory backend");
-    HELD_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
-    backend
+/// A storage-backed test backend for paths that do not execute engine effects.
+pub(crate) async fn memory_backend() -> lash_core::Backend {
+    lash_conformance::recording_backend_over(memory_store_set().await)
 }
 
 /// A fresh memory store set's Lashlang artifact store: a storage port a test

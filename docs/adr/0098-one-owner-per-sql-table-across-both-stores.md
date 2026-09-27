@@ -19,13 +19,15 @@ ADR 0101's close-out amendment keeps the `pending_turn_inputs`,
 logical ingress; of `session_ingress` only the per-session sequence counter
 (`session_ingress_sequence`) remains. The ownership rules here apply unchanged.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+Amended 2026-09-27 (FIG-3861): the effect journal, wait tables and their
+scope fences are deleted. The effect and wait rendering examples below record
+the historical migration; the ownership gate now covers storage tables only.
+
+Amended 2026-09-24 (FIG-3669), **partly implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR
 specifies SQL-engine behaviour: the table modules of engine tables such as
-`runtime_effect_replay`; the one-owner rule stays for the storage tables. Those
-passages stay as written until the PR that deletes the code (FIG-3667, FIG-3668,
-or FIG-3600 for the session lease) rewrites them.
+`runtime_effect_replay`; the one-owner rule stays for the storage tables. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. Session and process lease passages await their own cutovers.
 
 ## Context
 

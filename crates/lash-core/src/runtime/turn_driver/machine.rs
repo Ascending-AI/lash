@@ -80,7 +80,6 @@ impl RuntimeTurnDriver<'_> {
         event_tx: TurnObserver,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
-        Box::pin(self.recover_opener_groups(&event_tx)).await;
         // The erasure's reason lives on `EffectLoop`: the alias exists to make
         // the cut a named decision rather than an incidental annotation.
         let result = {

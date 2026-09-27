@@ -147,18 +147,6 @@ and the delete.
 """
 
 [[cross_family]]
-statement = "effect_journal.scope_is_quiescent"
-owner = "crates/lash-store-sql/src/effect.rs"
-touches = ["await_event_waits"]
-reason = """
-Quiescence is one question over both families: an in-progress effect row, a
-group still short of a journaled child, or an unresolved promise all mean the
-scope is live. Asking it as three statements would let a child start between
-them, so the effect family owns the whole predicate and reads the wait
-family's table inside it.
-"""
-
-[[cross_family]]
 statement = "attachment_manifest.select_live_root_proving_process_death"
 owner = "crates/lash-store-sql/src/attachment/manifest.rs"
 touches = ["deleted_sessions", "processes", "runtime_turn_commits"]
@@ -440,51 +428,6 @@ attachment_manifest = "crates/lash-store-sql/src/attachment/manifest.rs"
 attachment_condemnations = "crates/lash-store-sql/src/attachment/condemnation.rs"
 attachment_blobs = "crates/lash-store-sql/src/attachment/blob.rs"
 
-[families.effect]
-tables = [
-    "runtime_effect_replay",
-    "runtime_effect_group",
-    "runtime_effect_group_child",
-    "effect_scope_retirements",
-]
-statement_prefixes = [
-    "effect_journal",
-    "effect_replay",
-    "effect_group",
-    "effect_group_child",
-    "effect_scope_retirement",
-]
-shared = [
-    "crates/lash-store-sql/src/effect.rs",
-    "crates/lash-store-sql/src/effect/replay.rs",
-    "crates/lash-store-sql/src/effect/group.rs",
-    "crates/lash-store-sql/src/effect/group_child.rs",
-    "crates/lash-store-sql/src/effect/scope_retirement.rs",
-]
-sqlite = [
-    "crates/lash-sqlite-store/src/effect_replay.rs",
-    "crates/lash-sqlite-store/src/scope_fence.rs",
-]
-postgres = []
-# Provisioning, not persistence: the schema artifacts that create these tables
-# and seed them. No table name, column or durable encoding changes in this arc.
-schema = [
-    "crates/lash-sqlite-store/src/schema.rs",
-    "crates/lash-sqlite-store/src/schema_fragments.rs",
-    "crates/lash-postgres-store/src/postgres/schema.rs",
-    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
-    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
-    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
-    "crates/lash-postgres-store/src/postgres/migrate.rs",
-    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
-]
-
-[families.effect.table_modules]
-runtime_effect_replay = "crates/lash-store-sql/src/effect/replay.rs"
-runtime_effect_group = "crates/lash-store-sql/src/effect/group.rs"
-runtime_effect_group_child = "crates/lash-store-sql/src/effect/group_child.rs"
-effect_scope_retirements = "crates/lash-store-sql/src/effect/scope_retirement.rs"
-
 [families.process]
 tables = [
     "processes",
@@ -717,7 +660,6 @@ tables = [
     "turn_cancel_affected_inputs",
     "turn_cancel_requests",
     "turn_cancel_closure_authorizations",
-    "turn_cancel_closure_participants",
     "turn_cancel_retired_scopes",
     "turn_cancellation_bindings",
     "turn_parks",
@@ -736,7 +678,6 @@ statement_prefixes = [
     "turn_cancel_affected_input",
     "turn_cancel_request",
     "turn_cancel_closure_authorization",
-    "turn_cancel_closure_participant",
     "turn_cancel_retired_scope",
     "turn_cancellation_binding",
     "turn_park",
@@ -750,7 +691,6 @@ shared = [
     "crates/lash-store-sql/src/turn_ingress/cancel_requests.rs",
     "crates/lash-store-sql/src/turn_ingress/cancellation_bindings.rs",
     "crates/lash-store-sql/src/turn_ingress/closure_authorizations.rs",
-    "crates/lash-store-sql/src/turn_ingress/closure_participants.rs",
     "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_batches.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_items.rs",
@@ -827,7 +767,6 @@ tool_intent_submissions = "crates/lash-store-sql/src/turn_ingress/tool_intent_su
 turn_cancel_affected_inputs = "crates/lash-store-sql/src/turn_ingress/cancel_affected_inputs.rs"
 turn_cancel_requests = "crates/lash-store-sql/src/turn_ingress/cancel_requests.rs"
 turn_cancel_closure_authorizations = "crates/lash-store-sql/src/turn_ingress/closure_authorizations.rs"
-turn_cancel_closure_participants = "crates/lash-store-sql/src/turn_ingress/closure_participants.rs"
 turn_cancel_retired_scopes = "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs"
 turn_cancellation_bindings = "crates/lash-store-sql/src/turn_ingress/cancellation_bindings.rs"
 turn_parks = "crates/lash-store-sql/src/turn_ingress/turn_parks.rs"
@@ -878,36 +817,6 @@ schema = [
 
 [families.drain.table_modules]
 draining_generations = "crates/lash-store-sql/src/draining_generations.rs"
-
-[families.wait]
-tables = ["await_event_waits", "await_event_meta", "await_event_revoked_sessions"]
-statement_prefixes = [
-    "await_event_wait",
-    "await_event_revoked_session",
-    "await_event_meta",
-]
-shared = [
-    "crates/lash-store-sql/src/wait/waits.rs",
-    "crates/lash-store-sql/src/wait/meta.rs",
-    "crates/lash-store-sql/src/wait/revoked_sessions.rs",
-]
-sqlite = ["crates/lash-sqlite-store/src/await_event.rs"]
-postgres = []
-schema = [
-    "crates/lash-sqlite-store/src/schema.rs",
-    "crates/lash-sqlite-store/src/schema_fragments.rs",
-    "crates/lash-postgres-store/src/postgres/schema.rs",
-    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
-    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
-    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
-    "crates/lash-postgres-store/src/postgres/migrate.rs",
-    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
-]
-
-[families.wait.table_modules]
-await_event_waits = "crates/lash-store-sql/src/wait/waits.rs"
-await_event_meta = "crates/lash-store-sql/src/wait/meta.rs"
-await_event_revoked_sessions = "crates/lash-store-sql/src/wait/revoked_sessions.rs"
 
 # ---------------------------------------------------------------------------
 # attachment family
@@ -1018,155 +927,9 @@ reason = "Same table, same reason. The GC's physical delete of one blob."
 # effect family
 # ---------------------------------------------------------------------------
 
-[[dialect_only]]
-statement = "effect_journal.insert_session_scope_fences"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_replay.select_for_claim"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_replay.insert_claimed"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_replay.finalize_terminal"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_replay.renew_lease"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_group_child.insert_accepted"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_group.insert_new"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_scope_retirement.insert_fence"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_scope_retirement.select_pending_artifact_cleanup"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_scope_retirement.complete_artifact_cleanup"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_scope_retirement.select_all_scope_ids"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite alone keeps this table in two files — the journal's and a bound process
-registry's (ADR 0049) — and alone has to enumerate the journal's fences at bind
-time to lift the ones the registry says are stale. PostgreSQL has one table and
-no bind-time repair, so it has no counterpart operation.
-"""
-
 # ---------------------------------------------------------------------------
 # wait family
 # ---------------------------------------------------------------------------
-
-[[dialect_only]]
-statement = "await_event_wait.insert_pending"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "await_event_wait.insert_resolved"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "await_event_wait.resolve_pending"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "await_event_wait.cancel_session_promises"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "await_event_meta.select_signing_secret"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
 
 # ---------------------------------------------------------------------------
 # artifact family
@@ -3850,42 +3613,6 @@ reason = """
 The singleton flag forks as everywhere on this table, and the
 raise-not-lower max is SQLite's two-argument `MAX` where PostgreSQL spells
 it `GREATEST`.
-"""
-
-[[dialect_only]]
-statement = "effect_replay.release_uncommitted_derivation"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_group.transition_lifecycle"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_group.select_unsettled_by_scope"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
-"""
-
-[[dialect_only]]
-statement = "effect_group.select_session_pins"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
-The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 # ---------------------------------------------------------------------------

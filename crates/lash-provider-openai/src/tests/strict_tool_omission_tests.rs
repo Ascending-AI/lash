@@ -9,10 +9,9 @@ use lash::{LashCore, TurnInput};
 use lash_core::llm::types::{LlmContentBlock, LlmRole};
 use lash_core::{
     EffectAddress, ExecutionScope, LlmRequestSpec, RuntimeAttribution, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
-use lash_sqlite_store::SqliteRuntimeEffectController;
 use std::sync::Mutex;
 
 const TOOL_NAME: &str = "strict_omission_probe";
@@ -652,15 +651,18 @@ fn tool_arguments_from_effect(outcome: &RuntimeEffectOutcome) -> Value {
 }
 
 async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
-    let dir = tempfile::tempdir().expect("effect replay tempdir");
-    let journal_path = dir
-        .path()
-        .join(format!("{}-effects.sqlite", endpoint.label()));
+    let seed = match endpoint {
+        Endpoint::Chat => 0x5711_c7e6,
+        Endpoint::Responses => 0x5711_c7e7,
+    };
+    let backend = lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build replay backend");
     let scope = ExecutionScope::turn(
         format!("{}-replay-session", endpoint.label()),
         format!("{}-replay-turn", endpoint.label()),
     );
-    let provider_request = replay_request_with_canonical_call();
+    let request = replay_request_with_canonical_call();
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
             EffectAddress::new(scope.clone(), "strict-tool-call").expect("valid effect address"),
@@ -674,91 +676,85 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
         ),
         RuntimeEffectCommand::LlmCall {
             provider_id: "test".to_string(),
-            request: Box::new(effect_request_spec(&provider_request)),
+            request: Box::new(effect_request_spec(&request)),
         },
     );
-
     let strict_transport = Arc::new(CapturingScriptedTransport::new([tool_response(
         endpoint,
         &strict_arguments(),
     )]));
-    let mut strict_provider = provider(endpoint, true, Arc::clone(&strict_transport));
-    let controller = SqliteRuntimeEffectController::open(&journal_path, scope.clone())
-        .await
-        .expect("open durable effect controller");
-    let first = controller
-        .execute_effect(
-            envelope.clone(),
-            RuntimeEffectLocalExecutor::testing(move |_| async move {
-                let completion =
-                    strict_provider
-                        .complete(provider_request)
-                        .await
-                        .map_err(|error| {
-                            RuntimeEffectControllerError::foreign(
-                                "strict_provider_call_failed",
-                                lash_core::TurnFailureCause::Outcome,
-                                error.to_string(),
-                            )
-                        })?;
-                Ok(RuntimeEffectOutcome::LlmCall {
-                    result: Box::new(Ok(completion.response)),
-                    text_streamed: false,
-                    call_record: Some(completion.call_record),
-                    stream: Box::default(),
-                })
-            }),
-        )
-        .await
-        .expect("record normalized LLM outcome");
-    assert_eq!(tool_arguments_from_effect(&first), canonical_arguments());
-    assert_eq!(strict_transport.request_bodies().len(), 1);
-    drop(controller);
-
     let toggled_transport = Arc::new(CapturingScriptedTransport::new([tool_response(
         endpoint,
         &strict_arguments(),
     )]));
-    let mut toggled_provider = provider(endpoint, false, Arc::clone(&toggled_transport));
-    let replay_request = replay_request_with_canonical_call();
-    let replay_controller = SqliteRuntimeEffectController::open(&journal_path, scope)
-        .await
-        .expect("restore durable effect controller");
-    replay_controller.start_replay();
-    let replayed = replay_controller
-        .execute_effect(
-            envelope,
-            RuntimeEffectLocalExecutor::testing(move |_| async move {
-                let completion =
-                    toggled_provider
-                        .complete(replay_request)
-                        .await
-                        .map_err(|error| {
-                            RuntimeEffectControllerError::foreign(
-                                "toggled_provider_call_failed",
-                                lash_core::TurnFailureCause::Outcome,
-                                error.to_string(),
-                            )
-                        })?;
-                Ok(RuntimeEffectOutcome::LlmCall {
-                    result: Box::new(Ok(completion.response)),
-                    text_streamed: false,
-                    call_record: Some(completion.call_record),
-                    stream: Box::default(),
-                })
-            }),
+    let first: Arc<Mutex<Option<RuntimeEffectOutcome>>> = Arc::new(Mutex::new(None));
+    let replayed: Arc<Mutex<Option<RuntimeEffectOutcome>>> = Arc::new(Mutex::new(None));
+    let attempt = |strict: bool,
+                   transport: Arc<CapturingScriptedTransport>,
+                   answer: Arc<Mutex<Option<RuntimeEffectOutcome>>>|
+     -> lash_restate_test::HandlerAttempt {
+        let envelope = envelope.clone();
+        Arc::new(move |scoped| {
+            let envelope = envelope.clone();
+            let transport = Arc::clone(&transport);
+            let answer = Arc::clone(&answer);
+            Box::pin(async move {
+                let mut selected = provider(endpoint, strict, transport);
+                let request = replay_request_with_canonical_call();
+                let outcome = scoped
+                    .execute_effect(
+                        envelope,
+                        RuntimeEffectLocalExecutor::testing(move |_| async move {
+                            let completion = selected.complete(request).await.map_err(|error| {
+                                RuntimeEffectControllerError::foreign(
+                                    "provider_call_failed",
+                                    lash_core::TurnFailureCause::Outcome,
+                                    error.to_string(),
+                                )
+                            })?;
+                            Ok(RuntimeEffectOutcome::LlmCall {
+                                result: Box::new(Ok(completion.response)),
+                                text_streamed: false,
+                                call_record: Some(completion.call_record),
+                                stream: Box::default(),
+                            })
+                        }),
+                    )
+                    .await
+                    .expect("replay the normalized LLM outcome");
+                *answer.lock().expect("answer lock") = Some(outcome);
+                assert!(!strict, "crash after the first durable outcome");
+            })
+        })
+    };
+    backend
+        .run_crashed_then_redriven(
+            lash_core::AdmittedScope::new(scope),
+            attempt(true, Arc::clone(&strict_transport), Arc::clone(&first)),
+            attempt(false, Arc::clone(&toggled_transport), Arc::clone(&replayed)),
         )
         .await
-        .expect("replay persisted normalized LLM outcome");
-
+        .expect("redrive the provider outcome");
+    let first = first
+        .lock()
+        .expect("first outcome lock")
+        .clone()
+        .expect("first outcome");
+    let replayed = replayed
+        .lock()
+        .expect("replayed outcome lock")
+        .clone()
+        .expect("replayed outcome");
+    assert_eq!(tool_arguments_from_effect(&first), canonical_arguments());
     assert_eq!(tool_arguments_from_effect(&replayed), canonical_arguments());
+    assert_eq!(strict_transport.request_bodies().len(), 1);
     assert_eq!(
         serde_json::to_value(&replayed).expect("encode replayed outcome"),
-        serde_json::to_value(&first).expect("encode recorded outcome")
+        serde_json::to_value(&first).expect("encode first outcome")
     );
     assert!(
         toggled_transport.request_bodies().is_empty(),
-        "persisted replay must not invoke the provider or rerun normalization"
+        "replay must not invoke the provider or rerun normalization"
     );
 }
 

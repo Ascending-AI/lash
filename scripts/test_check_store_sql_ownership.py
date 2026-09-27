@@ -123,22 +123,21 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
 
     def test_a_duplicated_statement_inside_one_backend_is_refused(self) -> None:
         self.tree.substitute(
-            "crates/lash-sqlite-store/src/scope_fence.rs",
-            '        select_all_scope_ids = "SELECT scope_id FROM effect_scope_retirements";',
-            '        select_all_scope_ids = "SELECT scope_id FROM effect_scope_retirements";\n\n'
+            "crates/lash-sqlite-store/src/blobs.rs",
+            '        select_exists = "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)";',
+            '        select_exists = "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)";\n\n'
             "        /// A second name for a statement that already has one.\n"
-            '        every_fenced_scope = "SELECT scope_id   FROM effect_scope_retirements";',
+            '        exists_again = "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)";',
         )
         self.assert_refused("has the same text as")
 
     def test_a_shared_statement_shadowed_per_backend_is_refused(self) -> None:
         self.tree.substitute(
-            "crates/lash-sqlite-store/src/scope_fence.rs",
-            '        select_all_scope_ids = "SELECT scope_id FROM effect_scope_retirements";',
-            '        select_all_scope_ids = "SELECT scope_id FROM effect_scope_retirements";\n\n'
-            "        /// A per-backend copy of a name the shared crate owns.\n"
-            '        delete_by_scope = "DELETE FROM effect_scope_retirements\n'
-            '             WHERE scope_id = ?1 AND ?1 <> \'\'";',
+            "crates/lash-sqlite-store/src/session_sql.rs",
+            '    pub(crate) struct TurnCommitSqliteStatements @ "turn_commit" {',
+            '    pub(crate) struct TurnCommitSqliteStatements @ "turn_commit" {\n'
+            '        /// A per-backend copy of a name the shared crate owns.\n'
+            '        exists_for_turn = "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)";',
         )
         self.assert_refused("shadows the shared statement")
 
@@ -155,8 +154,8 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_a_manifest_entry_naming_a_backend_that_does_not_declare_it_is_refused(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'statement = "effect_scope_retirement.select_all_scope_ids"\nbackends = ["sqlite"]',
-            'statement = "effect_scope_retirement.select_all_scope_ids"\n'
+            'statement = "blob.select_session_checkpoint_page"\nbackends = ["sqlite"]',
+            'statement = "blob.select_session_checkpoint_page"\n'
             'backends = ["sqlite", "postgres"]',
         )
         self.assert_refused("that store declares no such statement")
@@ -187,11 +186,9 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
 
     def test_a_column_subset_that_is_not_a_named_projection_is_refused(self) -> None:
         self.tree.substitute(
-            "crates/lash-store-sql/src/effect/group.rs",
-            '        select_by_key = "SELECT group_key, scope_id, session_id, wake, loser_disposition,\n'
-            "                    expected_children, lifecycle, created_at_ms",
-            '        select_by_key = "SELECT group_key, scope_id, session_id, wake, loser_disposition,\n'
-            "                    expected_children, lifecycle, created_at_ms, next_seq",
+            "crates/lash-postgres-store/src/postgres/process_sql.rs",
+            'list_prunable_terminal = "SELECT process_id, record_json FROM processes',
+            'list_prunable_terminal = "SELECT process_id, status, record_json FROM processes',
         )
         self.assert_refused("is not one of the column lists")
 
@@ -241,9 +238,9 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     # --- FIG-3399 -------------------------------------------------------
 
     def test_a_cross_family_statement_without_a_manifest_entry_is_refused(self) -> None:
-        """The shared quiescence read spans the effect and wait families."""
+        """The blob page joins the session family and needs a manifest entry."""
         text = self.tree.read("crates/lash-store-sql/dialect-only.toml")
-        marker = '[[cross_family]]\nstatement = "effect_journal.scope_is_quiescent"'
+        marker = '[[cross_family]]\nstatement = "blob.select_session_checkpoint_page"'
         start = text.index(marker)
         end = text.index('"""', text.index("reason =", start) + len('reason = """')) + 3
         self.tree.write(
@@ -254,16 +251,16 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_a_cross_family_entry_that_misstates_what_it_touches_is_refused(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'owner = "crates/lash-store-sql/src/effect.rs"\ntouches = ["await_event_waits"]',
-            'owner = "crates/lash-store-sql/src/effect.rs"\ntouches = ["await_event_meta"]',
+            'owner = "crates/lash-sqlite-store/src/blobs.rs"\ntouches = ["session_head"]',
+            'owner = "crates/lash-sqlite-store/src/blobs.rs"\ntouches = ["sessions"]',
         )
         self.assert_refused("but the cross-family entry lists")
 
     def test_a_cross_family_entry_naming_the_wrong_owner_is_refused(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'owner = "crates/lash-store-sql/src/effect.rs"\ntouches = ["await_event_waits"]',
-            'owner = "crates/lash-store-sql/src/wait/waits.rs"\ntouches = ["await_event_waits"]',
+            'owner = "crates/lash-sqlite-store/src/blobs.rs"\ntouches = ["session_head"]',
+            'owner = "crates/lash-postgres-store/src/postgres/blobs.rs"\ntouches = ["session_head"]',
         )
         self.assert_refused("which no cross-family entry names as its owner")
 
@@ -287,12 +284,12 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     ) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            '[[cross_family]]\nstatement = "effect_journal.scope_is_quiescent"',
-            '[[cross_family]]\nstatement = "effect_journal.select_session_free_scope_ids"\n'
-            'owner = "crates/lash-store-sql/src/effect.rs"\n'
-            'touches = ["await_event_waits"]\n'
+            '[[cross_family]]\nstatement = "blob.select_session_checkpoint_page"',
+            '[[cross_family]]\nstatement = "blob.select_exists"\n'
+            'owner = "crates/lash-sqlite-store/src/blobs.rs"\n'
+            'touches = ["session_head"]\n'
             'reason = "invented"\n\n'
-            '[[cross_family]]\nstatement = "effect_journal.scope_is_quiescent"',
+            '[[cross_family]]\nstatement = "blob.select_session_checkpoint_page"',
         )
         self.assert_refused("reaches no owned table outside its own family")
 
@@ -306,12 +303,10 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         """
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            "[families.effect.table_modules]",
-            "[families.effect.vocabulary_columns]\n"
-            'runtime_effect_replay = ["status"]\n\n'
-            "[families.effect.table_modules]",
+            'pending_turn_inputs = ["state"]',
+            'pending_turn_inputs = ["state", "obligation_state"]',
         )
-        self.assert_refused("spells `status = '…'` over `runtime_effect_replay`")
+        self.assert_refused("spells `obligation_state = '…'` over `pending_turn_inputs`")
 
     def test_a_column_whose_name_ends_in_a_vocabulary_column_is_not_that_column(self) -> None:
         """The spelled-vocabulary rule matches the column as a whole identifier.
@@ -339,10 +334,10 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_vocabulary_columns_on_a_table_the_family_does_not_own_is_refused(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            "[families.effect.table_modules]",
-            "[families.effect.vocabulary_columns]\n"
-            'await_event_waits = ["status"]\n\n'
-            "[families.effect.table_modules]",
+            "[families.session_ingress]",
+            "[families.session_core.vocabulary_columns]\n"
+            'pending_turn_inputs = ["state"]\n\n'
+            "[families.session_ingress]",
         )
         self.assert_refused("which is not one of its tables")
 
@@ -391,7 +386,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         self.assertEqual(self.tree.failures(), [])
 
     def test_an_exempted_subtree_may_spell_sql_and_its_neighbours_may_not(self) -> None:
-        stray = 'pub const PROBE: &str = "SELECT key_id FROM await_event_waits WHERE key_id = ?1";\n'
+        stray = 'pub const PROBE: &str = "SELECT session_id FROM session_meta WHERE session_id = ?1";\n'
         self.tree.write("runbooks/restate-postgres-workers/src/probe_fig3399.rs", stray)
         self.assertEqual(self.tree.failures(), [])
         self.tree.write("runbooks/other-harness/src/probe_fig3399.rs", stray)
@@ -491,20 +486,15 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
             self.assertTrue(GATE.is_sql_statement(sql), f"real SQL missed: {sql!r}")
 
     def test_a_statement_nobody_issues_is_refused(self) -> None:
-        """An unissued statement is a deleted call site's leftovers.
-
-        FIG-3387 found one on main — `effect_group_child.count_membership`,
-        declared by the foundation lane and called by nothing — which is what
-        this rule exists to stop happening again.
-        """
+        """A declared statement without a call site is refused."""
         self.tree.substitute(
-            "crates/lash-store-sql/src/effect/scope_retirement.rs",
+            "crates/lash-store-sql/src/session/turn_commits.rs",
             "crate::statements! {",
             "crate::statements! {\n"
             "    /// A statement no caller issues.\n"
-            "    pub struct OrphanStatements @ \"effect_scope_retirement\" {\n"
+            '    pub struct OrphanStatements @ "turn_commit" {\n'
             "        /// Nobody calls this.\n"
-            "        count_fig3387_orphans = \"SELECT COUNT(*) FROM effect_scope_retirements\";\n"
+            '        count_fig3387_orphans = "SELECT COUNT(*) FROM runtime_turn_commits";\n'
             "    }\n"
             "}\n\n"
             "crate::statements! {",
@@ -540,10 +530,10 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_an_undeclared_non_table_literal_inside_an_owner_module_is_refused(self) -> None:
         """An owner module is not a licence to spell SQL either."""
         self.tree.substitute(
-            "crates/lash-sqlite-store/src/scope_fence.rs",
-            "fn lift_journal_fences_of_registered_processes(",
+            "crates/lash-sqlite-store/src/blobs.rs",
+            "fn blob_content_hash(",
             'const STRAY: &str = "PRAGMA journal_size_limit = 1";\n\n'
-            "fn lift_journal_fences_of_registered_processes(",
+            "fn blob_content_hash(",
         )
         self.assert_refused("is not one of its declared statements")
 

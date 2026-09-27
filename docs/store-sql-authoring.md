@@ -307,14 +307,12 @@ Three consequences worth knowing before you declare one:
   under the layout that has a registry, so the statement a connection with no
   registry must not issue cannot be rendered for it at all. Two production
   shapes, two named statements, one layout each.
-* **The first placement wins.** `effect_scope_retirements` lives in both the
-  effect journal and a bound process registry (ADR 0049), so the layout that
-  reaches the registry's copy is a different layout, not a second entry in the
-  same one.
+* **The first placement wins.** If a deployment carries copies of a table in
+  two databases, each statement's layout chooses one copy by declaration
+  order.
 * **A layout may place every table the crate owns** — that is what
-  `Schema::Main` is, and it is the truth for a deployment whose catalog and
-  journal are one file. It is still per-table resolution; the list is just
-  total.
+  `Schema::Main` does for a storage connection. It is still per-table
+  resolution; the list is just total.
 
 A family that lives on **one** SQLite connection — the process registry's own
 database — renders once with `Dialect::sqlite_unqualified()` instead, which

@@ -457,16 +457,16 @@ fn foreign_key_lines_round_trip_through_the_artifact_format() {
 #[test]
 fn deferred_foreign_key_lines_round_trip_through_the_artifact_format() {
     let key = ForeignKeyShape {
-        columns: vec!["group_key".to_string()],
-        parent_table: "lash_runtime_effect_group".to_string(),
-        parent_columns: vec!["group_key".to_string()],
+        columns: vec!["process_id".to_string()],
+        parent_table: "lash_processes".to_string(),
+        parent_columns: vec!["process_id".to_string()],
         on_delete: ForeignKeyAction::NoAction,
         deferrable: true,
         initially_deferred: true,
     };
     assert_eq!(
         key.to_string(),
-        "(group_key) references lash_runtime_effect_group (group_key) on delete no action \
+        "(process_id) references lash_processes (process_id) on delete no action \
          deferrable initially deferred"
     );
     let non_initial = ForeignKeyShape {

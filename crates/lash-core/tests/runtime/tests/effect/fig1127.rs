@@ -81,9 +81,9 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
 
         async fn commit_group_child_final(
             &self,
-            commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+            commit: lash_core::facade_support::GroupChildFinalCommit,
         ) -> Result<
-            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+            lash_core::facade_support::EffectGroupChildCommitOutcome,
             lash_core::RuntimeEffectControllerError,
         > {
             self.native

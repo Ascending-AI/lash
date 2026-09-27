@@ -450,7 +450,7 @@ fn prune_recovery_core(
 async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
     let dir = tempfile::tempdir().expect("process prune recovery tempdir");
     let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path())
+        lash_sqlite_store::SqliteStoreSet::open(dir.path())
             .await
             .expect("open the process prune backend"),
     );
@@ -503,8 +503,15 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
         )
         .await?;
 
+    let double =
+        lash_restate_test::backend_with(0x3861_0101, lash_restate_test::ServerConfig::default(), {
+            let backend = Arc::clone(&backend);
+            move |_| backend
+        })
+        .await
+        .expect("serve the process store with Restate");
     let core = prune_recovery_core(
-        backend.clone().into(),
+        double.lash_backend(),
         env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
         Arc::clone(&engine),
     )?;
@@ -534,6 +541,7 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
     assert_eq!(pending_after_first.len(), 1);
     drop(core);
     drop(registry);
+    drop(double);
 
     let reopened_backend = Arc::new(
         backend
@@ -542,8 +550,15 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
             .expect("reopen the backend after release failure"),
     );
     let reopened = reopened_backend.process_registry();
+    let reopened_double = lash_restate_test::backend_with(
+        0x3861_0102,
+        lash_restate_test::ServerConfig::default(),
+        move |_| reopened_backend,
+    )
+    .await
+    .expect("serve the reopened process store with Restate");
     let recovered_core = prune_recovery_core(
-        reopened_backend.into(),
+        reopened_double.lash_backend(),
         env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
         Arc::clone(&engine),
     )?;
@@ -824,13 +839,20 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
 async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()> {
     let dir = tempfile::tempdir().expect("sqlite facade prune tempdir");
     let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path())
+        lash_sqlite_store::SqliteStoreSet::open(dir.path())
             .await
             .expect("open the SQLite facade prune backend"),
     );
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone().into())?;
+    let double =
+        lash_restate_test::backend_with(0x3861_0103, lash_restate_test::ServerConfig::default(), {
+            let backend = Arc::clone(&backend);
+            move |_| backend
+        })
+        .await
+        .expect("serve the SQLite facade store with Restate");
+    let core = process_test_core(double.lash_backend())?;
 
     let session_id = "sqlite-facade-prune-session";
     let source_key = "sqlite-facade-prune-source";

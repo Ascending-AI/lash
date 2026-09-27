@@ -117,11 +117,6 @@ const BIG_OUTPUT_BYTES: usize = 64 * 1024;
 pub struct ToolChildWorld {
     /// The effect host a law opens groups through.
     pub host: Arc<dyn crate::EffectHost>,
-    /// The group drain over the same journal, where the tier keeps one. `None`
-    /// on Restate, which redrives the child invocation itself and keeps no
-    /// Lash-owned drain; the recovery law reads this to decide which half of
-    /// the routing contract the tier can speak to.
-    pub drain: Option<Arc<dyn crate::testing::conformance_support::StoreEffectGroupDrain>>,
 }
 
 /// What a law needs the next world to be built with.
@@ -160,8 +155,7 @@ pub type ToolChildProcessesFactory = Arc<
 /// recorded under durable completion routing (ADR 0102, D1).
 #[derive(Clone)]
 pub struct ToolChildLawFixture {
-    /// Two calls are two views of one substrate: on the SQL tiers each call
-    /// builds a fresh host over the shared store.
+    /// Two calls are two views of one substrate.
     pub make_world: ToolChildWorldFactory,
     /// A fresh process registry and process-exec-env store on the substrate
     /// the host factory serves.
@@ -172,12 +166,6 @@ pub struct ToolChildLawFixture {
 /// longer than the law, so a claim expiring mid-test can never be mistaken
 /// for the journal honoring it.
 const LIVE_LEASE_MS: u64 = 60_000;
-
-/// The lease window the recovery law's crash phase uses: long enough that the
-/// parked child's claim is not lost while its process is still working, short
-/// enough that a dead process's claim becomes reclaimable inside a test's
-/// patience.
-const CRASH_LEASE_MS: u64 = 900;
 
 /// How often the recovery law polls for lapsed claims.
 const POLL: Duration = Duration::from_millis(25);
@@ -1939,120 +1927,12 @@ fn single_leaf_group(
     .expect("the single-leaf group assembles")
 }
 
-/// The process-exec-env store for a phase that runs on a runtime of its own.
-///
-/// The phase's runtime dies with it, and so does every connection opened on
-/// it. A store shared from the law's runtime keeps any connection the phase
-/// made it open in its pool, and a later resolution on the law's runtime can
-/// wait out the pool's acquire timeout on it (FIG-3621). The phase instead
-/// builds its own store over the tier's substrate and publishes the law's
-/// environment there; the reference is content-addressed, so it is the one
-/// the law recorded.
-async fn phase_env_store(
-    make_processes: &ToolChildProcessesFactory,
-    env_ref: &crate::ProcessExecutionEnvRef,
-) -> Arc<dyn crate::ProcessExecutionEnvStore> {
-    let env_store = make_processes().await.process_env_store();
-    assert_eq!(
-        &crate::testing::process_execution_env_fixture(env_store.as_ref()).await,
-        env_ref,
-        "the phase's store publishes the environment the law recorded"
-    );
-    env_store
-}
-
-/// The crash: run `phase` on a world of its own, on a runtime of its own, and
-/// destroy the runtime afterwards.
-///
-/// Dropping a Tokio runtime drops every task it owns — the host-owned child
-/// tasks among them — and the host's substrate handles with them. What is left
-/// behind is what a killed worker leaves: journaled rows under claims nobody
-/// renews.
-async fn crashed_world<P>(fixture: &ToolChildLawFixture, phase: P)
-where
-    P: FnOnce(ToolChildWorld) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>>
-        + Send
-        + 'static,
-{
-    world_on_own_runtime(fixture, CRASH_LEASE_MS, phase).await;
-}
-
-/// Run `phase` on a world built with `lease_ttl_ms`, on a runtime of its own,
-/// and destroy the runtime afterwards — so nothing the phase's host spawned
-/// (a child task, a close's finalizer) outlives the phase.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn world_on_own_runtime<P>(fixture: &ToolChildLawFixture, lease_ttl_ms: u64, phase: P)
-where
-    P: FnOnce(ToolChildWorld) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>>
-        + Send
-        + 'static,
-{
-    let make = Arc::clone(&fixture.make_world);
-    std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("the phase's process gets a runtime of its own");
-        runtime.block_on(async move {
-            let world = make(ToolChildWorldSpec { lease_ttl_ms }).await;
-            phase(world).await;
-        });
-        // A killed worker does not shut down gracefully: bound the teardown so
-        // a task parked mid-drain — which is exactly the state a crash leaves —
-        // cannot hold the worker threads open.
-        runtime.shutdown_timeout(std::time::Duration::from_secs(10));
-    })
-    .join()
-    .expect("the phase's process runs its phase before dying");
-}
-
-/// Waits until the crashed process's claims on `group_key` have lapsed.
-///
-/// Expiry is the substrate's clock, not the test's, so the law polls with a
-/// probe host rather than sleeping a guessed interval. The probe's resolver is
-/// wired but its opener is absent, so a probe pass answers `NoExecutor` and
-/// writes nothing.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn until_claims_lapse(world: &ToolChildWorld, group_key: &str) {
-    let drain = world
-        .drain
-        .as_ref()
-        .expect("the crash scenario runs only where the tier keeps a journal");
-    tokio::time::timeout(SETTLE_BUDGET, async {
-        loop {
-            let report = drain
-                .drain_group(group_key, &tokio_util::sync::CancellationToken::new())
-                .await
-                .expect("a probe pass over the journaled group runs");
-            if report.children.iter().all(|child| {
-                !matches!(
-                    child.outcome,
-                    crate::testing::conformance_support::ChildDrainOutcome::LeaseLive { .. }
-                )
-            }) {
-                return;
-            }
-            tokio::time::sleep(POLL).await;
-        }
-    })
-    .await
-    .expect("a dead worker's claims lapse");
-}
-
 // =============================================================================
 // The laws
 // =============================================================================
 
 mod admission_fence;
 mod batch_group;
-mod capture;
 mod commit_boundary;
 mod deferred_commit;
 mod driver;
@@ -2065,11 +1945,9 @@ mod opener_end;
 mod presentation;
 mod recovery;
 mod siblings;
-mod usage;
 
 pub use admission_fence::*;
 pub use batch_group::*;
-pub use capture::*;
 pub use commit_boundary::*;
 pub use deferred_commit::*;
 pub use driver::*;
@@ -2082,4 +1960,3 @@ pub use opener_end::*;
 pub use presentation::*;
 pub use recovery::*;
 pub use siblings::*;
-pub use usage::*;

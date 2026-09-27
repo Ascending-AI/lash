@@ -4,13 +4,11 @@
 
 Accepted.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+Amended 2026-09-24 (FIG-3669), **partly implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR
 specifies SQL-engine behaviour: SQL scope retirement of effect, group and
-promise rows and the `effect_scope_retirements` fence. Those passages stay as
-written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
-the session lease) rewrites them.
+promise rows and the `effect_scope_retirements` fence. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. B6 removed process leases; the session lease cutover remains separate.
 
 ## Context
 

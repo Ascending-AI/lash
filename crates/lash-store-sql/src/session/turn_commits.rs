@@ -43,10 +43,6 @@ crate::statements! {
                  WHERE session_id = ?1 AND turn_id = ?2
              )";
 
-        /// The retention sweep asks it of a session-free runtime-operation
-        /// scope, which has no session id to key by.
-        exists_for_operation = "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE turn_id = ?1)";
-
         /// The receipt session `?1` recorded for operation key `?2`.
         select_receipt = "SELECT turn_commit_hash, result_json,
                         request_identity_hash, identity_encoding_version,

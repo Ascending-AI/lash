@@ -38,14 +38,13 @@ serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
-tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-chrono = { workspace = true }
 lash-conformance = { workspace = true, features = ["lashlang"] }
 lash-core = { workspace = true, features = ["testing"] }
+lash-restate-test = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
@@ -79,9 +78,3 @@ path = "tests/process_change_horizon.rs"
 [[test]]
 name = "durable_read_fixture"
 path = "tests/durable_read_fixture.rs"
-
-# Recovery subprocesses use certification fixtures only as dev dependencies.
-[[example]]
-name = "sqlite-await-event-helper"
-path = "src/bin/sqlite-await-event-helper.rs"
-required-features = ["testing"]

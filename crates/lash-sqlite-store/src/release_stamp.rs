@@ -1,6 +1,6 @@
 //! Which lash release wrote this SQLite deployment.
 //!
-//! The four `PRAGMA user_version` integers say what *this* build requires. They
+//! The three `PRAGMA user_version` integers say what *this* build requires. They
 //! never say which build produced the rows, so the only way a host could learn
 //! that was to upgrade crates, open the store, and read the refusal — which
 //! names schema integers, not releases. The stamp closes that gap with one row
@@ -24,8 +24,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use crate::session_sql::session_sql;
 
 use crate::schema::{
-    EFFECT_SCHEMA_VERSION, PROCESS_SCHEMA_VERSION, SCHEMA_VERSION, SqliteDatabase,
-    TRIGGER_SCHEMA_VERSION,
+    PROCESS_SCHEMA_VERSION, SCHEMA_VERSION, SqliteDatabase, TRIGGER_SCHEMA_VERSION,
 };
 
 /// The release this build stamps into every store it writes.
@@ -37,14 +36,13 @@ pub(crate) const BUILD_RELEASE: &str = env!("CARGO_PKG_VERSION");
 
 /// What every SQLite component required when this build wrote the stamp.
 ///
-/// All four constants live in one crate, so the durable-core row can record the
+/// All three constants live in one crate, so the durable-core row can record the
 /// whole deployment's tuple even though only one database carries the stamp.
 pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
     [
         (SqliteDatabase::DurableCore, SCHEMA_VERSION),
         (SqliteDatabase::ProcessRegistry, PROCESS_SCHEMA_VERSION),
         (SqliteDatabase::Triggers, TRIGGER_SCHEMA_VERSION),
-        (SqliteDatabase::EffectReplay, EFFECT_SCHEMA_VERSION),
     ]
     .into_iter()
     .map(|(database, version)| StoreComponentVersion {

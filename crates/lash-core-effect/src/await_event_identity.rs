@@ -1,14 +1,9 @@
-//! Backends own persistence, authentication, and compare-and-swap mechanics.
-//! This module owns the semantic decisions that must remain identical across
-//! the native, SQLite, Postgres, and engine-backed implementations.
+//! Stable AwaitEvent key identity and authentication material.
 //!
-//! Promise-key family v3 is a reject-and-recreate cutover from the live-serde
-//! v2 preimage. SQLite/Postgres effect schemas are bumped with this change;
-//! durable adapters without a Lash schema gate must recreate their promise
-//! state before deploying it. Any future projection correction requires a new
-//! family version and an explicit old-row policy.
+//! These bytes are shared by effect hosts. The family version and golden
+//! preimages are preserved across the engine cutover.
 
-use super::{AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome};
+use super::{AwaitEventWaitIdentity, ExecutionScope};
 use crate::{RuntimeError, RuntimeErrorCode};
 
 const AWAIT_EVENT_FAMILY_VERSION: u8 = 3;
@@ -113,83 +108,6 @@ pub fn sign_material(
     material.finish()
 }
 
-/// State observed by a backend while holding its promise transition fence.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PromiseState {
-    /// No waiter or earlier resolution has materialized a row yet.
-    Missing,
-    /// A waiter has materialized the promise, but no terminal has won.
-    Pending,
-    /// A terminal has already won the first-writer-wins race.
-    Resolved(Resolution),
-    /// The owning session has been durably revoked.
-    Revoked,
-    /// The group child that owns this completion key is cancel-decided: its
-    /// cancel decision closed the key's completion delivery (ADR 0099 §4,
-    /// W17). Readers observe `Cancelled`; a resolve is refused, typed, and
-    /// writes nothing.
-    CancelDecided,
-}
-
-/// Pure decision returned for a proposed terminal transition.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PromiseTransition {
-    /// Persist this terminal with a first-writer-wins compare-and-swap.
-    Store(Resolution),
-    /// A prior terminal remains authoritative.
-    AlreadyResolved(Resolution),
-    /// The key must use the common non-oracular unknown/revoked result.
-    UnknownOrRevoked,
-    /// The owning group child is cancel-decided, so the proposed terminal is
-    /// refused with [`cancel_decided_refusal`] and nothing is written.
-    CancelDecided,
-    /// The operation intentionally leaves this promise unchanged.
-    Unchanged,
-}
-
-impl PromiseTransition {
-    /// `Unchanged` is not a resolve result; it is used only by cancel sweeps.
-    /// `CancelDecided` is the typed refusal a late completion earns.
-    pub fn resolve_outcome(self) -> Option<Result<ResolveOutcome, RuntimeError>> {
-        match self {
-            Self::Store(_) => Some(Ok(ResolveOutcome::Accepted)),
-            Self::AlreadyResolved(terminal) => {
-                Some(Ok(ResolveOutcome::AlreadyResolved { terminal }))
-            }
-            Self::UnknownOrRevoked => Some(Ok(ResolveOutcome::UnknownOrRevoked)),
-            Self::CancelDecided => Some(Err(cancel_decided_refusal())),
-            Self::Unchanged => None,
-        }
-    }
-}
-
-/// Missing promises accept the terminal so signal-before-wait is buffered.
-pub fn resolve(state: PromiseState, proposed: Resolution) -> PromiseTransition {
-    match state {
-        PromiseState::Missing | PromiseState::Pending => PromiseTransition::Store(proposed),
-        PromiseState::Resolved(terminal) => PromiseTransition::AlreadyResolved(terminal),
-        PromiseState::Revoked => PromiseTransition::UnknownOrRevoked,
-        PromiseState::CancelDecided => PromiseTransition::CancelDecided,
-    }
-}
-
-/// Whether a group child's cancel decision closes this promise (ADR 0099 §4).
-///
-/// The decision fences completion delivery to the child's completion key: a
-/// promise nobody resolved yet — missing or pending — becomes
-/// [`PromiseState::CancelDecided`]. A terminal that won before the decision
-/// stays authoritative (that completion was not late), a revoked promise stays
-/// revoked, and a second decision is idempotent.
-pub fn cancel_decision_fences(state: &PromiseState) -> bool {
-    matches!(state, PromiseState::Missing | PromiseState::Pending)
-}
-
-/// What a waiter or peek observes on a cancel-decided promise: the child it
-/// belongs to was cancelled.
-pub fn cancel_decided_observation() -> Resolution {
-    Resolution::Cancelled
-}
-
 /// The typed refusal a completion delivered after its owning group child's
 /// cancel decision earns (ADR 0099 §4, W17): the same
 /// `RuntimeEffectGroupChildCancelDecided` a late final record earns, because
@@ -201,33 +119,6 @@ pub fn cancel_decided_refusal() -> RuntimeError {
         "the group child that owns this completion key is cancel-decided; ADR 0099 §4 \
          refuses a completion delivered after its cancel decision, and nothing was written",
     )
-}
-
-/// Why an await-event waiter stopped before its promise resolved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WaitStopReason {
-    Cancelled,
-    TimedOut,
-}
-
-/// Classify a stopped turn-control waiter in the shared promise policy.
-pub fn turn_control_wait_stop(
-    wait: &AwaitEventWaitIdentity,
-    reason: WaitStopReason,
-) -> Option<(RuntimeErrorCode, &'static str)> {
-    if !wait.is_turn_control() {
-        return None;
-    }
-    Some(match reason {
-        WaitStopReason::Cancelled => (
-            RuntimeErrorCode::TurnControlWaitCancelled,
-            "turn-control waiter stopped without resolving its keyed promise",
-        ),
-        WaitStopReason::TimedOut => (
-            RuntimeErrorCode::TurnControlWaitTimeout,
-            "turn-control waiter timed out without resolving its keyed promise",
-        ),
-    })
 }
 
 /// Compare authentication bytes without branching on their contents.
@@ -250,32 +141,6 @@ mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
-
-    #[test]
-    fn turn_control_wait_stop_table_classifies_only_turn_control_waiters() {
-        let gate = AwaitEventWaitIdentity::TurnCancelGate;
-        assert_eq!(
-            turn_control_wait_stop(&gate, WaitStopReason::Cancelled),
-            Some((
-                RuntimeErrorCode::TurnControlWaitCancelled,
-                "turn-control waiter stopped without resolving its keyed promise",
-            ))
-        );
-        assert_eq!(
-            turn_control_wait_stop(&gate, WaitStopReason::TimedOut),
-            Some((
-                RuntimeErrorCode::TurnControlWaitTimeout,
-                "turn-control waiter timed out without resolving its keyed promise",
-            ))
-        );
-        assert_eq!(
-            turn_control_wait_stop(
-                &AwaitEventWaitIdentity::tool_completion("ordinary"),
-                WaitStopReason::Cancelled,
-            ),
-            None
-        );
     }
 
     #[test]
@@ -352,30 +217,6 @@ mod tests {
             assert_eq!(preimage, expected_preimage);
             assert_eq!(key, expected_key);
         }
-    }
-
-    #[test]
-    fn resolve_buffers_before_wait_and_preserves_the_first_terminal() {
-        let first = Resolution::Ok(serde_json::json!("first"));
-        assert_eq!(
-            resolve(PromiseState::Missing, first.clone()),
-            PromiseTransition::Store(first.clone())
-        );
-        assert_eq!(
-            resolve(
-                PromiseState::Resolved(first.clone()),
-                Resolution::Ok(serde_json::json!("second")),
-            ),
-            PromiseTransition::AlreadyResolved(first)
-        );
-    }
-
-    #[test]
-    fn revoked_sessions_reject_resolution() {
-        assert_eq!(
-            resolve(PromiseState::Revoked, Resolution::Cancelled),
-            PromiseTransition::UnknownOrRevoked
-        );
     }
 
     #[test]

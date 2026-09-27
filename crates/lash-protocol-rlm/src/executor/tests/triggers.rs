@@ -1236,12 +1236,11 @@ async fn execute_trigger_process_with_originator(
 ) -> TriggerProcessResult {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
-    // The cell runs on a memory backend's effect host; its recorded start
-    // lands in the double's process table, whose workflow runs the body on a
-    // worker whose trigger store records every command the body runs.
-    let backend = memory_backend().await;
-    let effect_host = backend.effect_host();
     let table = crate::testing::DoubleProcesses::new(0x7219_0001).await;
+    let handler = table
+        .open_handler(crate::testing::default_cell_scope())
+        .await;
+    let effect_host = table.backend().effect_host();
     let registry = table.registry();
     let trigger_store = table.backend().trigger_store();
     let process_env_store = table.env_store();
@@ -1291,7 +1290,7 @@ async fn execute_trigger_process_with_originator(
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
+        crate::testing::double_ports(table.double(), &handler),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
@@ -1323,6 +1322,7 @@ async fn execute_trigger_process_with_originator(
         crate::plugin::RlmChannel::Cell,
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     assert!(response.error.is_none(), "{:?}", response.error);
     assert!(
         response.terminal_finish.is_some(),

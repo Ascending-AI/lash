@@ -4,17 +4,13 @@
 //! statement whose text both backends issue verbatim; this module owns the
 //! statements that genuinely fork and renders both sets once, at startup.
 //!
-//! Three renderings, because the family is reached through three different
+//! Two renderings, because the family is reached through two different
 //! addressings:
 //!
 //! * the session catalog's own database, [`turn_ingress_sql`], which is where
 //!   nine of the ten tables live;
 //! * the process registry's database, [`tool_intent_sql`], a one-connection
 //!   family addressed unqualified the way it always has been;
-//! * every schema an effect host has attached,
-//!   [`closure_participant_sql`], because "is this cancellation scope still
-//!   occupied?" is asked from the journal's connection as well as the
-//!   catalog's.
 
 use lash_store_sql::turn_ingress::queued_runs::QueuedRunStatements;
 use std::sync::LazyLock;
@@ -23,8 +19,7 @@ use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     cancellation_bindings::CancellationBindingStatements,
-    closure_authorizations::ClosureAuthorizationStatements,
-    closure_participants::ClosureParticipantStatements, pending_inputs::PendingInputStatements,
+    closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements, run_specs::RunSpecStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
@@ -203,15 +198,6 @@ static TOOL_INTENT_SQL: LazyLock<ToolIntentSql> = LazyLock::new(|| {
 /// The process registry's tool-intent statements, rendered once at first use.
 pub(crate) fn tool_intent_sql() -> &'static ToolIntentSql {
     &TOOL_INTENT_SQL
-}
-
-static CLOSURE_PARTICIPANT_SQL: LazyLock<[ClosureParticipantStatements; 3]> = LazyLock::new(|| {
-    Schema::ALL.map(|schema| ClosureParticipantStatements::render(schema.dialect()))
-});
-
-/// The cancellation-closure participant statements addressed through `schema`.
-pub(crate) fn closure_participant_sql(schema: Schema) -> &'static ClosureParticipantStatements {
-    &CLOSURE_PARTICIPANT_SQL[schema.index()]
 }
 
 #[cfg(test)]

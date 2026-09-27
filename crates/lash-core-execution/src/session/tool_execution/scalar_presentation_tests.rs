@@ -338,7 +338,7 @@ impl crate::RuntimeEffectController for DivergedPresentation {
             crate::RuntimeEffectCommand::PresentToolResult { .. }
         ) {
             return Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+                crate::RuntimeErrorCode::EffectReplayDivergence,
                 "presentation-conflict: recorded runtime effect hash did not match",
             ));
         }
@@ -412,7 +412,7 @@ async fn a_cell_call_whose_presentation_diverged_stops_the_run() {
         .expect("the diverged presentation is the run's nested replay mismatch");
     assert_eq!(
         mismatch.code,
-        crate::RuntimeErrorCode::SqliteEffectReplayHashConflict
+        crate::RuntimeErrorCode::EffectReplayDivergence
     );
     assert!(
         !executed.completed.output.is_success(),

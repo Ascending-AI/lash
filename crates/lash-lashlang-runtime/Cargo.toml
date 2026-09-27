@@ -51,6 +51,7 @@ thiserror = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-execution = { workspace = true }
 lash-restate-test = { workspace = true }
+lash-conformance = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }

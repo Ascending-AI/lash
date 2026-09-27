@@ -17,12 +17,9 @@
 //! * what crosses the backend boundary is the mutated-or-not verdict and the
 //!   set of logical tables that moved, which are backend-neutral.
 //!
-//! The durable effect tables — `runtime_effect_group`,
-//! `runtime_effect_group_child` and `runtime_effect_replay` — belong to the
-//! SQL effect engines, which are not storage (ADR 0104: Restate is the only
-//! effect engine; FIG-3667 and FIG-3668 delete the SQL engines). No driven
-//! store-trait operation writes them, so they sit in
-//! [`RESIDUE_TABLE_EXCLUSIONS`] with the rest of the effect surface.
+//! The SQL effect-engine tables were deleted in FIG-3861. The registry's
+//! surviving scope-retirement table is outside the store operations driven
+//! here and remains in [`RESIDUE_TABLE_EXCLUSIONS`].
 
 use super::*;
 
@@ -377,12 +374,9 @@ const TURN_CANCELLATION: &str = "turn-cancellation surface: this fixture wires n
      operation can write it; owned by the turn_control conformance suite";
 const PROCESS_LIFECYCLE: &str = "process-lifecycle surface: this fixture wires no process registry, so no driven operation \
      can write it; owned by the process conformance suites";
-const AWAIT_EVENT: &str = "await-event surface, reached through the EffectHost seam rather than the store traits this \
-     differential drives; owned by the await-event conformance suite";
 const TRIGGERS: &str = "trigger surface: no driven operation subscribes, delivers or occurs; owned by the trigger \
      conformance suite";
-const EFFECTS: &str = "effect-replay surface, written through the EffectHost seam rather than the store traits this \
-     differential drives";
+const REGISTRY: &str = "process-registry scope retirement and tool-intent submission are outside the store operations this differential drives";
 const ARTIFACTS: &str = "artifact/blob-byte store rather than a session row; the session-reachable blob bytes are \
      already compared by the `checkpoint_blobs` entry, and the blob store itself by \
      attachment_blob_store_differential_agrees";
@@ -449,18 +443,11 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          drive, and every feed append rides inside the transaction that changes the park on \
          `processes`; owned by the process_park_feed laws in lash-conformance",
     ),
-    ("await_event_meta", AWAIT_EVENT),
-    ("await_event_waits", AWAIT_EVENT),
-    ("await_event_revoked_sessions", AWAIT_EVENT),
     ("trigger_deliveries", TRIGGERS),
     ("trigger_mutation_receipts", TRIGGERS),
     ("trigger_occurrences", TRIGGERS),
     ("trigger_subscriptions", TRIGGERS),
-    ("effect_scope_retirements", EFFECTS),
-    ("runtime_effect_group", EFFECTS),
-    ("runtime_effect_group_child", EFFECTS),
-    ("runtime_effect_replay", EFFECTS),
-    ("tool_intent_submissions", EFFECTS),
+    ("tool_intent_submissions", REGISTRY),
     ("artifact_owners", ARTIFACTS),
     ("artifact_owner_retirements", ARTIFACTS),
     ("artifact_refs", ARTIFACTS),

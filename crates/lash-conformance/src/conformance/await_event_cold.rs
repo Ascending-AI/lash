@@ -42,29 +42,6 @@ where
     factory
 }
 
-/// Run the durable multi-host AwaitEvent suite.
-///
-/// Hosts with runtime-owned replay are intentionally ineligible. Store
-/// adapters call this only after they can reopen independent host objects
-/// over one substrate, so the active-wait law is witnessed through the store
-/// journal; an engine supplies its own witness through
-/// [`effect_host_await_events_cold_instance_with_active_wait_witness`].
-///
-/// `make_catalog` returns a fresh session-store factory over the same
-/// substrate: the catalog a turn-work driver resolves sessions through.
-pub async fn effect_host_await_events_cold_instance<F, C>(make: F, make_catalog: C)
-where
-    F: Fn() -> Arc<dyn EffectHost>,
-    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
-{
-    effect_host_await_events_cold_instance_with_active_wait_witness(
-        make,
-        make_catalog,
-        super::effect_host::effect_host_journaled_wait_registration_witness,
-    )
-    .await;
-}
-
 /// Run the durable multi-host AwaitEvent suite with an
 /// implementation-owned witness for the active-wait quiescence law.
 pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, C, W, WFut>(

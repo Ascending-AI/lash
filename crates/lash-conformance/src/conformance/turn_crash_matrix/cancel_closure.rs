@@ -84,7 +84,6 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
             let seam = SeamLayer {
                 control,
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                journal_faults: None,
             };
             let point = point.clone();
             Arc::new(move |scoped| {

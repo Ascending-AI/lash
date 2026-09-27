@@ -8,8 +8,6 @@
 mod fleet_format;
 #[path = "graph_sequence_cutover.rs"]
 mod graph_sequence_cutover;
-#[path = "layered_effect_host.rs"]
-mod layered_effect_host;
 #[path = "parent_end_payload.rs"]
 mod parent_end_payload;
 #[path = "parent_end_registration_race.rs"]
@@ -26,11 +24,6 @@ mod session_read_view;
 mod storage_fixes;
 #[path = "store_gc.rs"]
 mod store_gc;
-#[path = "tool_attempt_store_fault.rs"]
-mod tool_attempt_store_fault;
-#[path = "turn_control_binding.rs"]
-mod turn_control_binding;
 
 mod attachment_owner_proof;
-mod backend_binding_compat;
 mod boundary_retry;

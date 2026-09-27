@@ -799,23 +799,19 @@ class RealTreeTests(unittest.TestCase):
         self.assertEqual(
             laws,
             {
-                ("effect_controller_response_derivation_retry", "effect-controller-response-derivation-retry"),
                 ("effect_controller_response_derivation_terminals", "effect-controller-response-derivation-terminals"),
             },
         )
-        # The SQLite suite is one module mounted by two binaries, one per
-        # backend substrate (ADR 0102), so each claims it under its own path.
-        for label, claimant in (
-            ("//crates/lash-sqlite-store:conformance__test", "conformance::suite"),
-            ("//crates/lash-sqlite-store:conformance_memory__test", "conformance_memory::suite"),
-        ):
-            invocations = [
-                invocation
-                for prefix, root in MODULE.resolve_label(label)
-                for invocation in MODULE.invocations_in_root(root, prefix)
-            ]
-            expected = MODULE.expected_from_invocations(invocations, macros)
-            self.assertEqual({pair for pair in expected[claimant] if pair in laws}, laws)
+        # The engine-owned replay law is claimed by Restate's test suite.
+        invocations = [
+            invocation
+            for prefix, root in MODULE.resolve_label(
+                "//crates/lash-restate:lash-restate__unit_test"
+            )
+            for invocation in MODULE.invocations_in_root(root, prefix)
+        ]
+        expected = MODULE.expected_from_invocations(invocations, macros)
+        self.assertTrue(any(laws <= set(pairs) for pairs in expected.values()))
         invocations = [
             invocation
             for prefix, root in MODULE.resolve_label(
@@ -851,34 +847,19 @@ class RealTreeTests(unittest.TestCase):
         )
 
     def test_a_catalogue_declared_beside_its_laws_is_owed(self) -> None:
-        """``drain_end_tests!`` lives in ``conformance/drain_end.rs``, not
-        ``macros.rs``; its rows must still be registered pairs, or every
-        receipt the suite writes is rejected as misclaimed (FIG-3419)."""
+        """An external macro catalogue still registers its receipt pair."""
         self.assertNotIn(
-            "macro_rules! drain_end_tests",
+            "macro_rules! queued_after_commit_redrive_tests",
             MODULE.MACROS.read_text(encoding="utf-8"),
-            "the precondition: this catalogue is outside macros.rs",
         )
         macros = MODULE.load_macros()
-        expected = MODULE.suite_expected(macros, "drain_end_tests")
-        self.assertEqual(len(expected), 8)
-        self.assertIn(
-            ("a_multi_frame_drain_sweeps_children_only_at_its_own_end", "drain-end-multi-frame"),
+        expected = MODULE.suite_expected(macros, "queued_after_commit_redrive_tests")
+        self.assertEqual(
             expected,
-        )
-        self.assertIn(
-            (
-                "a_durably_failed_drain_settles_its_closing_group_and_ends",
-                "drain-end-durably-failed",
-            ),
-            expected,
-        )
-        self.assertIn(
-            (
-                "an_abandoned_drain_settles_its_closing_group_and_ends",
-                "drain-end-abandoned",
-            ),
-            expected,
+            {(
+                "a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_once",
+                "queued-after-commit-redrive",
+            )},
         )
 
     def test_the_deferred_manifest_names_real_ignored_invocations(self) -> None:

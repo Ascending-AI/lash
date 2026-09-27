@@ -10,7 +10,6 @@
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 
 // No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
 // No live_replay_tests!: live replay is an in-process cache, not PostgreSQL-backed storage.
@@ -51,13 +50,10 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
     })
 }
 
-use std::future::Future;
 #[path = "conformance/artifact_races.rs"]
 mod artifact_races;
 #[path = "conformance/attachment_catalog.rs"]
 mod attachment_catalog;
-#[path = "conformance/attachment_owner.rs"]
-mod attachment_owner;
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]
@@ -79,7 +75,7 @@ use lash_conformance::{
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core_execution::{
-    ExecutionScope, ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, RuntimePersistence,
+    ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, RuntimePersistence,
     SessionExecutionLeaseStore, SessionStoreFactory, StoreError, TriggerStore,
 };
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
@@ -289,6 +285,20 @@ async fn double_law_backend(
     ((attachments, backend), stores, host, runner)
 }
 
+/// Retained fixture for ingress suites awaiting handler-bound Restate drives.
+/// Its backend already uses the PostgreSQL store set and Restate engine; the
+/// deferred laws must enter through `double_law_backend`'s runner in FIG-3923.
+async fn pg_law_backend(
+    storage: &PostgresStorage,
+) -> (
+    (tempfile::TempDir, lash_restate_test::RestateTestBackend),
+    lash_core_execution::Backend,
+) {
+    let (guard, _, _, _) = double_law_backend(storage).await;
+    let backend = guard.1.lash_backend();
+    (guard, backend)
+}
+
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
     let url = database_url()?;
     let database_lock = SharedDatabaseLock::acquire(&url).await;
@@ -309,38 +319,6 @@ fn pg_law_stores(
         Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
     ));
     (attachments, stores)
-}
-
-/// A backend for a law's runtime over `storage`'s store set. These laws drive
-/// real turns through the engine's drive calls, so the host must execute effects outside
-/// a handler: a full SQLite engine in a scratch directory is the one
-/// executing host an in-process test can drive that way, and the laws stay on
-/// it until the B4 lane removes the SQL effect host. The store under test is
-/// still Postgres; the guard keeps the attachment bytes and the engine's
-/// scratch directory alive.
-async fn pg_law_backend(
-    storage: &PostgresStorage,
-) -> (
-    (
-        tempfile::TempDir,
-        tempfile::TempDir,
-        lash_sqlite_store::SqliteBackend,
-    ),
-    lash_core_execution::Backend,
-) {
-    let (attachments, stores) = pg_law_stores(storage);
-    let engine_dir = tempfile::tempdir().expect("effect engine directory");
-    let engine = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-        engine_dir.path(),
-        lash_sqlite_store::SqliteBackendOptions::default(),
-        stores.clock(),
-    )
-    .await
-    .expect("open the law's effect engine");
-    (
-        (attachments, engine_dir, engine.clone()),
-        lash_conformance::backend_over(stores, engine.effect_host()),
-    )
 }
 
 async fn postgres_lineage_handles() -> Option<(SharedDatabaseLock, LineageConformanceHandles)> {
@@ -443,14 +421,6 @@ async fn wait_for_session_lease_advisory_waiters(
     })
     .await
     .unwrap_or_else(|_| panic!("expected at least {at_least} session-lease advisory-lock waiters"));
-}
-
-fn durable_turn_scope(
-    session_id: impl Into<SessionId>,
-    turn_id: impl Into<TurnId>,
-) -> ExecutionScope {
-    let session_id = session_id.into();
-    ExecutionScope::turn(&session_id, turn_id)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1921,41 +1891,6 @@ mod cancelled_turn_withheld_input;
 mod direct_turn_acceptance;
 #[path = "conformance/injectors.rs"]
 mod injectors;
-lash_conformance::session_failure_evidence_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres failure-evidence conformance: database URL is not set");
-        return;
-    };
-    reset(storage.pool()).await;
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
-        1_800_000_000_000,
-    ));
-    let attachments = tempfile::tempdir().expect("attachment directory");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
-        &storage,
-        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
-        lash_core_execution::WakeDeliveryConfig::default(),
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-    ));
-    // The law streams real turns, so its host must execute effects: a full
-    // SQLite engine in a scratch directory is the one executing host an
-    // in-process test can drive. The store under test is still Postgres.
-    let engine_dir = tempfile::tempdir().expect("effect engine directory");
-    let engine = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-        engine_dir.path(),
-        lash_sqlite_store::SqliteBackendOptions::default(),
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-    )
-    .await
-    .expect("open the failure-evidence effect engine");
-    let backend = lash_conformance::backend_over(stores, engine.effect_host());
-    (
-        (_database_lock, attachments, engine_dir, engine),
-        backend,
-        move || clock.advance(1),
-    )
-});
-
 lash_conformance::session_read_view_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres read-session conformance: database URL is not set");

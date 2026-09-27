@@ -47,7 +47,7 @@ pub(crate) fn restate_await_event_key(
     scope: &ExecutionScope,
     wait: AwaitEventWaitIdentity,
 ) -> Result<AwaitEventKey, RuntimeError> {
-    let base_key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;
+    let base_key_id = lash_core::facade_support::await_event_identity::derive_key_id(scope, &wait)?;
     Ok(AwaitEventKey {
         scope: scope.clone(),
         wait,
@@ -61,7 +61,7 @@ pub(crate) fn restate_await_event_key_for_authority(
     scope: &ExecutionScope,
     wait: AwaitEventWaitIdentity,
 ) -> Result<AwaitEventKey, RuntimeError> {
-    let base_key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;
+    let base_key_id = lash_core::facade_support::await_event_identity::derive_key_id(scope, &wait)?;
     let mut preimage = Vec::with_capacity(authority_id.binding_id().len() + base_key_id.len() + 1);
     preimage.extend_from_slice(authority_id.binding_id().as_bytes());
     preimage.push(0);
@@ -80,7 +80,7 @@ pub(crate) fn restate_await_event_key_is_valid(key: &AwaitEventKey) -> bool {
         let Ok(expected) = restate_await_event_key(&key.scope, key.wait.clone()) else {
             return false;
         };
-        return lash_core::facade_support::promise_semantics::constant_time_eq(
+        return lash_core::facade_support::await_event_identity::constant_time_eq(
             expected.key_id.as_bytes(),
             key.key_id.as_bytes(),
         );
@@ -93,10 +93,10 @@ pub(crate) fn restate_await_event_key_is_valid(key: &AwaitEventKey) -> bool {
     else {
         return false;
     };
-    lash_core::facade_support::promise_semantics::constant_time_eq(
+    lash_core::facade_support::await_event_identity::constant_time_eq(
         expected.key_id.as_bytes(),
         key.key_id.as_bytes(),
-    ) && lash_core::facade_support::promise_semantics::constant_time_eq(
+    ) && lash_core::facade_support::await_event_identity::constant_time_eq(
         expected.signature.as_bytes(),
         key.signature.as_bytes(),
     )
@@ -376,7 +376,7 @@ impl RestateDurableWaitResolveResponse {
         match self {
             Self::Outcome(outcome) => Ok(outcome),
             Self::Refused(RestateDurableWaitResolveRefusal::CancelDecided) => {
-                Err(lash_core::facade_support::promise_semantics::cancel_decided_refusal())
+                Err(lash_core::facade_support::await_event_identity::cancel_decided_refusal())
             }
         }
     }
@@ -512,7 +512,7 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     #[serde(default)]
     awakeables: Vec<RestateDurableWaitAwakeableRequest>,
     /// Completion keys their owning group child's cancel decision closed, by
-    /// the key's authority-free identity (`promise_semantics::derive_key_id`),
+    /// the key's authority-free identity (`await_event_identity::derive_key_id`),
     /// so the group index that decides the child can name them (ADR 0099 §4,
     /// W17). Carried in the metadata every handler already reads, so the
     /// check journals nothing new; absent from the encoding while empty.
@@ -537,7 +537,7 @@ fn cancel_decided_id(
     scope: &ExecutionScope,
     wait: &AwaitEventWaitIdentity,
 ) -> Result<String, TerminalError> {
-    lash_core::facade_support::promise_semantics::derive_key_id(scope, wait)
+    lash_core::facade_support::await_event_identity::derive_key_id(scope, wait)
         .map_err(|error| TerminalError::new(error.to_string()))
 }
 /// Fire a gate entry because the turn-control wait it guards has settled.

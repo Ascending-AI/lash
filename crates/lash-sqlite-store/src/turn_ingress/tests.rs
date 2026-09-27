@@ -10,8 +10,7 @@
 
 use rusqlite::Connection;
 
-use super::{closure_participant_sql, tool_intent_sql, turn_ingress_sql};
-use crate::schema_layout::Schema;
+use super::{tool_intent_sql, turn_ingress_sql};
 
 /// A catalog with this crate's real durable-core schema, in memory: the
 /// session schema and the fragments the durable core database carries beside
@@ -155,25 +154,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.closures_sqlite.select_by_turn.sql(),
         sql.retired_scopes.exists_for_scope.sql(),
         sql.retired_scopes_sqlite.insert_new.sql(),
-    ] {
-        conn.prepare(statement)
-            .unwrap_or_else(|error| panic!("statement prepares: {error}\n{statement}"));
-    }
-}
-
-#[test]
-fn every_closure_participant_statement_prepares_against_the_effect_schema() {
-    // The cancellation-closure participant ledger lives in the effect journal's
-    // database, which a host reaches as its own `main` and a catalog reaches as
-    // an attached `effect_journal`; the statement is rendered once per schema.
-    let conn = Connection::open_in_memory().expect("in-memory database opens");
-    conn.execute_batch(crate::schema::EFFECT_SCHEMA)
-        .expect("effect schema applies");
-    let sql = closure_participant_sql(Schema::Main);
-    for statement in [
-        sql.insert_new.sql(),
-        sql.delete_participant.sql(),
-        sql.exists_for_scope.sql(),
     ] {
         conn.prepare(statement)
             .unwrap_or_else(|error| panic!("statement prepares: {error}\n{statement}"));

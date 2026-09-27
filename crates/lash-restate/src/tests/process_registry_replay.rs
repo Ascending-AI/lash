@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
+use lash_core::TestProcessRegistryWriteExt as _;
 use lash_core::TurnFailureCode;
 
 use lashlang::testing::ast_builders as b;
@@ -424,6 +425,101 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
         resolved[1].key, expected_key,
         "second signal must resolve the ordinal-2 wait key"
     );
+}
+
+#[tokio::test]
+pub(super) async fn restate_signal_uses_declared_wait_ordinal_when_event_count_diverges() {
+    let context = Arc::new(RecordingContext::default());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
+    let registry = process_registry();
+    let signal_name = "ready";
+    let event_type = lash_core::runtime::process_signal_event_type(signal_name)
+        .expect("valid signal event type");
+    let record = registry
+        .register_process(executed_registration().with_extra_event_types([
+            lash_core::ProcessEventType {
+                name: event_type.clone(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            },
+        ]))
+        .await
+        .expect("register signal target");
+    let process_id = record.id.clone();
+    registry
+        .record_first_started(
+            &process_id,
+            lash_core::ProcessStarted {
+                owner: lash_core::LeaseOwnerIdentity::engine_process_execution(
+                    &process_id,
+                    "signal-divergent-ordinal",
+                ),
+                attempt: 1,
+                started_at_ms: 1,
+                generation: None,
+                build_generation: None,
+            },
+        )
+        .await
+        .expect("start signal target's engine invocation");
+    registry
+        .set_process_wait(
+            &process_id,
+            lash_core::WaitState {
+                kind: lash_core::WaitKind::Signal {
+                    name: signal_name.to_string(),
+                    event_type: event_type.clone(),
+                    key: lash_core::runtime::process_signal_wait_key(&process_id, signal_name, 7),
+                    ordinal: 7,
+                },
+                since_ms: 1,
+            },
+        )
+        .await
+        .expect("park on ordinal seven");
+
+    let payload = serde_json::json!({"value": "wake-seven"});
+    host.execute_effect(
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::Process, "signal-divergent-ordinal"),
+            RuntimeEffectCommand::process(ProcessCommand::Signal {
+                process_id: process_id.clone(),
+                signal_name: signal_name.to_string(),
+                signal_id: "signal-1".to_string(),
+                request: lash_core::ProcessEventAppendRequest::new(
+                    event_type.clone(),
+                    payload.clone(),
+                )
+                .with_replay_key("signal-divergent-ordinal:1"),
+            }),
+        ),
+        registry_local_executor(registry.clone()),
+    )
+    .await
+    .expect("deliver signal");
+    assert_eq!(
+        registry
+            .count_events_through(&process_id, &event_type, i64::MAX as u64)
+            .await
+            .expect("count signal events"),
+        1,
+        "the event count must differ from the declared wait ordinal"
+    );
+    let declared_key = test_restate_await_event_key(
+        &ExecutionScope::process(process_id.clone()),
+        AwaitEventWaitIdentity::process_signal(process_id.clone(), signal_name, 7),
+    )
+    .expect("declared wait key");
+    let counted_key = test_restate_await_event_key(
+        &ExecutionScope::process(process_id.clone()),
+        AwaitEventWaitIdentity::process_signal(process_id, signal_name, 1),
+    )
+    .expect("event-count key");
+    let resolved = context.resolved_events.lock_recover();
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].key, declared_key);
+    assert_eq!(resolved[0].resolution, Resolution::Ok(payload));
+    assert_ne!(resolved[0].key, counted_key);
 }
 
 #[tokio::test]

@@ -8,8 +8,6 @@
 //! place is a render refusal, which is the point of the layout and also the
 //! way a new statement can fail for one connection shape and not another.
 
-use crate::schema_layout::Schema;
-
 #[test]
 fn every_rendered_statement_set_renders_for_every_layout() {
     let _ = crate::artifact_store::artifact_sql();
@@ -19,11 +17,4 @@ fn every_rendered_statement_set_renders_for_every_layout() {
     let _ = crate::turn_ingress::turn_ingress_sql();
     let _ = crate::turn_ingress::tool_intent_sql();
     let _ = crate::process_registry::sql::process_sql();
-    let _ = crate::process_registry::sql::attached_process_sql();
-    for schema in Schema::ALL {
-        let _ = crate::scope_fence::fence_sql(schema);
-        let _ = crate::await_event::wait_sql(schema);
-        let _ = crate::effect_replay::effect_sql(schema);
-        let _ = crate::turn_ingress::closure_participant_sql(schema);
-    }
 }

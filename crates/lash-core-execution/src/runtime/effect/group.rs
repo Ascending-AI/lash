@@ -331,176 +331,8 @@ impl RuntimeEffectGroup {
     }
 }
 
-/// The common group facts a host records and later fences on reopen.
-pub(crate) trait EffectGroupRecordAccessor {
-    /// The group's durable identity.
-    fn group_key(&self) -> &str;
-
-    /// The number of children recorded for the group.
-    fn children(&self) -> usize;
-
-    /// The wake rule recorded for the group.
-    fn wake(&self) -> GroupWakePolicy;
-
-    /// The loser disposition recorded for the group.
-    fn loser_disposition(&self) -> LoserPolicy;
-}
-
-impl EffectGroupRecordAccessor for RuntimeEffectGroup {
-    fn group_key(&self) -> &str {
-        self.group_key()
-    }
-
-    fn children(&self) -> usize {
-        self.children().len()
-    }
-
-    fn wake(&self) -> GroupWakePolicy {
-        self.wake()
-    }
-
-    fn loser_disposition(&self) -> LoserPolicy {
-        self.loser_disposition()
-    }
-}
-
-/// Refuses a reopen whose recorded group facts disagree with the offered ones.
-pub(crate) fn fence_reopen<Opening, Persisted>(
-    opening: &Opening,
-    persisted: &Persisted,
-) -> Result<(), RuntimeEffectControllerError>
-where
-    Opening: EffectGroupRecordAccessor,
-    Persisted: EffectGroupRecordAccessor,
-{
-    if opening.children() != persisted.children() {
-        return Err(group_shape_error(format!(
-            "durable effect group {} is recorded with {} children but was reopened \
-             with {}; a changed child count renumbers every rank above the change, \
-             so the settlements already consumed would no longer name the children \
-             that produced them",
-            opening.group_key(),
-            persisted.children(),
-            opening.children()
-        )));
-    }
-    if opening.wake() != persisted.wake() {
-        return Err(group_shape_error(format!(
-            "durable effect group {} is recorded under wake rule {:?} but was \
-             reopened under {:?}; the wake rule is journaled identity and a reopen \
-             may not change it",
-            opening.group_key(),
-            persisted.wake(),
-            opening.wake()
-        )));
-    }
-    if opening.loser_disposition() != persisted.loser_disposition() {
-        return Err(group_shape_error(format!(
-            "durable effect group {} declared loser disposition {:?} at open but was \
-             reopened declaring {:?}; the declared disposition is what a drain of \
-             this group applies, so a reopen may not restate it",
-            opening.group_key(),
-            persisted.loser_disposition(),
-            opening.loser_disposition()
-        )));
-    }
-    Ok(())
-}
-
-/// Refuses a reopen whose offered children are not the retained ones, when
-/// the opener asked for [`GroupReopen::RetainedContent`].
-///
-/// `retained` is the group rebuilt from the journal's membership, in position
-/// order. Each position is compared through the shared replay-validation seam,
-/// so a refusal carries the same divergent-path evidence as a mismatched
-/// effect row, under the host's own replay-mismatch code.
-pub(crate) fn fence_reopen_content(
-    offered: &RuntimeEffectGroup,
-    retained: &[RuntimeEffectEnvelope],
-    mismatch_code: crate::RuntimeErrorCode,
-) -> Result<(), RuntimeEffectControllerError> {
-    if offered.reopen() != GroupReopen::RetainedContent {
-        return Ok(());
-    }
-    for (offered_child, retained_child) in offered.children().iter().zip(retained) {
-        super::validation::validate_replayed_effect_envelope(
-            &retained_child.canonical_form()?,
-            &offered_content(offered_child, retained_child).canonical_form()?,
-            mismatch_code.clone(),
-            None,
-        )
-        .map_err(|mut error| {
-            error.message = format!(
-                "durable effect group {} was reopened with a child at replay key `{}` that \
-                 is not the retained one: {}",
-                offered.group_key(),
-                offered_child.invocation.replay_key(),
-                error.message
-            );
-            error
-        })?;
-    }
-    Ok(())
-}
-
-/// The offered child as the program asked for it, for comparison with the
-/// retained one: a tool child's cancellation authority is the journal's own
-/// routing address, not program content, so the retained child's stands in
-/// for it — a reopened group runs its retained children under their retained
-/// authority either way, and a journal opened at another address keeps them.
-fn offered_content(
-    offered: &RuntimeEffectEnvelope,
-    retained: &RuntimeEffectEnvelope,
-) -> RuntimeEffectEnvelope {
-    let mut offered = offered.clone();
-    if let (
-        crate::RuntimeEffectCommand::ToolInvocation { request },
-        crate::RuntimeEffectCommand::ToolInvocation { request: retained },
-    ) = (&mut offered.command, &retained.command)
-    {
-        request
-            .cancellation_authority
-            .clone_from(&retained.cancellation_authority);
-    }
-    offered
-}
-
-/// A reopen refusal re-coded as the host's replay mismatch, for a reopen the
-/// opener asked to be checked against the recorded run (FIG-3586).
-///
-/// The refusal names the diverged effect as the group head
-/// (`effect_group`), so the turn parks under that kind rather than
-/// `unknown` (FIG-3587).
-pub(crate) fn as_replay_mismatch(
-    mut error: RuntimeEffectControllerError,
-    mismatch_code: crate::RuntimeErrorCode,
-) -> RuntimeEffectControllerError {
-    error.code = mismatch_code;
-    let summary = error.summary.get_or_insert_with(|| {
-        Box::new(crate::RuntimeEffectReplayMismatchReport {
-            divergent_path_count: 1,
-            first_divergent_paths: vec!["group".to_string()],
-            effect_kind: None,
-        })
-    });
-    summary
-        .effect_kind
-        .get_or_insert_with(|| "effect_group".to_string());
-    error
-}
-
 pub(crate) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RuntimeEffectGroupShape, message)
-}
-
-/// Refuses an await after the caller consumed every recorded settlement.
-pub(crate) fn exhausted_group_error(handle: &EffectGroupHandle) -> RuntimeEffectControllerError {
-    group_shape_error(format!(
-        "durable effect group {} has all {} settlements consumed; check \
-         is_exhausted() before awaiting rather than awaiting past the group",
-        handle.group_key(),
-        handle.children()
-    ))
 }
 
 /// Refuses an await cancellation without advancing the caller's cursor.
@@ -513,30 +345,6 @@ pub(crate) fn await_cancelled_error(group_key: &str, rank: usize) -> RuntimeEffe
              at the same settlement"
         ),
     )
-}
-
-/// Reports the terminal recorded for a child cancelled by its group policy.
-pub(crate) fn child_cancelled_error(
-    group_key: &str,
-    position: usize,
-) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
-        format!(
-            "child {position} of durable effect group {group_key} was cancelled by \
-             the group's declared loser disposition; the cancellation is this \
-             child's terminal"
-        ),
-    )
-}
-
-/// Refuses access to a group that is closed to its caller.
-pub(crate) fn closed_group_error(group_key: &str) -> RuntimeEffectControllerError {
-    group_shape_error(format!(
-        "durable effect group {group_key} is closed to its caller; a closed group's \
-         remaining children settle under host ownership and the caller may not \
-         observe them"
-    ))
 }
 
 /// Refuses an effect that carries group membership on a path that cannot honor
@@ -877,6 +685,63 @@ impl Default for EffectGroupDrainBudget {
     }
 }
 
-#[cfg(test)]
-#[path = "group_mismatch_tests.rs"]
-mod mismatch_tests;
+/// What a tool child's terminal — its final attempt's boundary or its resolved
+/// completion — asks its controller to commit.
+///
+/// Identity and drain input only. The lease owner is the substrate's own
+/// fact, so the request does not carry it and no caller can claim another
+/// owner's fence — and the group is *resolved* from the durable record rather
+/// than asserted by the caller, so `group_key` is an output of the decision,
+/// not an input a caller could get wrong.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupChildFinalCommit {
+    /// The journal scope the child's replay row lives under.
+    pub scope_id: String,
+    /// The child's replay key — its durable identity.
+    pub replay_key: String,
+    /// The sealed drain input — the declared intents and projection data a
+    /// recovery replays instead of re-running the attempt.
+    pub drain_input: String,
+}
+
+/// The recorded result of committing a group child's final record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EffectGroupChildCommitOutcome {
+    /// The replay key names no group child: an ordinary effect, which takes
+    /// the process-local drain path and owes no durable discharge.
+    Ungrouped,
+    /// The final record won the §4 point: `commit_state` is `committed`, the
+    /// commit position `commit_seq` is allocated, and the drain input is
+    /// durable. The caller may drain once every lower commit position has
+    /// drained.
+    Committed {
+        /// The group the row resolved to.
+        group_key: String,
+        /// The child's durable position in the group's final-commit order.
+        commit_seq: u64,
+    },
+    /// The point already holds this child's final record — a crashed or
+    /// retried executor reaching the boundary again. `drain_input` is the
+    /// recorded obligation set the winner committed, so recovery drains the
+    /// recorded intents rather than whatever a re-execution re-declared.
+    AlreadyCommitted {
+        /// The group the row resolved to.
+        group_key: String,
+        /// The winning commit's durable position.
+        commit_seq: u64,
+        /// The drain input the winning commit recorded.
+        drain_input: Option<String>,
+    },
+    /// Refused: the cancel disposition already committed at the §4 point
+    /// (W6/W7). The late final may journal nothing — no terminal, no
+    /// position, no drain input — and the caller surfaces the typed
+    /// cancel-decided error rather than an outcome.
+    CancelDecided {
+        /// The group the row resolved to.
+        group_key: String,
+        /// The position the cancel decision seated the child at: the
+        /// settlement rank `decide_cancel` allocated, not a commit-order
+        /// position — a cancel-decided row carries no `commit_seq`.
+        commit_seq: u64,
+    },
+}

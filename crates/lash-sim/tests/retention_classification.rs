@@ -372,71 +372,13 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     ),
 ];
 
-/// Tables only the SQLite catalog carries: its attachment bytes, and its
-/// effect engine's journal (PostgreSQL journals no effects, ADR 0104; the
-/// SQLite engine leaves with FIG-3668).
-const SQLITE_ONLY: &[(&str, RetentionClass)] = &[
-    (
-        "attachment_blobs",
-        Bounded {
-            lever: "attachment GC (reclaim_unreferenced_attachments): a blob no manifest row roots is condemned and deleted",
-        },
-    ),
-    (
-        "turn_cancel_closure_participants",
-        LifecycleOwned {
-            scope: "catalog scope retirement after closure pins drain",
-        },
-    ),
-    // Session and process retirement select by owner; runtime-operation scopes
-    // retire through `EffectJournalRetirement::RuntimeOperation` once their
-    // receipt is back (facade plugin operations) or their process is pruned
-    // (trigger-delivery reconcile), groups and children in one transaction.
-    (
-        "runtime_effect_replay",
-        LifecycleOwned {
-            scope: "session, process, or runtime-operation retirement",
-        },
-    ),
-    (
-        "runtime_effect_group",
-        LifecycleOwned {
-            scope: "session, process, or runtime-operation retirement",
-        },
-    ),
-    (
-        "runtime_effect_group_child",
-        LifecycleOwned {
-            scope: "session, process, or runtime-operation retirement",
-        },
-    ),
-    (
-        "await_event_meta",
-        PermanentlyExempt {
-            reason: "singleton signing secret keeps issued promise keys valid across reopen",
-        },
-    ),
-    // Session promises die with session revocation; process and
-    // runtime-operation promises die with their scope's journal retirement.
-    (
-        "await_event_waits",
-        LifecycleOwned {
-            scope: "session revocation or process/runtime-operation retirement",
-        },
-    ),
-    (
-        "await_event_revoked_sessions",
-        PermanentlyExempt {
-            reason: "single-use session identity and permanent promise-key revocation",
-        },
-    ),
-    (
-        "effect_scope_retirements",
-        PermanentlyExempt {
-            reason: "scope fences: a runtime-operation fence is permanent; a process fence lasts until the host registers the id again (ADR 0049)",
-        },
-    ),
-];
+/// Tables only the SQLite catalog carries: attachment bytes.
+const SQLITE_ONLY: &[(&str, RetentionClass)] = &[(
+    "attachment_blobs",
+    Bounded {
+        lever: "attachment GC (reclaim_unreferenced_attachments): a blob no manifest row roots is condemned and deleted",
+    },
+)];
 
 const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[
     (

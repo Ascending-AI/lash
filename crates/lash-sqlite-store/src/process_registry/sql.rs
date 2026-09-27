@@ -4,15 +4,9 @@
 //! statements only SQLite issues, and each one has a `[[dialect_only]]` entry
 //! in `crates/lash-store-sql/dialect-only.toml` saying why its text forks.
 //!
-//! # Why two renderings
-//!
 //! The process registry is its own SQLite database and addresses its tables
 //! unqualified — the spelling every `INDEXED BY` plan in this crate was
-//! measured against. One caller reaches the same tables from a *session*
-//! connection with the registry `ATTACH`ed (the effect journal's bind-time
-//! fence repair, `crate::scope_fence`), so the set is rendered a second time
-//! through the `process_registry` qualifier. Rendering runs once, at first
-//! use, for each.
+//! measured against. Rendering runs once, at first use.
 
 use std::sync::LazyLock;
 
@@ -27,8 +21,6 @@ use lash_store_sql::process::{
     wake_deliveries::WakeDeliveryStatements, wake_redelivery_fences::WakeRedeliveryFenceStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
-
-use crate::schema_layout::Schema;
 
 /// `<column> = '<state>'`, for the one wake-delivery state named.
 ///
@@ -996,19 +988,10 @@ impl ProcessSql {
 static PROCESS_SQL: LazyLock<ProcessSql> =
     LazyLock::new(|| ProcessSql::render(Dialect::sqlite_unqualified()));
 
-static ATTACHED_PROCESS_SQL: LazyLock<ProcessSql> =
-    LazyLock::new(|| ProcessSql::render(Schema::ProcessRegistry.dialect()));
-
 /// The process-family statements as the registry's own connection addresses
 /// them, rendered once at first use and never again.
 pub(crate) fn process_sql() -> &'static ProcessSql {
     &PROCESS_SQL
-}
-
-/// The same statements as a connection that has `ATTACH`ed the registry
-/// addresses them.
-pub(crate) fn attached_process_sql() -> &'static ProcessSql {
-    &ATTACHED_PROCESS_SQL
 }
 
 /// The list statement this filter asks for, and the values it binds.

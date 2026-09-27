@@ -65,7 +65,6 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
     let seam = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
-        journal_faults: None,
     };
     let point = TurnCrashPoint {
         operation: TurnSeamOperation::Effect(EffectOperation::GroupSettle),
@@ -145,7 +144,6 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
     let successor_seam = SeamLayer {
         control: successor_control.clone(),
         executions: Arc::clone(&executions),
-        journal_faults: None,
     };
     let (refusals, mut refused) = tokio::sync::mpsc::unbounded_channel::<Refusal>();
     let admitted = reference_admitted_scope(&identity);
@@ -374,7 +372,6 @@ async fn refuse_claim<F, S>(
     let seam = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
-        journal_faults: None,
     };
     let tool = TraceTool::default();
     let (refusals, mut refused) = tokio::sync::mpsc::unbounded_channel();

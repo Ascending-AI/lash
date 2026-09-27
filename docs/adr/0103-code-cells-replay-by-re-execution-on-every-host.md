@@ -21,14 +21,12 @@ Amended 2026-09-25 (FIG-3779): on Restate a drifted binding's recorded process
 start and sleep are served, answered at a frontier marker each journals first;
 only one at the live frontier refuses.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+Amended 2026-09-24 (FIG-3669), **partly implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR
 specifies SQL-engine behaviour: the journal-row hosts (`StoreEffectReplayDriver`
 over `EffectReplayRowStore`) and the replay-hash park on every SQL host;
-re-execution on replay and the park stay, as engine obligations. Those passages
-stay as written until the PR that deletes the code (FIG-3667, FIG-3668, or
-FIG-3600 for the session lease) rewrites them.
+re-execution on replay and the park stay, as engine obligations. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. Session and process lease passages await their own cutovers.
 
 ## Context
 

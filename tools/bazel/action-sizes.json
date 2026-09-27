@@ -629,13 +629,6 @@
     "peak_bytes": 877707264,
     "samples": 244
   },
-  "lash-internal-sqlite-store/sqlite_await_event_helper": {
-    "cpu_count": 2,
-    "memory_kb": 2097152,
-    "p95_cores": 1.57,
-    "peak_bytes": 1114873856,
-    "samples": 285
-  },
   "lash-internal-subagents/lash_subagents": {
     "cpu_count": 2,
     "memory_kb": 2621440,
@@ -880,13 +873,6 @@
     "p95_cores": 1.41,
     "peak_bytes": 1251516416,
     "samples": 319
-  },
-  "lash-sim/two_opener_differential": {
-    "cpu_count": 2,
-    "memory_kb": 1572864,
-    "p95_cores": 1.55,
-    "peak_bytes": 1002348544,
-    "samples": 394
   },
   "rlm-smoke-host/rlm_smoke_host": {
     "cpu_count": 2,

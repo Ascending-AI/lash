@@ -3,49 +3,6 @@
 
 use super::*;
 
-/// The fragment dedup's whole point: every database that carries a shared
-/// table must end up with the same stored DDL for it. This is the
-/// invariant the two copy-pasted declarations silently assumed.
-#[test]
-fn shared_fragment_tables_carry_identical_ddl_in_every_carrier_database() {
-    let carriers: &[(&[&str], &[SqliteDatabase])] = &[(
-        &["effect_scope_retirements"],
-        &[
-            SqliteDatabase::ProcessRegistry,
-            SqliteDatabase::EffectReplay,
-        ],
-    )];
-    for &(objects, databases) in carriers {
-        for &object in objects {
-            let mut rendered = Vec::new();
-            for &database in databases {
-                let mut connection = Connection::open_in_memory().expect("open shared-DDL fixture");
-                prepare_versioned_schema(&mut connection, database)
-                    .expect("apply database schema and fragments")
-                    .commit()
-                    .expect("commit shared-DDL fixture");
-                let sql: String = connection
-                    .query_row(
-                        "SELECT sql FROM sqlite_master WHERE name = ?1",
-                        [object],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or_else(|error| {
-                        panic!("{object} missing from {}: {error}", database.name())
-                    });
-                rendered.push((database.name(), sql));
-            }
-            let (first_database, first_sql) = &rendered[0];
-            for (database, sql) in &rendered[1..] {
-                assert_eq!(
-                    first_sql, sql,
-                    "{object} DDL drifted between {first_database} and {database}"
-                );
-            }
-        }
-    }
-}
-
 fn assert_check_rejects(connection: &Connection, statement: &str, constraint: &str) {
     let error = connection
         .execute_batch(statement)
@@ -297,34 +254,5 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
              request_fingerprint, result_json, created_at_ms
          ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
         "ck_trigger_receipts_owner_kind",
-    );
-
-    let effects = Connection::open_in_memory().expect("open effect constraint fixture");
-    effects
-        .execute_batch(EFFECT_SCHEMA)
-        .expect("create effect constraint fixture");
-    assert_check_rejects(
-        &effects,
-        "INSERT INTO runtime_effect_replay (
-             scope_id, replay_key, envelope_hash, envelope_json, status,
-             created_at_ms, updated_at_ms
-         ) VALUES ('scope', 'bad-effect-status', 'hash', '{}', 'cancelled', 0, 0)",
-        "ck_runtime_effect_replay_status",
-    );
-    assert_check_rejects(
-        &effects,
-        "INSERT INTO runtime_effect_group (
-             group_key, scope_id, session_id, wake, loser_disposition,
-             expected_children, next_seq, next_commit_seq, created_at_ms
-         ) VALUES ('bad-wake', 'scope', 'session', 'majority', 'cancel', 0, 0, 0, 0)",
-        "ck_runtime_effect_group_wake",
-    );
-    assert_check_rejects(
-        &effects,
-        "INSERT INTO runtime_effect_group (
-             group_key, scope_id, session_id, wake, loser_disposition,
-             expected_children, next_seq, next_commit_seq, created_at_ms
-         ) VALUES ('bad-disposition', 'scope', 'session', 'all', 'retry', 0, 0, 0, 0)",
-        "ck_runtime_effect_group_loser_disposition",
     );
 }

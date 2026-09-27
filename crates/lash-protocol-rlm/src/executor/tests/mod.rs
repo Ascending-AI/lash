@@ -18,14 +18,11 @@ mod step_trace;
 use super::*;
 use std::sync::Mutex;
 
-mod binding_drift;
 mod deferred_and_processes;
 mod lifecycle_and_diagnostics;
 mod per_process_surface;
 mod production_map_law;
 mod projections_and_snapshots;
-mod replay_corpus;
-mod replay_ordinals;
 mod session_globals_law;
 mod triggers;
 mod typescript_cells;

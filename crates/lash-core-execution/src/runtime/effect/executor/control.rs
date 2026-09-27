@@ -141,20 +141,6 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(controller)
     }
 
-    /// The durable closing/finalization seam over this host's group journal
-    /// (ADR 0099 §7, FIG-3410): the recorded `closing` fact a `close` writes
-    /// and the four-step cursor a finalizer advances.
-    ///
-    /// `None` on a tier that keeps no group row — Restate answers the same
-    /// lifecycle through its engine-side `EffectGroupState` `Closed`/`Retired`
-    /// states, which are the twin of this seam, so there is nothing to hand
-    /// out. The SQL hosts answer with the shared driver's closing object.
-    fn effect_group_closing(
-        &self,
-    ) -> Option<Arc<dyn super::super::group_closing::StoreEffectGroupClosing>> {
-        None
-    }
-
     /// Installs — or returns the already-installed — tool-child wiring for this
     /// host, and registers it as the host's group-executor resolver
     /// (ADR 0099 §2, FIG-2266).
@@ -514,7 +500,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// invocation — happen where no caller is in scope, so a host that could
     /// only run what a caller handed it could not honor the contract at all. The
     /// host resolves every child from its journaled envelope through its
-    /// registered [`GroupExecutors`](super::super::group_drain::GroupExecutors),
+    /// registered [`GroupExecutors`](super::super::group_executors::GroupExecutors),
     /// which is the same seam the loser drain resolves through, so one host has
     /// one answer to "what code runs this child" on every path.
     ///
@@ -593,7 +579,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// unambiguous answer to it.
     fn register_group_executors(
         &self,
-        executors: Arc<dyn super::super::group_drain::GroupExecutors>,
+        executors: Arc<dyn super::super::group_executors::GroupExecutors>,
     ) -> Result<(), RuntimeEffectControllerError> {
         let _ = executors;
         Err(super::effect_groups_unsupported(
@@ -724,19 +710,17 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// cancel disposition owns the point — in which case the caller writes
     /// nothing of its own.
     ///
-    /// [`AlreadyCommitted`]: super::super::group_journal::EffectGroupChildCommitOutcome::AlreadyCommitted
-    /// [`CancelDecided`]: super::super::group_journal::EffectGroupChildCommitOutcome::CancelDecided
+    /// [`AlreadyCommitted`]: super::super::group::EffectGroupChildCommitOutcome::AlreadyCommitted
+    /// [`CancelDecided`]: super::super::group::EffectGroupChildCommitOutcome::CancelDecided
     ///
     /// The default refuses rather than inventing an arbitration: a controller
     /// that cannot serialize the decision cannot host grouped tool children,
     /// and silently succeeding would be a fence that does not exist.
     async fn commit_group_child_final(
         &self,
-        commit: super::super::group_journal::GroupChildFinalCommit,
-    ) -> Result<
-        super::super::group_journal::EffectGroupChildCommitOutcome,
-        RuntimeEffectControllerError,
-    > {
+        commit: super::super::group::GroupChildFinalCommit,
+    ) -> Result<super::super::group::EffectGroupChildCommitOutcome, RuntimeEffectControllerError>
+    {
         let _ = commit;
         Err(super::effect_groups_unsupported(
             "durable group-child commit boundary",
@@ -778,7 +762,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// the fence exists to close. Forwarding wrappers forward.
     async fn read_recorded_journal(
         &self,
-        range: &super::super::effect_replay_driver::RecordedKeyRange,
+        range: &super::super::recorded_keys::RecordedKeyRange,
     ) -> Result<RecordedJournal, RuntimeEffectControllerError> {
         let _ = range;
         Err(RuntimeEffectControllerError::new(
@@ -807,7 +791,7 @@ pub type IndependentEffectWork<'work> =
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordedJournal {
     /// The journal rows the scope holds in the range, readable by key.
-    Keys(super::super::effect_replay_driver::RecordedKeys),
+    Keys(super::super::recorded_keys::RecordedKeys),
     /// The host replays its journal by position and checks each entry's name
     /// as it goes (Restate's journal-mismatch check): a range read has nothing
     /// to add, because that positional check is already the fence — a command

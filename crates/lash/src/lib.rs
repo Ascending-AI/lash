@@ -113,8 +113,7 @@ pub use lash_core::async_trait;
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// effect host from: one [`EffectEngine`] over one store set (ADR 0104).
 /// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a
-/// SQLite or PostgreSQL store set, or `lash::sqlite::SqliteBackend` (file or
-/// memory) until FIG-3668 deletes the SQLite engine.
+/// SQLite or PostgreSQL store set.
 pub use lash_core::engine::BuildGeneration;
 /// Store→engine delivery obligations (ADR 0109): what a stalled obligation
 /// reports, and how this deployment competes for the recovery leader lease.

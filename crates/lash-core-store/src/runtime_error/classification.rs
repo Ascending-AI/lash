@@ -385,34 +385,6 @@ impl RuntimeErrorCode {
             Self::SessionHeadRefresh => Redrivable,
             // the tool registry refuses the same registration.
             Self::SessionToolRegistry => Terminal,
-            // the await-event row does not decode.
-            Self::SqliteAwaitEventDecode => Terminal,
-            // the same value fails to encode again.
-            Self::SqliteAwaitEventEncode => Terminal,
-            // the process-local notifier failed; a restart repairs it.
-            Self::SqliteAwaitEventNotify => Redrivable,
-            // signing the same key fails the same way.
-            Self::SqliteAwaitEventSign => Terminal,
-            // await-event store I/O failed.
-            Self::SqliteAwaitEventStore => Retryable,
-            // journal retirement store I/O failed; the identical retirement is safe to retry.
-            Self::SqliteEffectJournalRetirement => Retryable,
-            // the journal row is corrupt; a redrive reads the same row.
-            Self::SqliteEffectReplayCorruptRow => Terminal,
-            // the journal row does not decode; a redrive reads the same row.
-            Self::SqliteEffectReplayDecode => Terminal,
-            // the same value fails to encode again.
-            Self::SqliteEffectReplayEncode => Terminal,
-            // the live run diverged from its journal; a redrive diverges the same way.
-            Self::SqliteEffectReplayHashConflict => Parked,
-            // the effect carries no replay key; wiring, not the attempt.
-            Self::SqliteEffectReplayKeyMissing => Terminal,
-            // the journal row lease was lost to another owner.
-            Self::SqliteEffectReplayLeaseLost => Redrivable,
-            // strict replay found no journal row; a redrive finds none either.
-            Self::SqliteEffectReplayMissing => Terminal,
-            // journal store I/O failed.
-            Self::SqliteEffectReplayStore => Redrivable,
             // the same catalog resolves the same way.
             Self::ToolCatalogResolutionFailed => Terminal,
             // the completion key names no call id.

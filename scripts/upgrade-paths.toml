@@ -72,11 +72,6 @@ constant_path = "crates/lash-sqlite-store/src/schema.rs"
 note = "migrates on open in one transaction after a backup"
 
 [[surface]]
-constant = "EFFECT_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
-note = "migrates on open in one transaction after a backup"
-
-[[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
 constant_path = "crates/lash-core-store/src/process_identity.rs"
 note = "upcast on read, then write at the fleet format version"
@@ -198,7 +193,7 @@ note = "content-addressed identity family: new identities mint under the new fam
 
 [[surface]]
 constant = "AWAIT_EVENT_FAMILY_VERSION"
-constant_path = "crates/lash-core-effect/src/promise_semantics.rs"
+constant_path = "crates/lash-core-effect/src/await_event_identity.rs"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 
 [[surface]]

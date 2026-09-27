@@ -114,10 +114,6 @@ pub enum FencedWrite {
     QueuedWorkClaimAcquisition,
     /// Queued-work claim settlement on commit (`D5`).
     QueuedWorkClaimSettlement,
-    /// Effect-replay lease finalize (`D6`).
-    EffectReplayLeaseFinalize,
-    /// Effect-replay lease renewal (`D6`).
-    EffectReplayLeaseRenewal,
     /// Wake-delivery settlement out of the enqueuing claim (`D8`).
     WakeDeliverySettlement,
 }
@@ -134,8 +130,6 @@ impl FencedWrite {
             Self::SessionHeadPublication => "session_head.publish",
             Self::QueuedWorkClaimAcquisition => "queued_work_claim.acquire",
             Self::QueuedWorkClaimSettlement => "queued_work_claim.settle",
-            Self::EffectReplayLeaseFinalize => "effect_replay_lease.finalize",
-            Self::EffectReplayLeaseRenewal => "effect_replay_lease.renew",
             Self::WakeDeliverySettlement => "wake_delivery.settle",
         }
     }
@@ -572,100 +566,6 @@ pub fn require_single_writer_head_publication(
         session_id: SessionId::from(session_id.to_string()),
         backend,
     })
-}
-
-// ---------------------------------------------------------------------------
-// D6 — "is this effect-replay lease current?"
-// ---------------------------------------------------------------------------
-
-/// The lease columns a locked effect-replay row carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EffectReplayLeaseFacts<'a> {
-    pub envelope_hash: &'a str,
-    pub lease_owner_id: Option<&'a str>,
-    pub lease_token: Option<&'a str>,
-    /// The row's `status` column, compared against `in_progress`.
-    pub status: &'a str,
-    pub lease_expires_at_ms: u64,
-}
-
-/// The presented effect-replay lease authority, spelled without driver types.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EffectReplayLeaseAuthority<'a> {
-    pub envelope_hash: &'a str,
-    pub owner_id: &'a str,
-    pub lease_token: &'a str,
-}
-
-/// The status an effect-replay row must hold for its lease to be current.
-pub const EFFECT_REPLAY_IN_PROGRESS_STATUS: &str = "in_progress";
-
-/// The one answer to "is this effect-replay lease current?" (`D6`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EffectReplayLeaseVerdict {
-    /// The row names this owner and token, is in progress, and has not expired.
-    Current,
-    /// No row exists for this scope and replay key.
-    Absent,
-    /// The row records a different envelope: this is a replay mismatch, not a
-    /// lost race.
-    EnvelopeMismatch,
-    /// The row is no longer `in_progress`: it was already finalized.
-    NotInProgress,
-    /// The row names a different owner or a different lease token.
-    Superseded,
-    /// The row still names this holder, but the lease lapsed at `now`.
-    Expired,
-}
-
-impl EffectReplayLeaseVerdict {
-    /// Whether the lease may still be used to finalize or renew.
-    pub fn is_current(self) -> bool {
-        matches!(self, Self::Current)
-    }
-
-    /// Stable label for diagnostics and tests.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Absent => "absent",
-            Self::EnvelopeMismatch => "envelope_mismatch",
-            Self::NotInProgress => "not_in_progress",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-
-/// Decide whether an effect-replay lease is still current (`D6`).
-///
-/// The order of the arms is the order the SQL predicate applies them, so the
-/// verdict and the backstop cannot disagree about *why* a fence failed. `now`
-/// is an argument: PostgreSQL passes its transaction clock and SQLite its host
-/// clock, and the caller states which.
-pub fn effect_replay_lease_verdict(
-    observed: Option<EffectReplayLeaseFacts<'_>>,
-    presented: EffectReplayLeaseAuthority<'_>,
-    now_epoch_ms: u64,
-) -> EffectReplayLeaseVerdict {
-    let Some(observed) = observed else {
-        return EffectReplayLeaseVerdict::Absent;
-    };
-    if observed.envelope_hash != presented.envelope_hash {
-        return EffectReplayLeaseVerdict::EnvelopeMismatch;
-    }
-    if observed.lease_owner_id != Some(presented.owner_id)
-        || observed.lease_token != Some(presented.lease_token)
-    {
-        return EffectReplayLeaseVerdict::Superseded;
-    }
-    if observed.status != EFFECT_REPLAY_IN_PROGRESS_STATUS {
-        return EffectReplayLeaseVerdict::NotInProgress;
-    }
-    if observed.lease_expires_at_ms <= now_epoch_ms {
-        return EffectReplayLeaseVerdict::Expired;
-    }
-    EffectReplayLeaseVerdict::Current
 }
 
 // ---------------------------------------------------------------------------

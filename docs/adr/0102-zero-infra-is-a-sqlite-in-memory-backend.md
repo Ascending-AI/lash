@@ -4,6 +4,8 @@
 
 Superseded by [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 (FIG-3669, 2026-09-24). See "What 0104 kept" at the end of this ADR.
+FIG-3861 removed the `SqliteBackend` effect engine described below;
+`SqliteStoreSet` remains as storage for Restate.
 
 Accepted 2026-09-23 (FIG-3574) as the design freeze for arc FIG-3573. **Not yet
 implemented**: FIG-3575 through FIG-3584 build it, and FIG-3585 is the cut that
@@ -42,7 +44,8 @@ The tier difference is observable, not internal. Under `EffectJournaling::Journa
 a before-LLM failure and a controller error return `Err` where `Local` records a
 failed turn; an aborted direct turn is never re-driven and its input is swept
 into the session's next turn; a deterministic failure in a queued run retries
-eight times and stays pending. That is live today on `SqliteEffectHost`.
+eight times and stays pending. That was live on `SqliteEffectHost` before
+FIG-3861 removed it.
 
 Two more shapes exist only to serve the native path. SQL session stores are
 paired by hand with the non-journaled host, which needs store-delegated turn

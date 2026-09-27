@@ -30,10 +30,6 @@ use crate::{
 pub(crate) struct SeamLayer {
     pub(super) control: SeamControl,
     pub(super) executions: Arc<std::sync::atomic::AtomicUsize>,
-    /// The layered controller's journal fault injector, when it is a
-    /// journaled controller exposing one (FIG-3524).
-    pub(super) journal_faults:
-        Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
 }
 
 impl SeamLayer {
@@ -59,18 +55,11 @@ impl SeamLayer {
             .expect("layer the lent controller behind the crash seam")
     }
 
-    /// The typed store error an armed `ToolAttempt` error-return substitutes
-    /// for the real `execute_effect` call: the journal's own `Store`
-    /// vocabulary where the controller exposes one, the generic runtime-store
-    /// code where it does not.
     fn injected_store_error(&self) -> RuntimeEffectControllerError {
-        let code = self
-            .journal_faults
-            .as_ref()
-            .map_or(crate::RuntimeErrorCode::RuntimeStore, |faults| {
-                faults.store_code()
-            });
-        RuntimeEffectControllerError::new(code, "injected store error at the tool-attempt seam")
+        RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeStore,
+            "injected store error at the tool-attempt seam",
+        )
     }
 }
 
@@ -113,33 +102,6 @@ impl crate::testing::EffectLayer for SeamLayer {
             _ => None,
         };
         let Some((operation, counts_external_execution)) = operation else {
-            if self.control.armed_error_return()
-                == Some(ErrorReturnPlacement::StartGatePeekFinalize)
-                && matches!(
-                    envelope.command,
-                    crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
-                )
-                && envelope.invocation.effect_id()
-                    == lash_core::testing::conformance_support::TurnCancelPeekIdentity::StartGate
-                        .causal_identity()
-            {
-                // FIG-3647: fail the start-gate peek's journal finalize once;
-                // the peek crosses the seam so the oracle can place it.
-                self.journal_faults
-                    .clone()
-                    .unwrap_or_else(|| panic!("the start-gate placement requires a journaled controller"))
-                    .fail_next(
-                        lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint::Finalize,
-                        envelope.invocation.replay_key(),
-                    );
-                return self
-                    .control
-                    .around(
-                        TurnSeamOperation::Effect(EffectOperation::StartGatePeek),
-                        inner.execute_effect(envelope, executor),
-                    )
-                    .await;
-            }
             return inner.execute_effect(envelope, executor).await;
         };
         let operation = TurnSeamOperation::Effect(operation);
@@ -151,27 +113,16 @@ impl crate::testing::EffectLayer for SeamLayer {
             TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
         ) && let Some(placement) = self.control.take_tool_attempt_error_return()
         {
-            match placement.journal_point() {
-                None => {
-                    let error = match placement {
-                        ErrorReturnPlacement::ToolAttemptSessionRetirement => {
-                            session_retirement_refusal(&envelope)
-                        }
-                        _ => self.injected_store_error(),
-                    };
-                    return self
-                        .control
-                        .around(operation, async move { Err(error) })
-                        .await;
+            let error = match placement {
+                ErrorReturnPlacement::ToolAttemptSessionRetirement => {
+                    session_retirement_refusal(&envelope)
                 }
-                Some(point) => {
-                    let faults = self
-                        .journal_faults
-                        .clone()
-                        .unwrap_or_else(|| panic!("{placement:?} requires a journaled controller"));
-                    faults.fail_next(point, envelope.invocation.replay_key());
-                }
-            }
+                ErrorReturnPlacement::ToolAttempt => self.injected_store_error(),
+            };
+            return self
+                .control
+                .around(operation, async move { Err(error) })
+                .await;
         }
         if !counts_external_execution {
             return self
@@ -545,9 +496,9 @@ impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
 
     async fn commit_group_child_final(
         &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::GroupChildFinalCommit,
     ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::facade_support::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
         self.inner.commit_group_child_final(commit).await

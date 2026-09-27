@@ -53,7 +53,6 @@ lashlang = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 insta = "1"
-rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
 
 # The build script parses this crate's own `src/executor/state.rs` with `syn`

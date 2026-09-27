@@ -264,10 +264,6 @@ fn every_database_publishes_the_version_its_open_enforces() {
         SqliteDatabase::Triggers.expected_version(),
         i64::from(crate::schema::TRIGGER_SCHEMA_VERSION)
     );
-    assert_eq!(
-        SqliteDatabase::EffectReplay.expected_version(),
-        i64::from(crate::schema::EFFECT_SCHEMA_VERSION)
-    );
 }
 
 fn rewind_user_version(path: &std::path::Path, version: i64) {

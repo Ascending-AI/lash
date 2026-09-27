@@ -59,7 +59,6 @@ impl ReferenceTurn {
             seam: SeamLayer {
                 control,
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                journal_faults: None,
             },
             trace_tool: TraceTool {
                 executed: Arc::clone(executions),
@@ -85,16 +84,6 @@ impl ReferenceTurn {
         before_drive: impl Fn(&SeamControl) + Send + Sync + 'static,
     ) -> Self {
         self.before_drive = Arc::new(before_drive);
-        self
-    }
-
-    /// Arms the seam's journal faults, and the trace tool's, with `faults`.
-    pub(super) fn journal_faults(
-        mut self,
-        faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
-    ) -> Self {
-        self.seam.journal_faults = faults.clone();
-        self.trace_tool.journal_faults = faults;
         self
     }
 

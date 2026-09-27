@@ -27,46 +27,14 @@ pub(super) enum ErrorReturnPlacement {
     /// controller answers once the session is deleted under the turn
     /// (FIG-3630): `SessionDeleted`, carrying its cause.
     ToolAttemptSessionRetirement,
-    /// The journal's `claim` for the tool attempt's replay key returns the
-    /// backend's `Store` vocabulary error.
-    EffectJournalClaim,
-    /// The journal's `finalize` for the same key returns it.
-    EffectJournalFinalize,
-    /// The effect-lease `renew` inside the tool attempt's execution loop
-    /// returns it.
-    EffectJournalRenew,
-    /// The journal's `finalize` for the turn's start-gate cancel peek returns
-    /// it (FIG-3647): a failure the deleted start-gate retry ladder
-    /// retried in-process. The start gate is observed once, so the error
-    /// stops the turn unretried.
-    StartGatePeekFinalize,
 }
 
 impl ErrorReturnPlacement {
-    /// The fault point this placement arms on the journal, when it is a
-    /// journal placement.
-    pub(super) fn journal_point(
-        self,
-    ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint> {
-        use lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint;
-        match self {
-            Self::ToolAttempt | Self::ToolAttemptSessionRetirement => None,
-            Self::EffectJournalClaim => Some(EffectJournalFaultPoint::Claim),
-            Self::EffectJournalFinalize => Some(EffectJournalFaultPoint::Finalize),
-            Self::EffectJournalRenew => Some(EffectJournalFaultPoint::Renew),
-            Self::StartGatePeekFinalize => Some(EffectJournalFaultPoint::Finalize),
-        }
-    }
-
     /// Stable scenario-key suffix.
     fn key(self) -> &'static str {
         match self {
             Self::ToolAttempt => "tool-attempt",
             Self::ToolAttemptSessionRetirement => "tool-attempt-session-retirement",
-            Self::EffectJournalClaim => "effect-journal-claim",
-            Self::EffectJournalFinalize => "effect-journal-finalize",
-            Self::EffectJournalRenew => "effect-journal-renew",
-            Self::StartGatePeekFinalize => "start-gate-peek-finalize",
         }
     }
 }
@@ -203,10 +171,6 @@ fn is_dispatch_seam(operation: &TurnSeamOperation) -> bool {
 /// Sweep every error-return placement through one scripted turn per backend
 /// and hold the fail-stop oracle on each (FIG-3524).
 ///
-/// The turn runs on the tier's runner. The journal placements run only where
-/// the runner exposes its effect journal's fault injector
-/// ([`ConformanceTurnRunner::effect_journal_faults`](crate::ConformanceTurnRunner::effect_journal_faults));
-/// the tool-attempt placements run everywhere.
 pub async fn turn_crash_matrix_error_return_fail_stop<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
@@ -227,23 +191,10 @@ pub async fn turn_crash_matrix_error_return_fail_stop<F, S>(
     let rulings = error_return_rulings();
     validate_error_return_rulings(&rulings)
         .unwrap_or_else(|error| panic!("invalid error-return rulings: {error}"));
-    let journal_faults = runner.effect_journal_faults();
     for ruling in &rulings {
-        if ruling.placement.journal_point().is_some() && journal_faults.is_none() {
-            // No effect journal the law can fault behind this runner: the
-            // placement does not exist on this backend.
-            continue;
-        }
         let scenario = format!("error-return-{}", ruling.placement.key());
         let identity = ReferenceIdentity::for_scenario(&scenario);
-        Box::pin(run_error_return_case(
-            &law,
-            journal_faults.clone(),
-            ruling,
-            &scenario,
-            &identity,
-        ))
-        .await;
+        Box::pin(run_error_return_case(&law, ruling, &scenario, &identity)).await;
     }
 }
 
@@ -251,16 +202,10 @@ pub async fn turn_crash_matrix_error_return_fail_stop<F, S>(
 /// fail-stop oracle on what the turn did after the error returned.
 async fn run_error_return_case(
     law: &MatrixLaw<'_>,
-    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
     ruling: &ErrorReturnRuling,
     scenario: &str,
     identity: &ReferenceIdentity,
 ) {
-    // Every placement arms the one journal the law's host records into; each
-    // is observed from a clean injector.
-    if let Some(faults) = &journal_faults {
-        faults.reset();
-    }
     let raw = (law.make)(scenario);
     seed_reference_ingress(&raw, identity, scenario).await;
     let control = SeamControl::default();
@@ -275,7 +220,6 @@ async fn run_error_return_case(
         &executions,
         crashed_turn_timings(),
     )
-    .journal_faults(journal_faults.clone())
     .before_drive(move |control| control.arm_error_return(placement))
     .reporting();
     law.runner
@@ -285,25 +229,12 @@ async fn run_error_return_case(
         .await
         .map(crate::facade_support::QueuedTurnDrain::ran);
 
-    if let Some(faults) = &journal_faults
-        && ruling.placement.journal_point().is_some()
-    {
-        assert!(
-            faults.fired(),
-            "{scenario} ({:?}): the armed journal fault never fired; the placement covered nothing",
-            ruling.placement
-        );
-    }
     let trace = control.trace();
-    let faulted_seam = |operation: &TurnSeamOperation| match ruling.placement {
-        ErrorReturnPlacement::StartGatePeekFinalize => matches!(
-            operation,
-            TurnSeamOperation::Effect(EffectOperation::StartGatePeek)
-        ),
-        _ => matches!(
+    let faulted_seam = |operation: &TurnSeamOperation| {
+        matches!(
             operation,
             TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
-        ),
+        )
     };
     let error_index = trace.iter().position(faulted_seam).unwrap_or_else(|| {
         panic!(
@@ -312,11 +243,7 @@ async fn run_error_return_case(
         )
     });
     let continued = &trace[error_index + 1..];
-    let injected_code = journal_faults
-        .as_ref()
-        .map_or(crate::RuntimeErrorCode::RuntimeStore, |faults| {
-            faults.store_code()
-        });
+    let injected_code = crate::RuntimeErrorCode::RuntimeStore;
     // The scripted turn is a queued drain, and a queued run keeps a live fault
     // for a redrive (FIG-3575): a retryable fault reaches the caller as
     // itself, any other as the retained run's typed `QueuedRunPending`. A
@@ -343,21 +270,8 @@ async fn run_error_return_case(
         // Retried: the journal re-attempted the faulted call, or the faulted
         // seam was entered again — an engine that retries a failed group
         // child itself (Restate) runs the child's tool attempt anew.
-        retried: journal_faults
-            .as_ref()
-            .is_some_and(|faults| faults.calls_after_fire() > 0)
-            || continued.iter().any(faulted_seam),
+        retried: continued.iter().any(faulted_seam),
     };
-    if ruling.placement == ErrorReturnPlacement::StartGatePeekFinalize {
-        // FIG-3647: the start gate is observed once. A retry inside the
-        // attempt would re-peek a gate the journal never sealed, and could
-        // take a command path the first attempt did not.
-        assert!(
-            !observation.retried,
-            "{scenario}: the failed start-gate observation was retried in-process \
-             (observation: {observation:?})"
-        );
-    }
     let violations = fail_stop_violations(&observation, expected_code);
     match &ruling.ticket {
         None => assert!(

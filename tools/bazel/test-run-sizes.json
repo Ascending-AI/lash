@@ -510,7 +510,7 @@
     "peak_bytes": 17846272,
     "samples": 3
   },
-  "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_67065270": {
+  "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_cc056b78": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -524,7 +524,7 @@
     "peak_bytes": 18980864,
     "samples": 3
   },
-  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_67065270": {
+  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_cc056b78": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -698,13 +698,6 @@
     "p95_cores": 1.31,
     "peak_bytes": 149598208,
     "samples": 28
-  },
-  "//crates/lash-sim:two_opener_differential__test": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.2,
-    "peak_bytes": 18108416,
-    "samples": 3
   },
   "//crates/lash-sqlite-store:conformance__test": {
     "cpu_count": 3,

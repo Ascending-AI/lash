@@ -1,12 +1,11 @@
 # Bounded journals are an effect-controller obligation
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+Amended 2026-09-24 (FIG-3669), **partly implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR
 specifies SQL-engine behaviour: re-drive against `runtime_effect_replay` on the
 store tier and the SQL replay-row retirement; the bounded-journal obligation
-stays. Those passages stay as written until the PR that deletes the code
-(FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
+stays. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. Session and process lease passages await their own cutovers.
 
 A Runtime Process may run arbitrarily many effects (authored loops, large batch drivers) and
 for arbitrary duration. In the durable tier that currently means one Restate invocation per

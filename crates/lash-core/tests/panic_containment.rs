@@ -255,9 +255,9 @@ impl RuntimeEffectController for RecordingEffectController<'_> {
     }
     async fn commit_group_child_final(
         &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::GroupChildFinalCommit,
     ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::facade_support::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
         self.inner

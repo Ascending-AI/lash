@@ -171,7 +171,7 @@ mod tests {
             effect_kind: None,
         };
         let runtime_error = RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             "recorded runtime effect diverged at command.duration_ms",
         )
         .with_summary(summary.clone())

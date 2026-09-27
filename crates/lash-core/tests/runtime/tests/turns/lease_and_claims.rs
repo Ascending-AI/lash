@@ -8,9 +8,10 @@ mod acceptance_window;
 mod attempt_usage;
 use acceptance_window::{AcceptanceWindowJournalController, LATE_TAB_INPUT};
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
-    let backend = memory_backend().await;
+    let double = kernel_double(0xa776, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let (delta_sent_tx, delta_sent_rx) = tokio::sync::oneshot::channel::<()>();
     let delta_sent_tx = Arc::new(Mutex::new(Some(delta_sent_tx)));
     let transport = TestProvider::builder()
@@ -41,21 +42,23 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
     let turn_cancel = cancel.clone();
     let turn_events = RecordingTurnEvents::default();
     let turn_events_for_task = turn_events.clone();
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            "root",
+            "cancel-partial-provider-stream",
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = lash_core::task::spawn(async move {
-        runtime
+        let assembled = runtime
             .drive_turn(
                 TurnInput::text("cancel after partial stream"),
-                TurnOptions::new(
-                    turn_cancel,
-                    host_turn_scope(
-                        &runtime.host.core,
-                        &SessionId::from("root"),
-                        &TurnId::from("cancel-partial-provider-stream"),
-                    ),
-                )
-                .with_turn_events(&turn_events_for_task),
+                TurnOptions::new(turn_cancel, handler.scoped())
+                    .with_turn_events(&turn_events_for_task),
             )
-            .await
+            .await;
+        handler.close().await.expect("close the turn's handler");
+        assembled
     });
 
     delta_sent_rx
@@ -102,9 +105,10 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_usage() {
-    let backend = memory_backend().await;
+    let double = kernel_double(0xa773, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -175,20 +179,18 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
         .build();
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "truncated-stream-retry"))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .drive_turn(
             TurnInput::text("retry a truncated stream"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("truncated-stream-retry"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("retry succeeds");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert_eq!(assembled.assistant_output.safe_text, "success");
@@ -213,9 +215,10 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt_reset() {
-    let backend = memory_backend().await;
+    let double = kernel_double(0xa774, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -260,21 +263,19 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let turn_events = RecordingTurnEvents::default();
 
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "counted-regeneration-reset"))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .drive_turn(
             TurnInput::text("retry a pre-response transport failure"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("counted-regeneration-reset"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("counted retry succeeds");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     assert_eq!(assembled.llm_calls[0].attempts.len(), 2);
@@ -310,7 +311,8 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
 
 #[tokio::test(start_paused = true)]
 pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset() {
-    let backend = memory_backend().await;
+    let double = kernel_double(0xa775, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -357,21 +359,19 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let turn_events = RecordingTurnEvents::default();
 
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "courtesy-regeneration-reset"))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .drive_turn(
             TurnInput::text("defer to a provider retry-after"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("courtesy-regeneration-reset"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("courtesy retry succeeds");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     assert_eq!(assembled.llm_calls[0].attempts.len(), 2);
@@ -393,9 +393,10 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence() {
-    let backend = memory_backend().await;
+    let double = kernel_double(0xa777, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let lost_text = std::iter::repeat_n("discarded", 256)
@@ -481,21 +482,19 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         .await;
     let turn_events = RecordingTurnEvents::default();
 
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "paid-output-retry"))
+        .await
+        .expect("open the turn's handler");
     let assembled = runtime
         .drive_turn(
             TurnInput::text("retry after paid output"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("paid-output-retry"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("provider failure is returned as an assembled turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     assert!(matches!(
@@ -600,20 +599,18 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         (1, 1)
     );
 
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "paid-output-follow-up"))
+        .await
+        .expect("open the follow-up handler");
     runtime
         .drive_turn(
             TurnInput::text("follow up after the failed generation"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("paid-output-follow-up"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("a later turn can continue without replaying failure evidence");
+    handler.close().await.expect("close the follow-up handler");
     {
         let requests = requests.lock_recover();
         assert_eq!(requests.len(), 2);
@@ -667,11 +664,12 @@ fn single_answer_provider(text: &str) -> TestProvider {
 /// never joins that turn's message block, so the replacement worker replays the
 /// identical block instead of aborting, and the late input is delivered exactly
 /// once by the next turn.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_the_next_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(0xa778, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let turn_id = &TurnId::from("claim-window-worker-replacement");
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let controller = Arc::new(AcceptanceWindowJournalController::new(Arc::clone(&store)));
     let shared: Arc<dyn lash_core::testing::EffectLayer> = controller.clone();
     let input = TurnInput::text("first tab input");
@@ -684,20 +682,28 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
     ))
     .await;
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", turn_id))
+        .await
+        .expect("open the first worker's handler");
     let first_error = first_worker
         .drive_turn(
             input.clone(),
             TurnOptions::new(
                 CancellationToken::new(),
-                super::effect::layered_scope(
-                    &backend,
+                lash_core::testing::LayeredEffectHost::layer_scoped(
+                    handler.scoped(),
                     Arc::clone(&shared),
-                    lash_core::AdmittedScope::turn("root", turn_id),
-                ),
+                )
+                .expect("layer the handler scope"),
             ),
         )
         .await
         .expect_err("the first worker is replaced after it journals the message block");
+    handler
+        .close()
+        .await
+        .expect("close the first worker's handler");
     assert!(
         first_error.code == lash_core::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
         "the staged failure must be the worker replacement itself: {first_error:?}"
@@ -713,19 +719,29 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
     ))
     .await;
-    let replayed = Box::pin(replacement.drive_turn(
-        input,
-        TurnOptions::new(
-            CancellationToken::new(),
-            super::effect::layered_scope(
-                &backend,
-                Arc::clone(&shared),
-                lash_core::AdmittedScope::turn("root", turn_id),
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", turn_id))
+        .await
+        .expect("open the replacement handler");
+    let replayed = Box::pin(
+        replacement.drive_turn(
+            input,
+            TurnOptions::new(
+                CancellationToken::new(),
+                lash_core::testing::LayeredEffectHost::layer_scoped(
+                    handler.scoped(),
+                    Arc::clone(&shared),
+                )
+                .expect("layer the handler scope"),
             ),
         ),
-    ))
+    )
     .await
     .expect("the replacement must replay the journaled message block, not a re-claimed one");
+    handler
+        .close()
+        .await
+        .expect("close the replacement handler");
     let acceptance = replayed
         .turn_input_acceptance
         .expect("the replayed direct turn exposes its journaled acceptance");
@@ -755,17 +771,27 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
     ))
     .await;
-    let drained = Box::pin(next_turn_worker.stream_next_queued_work(TurnOptions::new(
-        CancellationToken::new(),
-        super::effect::layered_scope(
-            &backend,
-            Arc::clone(&shared),
-            lash_core::AdmittedScope::queue_drain("root", "claim-window-late-input-drain"),
-        ),
-    )))
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            "root",
+            "claim-window-late-input-drain",
+        ))
+        .await
+        .expect("open the late-input handler");
+    let drained = Box::pin(
+        next_turn_worker.stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            lash_core::testing::LayeredEffectHost::layer_scoped(
+                handler.scoped(),
+                Arc::clone(&shared),
+            )
+            .expect("layer the handler scope"),
+        )),
+    )
     .await
     .expect("the deferred second-tab input must drain on the next turn")
     .ran();
+    handler.close().await.expect("close the late-input handler");
     assert!(
         drained.is_some(),
         "the late input must be claimable by the next turn, not stranded"

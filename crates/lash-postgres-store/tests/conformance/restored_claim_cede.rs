@@ -10,18 +10,23 @@ use lash_core::store::RuntimePersistence;
 
 use super::{reset, storage};
 
-lash_conformance::restored_claim_cede_tests!({
-    let Some((database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres restored-claim cede conformance: database is not configured");
-        return;
-    };
-    reset(storage.pool()).await;
-    let (guard, backend) = super::pg_law_backend(&storage).await;
-    (
-        (database_lock, guard),
-        "postgres",
-        backend,
-        Arc::new(storage.session_store(lash_conformance::RESTORED_CLAIM_CEDE_SESSION_ID))
-            as Arc<dyn RuntimePersistence>,
-    )
-});
+lash_conformance::restored_claim_cede_tests!(
+    #[ignore = "FIG-3862: claims and claim ceding are deleted by B5"]
+    {
+        let Some((database_lock, storage)) = storage().await else {
+            eprintln!(
+                "skipping Postgres restored-claim cede conformance: database is not configured"
+            );
+            return;
+        };
+        reset(storage.pool()).await;
+        let (guard, backend) = super::pg_law_backend(&storage).await;
+        (
+            (database_lock, guard),
+            "postgres",
+            backend,
+            Arc::new(storage.session_store(lash_conformance::RESTORED_CLAIM_CEDE_SESSION_ID))
+                as Arc<dyn RuntimePersistence>,
+        )
+    }
+);

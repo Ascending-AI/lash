@@ -559,10 +559,6 @@ impl SeamControl {
         state.process_crashed = false;
     }
 
-    fn armed_error_return(&self) -> Option<ErrorReturnPlacement> {
-        self.state.lock_recover().error_return
-    }
-
     /// The armed error-return placement, consumed by the first tool attempt
     /// that reaches it: a retry of the faulted attempt runs clean, as a retry
     /// after a real store blip does. An engine that retries a failed group
@@ -1239,12 +1235,6 @@ impl Provider for ScriptedProvider {
 struct TraceTool {
     marker: Option<std::path::PathBuf>,
     control: SeamControl,
-    /// The journaled controller's fault injector (FIG-3524). When the armed
-    /// placement is `EffectJournalRenew`, the tool holds its own execution
-    /// open until the injected renew error fires and the renewal loop has
-    /// retried, so the lease-renewal loop is guaranteed to reach the fault
-    /// before the effect completes.
-    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
     /// How many times the tool body ran: the external effect every tier runs
     /// in process, wherever its engine dispatches the tool child.
     executed: Arc<std::sync::atomic::AtomicUsize>,
@@ -1293,27 +1283,6 @@ impl crate::ToolProvider for TraceTool {
             .matches(&operation, CrashPlacement::AfterExternalEffectBeforeOutcome)
         {
             self.control.stop_here().await;
-        }
-        if self.control.armed_error_return() == Some(ErrorReturnPlacement::EffectJournalRenew) {
-            let faults = self
-                .journal_faults
-                .clone()
-                .expect("a renew placement requires a journaled controller");
-            tokio::time::timeout(HIT_TIMEOUT, faults.wait_fired())
-                .await
-                .expect(
-                    "armed effect-lease renew fault never fired; the placement covered nothing",
-                );
-            // A failed renewal is a missed renewal, not a lost lease
-            // (FIG-3512): hold the tool open until the renewal loop has
-            // retried, so the run observes the retry it is ruled on.
-            tokio::time::timeout(HIT_TIMEOUT, async {
-                while faults.calls_after_fire() == 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            })
-            .await
-            .expect("a failed effect-lease renewal must be retried while the tool runs");
         }
         crate::ToolOutcome::ok(serde_json::json!({"effect":"executed"})).into()
     }

@@ -120,7 +120,6 @@ pub struct RuntimeExecutionContext<'run> {
     /// The host's durable closing seam (ADR 0099 §7), which the opener's end
     /// finalizes through. `None` on Restate, whose engine-side group index is
     /// the twin, and wherever no host wired one.
-    pub(crate) group_closing: Option<Arc<dyn crate::StoreEffectGroupClosing>>,
     /// Sources of this context that have no recorded form: a group tool child
     /// it opens records them (FIG-3712).
     pub(crate) unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources,
@@ -490,7 +489,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             nested_effect_error: Arc::default(),
             incorporation_ledger: Arc::default(),
             opener_groups: Arc::default(),
-            group_closing: None,
             unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
             parent_invocation: None,
             turn_phase_probe: None,
@@ -540,7 +538,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             opener_groups: Arc::clone(&self.opener_groups),
-            group_closing: self.group_closing.clone(),
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: self.live_opener_guard.clone(),
             #[cfg(any(test, feature = "testing"))]

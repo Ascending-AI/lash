@@ -333,19 +333,17 @@ pub mod facade_support {
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
-    pub use crate::runtime::await_event_coordinator;
+    pub use crate::runtime::await_event_identity;
     pub use crate::runtime::current_epoch_ms;
     pub use crate::runtime::diff_token_ledger;
     pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
-    pub use crate::runtime::effect_replay_driver;
     pub use crate::runtime::process_child_session_id;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_signal_wait_key;
     pub use crate::runtime::process_wake_delivery;
     pub use crate::runtime::process_wake_source_key;
-    pub use crate::runtime::promise_semantics;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::refuse_unhonored_group_membership;
     pub use crate::runtime::registry_transitions;
@@ -746,29 +744,28 @@ pub use runtime::{
     AdmittedProcessIdentity, AdmittedScope, Ancestry, ArtifactOwner, AssistantResponseHookEvents,
     AssistantStreamHookState, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BindingId,
     BoundaryReason, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointClaimSet,
-    ChildDrainOutcome, Clock, ClockWallTime, CommandJournalGuard, CommandReplayKey,
-    CompletionKeyPreparation, ContractRef, DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy,
-    DrainMode, DrainModePolicy, DrainedChild, EffectAddress, EffectGroupDrainBudget,
-    EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener,
-    EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
-    ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
-    GroupChildCancelWatch, GroupDrainReport, GroupExecutors, GroupFinalizationReport,
-    GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    IndependentEffectWork, InputItem, InvalidStartKey, LedgerUsageDisposition, Lifetime,
-    LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
+    Clock, ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation,
+    ContractRef, DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DrainMode,
+    DrainModePolicy, EffectAddress, EffectGroupDrainBudget, EffectGroupHandle,
+    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,
+    EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
+    ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupChildCancelWatch,
+    GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId, IndependentEffectWork,
+    InputItem, InvalidStartKey, LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy,
+    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
-    OpenerFinalizationSteps, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
-    ParentEndApplication, ParentEndPlan, PendingTurnInput, PendingTurnInputBatch,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
-    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
-    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
-    ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectOutcome, ProcessEngine,
-    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndApplication,
+    ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
+    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessArtifactCleanup,
+    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
+    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
+    ProcessDriveStep, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
+    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
@@ -804,19 +801,18 @@ pub use runtime::{
     SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionId, SessionListFilter,
     SessionRelationKind, SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest,
     SessionStoreFactory, SessionSummary, SessionWorkEngine, SleepSpec, SlotId, StartCx,
-    StartCxError, StartKey, StartKeyOwner, StoreEffectGroupClosing, StoreEffectGroupDrain,
-    StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
-    TurnCancellationAuthority, TurnContext, TurnControlAttachment, TurnControlBinding,
-    TurnControlBindingId, TurnControlBindingIdError, TurnEvent, TurnFailureCause,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
-    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
-    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputSettlementClaim, TurnInputState, UnreportedLedgerAttempt, UnsettledEffectGroup,
+    StartCxError, StartKey, StartKeyOwner, StoreRealization, TokenLedgerEntry, ToolAttemptLaunch,
+    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
+    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnEvent,
+    TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement,
+    TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
+    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnreportedLedgerAttempt,
     UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,

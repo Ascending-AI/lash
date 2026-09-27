@@ -152,8 +152,6 @@ if [ "$lane" = "mutation" ]; then
   selected_packages=(lash-internal-core)
   area_mutation_file_args=(
     --file 'crates/lash-core/src/runtime/observation/replay.rs'
-    --file 'crates/lash-core/src/runtime/effect/effect_replay_driver.rs'
-    --file 'crates/lash-core/src/runtime/effect/effect_replay_driver/*.rs'
     --file 'crates/lash-core/src/runtime/commit_admission.rs'
     --file 'crates/lash-core/src/runtime/turn_commit_draft.rs'
     --file 'crates/lash-core/src/runtime/turn_boundary/accepted_commit.rs'
@@ -2447,18 +2445,6 @@ run_authority_rebind_mutation_evidence() {
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-execution-tool-child-targeted" \
     -- --locked -p lash-internal-core-execution --lib --test effect_model tool_child
-  run_mutants_recorded "lash-core-execution group reopen settlement capture" "${out_dir}/mutants-lash-core-execution-group-settlement-targeted" \
-    cargo mutants \
-    -p lash-internal-core-execution \
-    --file crates/lash-core-execution/src/runtime/effect/effect_replay_driver/groups.rs \
-    --re 'open_effect_group|resolve_group_children|dispatch_group_children|group_child_finished|retire_group_if_complete|reap_if_complete|await_next_group_settlement|decode_settlement|close_effect_group|accepted_membership|reconstruct_group|replay_keys_of' \
-    --baseline skip \
-    --cargo-arg=--features=testing \
-    --jobs "$mutation_jobs" \
-    --timeout "$timeout" \
-    --minimum-test-timeout 30 \
-    --output "${out_dir}/mutants-lash-core-execution-group-settlement-targeted" \
-    -- --locked -p lash-internal-sqlite-store --test integration store_effect_group_drain
 }
 
 run_lash_sim_runtime_completion_mutation_evidence() {

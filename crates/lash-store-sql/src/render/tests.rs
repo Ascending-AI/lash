@@ -619,10 +619,9 @@ fn an_unqualified_sqlite_dialect_places_nothing_and_qualifies_nothing() {
 
 #[test]
 fn a_layout_resolves_a_two_database_table_by_declaration_order() {
-    // `effect_scope_retirements` is carried by both the effect journal and a
-    // bound process registry (ADR 0049). A layout places it in exactly one,
-    // and the other copy is a different layout — never a second entry here.
-    const TWO: &[&str] = &["runtime_effect_replay"];
+    // The same table can be declared in two database placements. The first
+    // placement in this layout wins.
+    const TWO: &[&str] = &["processes"];
     const JOURNAL_FIRST: TableLayout = TableLayout::new(&[
         SchemaTables::new("main", TWO),
         SchemaTables::new("process_registry", TWO),
@@ -630,14 +629,14 @@ fn a_layout_resolves_a_two_database_table_by_declaration_order() {
     const REGISTRY_ONLY: TableLayout =
         TableLayout::new(&[SchemaTables::new("process_registry", TWO)]);
 
-    let neutral = "SELECT scope_id FROM runtime_effect_replay";
+    let neutral = "SELECT process_id FROM processes";
     assert_eq!(
         render(neutral, Dialect::sqlite(JOURNAL_FIRST), TABLES).expect("renders"),
-        "SELECT scope_id FROM main.runtime_effect_replay"
+        "SELECT process_id FROM main.processes"
     );
     assert_eq!(
         render(neutral, Dialect::sqlite(REGISTRY_ONLY), TABLES).expect("renders"),
-        "SELECT scope_id FROM process_registry.runtime_effect_replay"
+        "SELECT process_id FROM process_registry.processes"
     );
 }
 

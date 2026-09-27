@@ -215,16 +215,6 @@ pub trait ConformanceTurnRunner: Send + Sync {
         panic!("this tier's turn runner cannot crash a turn from outside its attempt");
     }
 
-    /// The fault injector of the effect journal the runner's turns record
-    /// into, when the tier's engine keeps one a law can fault: a law arms a
-    /// journal claim, finalize or renew error through it. `None` when the
-    /// engine's journal is not the law's to fault.
-    fn effect_journal_faults(
-        &self,
-    ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults> {
-        None
-    }
-
     /// The replay keys of every effect the tier journaled for `scope`'s
     /// turn, or `None` when this runner cannot read them. A law finds the
     /// key of a [`JournalCut`] here, from a probe run of the same turn.
@@ -308,10 +298,6 @@ pub trait ConformanceTurnRunner: Send + Sync {
 /// runs on and driven in the calling task.
 pub struct HostTurnRunner {
     host: Arc<dyn crate::EffectHost>,
-    /// The host's journal fault injector, which cuts turns at a
-    /// [`JournalCut`]: a failed claim before the effect, a failed finalize
-    /// before its result.
-    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
 }
 
 impl HostTurnRunner {
@@ -319,22 +305,7 @@ impl HostTurnRunner {
     /// is built on: group children route through the executors that host
     /// registered.
     pub fn shared(host: Arc<dyn crate::EffectHost>) -> Arc<dyn ConformanceTurnRunner> {
-        Arc::new(Self {
-            host,
-            journal_faults: None,
-        })
-    }
-
-    /// [`shared`](Self::shared), cutting turns with `faults`, the journal
-    /// fault injector of `host`.
-    pub fn with_journal_faults(
-        host: Arc<dyn crate::EffectHost>,
-        faults: lash_core::facade_support::effect_replay_driver::EffectJournalFaults,
-    ) -> Arc<dyn ConformanceTurnRunner> {
-        Arc::new(Self {
-            host,
-            journal_faults: Some(faults),
-        })
+        Arc::new(Self { host })
     }
 }
 
@@ -405,12 +376,6 @@ impl ConformanceTurnRunner for HostTurnRunner {
         }
     }
 
-    fn effect_journal_faults(
-        &self,
-    ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults> {
-        self.journal_faults.clone()
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: an unscoped host is a fixture defect"
@@ -433,45 +398,5 @@ impl ConformanceTurnRunner for HostTurnRunner {
             crate::RecordedJournal::Keys(keys) => Some(keys.replay_keys),
             _ => None,
         }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: an unscoped host is a fixture defect"
-    )]
-    async fn run_cut_then_redriven_turn(
-        &self,
-        admitted: crate::AdmittedScope,
-        cut: JournalCut,
-        attempt: ConformanceTurnAttempt,
-        redrive: ConformanceTurnAttempt,
-    ) {
-        use lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint;
-        let faults = self
-            .journal_faults
-            .as_ref()
-            .unwrap_or_else(|| panic!("this host runner has no journal faults to cut {cut:?}"));
-        faults.fail_next(
-            match cut.at {
-                JournalCutPoint::BeforeEffect => EffectJournalFaultPoint::Claim,
-                JournalCutPoint::BeforeResult => EffectJournalFaultPoint::Finalize,
-            },
-            &cut.replay_key,
-        );
-        let scoped = self
-            .host
-            .scoped(admitted.clone())
-            .expect("scope the cut conformance turn on its host");
-        let end = attempt(scoped).await;
-        assert!(faults.fired(), "the journal cut at {cut:?} fired");
-        assert!(
-            matches!(end, ConformanceTurnEnd::Aborted(_)),
-            "the cut at {cut:?} aborts the attempt: {end:?}"
-        );
-        let scoped = self
-            .host
-            .scoped(admitted)
-            .expect("scope the redriven conformance turn on its host");
-        redrive(scoped).await;
     }
 }

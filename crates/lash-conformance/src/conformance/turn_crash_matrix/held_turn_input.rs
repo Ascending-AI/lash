@@ -37,7 +37,6 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
-        journal_faults: invocation.effect_journal_faults(),
     }
     .over(invocation.controller_handle());
     let runtime = Box::pin(build_runtime(
@@ -143,7 +142,6 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     let successor_effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: successor_control.clone(),
         executions,
-        journal_faults: successor_invocation.effect_journal_faults(),
     }
     .over(successor_invocation.controller_handle());
     let successor = Box::pin(build_runtime_with_lease_timings(

@@ -3,7 +3,6 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_core::ProcessRegistrar as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::sync::{Arc, Mutex};
@@ -14,9 +13,10 @@ const SCOPE: &str = "intent-ingress-observability-turn";
 /// target, so an identity re-used for a different cancel is the changed
 /// payload the submission ledger refuses.
 async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
-    let backend = lash_sqlite_store::SqliteBackend::memory()
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("open a memory backend");
+        .expect("open a memory store set");
+    let backend = lash_conformance::recording_backend_over(Arc::new(stores));
     let registry = backend.process_registry();
     let mut targets = Vec::new();
     for _ in 0..2 {
@@ -36,21 +36,20 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
         targets.push(process);
     }
     let [process, other_process] = <[ProcessId; 2]>::try_from(targets).expect("two targets");
-    let core =
-        lash::LashCore::standard_builder(Arc::new(backend).into(), lash::TurnBudget::Unbounded)
-            .provider(lash::provider::ProviderHandle::unconfigured())
-            .model(
-                lash::ModelSpec::builder("intent-ingress-observability-model")
-                    .context_window_tokens(4_096)
-                    .build()
-                    .expect("valid model"),
-            )
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "intent-ingress-observability-worker",
-                "intent-ingress-observability-boot",
-            ))?;
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+        .provider(lash::provider::ProviderHandle::unconfigured())
+        .model(
+            lash::ModelSpec::builder("intent-ingress-observability-model")
+                .context_window_tokens(4_096)
+                .build()
+                .expect("valid model"),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "intent-ingress-observability-worker",
+            "intent-ingress-observability-boot",
+        ))?;
     let _session = core.session(SESSION).open().await?;
     Ok((core, process, other_process))
 }

@@ -912,7 +912,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// Same answer the resolver gave: this only *reaches* the runner the
     /// resolver routed — it does not re-decide routing. A tier that drives
     /// tool children at handler level resolves once through
-    /// [`GroupExecutors::executor_for`](super::group_drain::GroupExecutors::executor_for)
+    /// [`GroupExecutors::executor_for`](super::group_executors::GroupExecutors::executor_for)
     /// and reads this.
     pub fn tool_child_driver(&self) -> Option<&dyn super::tool_child_driver::ToolChildDriver> {
         match &self.state {

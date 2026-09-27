@@ -300,263 +300,101 @@ pub async fn another_process_is_not_the_recorded_opener(
     .await;
     install_child_host(&world.host, &env_store);
 
-    if world.drain.is_some() {
-        // The durable tiers: journal the group under `process(P)#7` while its
-        // opener is live, then kill the worker with the deferred leaf parked.
-        crashed_world(fixture, {
-            let fixture_processes = Arc::clone(&fixture.make_processes);
-            let scope_p = scope_p.clone();
-            let session_id = session_id.clone();
-            let group_key = group_key.clone();
-            let recorded_ref = recorded_ref.clone();
-            let env_store = Arc::clone(&env_store);
-            let env_ref = env_ref.clone();
-            let observation = Arc::clone(&observation);
-            let opener_7 = opener_7.clone();
-            let expected_parent = expected_parent.clone();
-            move |world| {
-                Box::pin(async move {
-                    let _guard = register_opener(
-                        &world.host,
-                        &scope_p,
-                        Arc::new(LawLeafProvider {
-                            definitions: leaf_definitions(),
-                            observation: Arc::clone(&observation),
-                            session_id: session_id.clone(),
-                            intent_target: crate::ProcessId::fixture("unused-in-incarnation"),
-                            start_metadata: serde_json::Value::Null,
-                        }),
-                        fixture_processes().await.process_registry(),
-                        env_store,
-                        opener_7,
-                        tokio_util::sync::CancellationToken::new(),
-                    );
-                    let scoped = world
-                        .host
-                        .scoped(crate::AdmittedScope::process(recorded_ref.clone()))
-                        .expect("the process scope binds");
-                    let mut handle = scoped
-                        .controller()
-                        .open_effect_group(incarnation_group(
-                            &scope_p,
-                            &session_id,
-                            &group_key,
-                            &env_ref,
-                            &recorded_ref,
-                            ToolChildCompletionRouting::Durable,
-                            recorded_cancellation_authority(
-                                &world.host,
-                                &crate::AdmittedScope::process(recorded_ref.clone()),
-                            )
-                            .await,
-                        ))
-                        .await
-                        .expect("the group opens under the recorded process's opener");
-                    // Both deferred leaves park. The survivor's await lands
-                    // under the process scope's journal — no session listing
-                    // can see it — so the crash boundary is ordered instead
-                    // through call-0: resolving its key and consuming its
-                    // settlement rank is a durable commit strictly after its
-                    // own attempt row, and by the time all three ranks are
-                    // consumed the survivor's identical commits have landed.
-                    let key0 = observation.parked_key(&format!("{group_key}-call-0")).await;
-                    let _key3 = observation.parked_key(&format!("{group_key}-call-3")).await;
-                    resolve_when_registered(
-                        &world.host,
-                        key0,
-                        crate::Resolution::Ok(
-                            serde_json::json!({ "leaf": "incarnation", "via": "resolver" }),
-                        ),
-                    )
-                    .await;
-                    let mut settled = vec![
-                        next_settlement(&scoped, &mut handle, 0).await,
-                        next_settlement(&scoped, &mut handle, 1).await,
-                        next_settlement(&scoped, &mut handle, 2).await,
-                    ];
-                    assert_process_settlements(&mut settled, &expected_parent);
-                    scoped
-                        .controller()
-                        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-                        .await
-                        .expect("the caller closes and releases its loser");
-                })
-            }
-        })
-        .await;
-
-        let successor = world;
-        until_claims_lapse(&successor, &group_key).await;
-        let drain = successor
-            .drain
-            .as_ref()
-            .expect("a durable tier hands out a drain");
-
-        // Another process is live. It is a foreign opener: the drain reports
-        // the surviving child unrunnable and runs nothing.
-        let guard_9 = register_opener(
-            &successor.host,
-            &scope_q,
-            provider(),
-            Arc::clone(&registry),
-            Arc::clone(&env_store),
-            opener_9,
-            tokio_util::sync::CancellationToken::new(),
-        );
-        let report = drain
-            .drain_group(&group_key, &tokio_util::sync::CancellationToken::new())
-            .await
-            .expect("the drain pass runs under the other process");
-        assert!(
-            report.children.iter().all(|child| matches!(
-                child.outcome,
-                crate::testing::conformance_support::ChildDrainOutcome::NoExecutor
-            )),
-            "another process cannot drive the child the recorded process opened: {report:?}"
-        );
-        assert_eq!(
-            observation.executions_of("law_deferred").len(),
-            2,
-            "the other process's drain ran nothing — only the crashed world's admission ran the leaves"
-        );
-        drop(guard_9);
-
-        // The recorded process's opener registers again — how a durable
-        // process opener returns — and its drain replays the journaled Pending
-        // attempt; the out-of-band resolution settles the child.
-        let _guard_7 = register_opener(
-            &successor.host,
+    // A drain-less tier: the gate is the open itself. A live opener of
+    // `process(Q)` does not satisfy it; `process(P)`'s does.
+    let host = world.host;
+    let scoped = host
+        .scoped(crate::AdmittedScope::process(recorded_ref.clone()))
+        .expect("the process scope binds");
+    let guard_9 = register_opener(
+        &host,
+        &scope_q,
+        provider(),
+        Arc::clone(&registry),
+        Arc::clone(&env_store),
+        opener_9,
+        tokio_util::sync::CancellationToken::new(),
+    );
+    scoped
+        .controller()
+        .open_effect_group(incarnation_group(
             &scope_p,
-            provider(),
-            Arc::clone(&registry),
-            Arc::clone(&env_store),
-            opener_7,
-            tokio_util::sync::CancellationToken::new(),
-        );
-        let drained = crate::task::spawn({
-            let drain = Arc::clone(drain);
-            let group_key = group_key.clone();
-            async move {
-                drain
-                    .drain_group(&group_key, &tokio_util::sync::CancellationToken::new())
-                    .await
-            }
-        });
-        let key3 = observation.parked_key(&format!("{group_key}-call-3")).await;
-        resolve_when_registered(
-            &successor.host,
-            key3,
-            crate::Resolution::Ok(serde_json::json!({ "leaf": "incarnation", "via": "resolver" })),
-        )
-        .await;
-        let report = drained
-            .await
-            .expect("the reclaiming drain task joins")
-            .expect("the reclaiming drain pass runs");
-        assert!(
-            report.children.iter().all(|child| matches!(
-                child.outcome,
-                crate::testing::conformance_support::ChildDrainOutcome::Settled
-            )),
-            "the recorded process's drain settles its own child: {report:?}"
-        );
-    } else {
-        // A drain-less tier: the gate is the open itself. A live opener of
-        // `process(Q)` does not satisfy it; `process(P)`'s does.
-        let host = world.host;
-        let scoped = host
-            .scoped(crate::AdmittedScope::process(recorded_ref.clone()))
-            .expect("the process scope binds");
-        let guard_9 = register_opener(
-            &host,
-            &scope_q,
-            provider(),
-            Arc::clone(&registry),
-            Arc::clone(&env_store),
-            opener_9,
-            tokio_util::sync::CancellationToken::new(),
-        );
-        scoped
-            .controller()
-            .open_effect_group(incarnation_group(
-                &scope_p,
-                &session_id,
-                &group_key,
-                &env_ref,
-                &recorded_ref,
-                ToolChildCompletionRouting::Durable,
-                recorded_cancellation_authority(
-                    &host,
-                    &crate::AdmittedScope::process(recorded_ref.clone()),
-                )
-                .await,
-            ))
-            .await
-            .expect_err("a group whose recorded opener is not live refuses to open");
-        drop(guard_9);
+            &session_id,
+            &group_key,
+            &env_ref,
+            &recorded_ref,
+            ToolChildCompletionRouting::Durable,
+            recorded_cancellation_authority(
+                &host,
+                &crate::AdmittedScope::process(recorded_ref.clone()),
+            )
+            .await,
+        ))
+        .await
+        .expect_err("a group whose recorded opener is not live refuses to open");
+    drop(guard_9);
 
-        let _guard_7 = register_opener(
-            &host,
+    let _guard_7 = register_opener(
+        &host,
+        &scope_p,
+        provider(),
+        Arc::clone(&registry),
+        Arc::clone(&env_store),
+        opener_7,
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(incarnation_group(
             &scope_p,
-            provider(),
-            Arc::clone(&registry),
-            Arc::clone(&env_store),
-            opener_7,
-            tokio_util::sync::CancellationToken::new(),
-        );
-        let mut handle = scoped
-            .controller()
-            .open_effect_group(incarnation_group(
-                &scope_p,
-                &session_id,
-                &group_key,
-                &env_ref,
-                &recorded_ref,
-                ToolChildCompletionRouting::Durable,
-                recorded_cancellation_authority(
-                    &host,
-                    &crate::AdmittedScope::process(recorded_ref.clone()),
-                )
-                .await,
-            ))
-            .await
-            .expect("the group opens once its recorded opener is live");
-        let key0 = observation.parked_key(&format!("{group_key}-call-0")).await;
-        let key3 = observation.parked_key(&format!("{group_key}-call-3")).await;
-        resolve_when_registered(
-            &host,
-            key0,
-            crate::Resolution::Ok(serde_json::json!({ "leaf": "incarnation", "via": "resolver" })),
-        )
-        .await;
-        resolve_when_registered(
-            &host,
-            key3,
-            crate::Resolution::Ok(serde_json::json!({ "leaf": "incarnation", "via": "resolver" })),
-        )
-        .await;
-        let mut settled = vec![
-            next_settlement(&scoped, &mut handle, 0).await,
-            next_settlement(&scoped, &mut handle, 1).await,
-            next_settlement(&scoped, &mut handle, 2).await,
-            next_settlement(&scoped, &mut handle, 3).await,
-        ];
-        assert_process_settlements(&mut settled, &expected_parent);
-        let survivor = settled
-            .iter()
-            .find(|settlement| settlement.position == 3)
-            .expect("the second deferred leaf settled");
-        assert!(
-            survivor.outcome.is_ok(),
-            "the resolved survivor settles: {:?}",
-            survivor.outcome
-        );
-        scoped
-            .controller()
-            .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-            .await
-            .expect("the group closes");
-    }
+            &session_id,
+            &group_key,
+            &env_ref,
+            &recorded_ref,
+            ToolChildCompletionRouting::Durable,
+            recorded_cancellation_authority(
+                &host,
+                &crate::AdmittedScope::process(recorded_ref.clone()),
+            )
+            .await,
+        ))
+        .await
+        .expect("the group opens once its recorded opener is live");
+    let key0 = observation.parked_key(&format!("{group_key}-call-0")).await;
+    let key3 = observation.parked_key(&format!("{group_key}-call-3")).await;
+    resolve_when_registered(
+        &host,
+        key0,
+        crate::Resolution::Ok(serde_json::json!({ "leaf": "incarnation", "via": "resolver" })),
+    )
+    .await;
+    resolve_when_registered(
+        &host,
+        key3,
+        crate::Resolution::Ok(serde_json::json!({ "leaf": "incarnation", "via": "resolver" })),
+    )
+    .await;
+    let mut settled = vec![
+        next_settlement(&scoped, &mut handle, 0).await,
+        next_settlement(&scoped, &mut handle, 1).await,
+        next_settlement(&scoped, &mut handle, 2).await,
+        next_settlement(&scoped, &mut handle, 3).await,
+    ];
+    assert_process_settlements(&mut settled, &expected_parent);
+    let survivor = settled
+        .iter()
+        .find(|settlement| settlement.position == 3)
+        .expect("the second deferred leaf settled");
+    assert!(
+        survivor.outcome.is_ok(),
+        "the resolved survivor settles: {:?}",
+        survivor.outcome
+    );
+    scoped
+        .controller()
+        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group closes");
 
     // Each deferred leaf ran exactly once — the survivor's journaled Pending
     // replayed on the durable tiers — under its recorded session, with the

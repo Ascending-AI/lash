@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lash_core_execution::{
-    EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence,
-    SessionStoreFactory, TriggerStore,
+    ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence, SessionStoreFactory,
+    TriggerStore,
 };
 use lash_sqlite_store::{
-    SqliteEffectHost, SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteTriggerStore, Store,
+    SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteTriggerStore, Store,
 };
 use serde::{Deserialize, Serialize};
 
@@ -251,7 +251,6 @@ struct SqliteVersions {
     durable_core: i32,
     processes: i32,
     triggers: i32,
-    effects: i32,
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -641,29 +640,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         .expect("open SQLite trigger fixture")
         .with_incarnation_for_testing("durable-read-trigger-incarnation"),
     );
-    let effect_path = root.join("effects.db");
-    let priming_effects = SqliteEffectHost::open_with_clock(
-        &effect_path,
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-    )
-    .await
-    .expect("prime SQLite effect fixture schema");
-    drop(priming_effects);
-    rusqlite::Connection::open(&effect_path)
-        .expect("open SQLite effect fixture for deterministic secret")
-        .execute(
-            "UPDATE await_event_meta SET signing_secret = ?1 WHERE singleton = 1",
-            rusqlite::params![fixture::FIXTURE_AWAIT_EVENT_SIGNING_SECRET.to_vec()],
-        )
-        .expect("install deterministic SQLite effect await-event signing secret");
-    let effects = Arc::new(
-        SqliteEffectHost::open_with_clock(
-            &effect_path,
-            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        )
-        .await
-        .expect("open SQLite effect fixture"),
-    );
     let session_factory = Arc::new(
         SqliteSessionStoreFactory::new(root)
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
@@ -677,7 +653,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         continuations: processes as Arc<dyn ProcessContinuationStore>,
         process_envs: runtime as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,
-        effects: Some(effects as Arc<dyn EffectHost>),
     }
 }
 
@@ -693,7 +668,6 @@ fn versions_at(root: &Path) -> SqliteVersions {
         durable_core: user_version(&root.join("durable-core.db")),
         processes: user_version(&root.join("processes.db")),
         triggers: user_version(&root.join("triggers.db")),
-        effects: user_version(&root.join("effects.db")),
     }
 }
 
@@ -755,13 +729,8 @@ fn make_fixture_copy_writable(path: &Path) {
         .unwrap_or_else(|error| panic!("make copied SQLite fixture writable: {error}"));
 }
 
-fn database_names() -> [&'static str; 4] {
-    [
-        "durable-core.db",
-        "processes.db",
-        "triggers.db",
-        "effects.db",
-    ]
+fn database_names() -> [&'static str; 3] {
+    ["durable-core.db", "processes.db", "triggers.db"]
 }
 
 fn fixture_dir() -> PathBuf {

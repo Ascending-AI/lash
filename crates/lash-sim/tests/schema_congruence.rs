@@ -8,9 +8,8 @@ use lash_sansio::TurnId;
 use lash_sansio::{EffectAddress, ExecutionScope};
 use std::collections::{BTreeMap, BTreeSet};
 
-// schema_fragments.rs carries the table sets shared between databases; the
-// declarations are parsed out of the concatenated source so a table moved into
-// a fragment still counts as declared (FIG-3260).
+// Schema fragments are parsed with the main schema so every declared table
+// appears in the census.
 const SQLITE_SCHEMA_SOURCE: &str = concat!(
     include_str!("../../lash-sqlite-store/src/schema.rs"),
     include_str!("../../lash-sqlite-store/src/schema_fragments.rs"),
@@ -62,10 +61,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "lash_artifact_owner_retirements",
     ),
     pair("artifact_owners", "lash_artifact_owners"),
-    sqlite_engine_only("await_event_meta"),
-    sqlite_engine_only("await_event_revoked_sessions"),
-    sqlite_engine_only("await_event_waits"),
-    sqlite_engine_only("effect_scope_retirements"),
     pair("blobs", "lash_blobs"),
     pair("checkpoint_blob_refs", "lash_checkpoint_blob_refs"),
     pair("deleted_sessions", "lash_deleted_sessions"),
@@ -102,9 +97,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("queued_run_members", "lash_queued_run_members"),
     pair("queued_work_batches", "lash_queued_work_batches"),
     pair("queued_work_items", "lash_queued_work_items"),
-    sqlite_engine_only("runtime_effect_group"),
-    sqlite_engine_only("runtime_effect_group_child"),
-    sqlite_engine_only("runtime_effect_replay"),
     pair("runtime_turn_commits", "lash_runtime_turn_commits"),
     TablePair {
         sqlite_table: None,
@@ -159,7 +151,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "turn_cancel_closure_authorizations",
         "lash_turn_cancel_closure_authorizations",
     ),
-    sqlite_engine_only("turn_cancel_closure_participants"),
     pair(
         "turn_cancel_retired_scopes",
         "lash_turn_cancel_retired_scopes",
@@ -193,17 +184,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
 
 /// A table only SQLite's effect engine keeps: PostgreSQL is storage only and
 /// journals no effects (ADR 0104). The engine leaves with FIG-3668.
-const fn sqlite_engine_only(sqlite_table: &'static str) -> TablePair {
-    TablePair {
-        sqlite_table: Some(sqlite_table),
-        postgres_table: None,
-        parity: Parity::OneBackendOnly {
-            side: Backend::SQLite,
-            reason: "SQLite effect engine until FIG-3668; PostgreSQL journals no effects (ADR 0104)",
-        },
-    }
-}
-
 const fn pair(sqlite_table: &'static str, postgres_table: &'static str) -> TablePair {
     TablePair {
         sqlite_table: Some(sqlite_table),
@@ -996,8 +976,8 @@ fn schema_congruence_rejects_a_dropped_registered_foreign_key() {
             "SQLite",
             SQLITE_SCHEMA_SOURCE,
             &sqlite_registry[..],
-            "    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,\n",
-            "missing registered foreign key (group_key) REFERENCES",
+            "    FOREIGN KEY (session_id, scope_id) REFERENCES queued_runs(session_id, scope_id)\n",
+            "missing registered foreign key (session_id, scope_id) REFERENCES",
         ),
         (
             "Postgres",
@@ -1150,12 +1130,11 @@ fn schema_congruence_rejects_a_dropped_registered_constraint() {
 
 #[test]
 fn registered_constraint_vocabularies_match_the_rust_writers() {
-    use lash_core::facade_support::effect_replay_driver::EffectRowStatus;
     use lash_core::store_backend_support::SessionMetaCodec;
     use lash_core::{
-        CausalRef, DeliveryPolicy, GroupWakePolicy, LoserPolicy, ProcessStatus, QueuedWorkKind,
-        SessionMeta, SessionRelation, ToolIntentKind, TurnInputCheckpointBoundary,
-        TurnInputIngress, TurnInputState, TurnInputStateKind, WakeDeliveryState, WakeDiscardReason,
+        CausalRef, DeliveryPolicy, ProcessStatus, QueuedWorkKind, SessionMeta, SessionRelation,
+        ToolIntentKind, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
+        TurnInputStateKind, WakeDeliveryState, WakeDiscardReason,
     };
 
     assert_eq!(
@@ -1249,43 +1228,6 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         ]
         .map(WakeDiscardReason::as_str),
         ["expired", "target_gone", "retargeted", "sequence_rewound"]
-    );
-    assert_eq!(
-        [
-            EffectRowStatus::InProgress,
-            EffectRowStatus::Completed,
-            EffectRowStatus::Failed,
-        ]
-        .map(EffectRowStatus::column),
-        ["in_progress", "completed", "failed"]
-    );
-    // The effect-group policy columns spell the same snake_case strings their
-    // serde encoding uses; `EffectGroupColumn` is deliberately unexported, so
-    // the DDL vocabulary is pinned here through serialization.
-    assert_eq!(
-        [
-            GroupWakePolicy::First,
-            GroupWakePolicy::FirstSuccess,
-            GroupWakePolicy::All,
-        ]
-        .map(|policy| {
-            serde_json::to_value(policy)
-                .expect("serialize group wake policy")
-                .as_str()
-                .expect("group wake policy serializes as a string")
-                .to_string()
-        }),
-        ["first", "first_success", "all"]
-    );
-    assert_eq!(
-        [LoserPolicy::RunToCompletion, LoserPolicy::Cancel].map(|policy| {
-            serde_json::to_value(policy)
-                .expect("serialize loser policy")
-                .as_str()
-                .expect("loser policy serializes as a string")
-                .to_string()
-        }),
-        ["run_to_completion", "cancel"]
     );
     assert_eq!(
         [
@@ -1439,21 +1381,6 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             | ToolIntentKind::RegisterTrigger => {}
         }
     }
-    fn exhaustive_effect_row_status(status: EffectRowStatus) {
-        match status {
-            EffectRowStatus::InProgress | EffectRowStatus::Completed | EffectRowStatus::Failed => {}
-        }
-    }
-    fn exhaustive_group_wake_policy(policy: GroupWakePolicy) {
-        match policy {
-            GroupWakePolicy::First | GroupWakePolicy::FirstSuccess | GroupWakePolicy::All => {}
-        }
-    }
-    fn exhaustive_loser_policy(policy: LoserPolicy) {
-        match policy {
-            LoserPolicy::RunToCompletion | LoserPolicy::Cancel => {}
-        }
-    }
     fn exhaustive_session_relation(relation: &SessionRelation) {
         match relation {
             SessionRelation::Root
@@ -1479,9 +1406,6 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     exhaustive_delivery_policy(DeliveryPolicy::EarliestSafeBoundary);
     exhaustive_wake_delivery_state(WakeDeliveryState::Pending);
     exhaustive_tool_intent_kind(ToolIntentKind::StartProcess);
-    exhaustive_effect_row_status(EffectRowStatus::InProgress);
-    exhaustive_group_wake_policy(GroupWakePolicy::First);
-    exhaustive_loser_policy(LoserPolicy::Cancel);
     exhaustive_session_relation(&SessionRelation::Root);
     exhaustive_causal_ref(&CausalRef::Process {
         process_id: ProcessId::fixture("process"),

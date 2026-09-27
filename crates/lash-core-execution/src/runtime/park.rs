@@ -335,33 +335,3 @@ pub fn input_root(input: &crate::PendingTurnInput) -> crate::TurnId {
             .unwrap_or_else(|| input.input_id.as_str()),
     )
 }
-
-/// Refuse destructive control while the root owns live or closing groups.
-pub async fn require_root_groups_closed(
-    host: Option<&dyn crate::EffectHost>,
-    request: &crate::store::RootIntentRequest,
-) -> Result<(), crate::store::RootIntentRefused> {
-    if request.verb == crate::store::RootVerb::Redrive {
-        return Ok(());
-    }
-    if let Some(closing) = host.and_then(|host| host.effect_group_closing()) {
-        let mut count = 0;
-        for scope in [
-            crate::ExecutionScope::turn(request.session_id.clone(), request.root.clone()),
-            crate::ExecutionScope::queue_drain(
-                request.session_id.clone(),
-                request.root.to_string(),
-            ),
-        ] {
-            count += closing
-                .read_unsettled_groups(&scope)
-                .await
-                .map_err(|error| crate::StoreError::Backend(error.to_string()))?
-                .len();
-        }
-        if count != 0 {
-            return Err(crate::store::RootIntentRefused::EffectGroupsOpen { count });
-        }
-    }
-    Ok(())
-}

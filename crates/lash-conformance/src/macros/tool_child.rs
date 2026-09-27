@@ -484,14 +484,6 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-process-incarnation"
             ),
             (
-                a_crashed_child_replays_its_committed_attempts_facts,
-                "tool-child-attempt-capture"
-            ),
-            (
-                every_billed_provider_attempt_is_conserved_once_on_its_opener,
-                "tool-child-usage-conservation"
-            ),
-            (
                 a_committed_childs_final_is_protected_and_its_drain_is_finished,
                 "tool-child-commit-boundary-crash"
             ),

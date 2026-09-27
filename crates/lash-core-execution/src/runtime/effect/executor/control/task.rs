@@ -67,10 +67,10 @@ pub enum EffectControllerTaskRequest {
         >,
     },
     CommitGroupChildFinal {
-        commit: crate::runtime::effect::group_journal::GroupChildFinalCommit,
+        commit: crate::runtime::effect::group::GroupChildFinalCommit,
         response: oneshot::Sender<
             Result<
-                crate::runtime::effect::group_journal::EffectGroupChildCommitOutcome,
+                crate::runtime::effect::group::EffectGroupChildCommitOutcome,
                 RuntimeEffectControllerError,
             >,
         >,
@@ -549,9 +549,9 @@ impl RuntimeEffectController for EffectTaskController {
 
     async fn commit_group_child_final(
         &self,
-        commit: crate::runtime::effect::group_journal::GroupChildFinalCommit,
+        commit: crate::runtime::effect::group::GroupChildFinalCommit,
     ) -> Result<
-        crate::runtime::effect::group_journal::EffectGroupChildCommitOutcome,
+        crate::runtime::effect::group::EffectGroupChildCommitOutcome,
         RuntimeEffectControllerError,
     > {
         let (response_tx, response_rx) = oneshot::channel();

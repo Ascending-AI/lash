@@ -48,18 +48,6 @@ impl LawBackend {
         }
     }
 
-    /// The law's session catalog in place of the backend's own.
-    pub(crate) fn with_session_store_factory(
-        self,
-        session_store_factory: Arc<dyn crate::SessionStoreFactory>,
-    ) -> Self {
-        Self {
-            layered: self
-                .layered
-                .map_session_store_factory(|_| session_store_factory),
-        }
-    }
-
     /// The law's process registry in place of the backend's own.
     pub(crate) fn with_process_registry(
         self,

@@ -861,12 +861,12 @@ fn assert_remote_round_trip(item: ProcessObservationItem, process_id: &ProcessId
 #[tokio::test]
 async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     let dir = tempfile::tempdir().expect("facade tempdir");
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path())
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(dir.path())
             .await
-            .expect("open the file backend"),
+            .expect("open the file store set"),
     );
-    let core = crate::tests::standard_core_over(backend.into());
+    let core = crate::tests::standard_core_over(lash_conformance::recording_backend_over(stores));
     let watched = core.process_registry();
     let process_id = watched
         .register_process(registration("l8-facade", false))

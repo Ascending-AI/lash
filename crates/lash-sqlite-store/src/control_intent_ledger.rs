@@ -65,12 +65,6 @@ impl ControlIntentStore for SqliteSessionStoreFactory {
         request: &lash_core_execution::store::RootIntentRequest,
         at_ms: u64,
     ) -> Result<ControlIntent, lash_core_execution::store::RootIntentRefused> {
-        let host = self
-            .effect_host
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        lash_core_execution::runtime::require_root_groups_closed(host.as_deref(), request).await?;
         let Some(conn) = self.control_ledger().await? else {
             return Err(lash_core_execution::store::RootIntentRefused::NotParked);
         };

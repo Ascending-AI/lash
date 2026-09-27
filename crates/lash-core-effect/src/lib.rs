@@ -1,5 +1,5 @@
+pub mod await_event_identity;
 mod await_event_resolver;
-pub mod promise_semantics;
 pub mod queued_lane;
 pub mod queued_lane_wait;
 pub mod retirement;

@@ -6,20 +6,12 @@
 //! databases through a fixture wrapper, so the only difference between the
 //! two registrations is which [`Substrate`] the substrate is opened on.
 //!
-//! [`TestBackend`] is the storage fixture: a [`SqliteStoreSet`], which opens
-//! no effect journal. Laws that need the SQLite effect engine — a scoped
-//! controller, a journaled turn, a host handle — take [`TestEngineBackend`]
-//! instead, which opens the full [`SqliteBackend`].
+//! [`TestBackend`] is the storage fixture: a [`SqliteStoreSet`].
 
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_core_execution::ExecutionScope;
-use lash_sansio::{SessionId, TurnId};
-use lash_sqlite_store::{
-    SqliteBackend, SqliteBackendOptions, SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions,
-    Store,
-};
+use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions, Store};
 
 /// Which kind of SQLite substrate a suite instance runs on.
 #[expect(
@@ -49,30 +41,6 @@ impl std::ops::Deref for TestBackend {
     fn deref(&self) -> &SqliteStoreSet {
         &self.stores
     }
-}
-
-/// A full backend — storage plus the SQLite effect host — and, for a file
-/// one, the directory it lives in.
-#[derive(Clone)]
-pub(crate) struct TestEngineBackend {
-    backend: SqliteBackend,
-    _dir: Option<Arc<tempfile::TempDir>>,
-}
-
-impl std::ops::Deref for TestEngineBackend {
-    type Target = SqliteBackend;
-
-    fn deref(&self) -> &SqliteBackend {
-        &self.backend
-    }
-}
-
-pub(crate) fn durable_turn_scope(
-    session_id: impl Into<SessionId>,
-    turn_id: impl Into<TurnId>,
-) -> ExecutionScope {
-    let session_id = session_id.into();
-    ExecutionScope::turn(&session_id, turn_id)
 }
 
 /// Fresh, empty attachment byte stores for the root-set laws, each a
@@ -214,129 +182,6 @@ impl TestBackend {
     }
 
     /// [`Self::store`] from synchronous fixture code.
-    pub(crate) fn blocking_store(&self) -> Arc<Store> {
-        let backend = self.clone();
-        sync_await(async move { backend.store().await })
-    }
-
-    /// A raw connection to `database`, for fault injection and inspection.
-    pub(crate) fn raw(&self, database: SqliteDatabase) -> rusqlite::Connection {
-        raw_connection(self.database_uri(database))
-    }
-}
-
-impl TestEngineBackend {
-    pub(crate) async fn open(substrate: Substrate) -> Self {
-        Self::open_with(substrate, |options| options, system_clock()).await
-    }
-
-    pub(crate) async fn open_with_clock(
-        substrate: Substrate,
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> Self {
-        Self::open_with(substrate, |options| options, clock).await
-    }
-
-    /// A backend whose default options for `substrate` were adjusted by
-    /// `configure`.
-    pub(crate) async fn open_with(
-        substrate: Substrate,
-        configure: impl FnOnce(SqliteBackendOptions) -> SqliteBackendOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> Self {
-        match substrate {
-            Substrate::File => {
-                let dir = tempfile::tempdir().expect("file backend tempdir");
-                let backend = SqliteBackend::open_with_options_and_clock(
-                    dir.path(),
-                    configure(SqliteBackendOptions::default()),
-                    clock,
-                )
-                .await
-                .expect("open the file backend");
-                Self {
-                    backend,
-                    _dir: Some(Arc::new(dir)),
-                }
-            }
-            Substrate::Memory => Self {
-                backend: SqliteBackend::memory_with_options_and_clock(
-                    configure(SqliteBackendOptions::memory()),
-                    clock,
-                )
-                .await
-                .expect("open the memory backend"),
-                _dir: None,
-            },
-        }
-    }
-
-    /// The backend's storage ports alone, for a law that journals on an
-    /// effect host it is handed separately.
-    pub(crate) fn as_stores(&self) -> Arc<dyn lash_core_execution::StoreSet> {
-        Arc::new(self.backend.stores().clone())
-    }
-
-    /// This backend as the [`Backend`](lash_core_execution::Backend) a law's
-    /// runtime runs over.
-    pub(crate) fn as_backend(&self) -> lash_core_execution::Backend {
-        Arc::new(self.backend.clone()).into()
-    }
-
-    /// [`Self::open`] from synchronous fixture code.
-    pub(crate) fn blocking(substrate: Substrate) -> Self {
-        sync_await(Self::open(substrate))
-    }
-
-    /// Fresh handles on the same databases, with the same options and clock.
-    pub(crate) async fn reopen(&self) -> Self {
-        Self {
-            backend: self.backend.reopen().await.expect("reopen the backend"),
-            _dir: self._dir.clone(),
-        }
-    }
-
-    /// [`Self::reopen`] that reports a refused open instead of panicking.
-    pub(crate) async fn try_reopen(&self) -> tokio_rusqlite::Result<SqliteBackend> {
-        self.backend.reopen().await
-    }
-
-    /// Fresh handles on the same databases, with options adjusted by
-    /// `configure` and on `clock`.
-    pub(crate) async fn reopen_with(
-        &self,
-        configure: impl FnOnce(SqliteBackendOptions) -> SqliteBackendOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> Self {
-        Self {
-            backend: self
-                .backend
-                .reopen_with_options_and_clock(configure(self.options().clone()), clock)
-                .await
-                .expect("reopen the backend with other options"),
-            _dir: self._dir.clone(),
-        }
-    }
-
-    /// A new unbound durable-core store on a connection of its own.
-    #[expect(
-        dead_code,
-        reason = "one conformance root's suite may not hold an engine law that opens a bare store"
-    )]
-    pub(crate) async fn store(&self) -> Arc<Store> {
-        Arc::new(
-            self.backend
-                .open_store()
-                .await
-                .expect("open a durable-core store"),
-        )
-    }
-
-    /// [`Self::store`] from synchronous fixture code.
-    #[expect(
-        dead_code,
-        reason = "one conformance root's suite may not hold an engine law that opens a bare store"
-    )]
     pub(crate) fn blocking_store(&self) -> Arc<Store> {
         let backend = self.clone();
         sync_await(async move { backend.store().await })

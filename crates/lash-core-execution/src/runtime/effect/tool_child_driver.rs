@@ -123,7 +123,7 @@ pub struct ToolChildHost {
     /// also forms product tool groups needs both answers on one controller,
     /// and a controller has one registered resolver.
     #[cfg(any(test, feature = "testing"))]
-    law_fallback: Arc<std::sync::OnceLock<Arc<dyn super::group_drain::GroupExecutors>>>,
+    law_fallback: Arc<std::sync::OnceLock<Arc<dyn super::group_executors::GroupExecutors>>>,
 }
 
 impl ToolChildHost {
@@ -407,7 +407,7 @@ impl std::fmt::Debug for ToolChildHost {
     }
 }
 
-impl super::group_drain::GroupExecutors for ToolChildHost {
+impl super::group_executors::GroupExecutors for ToolChildHost {
     /// Every tool child is this resolver's, whether or not its opener is live
     /// in this process: the process whose opener is live runs it. Every other
     /// command routes exactly when [`executor_for`](Self::executor_for) answers.
@@ -415,7 +415,7 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
         matches!(
             envelope.command,
             RuntimeEffectCommand::ToolInvocation { .. }
-        ) || super::group_drain::GroupExecutors::executor_for(self, envelope).is_some()
+        ) || super::group_executors::GroupExecutors::executor_for(self, envelope).is_some()
     }
 
     /// Routes through the host that installed this resolver: a layer over
@@ -513,7 +513,7 @@ impl ToolChildHost {
     /// group child can be. Set once; a second call keeps the first.
     pub fn with_law_fallback(
         self: &Arc<Self>,
-        fallback: Arc<dyn super::group_drain::GroupExecutors>,
+        fallback: Arc<dyn super::group_executors::GroupExecutors>,
     ) -> Arc<Self> {
         let _ = self.law_fallback.set(fallback);
         Arc::clone(self)
@@ -692,7 +692,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
 pub trait ToolChildDriver: Send {
     /// Runs the child to a terminal on `controller`, returning its settlement
     /// outcome. The tier routes `controller` through the resolver's host
-    /// ([`GroupExecutors::route_handler_child_controller`](super::group_drain::GroupExecutors::route_handler_child_controller))
+    /// ([`GroupExecutors::route_handler_child_controller`](super::group_executors::GroupExecutors::route_handler_child_controller))
     /// before handing it here, as it routes every other child kind. `child` is the child's own `ToolInvocation`
     /// envelope address — the replay row its §4 final commits against (ADR
     /// 0099 §4). A live opener's token is the parent of the child's body

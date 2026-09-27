@@ -164,11 +164,9 @@ impl SchemaTables {
 /// `process_registry` — and a statement that joins them needs a different
 /// qualifier per table, which a single per-statement schema cannot express.
 ///
-/// Resolution is by first match, in declaration order. One table really does
-/// live in two databases (`effect_scope_retirements` is carried by both the
-/// effect journal and a bound process registry, ADR 0049); a layout places it
-/// in exactly one of them, and the other copy is reached through a different
-/// layout rather than through a second entry here.
+/// Resolution is by first match, in declaration order. A layout places a
+/// table in exactly one database, even if a deployment carries a copy in
+/// another database.
 ///
 /// A table no entry places is a render refusal, so a statement a connection
 /// must not issue cannot be rendered for that connection's layout.

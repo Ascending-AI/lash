@@ -36,7 +36,6 @@ lash_rust_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -325,7 +324,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -378,7 +376,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -430,7 +427,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -482,7 +478,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -535,7 +530,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -588,7 +582,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -638,7 +631,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -692,7 +684,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",
@@ -744,7 +735,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
-        "src/runtime/effect/effect_replay_driver/tests.rs",
         "src/runtime/effect/executor/control/tests.rs",
         "src/runtime/effect/live_openers/tests.rs",
         "src/runtime/effect/tool_child_driver/tests.rs",

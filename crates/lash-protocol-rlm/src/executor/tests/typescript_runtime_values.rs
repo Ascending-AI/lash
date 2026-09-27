@@ -17,11 +17,11 @@ use super::*;
 pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomness() {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
-    // The cell runs on a memory backend's effect host; its recorded start
-    // lands in the double's process table, whose workflow runs the body.
-    let backend = memory_backend().await;
-    let effect_host = backend.effect_host();
     let table = crate::testing::DoubleProcesses::new(0x3079_0001).await;
+    let handler = table
+        .open_handler(crate::testing::default_cell_scope())
+        .await;
+    let effect_host = table.backend().effect_host();
     let registry = table.registry();
     let process_env_store = table.env_store();
     let surface = LashlangSurface::new(
@@ -62,7 +62,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
+        crate::testing::double_ports(table.double(), &handler),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
@@ -100,6 +100,8 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         crate::plugin::RlmChannel::Cell,
     )
     .await;
+    drop(ctx);
+    handler.close().await.expect("close the cell's handler");
     assert!(response.error.is_none(), "{:?}", response.error);
 
     table.admit_pending().await;

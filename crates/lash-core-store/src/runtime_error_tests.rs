@@ -14,7 +14,6 @@ fn missing_process_execution_id_round_trips() {
 #[test]
 fn replay_mismatch_classification_covers_every_durable_controller_code() {
     for code in [
-        "sqlite_effect_replay_hash_conflict",
         "effect_replay_divergence",
         "tool_intent_replay_key_format_cutover",
         "lashlang_cell_replay_divergence",
@@ -94,7 +93,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        188,
+        174,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -146,17 +145,6 @@ fn assistant_response_hook_failures_are_retryable_not_terminal() {
         code,
         "the wire code must decode as first-party, not foreign"
     );
-}
-
-/// FIG-3575: a lost journal lease is a live fault. The identical call is not
-/// safe to repeat, so it is not retryable, but a redrive under a fresh lease
-/// succeeds, so it is not terminal either. A durable timeout is terminal.
-#[test]
-fn journal_lease_loss_is_redrivable_and_a_durable_timeout_is_terminal() {
-    let code = RuntimeErrorCode::SqliteEffectReplayLeaseLost;
-    assert!(!code.is_retryable(), "{code} must not be retried unchanged");
-    assert!(!code.is_terminal(), "{code} must stay redrivable");
-    assert!(RuntimeErrorCode::ProcessSignalWaitTimeout.is_terminal());
 }
 
 #[test]
@@ -348,7 +336,6 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
             RuntimeErrorCode::RetiredGeneration,
             RuntimeErrorCode::LashlangCellBindingDrift,
             RuntimeErrorCode::EffectReplayDivergence,
-            RuntimeErrorCode::SqliteEffectReplayHashConflict,
         ]
         .iter()
         .map(RuntimeErrorCode::as_str)
@@ -386,8 +373,6 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         RuntimeErrorCode::SessionExecutionLeaseLost,
         RuntimeErrorCode::StoreCommitFailed,
         RuntimeErrorCode::ExecutionStateCaptureFailed,
-        RuntimeErrorCode::SqliteEffectReplayStore,
-        RuntimeErrorCode::SqliteEffectReplayLeaseLost,
         RuntimeErrorCode::RuntimeEffectTaskJoin,
         RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
         RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
@@ -412,7 +397,7 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
 fn a_journaled_controller_error_is_an_outcome_whatever_its_code() {
     use crate::runtime_error::{RuntimeEffectControllerError, TurnFailureCause};
 
-    let live = RuntimeEffectControllerError::new(RuntimeErrorCode::SqliteEffectReplayStore, "io");
+    let live = RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeStore, "io");
     assert_eq!(live.turn_failure_cause(), TurnFailureCause::LiveFault);
     assert_eq!(
         live.into_journaled().turn_failure_cause(),
@@ -456,7 +441,6 @@ fn replay_refusals_park_the_turn() {
         RuntimeErrorCode::RetiredGeneration,
         RuntimeErrorCode::LashlangCellBindingDrift,
         RuntimeErrorCode::EffectReplayDivergence,
-        RuntimeErrorCode::SqliteEffectReplayHashConflict,
     ] {
         assert_eq!(
             code.turn_failure_cause(),
@@ -486,7 +470,6 @@ fn replay_refusals_park_the_turn() {
                     | RuntimeErrorCode::RetiredGeneration
                     | RuntimeErrorCode::LashlangCellBindingDrift
                     | RuntimeErrorCode::EffectReplayDivergence
-                    | RuntimeErrorCode::SqliteEffectReplayHashConflict
             ),
             "{code}: only the replay refusals park"
         );

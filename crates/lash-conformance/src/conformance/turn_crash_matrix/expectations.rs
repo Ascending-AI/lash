@@ -95,10 +95,6 @@ pub(super) fn validate_error_return_rulings(rulings: &[ErrorReturnRuling]) -> Re
     let missing = [
         ErrorReturnPlacement::ToolAttempt,
         ErrorReturnPlacement::ToolAttemptSessionRetirement,
-        ErrorReturnPlacement::EffectJournalClaim,
-        ErrorReturnPlacement::EffectJournalFinalize,
-        ErrorReturnPlacement::EffectJournalRenew,
-        ErrorReturnPlacement::StartGatePeekFinalize,
     ]
     .into_iter()
     .filter(|placement| !seen.contains(placement))

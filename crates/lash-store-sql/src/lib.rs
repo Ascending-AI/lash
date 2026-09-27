@@ -14,7 +14,6 @@
 //!   list anywhere. `scripts/check-store-sql-ownership.py` refuses a projection
 //!   of two or more columns that is not one of them, which is what stops the
 //!   per-call-site column subsets this crate exists to delete.
-//! * the row type, when the row is pure SQL shape (see [`wait::waits::WaitRow`]).
 //!   When the row is already a port type of the shared driver that consumes it,
 //!   the table module names the column list and the port type stays where the
 //!   driver defines it: one owner per fact, not two.
@@ -28,13 +27,12 @@
 //!
 //! | | placeholder | table |
 //! |---|---|---|
-//! | SQLite | `?1` | `main.runtime_effect_replay` |
-//! | PostgreSQL | `$1` | `lash_runtime_effect_replay` |
+//! | SQLite | `?1` | `main.processes` |
+//! | PostgreSQL | `$1` | `lash_processes` |
 //!
 //! The SQLite schema qualifier is a property of the **table**, resolved from
-//! the [`TableLayout`] the dialect carries: the retention sweep reaches the
-//! journal's tables through an `ATTACH`ed database while the catalog's stay in
-//! `main`, and the attachment GC joins `main.attachment_manifest` to
+//! the [`TableLayout`] the dialect carries: the attachment GC joins
+//! `main.attachment_manifest` to
 //! `process_registry.processes`. A statement set is rendered once per
 //! deployment layout rather than rebuilt with `format!` per call, and a table
 //! the layout does not place is a startup refusal — which is how a statement
@@ -88,7 +86,6 @@ mod render;
 pub mod artifact;
 pub mod attachment;
 pub mod draining_generations;
-pub mod effect;
 pub mod obligation;
 pub mod process;
 pub mod recovery_leader;
@@ -97,7 +94,6 @@ pub mod session_ingress;
 pub mod session_roots;
 pub mod trigger;
 pub mod turn_ingress;
-pub mod wait;
 
 pub use render::{
     Dialect, Placeholder, RenderError, SchemaTables, TableLayout, Vocabulary, VocabularyTerm,
@@ -118,10 +114,6 @@ pub const TABLES: &[&str] = &[
     attachment::condemnation::TABLE,
     attachment::manifest::TABLE,
     draining_generations::TABLE,
-    effect::replay::TABLE,
-    effect::group::TABLE,
-    effect::group_child::TABLE,
-    effect::scope_retirement::TABLE,
     process::artifact_cleanup::TABLE,
     process::change_clock::TABLE,
     process::definitions::TABLE,
@@ -147,7 +139,6 @@ pub const TABLES: &[&str] = &[
     turn_ingress::closure_authorizations::TABLE,
     turn_ingress::queued_runs::TABLE,
     turn_ingress::queued_run_members::TABLE,
-    turn_ingress::closure_participants::TABLE,
     turn_ingress::pending_inputs::TABLE,
     turn_ingress::run_specs::TABLE,
     turn_ingress::queued_batches::TABLE,
@@ -158,9 +149,6 @@ pub const TABLES: &[&str] = &[
     turn_ingress::turn_park_clock::TABLE,
     turn_ingress::turn_park_events::TABLE,
     turn_ingress::turn_parks::TABLE,
-    wait::waits::TABLE,
-    wait::meta::TABLE,
-    wait::revoked_sessions::TABLE,
     session::checkpoint_blob_refs::TABLE,
     session::deleted_sessions::TABLE,
     session::fleet_format::TABLE,
@@ -194,10 +182,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(attachment::manifest::ManifestStatements::NEUTRAL);
     statements.extend_from_slice(attachment::manifest::ManifestProcessOwnerStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
-    statements.extend_from_slice(effect::EffectJournalStatements::NEUTRAL);
-    statements.extend_from_slice(effect::replay::ReplayStatements::NEUTRAL);
-    statements.extend_from_slice(effect::group::GroupStatements::NEUTRAL);
-    statements.extend_from_slice(effect::scope_retirement::ScopeRetirementStatements::NEUTRAL);
     statements.extend_from_slice(trigger::deliveries::DeliveryStatements::NEUTRAL);
     statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
     statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
@@ -230,8 +214,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(turn_ingress::queued_items::ItemRootVerbStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::root_inputs::SessionRootInputStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::control_intents::ControlIntentStatements::NEUTRAL);
-    statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
-    statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::TurnIngressStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::queued_runs::QueuedRunStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::cancel_requests::CancelRequestStatements::NEUTRAL);
@@ -240,9 +222,6 @@ pub fn all_statements() -> Vec<Statement> {
     );
     statements.extend_from_slice(
         turn_ingress::closure_authorizations::ClosureAuthorizationStatements::NEUTRAL,
-    );
-    statements.extend_from_slice(
-        turn_ingress::closure_participants::ClosureParticipantStatements::NEUTRAL,
     );
     statements.extend_from_slice(turn_ingress::pending_inputs::PendingInputStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::queued_batches::QueuedBatchStatements::NEUTRAL);
@@ -360,12 +339,11 @@ impl Rendered {
 /// ```ignore
 /// lash_store_sql::statements! {
 ///     /// Statements both backends share verbatim.
-///     pub struct ReplayStatements @ "effect_replay" {
-///         /// Whether a replay row exists.
-///         exists_by_key = "SELECT EXISTS(
-///                              SELECT 1 FROM runtime_effect_replay
-///                              WHERE scope_id = ?1 AND replay_key = ?2
-///                          )";
+///     pub struct ProcessStatements @ "processes" {
+///         /// Whether a process row exists.
+///         exists_by_id = "SELECT EXISTS(
+///                             SELECT 1 FROM processes WHERE process_id = ?1
+///                         )";
 ///     }
 /// }
 /// ```

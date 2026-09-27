@@ -110,7 +110,7 @@ impl World {
     async fn new() -> Self {
         let clock = Arc::new(TestClock::new(1_000_000));
         Self::over(
-            lash_sqlite_store::SqliteBackend::memory_with_clock(clock.clone())
+            lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
                 .await
                 .expect("a memory backend opens"),
             clock,
@@ -118,8 +118,8 @@ impl World {
         .await
     }
 
-    async fn over(backend: lash_sqlite_store::SqliteBackend, clock: Arc<TestClock>) -> Self {
-        let backend = lash_core::Backend::from(backend);
+    async fn over(stores: lash_sqlite_store::SqliteStoreSet, clock: Arc<TestClock>) -> Self {
+        let backend = lash_conformance::recording_backend_over(Arc::new(stores));
         let registry = backend.process_registry();
         Self {
             clock,
@@ -423,9 +423,9 @@ async fn retryable_failures_stall_at_the_attempt_ceiling() {
 async fn an_undecodable_row_stalls_alone_and_its_page_delivers() {
     let dir = tempfile::tempdir().expect("tempdir");
     let clock = Arc::new(TestClock::new(1_000_000));
-    let backend = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+    let backend = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
         dir.path().join("store"),
-        lash_sqlite_store::SqliteBackendOptions::default(),
+        lash_sqlite_store::SqliteStoreSetOptions::default(),
         clock.clone(),
     )
     .await

@@ -480,8 +480,6 @@
   "queue_batch_id": "qwb:bfc05c27215b02bef8f1709deee8e88cb5e0658c8e65f3ee4a9cd3b2df485a48",
   "pending_input_id": "durable-read-pending-input",
   "process_env_ref": "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738",
-  "await_event_key": null,
-  "revoked_await_event_key": null,
   "wake_delivery": {
     "version": 4,
     "wake_id": "wake:v1:blake3:5f8eb7fb2de74745b4f301023356a7a43ea1452d796158036ec9542fde33d409",

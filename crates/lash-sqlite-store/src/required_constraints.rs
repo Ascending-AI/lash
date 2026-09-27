@@ -141,6 +141,5 @@ fn sqlite_database(database: SqliteConstraintDatabase) -> SqliteDatabase {
         SqliteConstraintDatabase::DurableCore => SqliteDatabase::DurableCore,
         SqliteConstraintDatabase::ProcessRegistry => SqliteDatabase::ProcessRegistry,
         SqliteConstraintDatabase::Triggers => SqliteDatabase::Triggers,
-        SqliteConstraintDatabase::EffectReplay => SqliteDatabase::EffectReplay,
     }
 }

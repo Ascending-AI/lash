@@ -40,11 +40,11 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingBeforeLlmCall {
 }
 
 /// The Restate double a law's cores run over, held by the test.
-struct SqliteBackend {
+struct TestBackend {
     backend: lash_core::Backend,
 }
 
-impl SqliteBackend {
+impl TestBackend {
     async fn open() -> Self {
         Self {
             backend: double_backend().await,
@@ -127,7 +127,7 @@ fn assert_recorded_before_llm_failure(report: &TurnReport) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_turn() -> Result<()>
 {
-    let backend = SqliteBackend::open().await;
+    let backend = TestBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let protocol = Arc::new(RefusingBeforeLlmCall::default());
     let core = backend.core(
@@ -195,7 +195,7 @@ impl lash_core::plugin::ProtocolSessionPlugin for DivergingBeforeLlmCall {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -> Result<()> {
     const SESSION: &str = "direct-replay-refusal";
-    let backend = SqliteBackend::open().await;
+    let backend = TestBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let protocol = Arc::new(DivergingBeforeLlmCall::default());
     let core = backend.core(
@@ -269,7 +269,7 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     const SESSION: &str = "direct-live-fault";
-    let backend = SqliteBackend::open().await;
+    let backend = TestBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -327,7 +327,7 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancellation_still_settles_stopped_cancelled() -> Result<()> {
-    let backend = SqliteBackend::open().await;
+    let backend = TestBackend::open().await;
     let (entered_tx, entered_rx) = oneshot::channel::<()>();
     let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
     let provider = crate::testing::TestProvider::builder()

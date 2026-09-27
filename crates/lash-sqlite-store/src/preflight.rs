@@ -188,14 +188,13 @@ async fn read_fleet_format_state(path: &Path) -> FleetFormatState {
 ///
 /// Construction opens nothing: the paths are recorded and read only when
 /// [`StorePreflight::schema_status`] is called. A deployment that wires only
-/// some of the four databases declares only those, and the report says so —
+/// some of the three databases declares only those, and the report says so —
 /// naming what was not inspected is part of the answer.
 #[derive(Clone, Debug)]
 pub struct SqliteStorePreflight {
     durable_core: PathBuf,
     process_registry: Option<PathBuf>,
     triggers: Option<PathBuf>,
-    effect_replay: Option<PathBuf>,
 }
 
 impl SqliteStorePreflight {
@@ -205,7 +204,6 @@ impl SqliteStorePreflight {
             durable_core: root.into().join(crate::DURABLE_CORE_DB_FILE),
             process_registry: None,
             triggers: None,
-            effect_replay: None,
         }
     }
 
@@ -215,7 +213,6 @@ impl SqliteStorePreflight {
             durable_core: path.into(),
             process_registry: None,
             triggers: None,
-            effect_replay: None,
         }
     }
 
@@ -233,13 +230,6 @@ impl SqliteStorePreflight {
         self
     }
 
-    /// Also read the effect-replay journal at the path the host passes to its
-    /// effect host.
-    pub fn with_effect_journal(mut self, path: impl Into<PathBuf>) -> Self {
-        self.effect_replay = Some(path.into());
-        self
-    }
-
     fn declared(&self) -> Vec<(SqliteDatabase, &Path)> {
         let mut declared: Vec<(SqliteDatabase, &Path)> =
             vec![(SqliteDatabase::DurableCore, self.durable_core.as_path())];
@@ -248,9 +238,6 @@ impl SqliteStorePreflight {
         }
         if let Some(path) = &self.triggers {
             declared.push((SqliteDatabase::Triggers, path.as_path()));
-        }
-        if let Some(path) = &self.effect_replay {
-            declared.push((SqliteDatabase::EffectReplay, path.as_path()));
         }
         declared
     }

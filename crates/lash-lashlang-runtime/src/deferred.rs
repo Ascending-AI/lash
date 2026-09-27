@@ -437,6 +437,7 @@ mod tests {
     use super::*;
     use crate::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
     use lash_sansio::sync::MutexExt;
+    use std::collections::HashMap;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -456,11 +457,12 @@ mod tests {
         AfterDurableRecord,
     }
 
-    /// Fails the first deferred-resolution effect at `fault`, over a SQLite
-    /// memory backend whose journal records and replays every effect.
+    /// A test journal for deferred-resolution folds. The Restate double
+    /// covers engine replay; this layer isolates link and restore behavior.
     struct FaultJournalLayer {
         fault: JournalFault,
         faults_remaining: AtomicUsize,
+        recorded: Mutex<HashMap<lash_core::EffectAddress, lash_core::RuntimeEffectOutcome>>,
     }
 
     #[async_trait]
@@ -472,59 +474,53 @@ mod tests {
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
         {
+            let key = envelope.invocation.address.clone();
+            if let Some(outcome) = self.recorded.lock_recover().get(&key).cloned() {
+                return Ok(outcome);
+            }
             let is_deferred = matches!(
                 &envelope.command,
                 lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
                     if operation.starts_with("deferred_tool_resolution:v2:")
             );
-            let inject = is_deferred
-                && self
-                    .faults_remaining
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
-                        remaining.checked_sub(1)
-                    })
-                    .is_ok();
-            if !inject {
+            if !is_deferred {
                 return inner.execute_effect(envelope, local_executor).await;
             }
-            match self.fault {
-                JournalFault::None => inner.execute_effect(envelope, local_executor).await,
-                // The resolver ran, and the process died before the journal
-                // recorded its answer.
-                JournalFault::AfterResolverReturn => {
-                    local_executor.execute(envelope).await?;
-                    Err(lash_core::RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::RuntimeStore,
-                        "injected failure after resolver return",
-                    ))
-                }
-                // The journal recorded the answer, and the process died before
-                // it reached the caller.
-                JournalFault::AfterDurableRecord => {
-                    inner.execute_effect(envelope, local_executor).await?;
-                    Err(lash_core::RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::RuntimeStore,
-                        "injected failure after durable record",
-                    ))
-                }
+            let inject = self
+                .faults_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok();
+            let outcome = local_executor.execute(envelope).await?;
+            if inject && matches!(self.fault, JournalFault::AfterResolverReturn) {
+                return Err(lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RuntimeStore,
+                    "injected failure after resolver return",
+                ));
             }
+            self.recorded.lock_recover().insert(key, outcome.clone());
+            if inject && matches!(self.fault, JournalFault::AfterDurableRecord) {
+                return Err(lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RuntimeStore,
+                    "injected failure after durable record",
+                ));
+            }
+            Ok(outcome)
         }
     }
 
-    /// A fresh SQLite memory backend's effect host behind a
-    /// [`FaultJournalLayer`]: one journal every context built over it shares.
+    /// One test-owned journal shared by contexts constructed from this host.
     async fn fault_journal_host(fault: JournalFault) -> Arc<dyn lash_core::EffectHost> {
-        let backend = lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a memory backend");
         Arc::new(lash_core::testing::LayeredEffectHost::new(
-            backend.effect_host(),
+            Arc::new(lash_conformance::RecordingEffectHost::default()),
             Arc::new(FaultJournalLayer {
                 fault,
                 faults_remaining: AtomicUsize::new(usize::from(!matches!(
                     fault,
                     JournalFault::None
                 ))),
+                recorded: Mutex::new(HashMap::new()),
             }),
         ))
     }
@@ -1519,7 +1515,7 @@ mod tests {
             "exec-code:other",
         );
         let mismatched_context = lash_core::testing::code_execution_context_with_invocation(
-            &lash_core::Backend::from(crate::lib_tests::memory_backend().await),
+            &crate::lib_tests::memory_backend().await,
             mismatched_invocation,
         );
 

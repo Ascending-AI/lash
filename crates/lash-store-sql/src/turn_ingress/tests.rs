@@ -8,7 +8,6 @@ fn statements() -> Vec<Statement> {
     all.extend_from_slice(super::cancel_requests::CancelRequestStatements::NEUTRAL);
     all.extend_from_slice(super::cancellation_bindings::CancellationBindingStatements::NEUTRAL);
     all.extend_from_slice(super::closure_authorizations::ClosureAuthorizationStatements::NEUTRAL);
-    all.extend_from_slice(super::closure_participants::ClosureParticipantStatements::NEUTRAL);
     all.extend_from_slice(super::pending_inputs::PendingInputStatements::NEUTRAL);
     all.extend_from_slice(super::queued_batches::QueuedBatchStatements::NEUTRAL);
     all.extend_from_slice(super::queued_items::QueuedItemStatements::NEUTRAL);

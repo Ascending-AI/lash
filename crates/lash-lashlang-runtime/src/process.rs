@@ -553,16 +553,6 @@ pub async fn run_lashlang_process(
         ctx.restore_incorporation_ledger(segment_state.incorporation_ledger.clone());
         ctx.restore_outstanding_groups(std::mem::take(&mut segment_state.outstanding_groups));
     }
-    // A segment that starts after a worker died recovers the losers of groups
-    // its process accepted earlier (ADR 0099 W5): worker loss and a segment
-    // handover are not opener ends, so nothing is cancelled here.
-    if let Err(error) = ctx.recover_opener_groups().await {
-        tracing::warn!(
-            process_id = %process_id,
-            %error,
-            "recovering a resumed process's live effect groups failed; its terminal closes them",
-        );
-    }
     let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
     let run = crate::LashlangReplayRun::new(
         identities.namespace(),

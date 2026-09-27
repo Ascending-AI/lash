@@ -549,7 +549,6 @@ async fn publish_terminal_after_commit(
 mod tests {
     use crate::SessionId;
     use crate::TurnId;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{ActiveTurnControl, next_physical_turn_id, publish_terminal_after_commit};
@@ -560,13 +559,13 @@ mod tests {
 
     /// Refuses every terminal publication and forwards the rest of the
     /// await-event surface to a backend host's controller for the turn.
-    struct RejectTerminalPublication {
+    struct RejectTerminalPublication<'a> {
         attempts: AtomicUsize,
-        inner: Arc<dyn crate::RuntimeEffectController>,
+        inner: &'a dyn crate::RuntimeEffectController,
     }
 
     #[async_trait::async_trait]
-    impl AwaitEventResolver for RejectTerminalPublication {
+    impl AwaitEventResolver for RejectTerminalPublication<'_> {
         fn await_event_authority_binding_id(&self) -> Option<String> {
             self.inner.await_event_authority_binding_id()
         }
@@ -636,40 +635,44 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_publication_failure_is_non_fatal_after_commit() {
-        let backend = crate::testing::memory_backend().await;
-        let resolver = RejectTerminalPublication {
-            attempts: AtomicUsize::new(0),
-            inner: backend
-                .effect_host()
-                .scoped_static(crate::AdmittedScope::turn(
-                    SessionId::from("committed-session"),
-                    TurnId::from("committed-turn"),
-                ))
-                .expect("admit the turn scope")
-                .expect("the backend host lends a static controller")
-                .owned_controller()
-                .expect("a static controller is shared"),
-        };
-        let control = ActiveTurnControl::new(
-            &resolver,
-            TurnAddress::new("committed-session", "committed-turn"),
-        )
-        .await
-        .expect("active turn control");
-        publish_terminal_after_commit(
-            &control,
-            &resolver,
-            &TurnTerminal::Committed {
-                outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                    text: "committed".to_string(),
-                }),
-                session_revision: Some(1),
-            },
-            &SessionId::from("committed-session"),
-            &TurnId::from("committed-turn"),
-        )
-        .await;
-        assert_eq!(resolver.attempts.load(Ordering::SeqCst), 1);
+        let double =
+            crate::testing::kernel_double(0x3861_0401, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::AdmittedScope::turn(
+                SessionId::from("committed-session"),
+                TurnId::from("committed-turn"),
+            ))
+            .await
+            .expect("open committed turn handler");
+        {
+            let scoped = handler.scoped();
+            let resolver = RejectTerminalPublication {
+                attempts: AtomicUsize::new(0),
+                inner: scoped.controller(),
+            };
+            let control = ActiveTurnControl::new(
+                &resolver,
+                TurnAddress::new("committed-session", "committed-turn"),
+            )
+            .await
+            .expect("active turn control");
+            publish_terminal_after_commit(
+                &control,
+                &resolver,
+                &TurnTerminal::Committed {
+                    outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
+                        text: "committed".to_string(),
+                    }),
+                    session_revision: Some(1),
+                },
+                &SessionId::from("committed-session"),
+                &TurnId::from("committed-turn"),
+            )
+            .await;
+            assert_eq!(resolver.attempts.load(Ordering::SeqCst), 1);
+        }
+        handler.close().await.expect("close committed turn handler");
     }
 }
 

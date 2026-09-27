@@ -93,12 +93,12 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
 
     async fn commit_group_child_final(
         &self,
-        _commit: crate::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        _commit: crate::facade_support::GroupChildFinalCommit,
     ) -> Result<
-        crate::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        crate::facade_support::EffectGroupChildCommitOutcome,
         crate::RuntimeEffectControllerError,
     > {
-        Ok(crate::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped)
+        Ok(crate::facade_support::EffectGroupChildCommitOutcome::Ungrouped)
     }
 }
 

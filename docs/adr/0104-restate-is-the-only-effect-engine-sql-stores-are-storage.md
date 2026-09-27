@@ -2,17 +2,15 @@
 
 ## Status
 
-Accepted 2026-09-24 (FIG-3669). It records Sam's ruling on FIG-3664, including
-the hard constraint that the effect interface stays engine-neutral. **Partially
-implemented**: the remaining FIG-3665 through FIG-3668 work, FIG-3670,
-FIG-3600 and B2 backend construction build it, in the order under
-*Order*. Nothing below describes current behaviour unless it says so.
-Implemented so far: step 2 (FIG-3585) and step 3 (FIG-3667) deleted the
-PostgreSQL engine and `PostgresBackend`; B2 runs a `RestateEngine` over a
-`PostgresStoreSet`. B6 (FIG-3863) removes process leases and native
-process-recovery sweeps under D21.
-The bounded non-terminal registry page remains for Restate admission and
-lost-run reconciliation, and ADR 0109's process-wake obligation claims remain.
+Accepted 2026-09-24 (FIG-3669). The effect interface remains engine-neutral.
+FIG-3861 removed the SQLite SQL effect engine and `SqliteBackend`; the native
+and PostgreSQL engines were removed earlier. Restate is the only effect engine
+over SQLite and PostgreSQL store sets. B6 (FIG-3863) removed process leases
+and native process-recovery sweeps. The bounded non-terminal registry page
+remains for Restate admission and lost-run reconciliation, as do ADR 0109's
+process-wake obligation claims. The session lease cutover and broader facade
+rewrite remain separate work. The *Context* and *Order* sections below
+describe the pre-cutover design unless they say otherwise.
 
 Supersedes [ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md); see
 "What 0104 kept" at the end of that ADR. Amends every ADR that specifies
@@ -155,9 +153,9 @@ existing `RestateQueuedWork` choice, and `SubmitOnly | Serve` is not a config
 choice yet, because a serving endpoint needs the process worker of the core
 built over the backend, which exists only after the engine does; a submit-only
 process is still one that never calls `endpoint_builder`. `RestateEngine::new`
-is infallible until a construction check exists. Until FIG-3668 deletes the
-SQLite engine, `SqliteBackend` is its `EffectEngine`, and
-`EffectEngine::process_work` returns `None` for it.
+is infallible until a construction check exists. Before FIG-3861 removed the
+SQLite engine, `SqliteBackend` was its `EffectEngine`, and
+`EffectEngine::process_work` returned `None` for it.
 
 **The execution seam.** The driver exposes replayable decisions and
 registered, serializable effect commands; adapters own scheduling and I/O

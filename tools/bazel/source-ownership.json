@@ -108,7 +108,6 @@
   "crates/lash-core-execution": {
     "library_test_sources": [
       "src/plugin/state/tests.rs",
-      "src/runtime/effect/effect_replay_driver/tests.rs",
       "src/runtime/effect/executor/control/tests.rs",
       "src/runtime/effect/live_openers/tests.rs",
       "src/runtime/effect/tool_child_driver/tests.rs",

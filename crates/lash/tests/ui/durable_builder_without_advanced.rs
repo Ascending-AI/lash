@@ -9,11 +9,13 @@ async fn durable_core_without_advanced(
         .build()
         .expect("valid model metadata");
 
-    // One file backend supplies every port and the effect host.
-    let backend: lash::Backend = lash_sqlite_store::SqliteBackend::open(data_dir)
-        .await
-        .expect("sqlite backend")
-        .into();
+    // A store set supplies durable ports to a test effect host.
+    let stores = std::sync::Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(data_dir)
+            .await
+            .expect("sqlite store set"),
+    );
+    let backend: lash::Backend = lash_conformance::recording_backend_over(stores);
     // The RLM factory keeps its Lashlang artifacts in that same backend.
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()

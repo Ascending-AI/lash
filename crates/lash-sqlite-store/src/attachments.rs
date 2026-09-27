@@ -956,9 +956,6 @@ mod cross_database_plan_tests {
             registry
                 .execute_batch(crate::schema::PROCESS_SCHEMA)
                 .expect("apply the process registry schema");
-            registry
-                .execute_batch(crate::schema_fragments::SCOPE_RETIREMENT_TABLE)
-                .expect("apply the shared fence fragment");
         }
         let connection = rusqlite::Connection::open(directory.path().join("catalog.sqlite3"))
             .expect("open session catalog");

@@ -367,7 +367,7 @@ paths = [
     "crates/lash-sqlite-store/src/schema.rs",
     "crates/lash-sqlite-store/src/schema_fragments.rs",
 ]
-symbols = ["SCHEMA", "AWAIT_EVENT_TABLES"]
+symbols = ["SCHEMA"]
 elide = "sql_idempotent_index"
 
 [[surface.guard]]
@@ -422,7 +422,7 @@ paths = [
     "crates/lash-sqlite-store/src/schema.rs",
     "crates/lash-sqlite-store/src/schema_fragments.rs",
 ]
-symbols = ["PROCESS_SCHEMA", "SCOPE_RETIREMENT_TABLE"]
+symbols = ["PROCESS_SCHEMA"]
 elide = "sql_idempotent_index"
 
 [[surface]]
@@ -436,22 +436,6 @@ outside_manifest = "store DDL stamp: owned by its backend and read from the depl
 kind = "rust_items"
 paths = ["crates/lash-sqlite-store/src/schema.rs"]
 symbols = ["TRIGGER_SCHEMA"]
-elide = "sql_idempotent_index"
-
-[[surface]]
-constant = "EFFECT_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
-upgrade = "migrate"
-description = "SQLite runtime-effect and await-event tables, columns, constraints, and unique indexes"
-outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-    "crates/lash-sqlite-store/src/schema.rs",
-    "crates/lash-sqlite-store/src/schema_fragments.rs",
-]
-symbols = ["EFFECT_SCHEMA", "AWAIT_EVENT_TABLES", "SCOPE_RETIREMENT_TABLE"]
 elide = "sql_idempotent_index"
 
 # ADR 0103 / `CanonicalRuntimeEffectEnvelope`: a change that moves the
@@ -479,20 +463,6 @@ outside_manifest = "store-resident stamp: recorded in the fleet-format row and r
 kind = "rust_items"
 paths = ["crates/lash-core-store/src/store/fleet_format.rs"]
 symbols = ["FLEET_FORMAT_VERSION", "FleetFormat", "FleetFormatState"]
-
-# The durable lifecycle JSON the `runtime_effect_group.lifecycle` column
-# carries (ADR 0099 section 7, FIG-3410): `{"type":"live"}`,
-# `{"type":"closing","disposition":..,"finalized":0..3}`,
-# `{"type":"settled","disposition":..}`. Both SQL stores decode the same
-# vocabulary, so the one guard covers both schemas.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/effect/group_journal.rs"]
-symbols = [
-    "EffectGroupLifecycle",
-    "EffectGroupLifecyclePhase",
-    "FinalizationStep",
-]
 
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
@@ -1205,13 +1175,13 @@ symbols = ["process_transfer_set_preimage"]
 
 [[surface]]
 constant = "AWAIT_EVENT_FAMILY_VERSION"
-constant_path = "crates/lash-core-effect/src/promise_semantics.rs"
+constant_path = "crates/lash-core-effect/src/await_event_identity.rs"
 upgrade = "coexist"
 description = "stable await-event promise identity and authenticated material"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-effect/src/promise_semantics.rs"]
+paths = ["crates/lash-core-effect/src/await_event_identity.rs"]
 symbols = ["promise_key_preimage", "sign_material"]
 
 [[surface]]

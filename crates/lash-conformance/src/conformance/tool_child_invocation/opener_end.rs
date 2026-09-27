@@ -14,7 +14,6 @@ use tokio_util::sync::CancellationToken;
 
 use super::incorporation::RecordingCharge;
 use super::*;
-use lash_core::testing::conformance_support::EffectGroupLifecycle;
 
 /// An opener's execution context over `host`, as a turn's phase context is:
 /// its own opener state, the host's closing seam, the charge sink its
@@ -62,7 +61,6 @@ fn opener_context(
     .with_opener_state(crate::session::OpenerState::new(
         crate::session::OpenerWorkBound::default(),
     ))
-    .with_group_closing(host.effect_group_closing())
     .with_cancellation_token(cancel)
 }
 
@@ -103,61 +101,11 @@ fn aggregate(
     }
 }
 
-/// The one group the session pins, while it pins one.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn pinned_group(host: &Arc<dyn crate::EffectHost>, session_id: &crate::SessionId) -> String {
-    let closing = host
-        .effect_group_closing()
-        .expect("a tier that runs group laws hands out its closing seam");
-    let pins = closing
-        .read_session_pins(session_id)
-        .await
-        .expect("the session's pins are readable");
-    assert_eq!(pins.len(), 1, "the aggregate formed one group: {pins:?}");
-    pins.into_iter().next().expect("one pin")
-}
-
-/// Waits until `group_key`'s recorded lifecycle is `closing`.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn until_closing(host: &Arc<dyn crate::EffectHost>, group_key: &str) {
-    let closing = host
-        .effect_group_closing()
-        .expect("a tier that runs group laws hands out its closing seam");
-    tokio::time::timeout(SETTLE_BUDGET, async {
-        loop {
-            if matches!(
-                closing
-                    .read_group_lifecycle(group_key)
-                    .await
-                    .expect("the lifecycle is readable"),
-                Some(EffectGroupLifecycle::Closing { .. })
-            ) {
-                return;
-            }
-            tokio::time::sleep(POLL).await;
-        }
-    })
-    .await
-    .expect("the opener's end records `closing`");
-}
-
 /// What an opener's end must have incorporated from the spending loser: its
 /// one spend, once, and the process its drain started.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn assert_loser_incorporated(
     context: &crate::RuntimeExecutionContext<'_>,
     charge: &RecordingCharge,
-    host: &Arc<dyn crate::EffectHost>,
-    session_id: &crate::SessionId,
     law: &str,
 ) {
     assert_eq!(
@@ -168,16 +116,6 @@ async fn assert_loser_incorporated(
     assert!(
         !context.started_process_ids().is_empty(),
         "{law}: the process the loser's drain started is the opener's possession"
-    );
-    let pins = host
-        .effect_group_closing()
-        .expect("the closing seam")
-        .read_session_pins(session_id)
-        .await
-        .expect("the session's pins are readable");
-    assert!(
-        pins.is_empty(),
-        "{law}: the group settled, so nothing pins the session against deletion: {pins:?}"
     );
 }
 
@@ -265,14 +203,7 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
         .close_opener_groups()
         .await
         .expect("the opener's end closes, finalizes and incorporates");
-    assert_loser_incorporated(
-        &context,
-        &charge,
-        &host,
-        &session_id,
-        "a cancelled aggregate's committed loser",
-    )
-    .await;
+    assert_loser_incorporated(&context, &charge, "a cancelled aggregate's committed loser").await;
 }
 
 /// §7, §13, W16: an opener's end records `closing` and then fails — the worker
@@ -313,7 +244,7 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
         lease_ttl_ms: LIVE_LEASE_MS,
     })
     .await;
-    if probe.drain.is_none() {
+    {
         let host = probe.host;
         let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
         let sink = Arc::new(IntentSink::default());
@@ -343,7 +274,6 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
             ),
             "the plain leaf wins while the spender is held"
         );
-        let group_key = pinned_group(&host, &session_id).await;
         scenario.observation.release(&spender);
         sink.await_blocked(&spender).await;
 
@@ -351,7 +281,11 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
         // drain, and is abandoned there.
         let ending = first.clone();
         let first_end = crate::task::spawn(async move { ending.close_opener_groups().await });
-        until_closing(&host, &group_key).await;
+        tokio::time::sleep(ABSENCE_BUDGET).await;
+        assert!(
+            !first_end.is_finished(),
+            "the first end waits on the held child"
+        );
         first_end.abort();
 
         let charge = Arc::new(RecordingCharge::default());
@@ -377,140 +311,6 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
             .expect("the retried end finishes once the drain lands")
             .expect("the retried end's task")
             .expect("the retried end finalizes and incorporates");
-        assert_loser_incorporated(
-            &retried,
-            &charge,
-            &host,
-            &session_id,
-            "an abandoned end's closing group",
-        )
-        .await;
-        return;
+        assert_loser_incorporated(&retried, &charge, "an abandoned end's closing group").await;
     }
-    drop(probe);
-
-    // The durable half: the first end dies with its worker. The crashed
-    // world and its successor share one durable store set.
-    let stores = (fixture.make_processes)().await;
-    let intent_target =
-        register_intent_target(stores.process_registry().as_ref(), &session_id).await;
-    let group_key = Arc::new(std::sync::Mutex::new(None::<String>));
-    crashed_world(fixture, {
-        let session_id = session_id.clone();
-        let spender = spender.clone();
-        let group_key = Arc::clone(&group_key);
-        let first_race = race();
-        let stores = Arc::clone(&stores);
-        let intent_target = intent_target.clone();
-        move |world| {
-            Box::pin(async move {
-                let observation = Arc::new(LawObservation::default());
-                let provider: Arc<dyn crate::ToolProvider> = Arc::new(LawLeafProvider {
-                    definitions: leaf_definitions(),
-                    observation: Arc::clone(&observation),
-                    session_id: session_id.clone(),
-                    intent_target: intent_target.clone(),
-                    start_metadata: serde_json::Value::Null,
-                });
-                let crash_processes = Arc::clone(&stores);
-                let env_store = crash_processes.process_env_store();
-                let _env_ref =
-                    crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
-                let sink = Arc::new(IntentSink::default());
-                sink.hold_all();
-                let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-                    inner: crate::testing::effect_backed_process_service(
-                        crash_processes.process_registry(),
-                        Arc::clone(&env_store),
-                    ),
-                    sink: Arc::clone(&sink),
-                });
-                observation.hold(&spender);
-                let first = opener_context(
-                    &world.host,
-                    &session_id,
-                    provider,
-                    processes,
-                    env_store,
-                    Arc::new(RecordingCharge::default()),
-                    CancellationToken::new(),
-                );
-                let outcome = first.call_tool_aggregate(first_race).await;
-                assert!(
-                    matches!(
-                        outcome,
-                        crate::session::ToolAggregateOutcome::Selected { leaf: 0, .. }
-                    ),
-                    "the plain leaf wins while the spender is held"
-                );
-                let key = pinned_group(&world.host, &session_id).await;
-                observation.release(&spender);
-                sink.await_blocked(&spender).await;
-                let ending = first.clone();
-                crate::task::spawn(async move { ending.close_opener_groups().await });
-                until_closing(&world.host, &key).await;
-                *group_key.lock_recover() = Some(key);
-                // Returning drops the runtime with the end parked in
-                // finalization and the loser's drain still held.
-            })
-        }
-    })
-    .await;
-    let group_key = group_key
-        .lock_recover()
-        .clone()
-        .expect("the crashed worker formed the group");
-
-    let successor = (fixture.make_world)(ToolChildWorldSpec {
-        lease_ttl_ms: LIVE_LEASE_MS,
-    })
-    .await;
-    let scenario = scenario_on(
-        stores,
-        &session_id,
-        serde_json::Value::Null,
-        Some(intent_target),
-    )
-    .await;
-    install_child_host(&successor.host, &scenario.process_env_store);
-    until_claims_lapse(&successor, &group_key).await;
-    let closing = successor
-        .host
-        .effect_group_closing()
-        .expect("the closing seam");
-    assert!(
-        matches!(
-            closing
-                .read_group_lifecycle(&group_key)
-                .await
-                .expect("the lifecycle is readable"),
-            Some(EffectGroupLifecycle::Closing { .. })
-        ),
-        "the crash left the group closing"
-    );
-    let charge = Arc::new(RecordingCharge::default());
-    let retried = opener_context(
-        &successor.host,
-        &session_id,
-        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
-        crate::testing::effect_backed_process_service(
-            Arc::clone(&scenario.registry),
-            Arc::clone(&scenario.process_env_store),
-        ),
-        Arc::clone(&scenario.process_env_store),
-        Arc::clone(&charge),
-        CancellationToken::new(),
-    );
-    tokio::time::timeout(SETTLE_BUDGET, retried.close_opener_groups())
-        .await
-        .expect("the retried end finishes")
-        .expect("the retried end finalizes and incorporates");
-    assert_loser_incorporated(
-        &retried,
-        &charge,
-        &successor.host,
-        &session_id,
-        "a crashed end's closing group",
-    )
-    .await;
 }

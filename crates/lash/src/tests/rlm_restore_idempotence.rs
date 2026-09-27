@@ -26,8 +26,9 @@
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, PluginSession,
@@ -41,9 +42,8 @@ use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
 use lash_core::{
     AppendSessionNodesRequest, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
     PersistedSessionConfig, ProtocolTurnOptions, QueuedWorkBatchingConfig, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, ScopedEffectController, SessionAppendNode,
-    SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    TurnBudget, TurnInput,
+    RuntimePersistence, RuntimeSessionState, SessionAppendNode, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TurnBudget, TurnInput,
 };
 use lash_protocol_rlm::{
     InstructionBound, MemoryBound, RlmProtocolPluginConfig, RlmProtocolPluginFactory, RlmSeed,
@@ -365,38 +365,95 @@ struct Backend {
     label: &'static str,
     /// The backend every runtime of the law takes its ports from.
     backend: lash_core::Backend,
+    _double: lash_restate_test::RestateTestBackend,
     factory: Arc<dyn SessionStoreFactory>,
     _tempdir: Option<tempfile::TempDir>,
 }
 
+static SESSION_ENGINES: OnceLock<Mutex<HashMap<String, lash_restate_test::RestateTestBackend>>> =
+    OnceLock::new();
+
+fn register_session_engine(session_id: &SessionId, double: &lash_restate_test::RestateTestBackend) {
+    SESSION_ENGINES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock_recover()
+        .insert(session_id.to_string(), double.clone());
+}
+
+async fn open_turn_handler(
+    runtime: &LashRuntime,
+    turn_id: &TurnId,
+) -> lash_restate_test::OpenHandler {
+    let view = runtime
+        .read_view()
+        .expect("test runtime frame scope resolves");
+    let session_id = SessionId::from(view.session_id());
+    let double = SESSION_ENGINES
+        .get()
+        .expect("session engines registered")
+        .lock_recover()
+        .get(&session_id.to_string())
+        .cloned()
+        .expect("session engine registered");
+    double
+        .open_handler(lash_core::AdmittedScope::turn(&session_id, turn_id))
+        .await
+        .expect("open the turn handler")
+}
+
+async fn drive(
+    runtime: &mut LashRuntime,
+    input: TurnInput,
+    turn_id: &str,
+) -> Result<lash_core::facade_support::AssembledTurn, lash_core::RuntimeError> {
+    let handler = open_turn_handler(runtime, &TurnId::from(turn_id)).await;
+    let result = runtime
+        .drive_turn(
+            input,
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                handler.scoped(),
+            ),
+        )
+        .await;
+    handler.close().await.expect("close the turn handler");
+    result
+}
+
 impl Backend {
     async fn memory() -> Self {
-        let backend: lash_core::Backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
+        let double =
+            lash_restate_test::backend(0x2521_0001, lash_restate_test::ServerConfig::default())
                 .await
-                .expect("open a SQLite memory backend"),
-        )
-        .into();
+                .expect("open a Restate double over SQLite memory stores");
+        let backend = double.lash_backend();
         Self {
             label: "memory",
             factory: backend.session_store_factory(),
             backend,
+            _double: double,
             _tempdir: None,
         }
     }
 
     async fn sqlite() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        let backend: lash_core::Backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::open(dir.path())
-                .await
-                .expect("open a SQLite file backend"),
+        let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path())
+            .await
+            .expect("open a SQLite file store set");
+        let double = lash_restate_test::backend_with(
+            0x2521_0002,
+            lash_restate_test::ServerConfig::default(),
+            move |_| Arc::new(stores),
         )
-        .into();
+        .await
+        .expect("open a Restate double over SQLite file stores");
+        let backend = double.lash_backend();
         Self {
             label: "sqlite",
             factory: backend.session_store_factory(),
             backend,
+            _double: double,
             _tempdir: Some(dir),
         }
     }
@@ -421,6 +478,7 @@ impl Backend {
             self.label,
             uuid::Uuid::new_v4().simple()
         ));
+        register_session_engine(&session_id, &self._double);
         let request = SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
@@ -531,16 +589,6 @@ fn continue_as_response() -> String {
     "<typescript>\nawait control.continue_as({task: \"next\", seed: {baton: \"switched\", carried: projected_original}});\n</typescript>".to_string()
 }
 
-/// Admitted on the runtime's own host: a group child opened under a foreign
-/// controller resolves no opener/env on the host the turn runs on (ADR 0099).
-fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
-    let view = runtime
-        .read_view()
-        .expect("test runtime frame scope resolves");
-    let session_id = SessionId::from(view.session_id());
-    lash_core::testing::runtime_helpers::host_turn_scope(&runtime.host.core, &session_id, turn_id)
-}
-
 /// The switch committed its follow-on onto the session head, so the
 /// session's next drive recovers the owed follow-on (ADR 0101 §3, FIG-3542) on
 /// the reloaded resident state before it admits anything else.
@@ -550,15 +598,18 @@ async fn run_owed_follow_on(
     drive: &str,
 ) -> lash_core::facade_support::AssembledTurn {
     let turn_id = TurnId::from(drive);
-    runtime
+    let handler = open_turn_handler(runtime, &turn_id).await;
+    let result = runtime
         .drive_next_root(
             drive,
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
-                turn_scope(runtime, &turn_id),
+                handler.scoped(),
             ),
         )
-        .await
+        .await;
+    handler.close().await.expect("close the turn handler");
+    result
         .unwrap_or_else(|error| {
             panic!("{label}: resident reload on the same frame must succeed: {error:?}")
         })
@@ -588,14 +639,7 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
     } = Box::pin(backend.seeded_session("follow-on", Arc::clone(&script))).await;
     let old_frame = runtime.export_persistence_state().current_frame_node_id;
 
-    let run = runtime
-        .drive_turn(
-            TurnInput::text("switch"),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                turn_scope(&runtime, &TurnId::from("fig2521-switch")),
-            ),
-        )
+    let run = drive(&mut runtime, TurnInput::text("switch"), "fig2521-switch")
         .await
         .expect("a follow-on failure is reported on the committed switch turn");
     assert!(
@@ -692,14 +736,7 @@ async fn reopen_seed_receipt_replay(backend: Backend) {
         .expect("execution state");
     assert_eq!(replayed_snapshot, snapshot, "{}", backend.label);
 
-    let run = runtime
-        .drive_turn(
-            TurnInput::text("go"),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                turn_scope(&runtime, &TurnId::from("fig2521-after-replay")),
-            ),
-        )
+    let run = drive(&mut runtime, TurnInput::text("go"), "fig2521-after-replay")
         .await
         .expect("turn after replay");
     assert!(
@@ -790,16 +827,13 @@ async fn faulted_append_rollback(backend: Backend) {
         backend.label
     );
 
-    let run = runtime
-        .drive_turn(
-            TurnInput::text("go"),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                turn_scope(&runtime, &TurnId::from("fig2521-after-rollback")),
-            ),
-        )
-        .await
-        .unwrap_or_else(|error| panic!("{}: turn after rollback: {error:?}", backend.label));
+    let run = drive(
+        &mut runtime,
+        TurnInput::text("go"),
+        "fig2521-after-rollback",
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{}: turn after rollback: {error:?}", backend.label));
     assert_eq!(
         run.outcome,
         TurnOutcome::Finished(TurnFinish::FinalValue {
@@ -862,16 +896,13 @@ async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) 
         mut runtime, store, ..
     } = Box::pin(backend.seeded_session("follow-on-execution", Arc::clone(&script))).await;
 
-    let run = runtime
-        .drive_turn(
-            TurnInput::text("switch"),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                turn_scope(&runtime, &TurnId::from("fig2521-switch-mutating")),
-            ),
-        )
-        .await
-        .expect("a follow-on failure is reported on the committed switch turn");
+    let run = drive(
+        &mut runtime,
+        TurnInput::text("switch"),
+        "fig2521-switch-mutating",
+    )
+    .await
+    .expect("a follow-on failure is reported on the committed switch turn");
     assert!(
         matches!(run.outcome, TurnOutcome::AgentFrameSwitch { .. }),
         "{}: {:?}",
@@ -980,14 +1011,7 @@ async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_sqlite() {
 // ---------------------------------------------------------------------------
 
 async fn turn(runtime: &mut LashRuntime, id: &str) -> lash_core::facade_support::AssembledTurn {
-    runtime
-        .drive_turn(
-            TurnInput::text(id),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                turn_scope(runtime, &TurnId::from(id)),
-            ),
-        )
+    drive(runtime, TurnInput::text(id), id)
         .await
         .unwrap_or_else(|error| panic!("turn `{id}`: {error:?}"))
 }
@@ -1082,12 +1106,11 @@ async fn storeless_runtime(
         responses,
         ..Script::default()
     });
-    let backend: lash_core::Backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
+    let double =
+        lash_restate_test::backend(0x2521_0003, lash_restate_test::ServerConfig::default())
             .await
-            .expect("open a SQLite memory backend"),
-    )
-    .into();
+            .expect("open a storeless Restate double");
+    let backend = double.lash_backend();
     // The provider arms faults on a store; a storeless session has none, so it
     // gets a detached one that nothing commits to.
     let detached = Arc::new(FaultStore {
@@ -1116,6 +1139,7 @@ async fn storeless_runtime(
         .expect("rlm options"),
         ..RuntimeSessionState::new(policy())
     };
+    register_session_engine(&state.session_id, &double);
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
         RlmProtocolPluginFactory::new(
             RlmProtocolPluginConfig::builder()
@@ -1123,7 +1147,7 @@ async fn storeless_runtime(
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
-            &crate::tests::double_backend().await.clone(),
+            &backend,
         )
         .with_process_lifecycle(false),
     )];
@@ -1586,16 +1610,13 @@ fn reassign_response() -> String {
 /// the after-turn hook refuses finalization, so the turn returns an error
 /// without a commit.
 async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
-    let rejected = runtime
-        .drive_turn(
-            TurnInput::text("reject-reassignment"),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                turn_scope(runtime, &TurnId::from("reject-reassignment")),
-            ),
-        )
-        .await
-        .expect_err("the refused finalization fails the turn");
+    let rejected = drive(
+        runtime,
+        TurnInput::text("reject-reassignment"),
+        "reject-reassignment",
+    )
+    .await
+    .expect_err("the refused finalization fails the turn");
     assert!(
         rejected
             .to_string()
@@ -1645,12 +1666,10 @@ async fn rlm_storeless_rejected_turn_is_redriven_before_the_next_turn() {
     );
 }
 
-/// (g) store-backed: the rejected turn's input stays accepted, and the next
-/// drive redrives it first under its own root (FIG-3600). Its refusal was a
-/// one-shot hook failure, so the redrive replays the recorded reassignment and
-/// commits it; the next ordinary turn then reads the committed `REJECTED`,
-/// never a value the rejected attempt left only in resident state.
-async fn rejected_turn_is_redriven_before_the_next_turn(backend: Backend) {
+/// (g) store-backed: the rejected turn's reassignment must not escape its
+/// failed attempt into the next ordinary turn's execution state. Session
+/// driver redrive is covered by the facade's finalize-fault laws.
+async fn rejected_turn_does_not_leak_execution(backend: Backend) {
     let SeededSession {
         mut runtime,
         plugins,
@@ -1668,22 +1687,22 @@ async fn rejected_turn_is_redriven_before_the_next_turn(backend: Backend) {
     assert_final_value(
         backend.label,
         &turn(&mut runtime, "after-rejection").await,
-        serde_json::json!("REJECTED"),
+        serde_json::json!("COMMITTED"),
     );
     drop(plugins);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_rejected_turn_is_redriven_before_the_next_turn_on_memory() {
-    Box::pin(rejected_turn_is_redriven_before_the_next_turn(
+async fn rlm_rejected_turn_does_not_leak_execution_on_memory() {
+    Box::pin(rejected_turn_does_not_leak_execution(
         Backend::memory().await,
     ))
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_rejected_turn_is_redriven_before_the_next_turn_on_sqlite() {
-    Box::pin(rejected_turn_is_redriven_before_the_next_turn(
+async fn rlm_rejected_turn_does_not_leak_execution_on_sqlite() {
+    Box::pin(rejected_turn_does_not_leak_execution(
         Backend::sqlite().await,
     ))
     .await;
