@@ -44,6 +44,17 @@ alternate_state_root="$({
 [ "$alternate_state_root" = "$expected_state_root" ] \
   || fail "ambient temp directories changed the lock root to $alternate_state_root"
 
+# Every lock scenario below now runs against a per-run state root, so a live
+# gate in another worktree holding a real port-slot lock cannot turn this
+# self-test red. The override is exported so each subshell that re-sources the
+# helper lands in the same hermetic root; the assertions above already proved
+# the default root.
+export LASH_GATE_STATE_ROOT_OVERRIDE="$test_tmp/gate-state"
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$helper"
+[ "$LASH_GATE_STATE_ROOT" = "$LASH_GATE_STATE_ROOT_OVERRIDE" ] \
+  || fail "state-root override did not move the lock root: $LASH_GATE_STATE_ROOT"
+
 mkdir -p "$test_tmp/a/checkout" "$test_tmp/b/checkout"
 slug_a="$(lash_gate_slug_for_root "$test_tmp/a/checkout")"
 slug_b="$(lash_gate_slug_for_root "$test_tmp/b/checkout")"

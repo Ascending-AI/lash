@@ -52,7 +52,9 @@ lash_gate_configure() {
   LASH_GATE_LABEL="com.lash.e2e.worktree=${LASH_GATE_WORKTREE_SLUG}"
   # Lock identity must not change between interactive, cron, and systemd-run
   # environments. /tmp is host-wide and the UID suffix keeps users disjoint.
-  LASH_GATE_STATE_ROOT="/tmp/lash-gate-$(id -u)"
+  # LASH_GATE_STATE_ROOT_OVERRIDE exists for the self-test, which must not
+  # touch the shared lock root while real gates may hold its slots.
+  LASH_GATE_STATE_ROOT="${LASH_GATE_STATE_ROOT_OVERRIDE:-/tmp/lash-gate-$(id -u)}"
   LASH_GATE_STATE_DIR="${LASH_GATE_STATE_ROOT}/${LASH_GATE_WORKTREE_SLUG}"
   LASH_GATE_WORKTREE_LOCK_PATH="${LASH_GATE_STATE_DIR}/worktree.lock"
   LASH_GATE_PORT_LOCK_PATH="${LASH_GATE_STATE_ROOT}/port-slot-${LASH_GATE_PORT_SLOT}.lock"
