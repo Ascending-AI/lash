@@ -1785,6 +1785,20 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
     type ObservedLease = Option<(String, u64)>;
     let observed_leases: Arc<Mutex<Vec<ObservedLease>>> = Arc::new(Mutex::new(Vec::new()));
     let captured_observed_leases = Arc::clone(&observed_leases);
+    // The wake arrives while the foreground turn runs: accepted after the
+    // turn's input, so the turn lane admits the input first (ADR 0101 §5)
+    // and the wake reaches the turn only at a checkpoint. Filled once the
+    // process is registered; the provider appends it on its first call.
+    type WakeSource = (
+        Arc<dyn lash_core::ProcessRegistry>,
+        Arc<RecordingStore>,
+        ProcessId,
+    );
+    let wake_source: Arc<Mutex<Option<WakeSource>>> = Arc::new(Mutex::new(None));
+    let captured_wake_source = Arc::clone(&wake_source);
+    let appended_wake: Arc<Mutex<Option<lash_core::ProcessWakeDelivery>>> =
+        Arc::new(Mutex::new(None));
+    let captured_appended_wake = Arc::clone(&appended_wake);
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -1793,8 +1807,29 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
             let captured_calls = Arc::clone(&captured_calls);
             let captured_store_cell = Arc::clone(&captured_store_cell);
             let captured_observed_leases = Arc::clone(&captured_observed_leases);
+            let captured_wake_source = Arc::clone(&captured_wake_source);
+            let captured_appended_wake = Arc::clone(&captured_appended_wake);
             async move {
                 captured_requests.lock_recover().push(req);
+                let source = captured_wake_source.lock_recover().take();
+                if let Some((registry, store, process)) = source {
+                    let wake = append_process_wake_to_queue(
+                        registry.as_ref(),
+                        store.as_ref(),
+                        &process,
+                        lash_core::ProcessEventAppendRequest::new(
+                            "process.wake",
+                            json!({
+                                "text": "wake at the terminal boundary",
+                                "value": {
+                                    "status": "wake at the terminal boundary"
+                                }
+                            }),
+                        ),
+                    )
+                    .await;
+                    *captured_appended_wake.lock_recover() = Some(wake);
+                }
                 let store = captured_store_cell.lock_recover().clone();
                 let observed = match store {
                     Some(store) => {
@@ -1854,21 +1889,11 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
         )
         .await
         .expect("register wake process");
-    let wake = append_process_wake_to_queue(
-        registry.as_ref(),
-        store.as_ref(),
-        &registered.id,
-        lash_core::ProcessEventAppendRequest::new(
-            "process.wake",
-            json!({
-                "text": "wake at the terminal boundary",
-                "value": {
-                    "status": "wake at the terminal boundary"
-                }
-            }),
-        ),
-    )
-    .await;
+    *wake_source.lock_recover() = Some((
+        Arc::clone(&registry),
+        Arc::clone(&store),
+        registered.id.clone(),
+    ));
 
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -1885,6 +1910,10 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
         .await
         .expect("the terminal-checkpoint wake drives its own follow-on turn");
     handler.close().await.expect("close the turn's handler");
+    let wake = appended_wake
+        .lock_recover()
+        .clone()
+        .expect("the wake arrived during the foreground turn");
 
     // One logical run, two physical turns, and the first one is a finish —
     // not a frame switch, and not a turn that was re-prompted into a second

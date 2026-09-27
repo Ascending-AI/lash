@@ -20,7 +20,7 @@ use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::store::DriveEpochSeal;
 use crate::{
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectOutcome, RuntimeErrorCode, SessionId, StoreError, TurnId,
+    RuntimeEffectOutcome, RuntimeErrorCode, StoreError, TurnId,
 };
 
 /// The id one admission is keyed by: its drive request and its ordinal
@@ -215,12 +215,13 @@ impl AdmitDriveRunner {
     /// resumed first; it also owns any follow-on its own switch left owed.
     /// Then a follow-on the head owes that no run owns (ADR 0101 §3,
     /// FIG-3542): while it is owed every other claim is blocked, so it is
-    /// recovered before anything else is admitted. Then the head of the
-    /// accepted next-turn input, unless a
-    /// session command was enqueued before it: commands are applied by the
-    /// queued drain, in order. Then any other queued work. The root of an
-    /// input is its host id (its source key) when it has one, else its input
-    /// id.
+    /// recovered before anything else is admitted. Then the command lane: an
+    /// open session command is applied by the queued drain before any
+    /// turn-lane work (ADR 0101 §4). Then the turn lane in `enqueue_seq`
+    /// order across both admission tables, with no kind priority (ADR 0101
+    /// §5): the head next-turn input, or the queued work pending before it.
+    /// The root of an input is its host id (its source key) when it has one,
+    /// else its input id.
     async fn next_root(
         &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
@@ -250,52 +251,42 @@ impl AdmitDriveRunner {
             .pending_session_work_ordering(session_id)
             .await
             .map_err(|error| store_fault("pending work ordering read", error))?;
-        if !ordering.session_command_precedes_turn_input()
-            && let Some((root, head)) = self.next_input_root(store, session_id).await?
-        {
-            return Ok(Some((root, AdmittedWork::Input { head })));
-        }
         let queued = store
             .list_pending_queued_work(session_id)
             .await
             .map_err(|error| store_fault("pending queued work read", error))?;
-        if !queued.is_empty() {
-            return Ok(Some((
+        let queued_run = || {
+            Some((
                 queued_root(&admission_id(&self.request.request, self.ordinal)),
                 AdmittedWork::Queued,
-            )));
+            ))
+        };
+        if ordering.session_command_precedes_turn_input() && !queued.is_empty() {
+            return Ok(queued_run());
         }
-        // A command enqueued before every input was the only reason to skip
-        // the input lane: with no queued work left, the input is next.
-        Ok(self
-            .next_input_root(store, session_id)
-            .await?
-            .map(|(root, head)| (root, AdmittedWork::Input { head })))
-    }
-
-    async fn next_input_root(
-        &self,
-        store: &Arc<dyn crate::store::RuntimePersistence>,
-        session_id: &SessionId,
-    ) -> Result<Option<(TurnId, crate::InputId)>, RuntimeEffectControllerError> {
         let open = store
             .list_pending_turn_inputs(session_id)
             .await
             .map_err(|error| store_fault("pending turn input read", error))?;
-        let Some(head) = lash_core_execution::runtime::head_input(&open) else {
-            return Ok(None);
-        };
-        // A root the input is bound to drives it: the root whose claim took
-        // it, or the new root a fork bound it to (FIG-3600 S7). Then its host
-        // id.
-        let bound = store
-            .root_binding(session_id, &head.input.input_id)
-            .await
-            .map_err(|error| store_fault("input root binding read", error))?;
-        Ok(Some((
-            lash_core_execution::runtime::head_input_root(head, bound),
-            head.input.input_id.clone(),
-        )))
+        match lash_core_execution::runtime::turn_lane_head(&open, &queued) {
+            None => Ok(None),
+            Some(lash_core_execution::runtime::TurnLaneHead::Queued) => Ok(queued_run()),
+            Some(lash_core_execution::runtime::TurnLaneHead::Input(head)) => {
+                // A root the input is bound to drives it: the root whose claim
+                // took it, or the new root a fork bound it to (FIG-3600 S7).
+                // Then its host id.
+                let bound = store
+                    .root_binding(session_id, &head.input.input_id)
+                    .await
+                    .map_err(|error| store_fault("input root binding read", error))?;
+                Ok(Some((
+                    lash_core_execution::runtime::head_input_root(head, bound),
+                    AdmittedWork::Input {
+                        head: head.input.input_id.clone(),
+                    },
+                )))
+            }
+        }
     }
 }
 

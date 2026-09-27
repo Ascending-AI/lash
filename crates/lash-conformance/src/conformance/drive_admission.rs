@@ -1312,3 +1312,110 @@ pub async fn a_redrive_racing_lane_release_answers_without_a_failed_row(
         "the root has an Answered row and no Failed row"
     );
 }
+
+/// What an idle session's admission takes first: `queued` or `input:<id>`.
+async fn idle_admission(
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    parts: &DriveParts,
+    request: &str,
+) -> String {
+    let request = parts.request(request);
+    on_tier(runner, parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            match lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0).await {
+                Ok(AdmitVerdict::Admit(admitted)) => match admitted.work() {
+                    lash_core::engine::AdmittedWork::Queued => "queued".to_owned(),
+                    lash_core::engine::AdmittedWork::Input { head } => format!("input:{head}"),
+                    other => format!("{other:?}"),
+                },
+                other => format!("{other:?}"),
+            }
+        })
+    })
+    .await
+}
+
+/// ADR 0101 §5, as the FIG-3540 close-out amends it: the turn lane has no
+/// kind priority. The two admission tables take one per-session
+/// `enqueue_seq`, and an idle session admits whichever of its head host input
+/// and its pending queued work came first — a process wake accepted before a
+/// host input runs first, an input accepted before a wake runs first — while
+/// an open session command still goes ahead of both (§4).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let wake = |parts: &DriveParts, sequence: u64| {
+        crate::conformance::helpers::process_wake_work(
+            &parts.session_id,
+            "idle-order",
+            sequence,
+            "a wake",
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+        )
+    };
+
+    let wake_first =
+        DriveParts::new(prefix, "idle-order-wake-first", &effect_host, &stores, 8).await;
+    wake_first
+        .store
+        .enqueue_queued_work(wake(&wake_first, 1))
+        .await
+        .expect("queue the earlier wake");
+    wake_first
+        .enqueue("a later input", Some("idle-order-later-input"))
+        .await;
+    assert_eq!(
+        idle_admission(&runner, &wake_first, "idle-order-wake-first").await,
+        "queued",
+        "the wake accepted before the input is admitted first"
+    );
+
+    let input_first =
+        DriveParts::new(prefix, "idle-order-input-first", &effect_host, &stores, 8).await;
+    let input = input_first
+        .enqueue("an earlier input", Some("idle-order-earlier-input"))
+        .await;
+    input_first
+        .store
+        .enqueue_queued_work(wake(&input_first, 1))
+        .await
+        .expect("queue the later wake");
+    assert_eq!(
+        idle_admission(&runner, &input_first, "idle-order-input-first").await,
+        format!("input:{input}"),
+        "the input accepted before the wake is admitted first"
+    );
+
+    let command_last =
+        DriveParts::new(prefix, "idle-order-command-last", &effect_host, &stores, 8).await;
+    command_last
+        .enqueue(
+            "an input before the command",
+            Some("idle-order-command-input"),
+        )
+        .await;
+    command_last
+        .store
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            command_last.session_id.clone(),
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "a command after the input".to_owned(),
+            },
+        ))
+        .await
+        .expect("queue the command");
+    assert_eq!(
+        idle_admission(&runner, &command_last, "idle-order-command-last").await,
+        "queued",
+        "the command lane goes ahead of an earlier input"
+    );
+}

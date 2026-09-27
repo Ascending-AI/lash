@@ -709,6 +709,11 @@ impl LashRuntime {
         }
         self.queued_run_reacquired = Default::default();
         let (mut input, options, claims) = self.queued_run_input(selection, true)?;
+        self.queued_run_driven_inputs = claims
+            .turn_inputs
+            .iter()
+            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
+            .collect();
         if selected.is_some() {
             input.turn_context.mark_selected_queued_work_drain();
         }

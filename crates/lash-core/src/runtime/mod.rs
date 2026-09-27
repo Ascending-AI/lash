@@ -526,6 +526,10 @@ pub struct LashRuntime {
     /// Rows the running queued run retook on resume because its checkpoints
     /// had been assigned them (FIG-3552).
     pub(crate) queued_run_reacquired: logical_turn::ReacquiredClaims,
+    /// The accepted inputs the last queued run this runtime drained took
+    /// into its turn: the root that ran it drove them (ADR 0101 §5), so a
+    /// waiter on one of them is answered by that root's run.
+    pub(crate) queued_run_driven_inputs: Vec<crate::InputId>,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here

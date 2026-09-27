@@ -50,6 +50,11 @@ struct StopAfterTerminalClaim {
     armed: Mutex<Option<Stop>>,
     withheld_inputs: Mutex<Vec<crate::InputId>>,
     withheld_batches: Mutex<Vec<crate::BatchId>>,
+    /// A wake to accept just before the running turn's terminal checkpoint
+    /// claims: accepted after the turn's input, so the turn lane admits the
+    /// input first (ADR 0101 §5) and the wake reaches the turn only there.
+    arriving_wake: Mutex<Option<crate::QueuedWorkBatchDraft>>,
+    arrived_wake: Mutex<Option<crate::QueuedWorkBatch>>,
 }
 
 #[async_trait::async_trait]
@@ -78,6 +83,17 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
         ),
         crate::StoreError,
     > {
+        if matches!(checkpoint, crate::CheckpointKind::BeforeCompletion) {
+            let arriving = self.arriving_wake.lock().expect("arriving wake").take();
+            if let Some(draft) = arriving {
+                let batch = self
+                    .inner
+                    .enqueue_queued_work(draft)
+                    .await
+                    .expect("accept the wake that arrives during the turn");
+                *self.arrived_wake.lock().expect("arrived wake") = Some(batch);
+            }
+        }
         let claims = self
             .inner
             .claim_checkpoint_work(
@@ -420,6 +436,8 @@ async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimePersisten
         armed: Mutex::new(None),
         withheld_inputs: Mutex::new(Vec::new()),
         withheld_batches: Mutex::new(Vec::new()),
+        arriving_wake: Mutex::new(None),
+        arrived_wake: Mutex::new(None),
     });
     let runtime_store: Arc<dyn crate::RuntimePersistence> = decorated.clone();
     let requests = Arc::new(Mutex::new(Vec::<crate::LlmRequest>::new()));
@@ -536,15 +554,15 @@ async fn withheld_wake_case(
     let cancelled_turn_id = TurnId::from(format!("{case}-cancelled"));
     let next_turn_id = TurnId::from(format!("{case}-next"));
 
-    // A wake queued for the session: a direct turn does not absorb it at its
-    // start, so its terminal checkpoint claims and withholds it for a
-    // follow-on turn (FIG-3157).
+    // A wake that arrives while the turn runs: accepted after the turn's
+    // input, its terminal checkpoint claims and withholds it for a follow-on
+    // turn (FIG-3157).
     let wake = wake_delivery(&format!("{case}-process"), sequence, text);
-    let batch = harness
-        .store
-        .enqueue_queued_work(crate::runtime::process_wake_batch_draft(wake.clone()))
-        .await
-        .expect("enqueue the wake");
+    *harness
+        .decorated
+        .arriving_wake
+        .lock()
+        .expect("arriving wake") = Some(crate::runtime::process_wake_batch_draft(wake.clone()));
 
     let local = CancellationToken::new();
     let stop = match disposition {
@@ -569,6 +587,13 @@ async fn withheld_wake_case(
     let run = harness
         .run(&cancelled_turn_id, "summarise the repo", local)
         .await;
+    let batch = harness
+        .decorated
+        .arrived_wake
+        .lock()
+        .expect("arrived wake")
+        .take()
+        .expect("the wake arrived before the terminal checkpoint claimed");
 
     assert_eq!(
         *harness

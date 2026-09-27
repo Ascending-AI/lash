@@ -275,10 +275,19 @@ impl LashRuntime {
         let root = admitted.root().clone();
         let host = Arc::clone(&self.host.core.control.effect_host);
         let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
+        self.queued_run_driven_inputs.clear();
         let drain = Box::pin(self.stream_next_queued_work(options))
             .await
             .map_err(|error| drive_abort(Some(&root), error))?;
-        self.root_run_of_drain(root, drain)
+        let driven_inputs = std::mem::take(&mut self.queued_run_driven_inputs);
+        let mut run = self.root_run_of_drain(root, drain)?;
+        if run.run.is_some() {
+            // Accepted input the queued run took into its turn — the turn
+            // lane composes in `enqueue_seq` order, so input behind earlier
+            // queued work rides that work's run (ADR 0101 §5).
+            run.driven_inputs = driven_inputs;
+        }
+        Ok(run)
     }
 
     /// Recover the follow-on the session head owes under `admitted`'s root

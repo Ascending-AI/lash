@@ -189,6 +189,7 @@ macro_rules! drive_admission_tests {
             (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),
             (a_queued_root_settled_without_a_commit_closes_after_its_evidence, "drive-root-settled-close"),
             (a_root_end_closes_its_turn_scope_in_the_process_registry, "drive-root-registry-close"),
+            (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
         ]);
     };
     (@laws $attrs:tt $fixture:block; [$($(#[$law_attr:meta])* ( $law:ident, $label:literal )),* $(,)?]) => {

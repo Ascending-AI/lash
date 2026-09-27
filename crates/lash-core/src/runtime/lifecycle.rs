@@ -322,6 +322,7 @@ impl LashRuntime {
         Ok(Self {
             queued_run: None,
             queued_run_reacquired: Default::default(),
+            queued_run_driven_inputs: Vec::new(),
             session: Some(session),
             host,
             services,

@@ -931,10 +931,12 @@ the bind and reclaim store methods, and `ClaimMode::Exact`. A redrive of an
 aborted root replays the drive its root claim recorded (FIG-3840), and a park is
 released once no open input bound to its root in `session_root_inputs` remains.
 
-**Not yet held.** §5 says the turn lane has no kind priority. At idle,
-admission takes the head host input before any queued wake whatever their
-`enqueue_seq`; the shared counter makes the cross-table comparison possible,
-but admission does not make it yet.
+**No kind priority (§5), held (FIG-3905).** Once no command is open, idle
+admission compares the head next-turn input with the earliest pending queued
+batch by the shared `enqueue_seq` and admits whichever came first: a wake
+accepted before an input runs first, and an input accepted before a wake runs
+first. The drive's admission and the park reconcile's reading of the next root
+share one decision (`turn_lane_head`).
 
 ## Alternatives considered
 

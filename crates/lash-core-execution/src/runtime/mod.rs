@@ -31,8 +31,8 @@ pub use lash_core_store::usage;
 pub(crate) use lash_core_store::usage;
 mod park;
 pub use park::{
-    StoreParkRecovery, head_input, head_input_root, input_root, record_root_park,
-    require_root_groups_closed,
+    StoreParkRecovery, TurnLaneHead, head_input, head_input_root, input_root, record_root_park,
+    require_root_groups_closed, turn_lane_head,
 };
 mod vocabulary;
 pub use vocabulary::*;
