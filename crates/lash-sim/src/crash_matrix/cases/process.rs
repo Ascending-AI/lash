@@ -25,7 +25,7 @@ use crate::crash_matrix::CrashPoint;
 use crate::crash_matrix::invariants::{CustomCheck, Expected};
 use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 
-const PROCESS_WORKFLOW: &str = "LashProcessWorkflow";
+pub(crate) const PROCESS_WORKFLOW: &str = "LashProcessWorkflow";
 const PROCESS: &str = "main";
 
 /// The journal commands of the process workflow's run the mid-journal cut
@@ -40,7 +40,7 @@ const RUN_JOURNAL_CUTS: u64 = 14;
 /// resolved: the window S-14 names.
 const AFTER_TERMINAL_WRITE: &str = "lash.process.parent-end";
 
-fn model_spec() -> Result<lash_core::ModelSpec, String> {
+pub(crate) fn model_spec() -> Result<lash_core::ModelSpec, String> {
     lash_core::ModelSpec::builder("crash-matrix-model")
         .context_window_tokens(200_000)
         .build()
@@ -75,17 +75,17 @@ fn rlm_core() -> CoreBuild {
     })
 }
 
-/// Publish `process main() { sleep for "500ms"; finish 7 }` and answer its start
-/// request.
-async fn publish_process(world: &CrashWorld) -> Result<lash_core::ProcessStartRequest, String> {
+/// Publish `process main() { sleep for <sleep>; finish 7 }` and answer its
+/// start request.
+pub(crate) async fn publish_process(
+    world: &CrashWorld,
+    sleep: &str,
+) -> Result<lash_core::ProcessStartRequest, String> {
     let program = b::module(
         vec![b::process(
             PROCESS,
             Vec::new(),
-            b::block(vec![
-                b::sleep_for(b::string("500ms")),
-                b::finish(b::num(7.0)),
-            ]),
+            b::block(vec![b::sleep_for(b::string(sleep)), b::finish(b::num(7.0))]),
         )],
         Vec::new(),
     );
@@ -174,7 +174,7 @@ async fn start_process(
 
 /// The engine waiter's end: its invocation completed, answered by the
 /// terminal promise.
-fn waiter_completed(waiter: String, process: ProcessId) -> CustomCheck {
+pub(crate) fn waiter_completed(waiter: String, process: ProcessId) -> CustomCheck {
     Arc::new(move |world: &CrashWorld| {
         let waiter = waiter.clone();
         let process = process.clone();
@@ -223,7 +223,7 @@ fn waiter_completed(waiter: String, process: ProcessId) -> CustomCheck {
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
     let world = CrashWorld::new(seed, rlm_core(), true).await?;
     world.restart().await?;
-    let request = publish_process(&world).await?;
+    let request = publish_process(&world, "500ms").await?;
     let mut notes = Vec::new();
     match point {
         CrashPoint::MidJournalStep => {

@@ -9,7 +9,7 @@
 
 mod ingress;
 mod intent;
-mod process;
+pub(crate) mod process;
 mod scope;
 
 use std::sync::Arc;

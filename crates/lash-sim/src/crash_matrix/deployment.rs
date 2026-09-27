@@ -860,4 +860,14 @@ impl lash_core::ProcessWorkSubstrate for CrashProcessPort {
             .publish_process_terminal(process_id, output, key)
             .await
     }
+
+    /// The drain's wake reaches the engine unchanged: the trait default
+    /// refuses, which would leave every drained process where it waits.
+    async fn deliver_hand_over(
+        &self,
+        process_id: &lash_core::ProcessId,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner.deliver_hand_over(process_id, generation).await
+    }
 }

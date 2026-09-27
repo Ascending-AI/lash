@@ -259,6 +259,43 @@ the Release workflow's `crash-matrix-restate` job runs it before publishing.
 kiln gate lash <fork> -- just crash-matrix-restate-e2e
 ```
 
+## Chaos soak
+
+`tests/chaos_soak.rs` is the release gate's soak (FIG-3873). It runs seeded
+epochs on the crash matrix's world. Each epoch opens sessions, including child
+sessions, and draws 200 steps from its seed. The workload steps are sends,
+batched sends, session commands, held roots that are cancelled or deleted
+(some with a child process), session deletes, and Lashlang processes with an
+engine waiter. The fault steps are deployment kills, first-attempt journal
+cuts, host crashes at the matrix's seam boundaries, and leader-lease loss.
+Rolling deploys register build N+1, move the deployment onto it, drain
+generation N and retire N's build. The epoch then ticks recovery until the
+crash matrix's invariants and the soak's own checks hold. The server double
+runs on manual time with Restate's default retry policy, so a replay's
+backoff spans virtual time as it does against a real server.
+
+`chaos_soak_smoke` runs two epochs, about two minutes, and is `dev-deferred`.
+`chaos_soak_release` is ignored; `just chaos-soak` and release.yml's
+`chaos-soak` job run it for 90 minutes. A failed epoch prints its seed, its
+violations and the trace of its steps. The `LASH_CHAOS_SOAK_*` settings it
+prints replay the epoch alone. `LASH_CHAOS_SOAK_STEPS` cuts the plan to a
+prefix, and `LASH_CHAOS_SOAK_WITHOUT=<kind,...>` replaces step kinds with
+quiesces while keeping every other step where it was.
+
+A defect the soak finds that `main` has not fixed is an entry in
+`chaos_soak::findings::OPEN`: its id, the step kinds that expose it, and a
+short replay. Each entry has an ignored regression test in
+`tests/chaos_soak.rs` that fails while the defect stands. The smoke leaves
+out every open finding's kinds so it stays green on `main`; the release soak
+draws every kind and stays red until the findings are fixed.
+
+```sh
+kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_smoke --nocapture
+LASH_CHAOS_SOAK_SEED=0x1001 LASH_CHAOS_SOAK_EPOCHS=1 \
+  kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_smoke --nocapture
+just chaos-soak 30m
+```
+
 ## Search fleet
 
 The confidence gate's search lane (`run_sim_search_lane`) runs `--mode search`

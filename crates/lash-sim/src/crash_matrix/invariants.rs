@@ -436,7 +436,7 @@ pub fn obligation_probes() -> Vec<Box<dyn ObligationProbe>> {
 }
 
 /// The role and the text of every committed message of `session`.
-async fn transcript(
+pub(crate) async fn transcript(
     world: &CrashWorld,
     session: &SessionId,
 ) -> Result<Vec<(String, String)>, String> {

@@ -97,6 +97,28 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
+    name = "chaos_soak__test",
+    crate_features = [],
+    crate_name = "chaos_soak",
+    crate_root = "tests/chaos_soak.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-sim", "chaos_soak", "//crates/lash-sim:chaos_soak__test"),
+    extra_compile_data = [
+        "//crates/lash-postgres-store:package_files",
+        "//crates/lash-sqlite-store:package_files",
+    ],
+    library = ":lash-sim",
+    library_crate_name = "lash_sim",
+    manifest_dir = "crates/lash-sim",
+    package_name = "lash-sim",
+    rustc_env = {},
+    tags = [
+        "dev-deferred",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "crash_point_matrix__test",
     crate_features = [],
     crate_name = "crash_point_matrix",

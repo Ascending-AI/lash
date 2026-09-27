@@ -98,6 +98,18 @@ targets = ["crash_point_matrix"]
 tags = ["dev-deferred"]
 reason = "the crash-point matrix restarts a deployment per cell and seed and ticks recovery on virtual time; minutes per run, too slow for the developer loop; the Bazel tail runs it on main's full-profile dispatch"
 
+# The chaos soak (FIG-3873): its smoke mode runs two seeded epochs of
+# randomized workload under kills, lease loss and rolling deploys on the
+# Restate server double, about two minutes; its release mode is ignored and
+# runs from `just chaos-soak`. Tagged as the crash-point matrix is.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+targets = ["chaos_soak"]
+tags = ["dev-deferred"]
+reason = "the chaos-soak smoke runs two seeded epochs of randomized workload under kills, lease loss and rolling deploys on the server double; minutes per run, too slow for the developer loop; the Bazel tail runs it on main's full-profile dispatch"
+timeout = "long"
+
 # The no-abort guarantee forks a dozen children that each parse deliberately
 # deep sources right up to the stack bound. At the 4 GiB test floor
 # `the_abort_corpus_survives_without_the_preflight` and

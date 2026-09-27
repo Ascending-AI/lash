@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 179,
+  "cargo_target_count": 180,
   "feature_lane_units": [
     {
       "features": [
@@ -16636,7 +16636,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 238,
+  "generated_label_count": 239,
   "packages": [
     {
       "declared_features": [
@@ -18652,6 +18652,15 @@
           "kind": "bin-unit-test",
           "label": "//crates/lash-sim:lash-sim__bin__unit_test",
           "tags": []
+        },
+        {
+          "cargo": "chaos_soak",
+          "cargo_only": "the chaos-soak smoke runs two seeded epochs of randomized workload under kills, lease loss and rolling deploys on the server double; minutes per run, too slow for the developer loop; the Bazel tail runs it on main's full-profile dispatch",
+          "kind": "test",
+          "label": "//crates/lash-sim:chaos_soak__test",
+          "tags": [
+            "dev-deferred"
+          ]
         },
         {
           "cargo": "crash_point_matrix",

@@ -452,6 +452,15 @@ runtime-persistence-soak cases='256':
 sim-serial-sweep seeds='20':
   kiln test //crates/lash-sim:lash-sim__unit_test --test_arg=serial_engine_lane_is_deterministic_across_seeds --test_sharding_strategy=disabled --nocache_test_results --test_env=LASH_SIM_SERIAL_LANE_SEEDS={{seeds}}
 
+# The release gate's chaos soak (FIG-3873): randomized lash-sim workloads
+# under deployment kills, leader-lease loss and rolling deploys on the Restate
+# server double, checked against the crash matrix's invariants. An empty
+# `seed` draws one from the clock; the soak prints it, and a failed epoch
+# prints the `LASH_CHAOS_SOAK_*` settings that replay it alone. release.yml's
+# `chaos-soak` job runs the same test under Cargo.
+chaos-soak duration='90m' seed='':
+  LASH_CHAOS_SOAK_DURATION="{{duration}}" LASH_CHAOS_SOAK_SEED="{{seed}}" kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_release --exact --ignored --nocapture
+
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.
 cross-backend-store-soak cases='64' seed='852':

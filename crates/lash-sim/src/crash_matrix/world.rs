@@ -56,12 +56,60 @@ struct Deployment {
     tasks: Vec<tokio::task::AbortHandle>,
 }
 
+/// `engine`'s backend as a deployment reaches it: the crash levers on the
+/// session work, the session catalog and the process-work port.
+fn layered(engine: Backend, work: &Arc<CrashSessionWork>, faults: &Arc<HostFaults>) -> Backend {
+    let factory_faults = Arc::clone(faults);
+    let port_faults = Arc::clone(faults);
+    lash_core::testing::runtime_helpers::LayeredBackend::over(engine)
+        .with_session_work(Some(
+            Arc::clone(work) as Arc<dyn lash_core::SessionWorkEngine>
+        ))
+        .map_session_store_factory(move |factory| {
+            Arc::new(CrashSessionFactory::new(factory, factory_faults))
+        })
+        .map_process_work_port(move |port| Arc::new(CrashProcessPort::new(port, port_faults)))
+        .into_backend()
+}
+
+/// Whichever deployment is up, as a host handler attempt reaches it.
+#[derive(Clone)]
+pub struct LiveCore(tokio::sync::watch::Receiver<Option<lash::LashCore>>);
+
+impl std::fmt::Debug for LiveCore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LiveCore")
+            .field("up", &self.0.borrow().is_some())
+            .finish()
+    }
+}
+
+impl LiveCore {
+    /// The live deployment's core, waiting while none is up.
+    pub async fn get(&self) -> Result<lash::LashCore, String> {
+        let mut cores = self.0.clone();
+        cores
+            .wait_for(Option::is_some)
+            .await
+            .map_err(|_| "the world ended".to_owned())
+            .map(|core| {
+                core.clone()
+                    .unwrap_or_else(|| unreachable!("waited for a core"))
+            })
+    }
+}
+
 /// See the module documentation.
 pub struct CrashWorld {
     seed: u64,
     rng: Mutex<fastrand::Rng>,
     engine: Engine,
     backend: Backend,
+    /// The backend the next deployment is built over: the first build's, or
+    /// the one [`add_generation`](Self::add_generation) registered last.
+    deploy: Mutex<Backend>,
+    work: Arc<CrashSessionWork>,
     proxy: Arc<DriverProxy>,
     faults: Arc<HostFaults>,
     trip: Arc<Trip>,
@@ -69,6 +117,14 @@ pub struct CrashWorld {
     build: CoreBuild,
     serve_processes: bool,
     live: Mutex<Option<Deployment>>,
+    /// The live deployment's core, for host handler attempts that replay
+    /// onto whichever deployment is up ([`replay_host_handlers`]).
+    ///
+    /// [`replay_host_handlers`]: Self::replay_host_handlers
+    cores: tokio::sync::watch::Sender<Option<lash::LashCore>>,
+    /// Whether a kill crashes the host's own handler invocations, so the
+    /// server replays them, instead of killing them.
+    host_handlers_replay: AtomicBool,
     incarnations: AtomicU32,
     interval: tokio::sync::Mutex<Interval>,
     ticks_run: std::sync::atomic::AtomicUsize,
@@ -92,7 +148,37 @@ impl CrashWorld {
     /// until [`restart`](Self::restart). `serve_processes` installs each
     /// deployment's durable process worker on the engine's endpoint.
     pub async fn new(seed: u64, build: CoreBuild, serve_processes: bool) -> Result<Self, String> {
-        let engine = Engine::start(&EngineKind::from_env()?, seed).await?;
+        Self::on_engine(
+            seed,
+            Engine::start(&EngineKind::from_env()?, seed).await?,
+            build,
+            serve_processes,
+        )
+        .await
+    }
+
+    /// [`new`](Self::new) on a server double configured by `config`, whatever
+    /// the environment names: its time mode and retry policy decide how a
+    /// replay's retries spread over virtual time.
+    pub async fn on_server(
+        seed: u64,
+        build: CoreBuild,
+        serve_processes: bool,
+        config: lash_restate_test::ServerConfig,
+    ) -> Result<Self, String> {
+        let engine = lash_restate_test::backend(seed, config)
+            .await
+            .map(Engine::Double)
+            .map_err(|error| format!("build the Restate test backend: {error}"))?;
+        Self::on_engine(seed, engine, build, serve_processes).await
+    }
+
+    async fn on_engine(
+        seed: u64,
+        engine: Engine,
+        build: CoreBuild,
+        serve_processes: bool,
+    ) -> Result<Self, String> {
         let clock: Arc<dyn lash_core::Clock> = engine.clock();
         let trip = Arc::new(Trip::new(clock));
         let faults = Arc::new(HostFaults::new(Arc::clone(&trip)));
@@ -102,19 +188,7 @@ impl CrashWorld {
             Arc::clone(&proxy),
             Arc::clone(&faults),
         ));
-        let backend = {
-            let factory_faults = Arc::clone(&faults);
-            let port_faults = Arc::clone(&faults);
-            lash_core::testing::runtime_helpers::LayeredBackend::over(engine.lash_backend())
-                .with_session_work(Some(work))
-                .map_session_store_factory(move |factory| {
-                    Arc::new(CrashSessionFactory::new(factory, factory_faults))
-                })
-                .map_process_work_port(move |port| {
-                    Arc::new(CrashProcessPort::new(port, port_faults))
-                })
-                .into_backend()
-        };
+        let backend = layered(engine.lash_backend(), &work, &faults);
         let killing = Arc::new(AtomicBool::new(false));
         {
             // An engine crash rule dropped an attempt: the deployment died
@@ -140,7 +214,9 @@ impl CrashWorld {
             seed,
             rng: Mutex::new(fastrand::Rng::with_seed(seed)),
             engine,
+            deploy: Mutex::new(backend.clone()),
             backend,
+            work,
             proxy,
             faults,
             trip,
@@ -148,6 +224,8 @@ impl CrashWorld {
             build,
             serve_processes,
             live: Mutex::new(None),
+            cores: tokio::sync::watch::channel(None).0,
+            host_handlers_replay: AtomicBool::new(false),
             incarnations: AtomicU32::new(0),
             interval: tokio::sync::Mutex::new(Interval::fresh(engine_now_ms)),
             ticks_run: std::sync::atomic::AtomicUsize::new(0),
@@ -169,6 +247,17 @@ impl CrashWorld {
     #[must_use]
     pub fn engine(&self) -> &Engine {
         &self.engine
+    }
+
+    /// The server double this world runs on; a world on a live server has
+    /// none.
+    pub fn double(&self) -> Result<&lash_restate_test::RestateTestBackend, String> {
+        match &self.engine {
+            Engine::Double(double) => Ok(double),
+            Engine::Live(_) => {
+                Err("this world runs on a live restate-server, not the double".to_owned())
+            }
+        }
     }
 
     /// Arm a journal-step crash on the engine.
@@ -196,10 +285,40 @@ impl CrashWorld {
         self.engine.hold_service(service).await
     }
 
-    /// The backend every deployment builds over.
+    /// The first build's backend: the stores every check reads.
     #[must_use]
     pub fn backend(&self) -> &Backend {
         &self.backend
+    }
+
+    /// The build generation the next deployment runs.
+    #[must_use]
+    pub fn generation(&self) -> lash_core::engine::BuildGeneration {
+        self.deploy.lock_recover().build_generation().clone()
+    }
+
+    /// Register a build of drain generation `generation` on the server under
+    /// `label`, beside the builds already serving (a rolling deploy's new
+    /// build), and build every later deployment over it: its core stamps
+    /// `generation` and competes for the recovery lease as that build. Only a
+    /// [`restart`](Self::restart) brings a deployment of it up.
+    pub async fn add_generation(
+        &self,
+        generation: lash_core::engine::BuildGeneration,
+        label: impl Into<String>,
+    ) -> Result<lash_restate_test::DeploymentId, String> {
+        let double = self.double()?;
+        let deployment = double
+            .add_build(
+                generation.clone(),
+                label,
+                lash_restate_test::DeploymentHooks::default(),
+            )
+            .await
+            .map_err(|error| format!("register the build of `{generation}`: {error}"))?;
+        let engine = Backend::new(Arc::new(double.restate().sibling_build(generation)));
+        *self.deploy.lock_recover() = layered(engine, &self.work, &self.faults);
+        Ok(deployment)
     }
 
     #[must_use]
@@ -240,7 +359,8 @@ impl CrashWorld {
             "lash-sim-crash-matrix",
             format!("seed-{:x}-incarnation-{incarnation}", self.seed),
         );
-        let core = (self.build)(self.backend.clone(), owner)?;
+        let backend = self.deploy.lock_recover().clone();
+        let core = (self.build)(backend, owner)?;
         if self.serve_processes {
             let config = core
                 .durable_process_worker_config()
@@ -251,11 +371,27 @@ impl CrashWorld {
             );
         }
         *self.interval.lock().await = Interval::fresh(self.engine.now_ms());
+        self.cores.send_replace(Some(core.clone()));
         *self.live.lock_recover() = Some(Deployment {
             core,
             tasks: Vec::new(),
         });
         self.engine.revive_deployment().await
+    }
+
+    /// From now on a kill crashes the host's own handler invocations as it
+    /// crashes lash's, and the server replays them, as Restate retries a
+    /// host service's handler on the next deployment. Their attempts must
+    /// take the core from [`live_core`](Self::live_core) at each attempt,
+    /// never capture one.
+    pub fn replay_host_handlers(&self) {
+        self.host_handlers_replay.store(true, Ordering::SeqCst);
+    }
+
+    /// A handle on whichever deployment is up, for a handler attempt.
+    #[must_use]
+    pub fn live_core(&self) -> LiveCore {
+        LiveCore(self.cores.subscribe())
     }
 
     /// Run `task` as the live deployment's host work: it dies with the
@@ -293,6 +429,7 @@ impl CrashWorld {
     pub async fn kill(&self) {
         self.killing.store(true, Ordering::SeqCst);
         self.proxy.down();
+        self.cores.send_replace(None);
         let deployment = self.live.lock_recover().take();
         if let Some(deployment) = deployment {
             for task in &deployment.tasks {
@@ -300,7 +437,22 @@ impl CrashWorld {
             }
             drop(deployment);
         }
-        self.engine.kill_deployment().await;
+        match (
+            &self.engine,
+            self.host_handlers_replay.load(Ordering::SeqCst),
+        ) {
+            // The host's own handler jobs are crashed as lash's are, and
+            // the server replays them on the next deployment.
+            (Engine::Double(double), true) => {
+                let server = double.server();
+                for view in server.invocations() {
+                    if view.status == "running" {
+                        let _ = server.crash(&view.id);
+                    }
+                }
+            }
+            _ => self.engine.kill_deployment().await,
+        }
         self.killing.store(false, Ordering::SeqCst);
     }
 
