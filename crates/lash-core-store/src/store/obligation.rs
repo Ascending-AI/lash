@@ -179,47 +179,30 @@ impl ObligationKey {
         columns: Vec<KeyColumn>,
     ) -> Result<Self, UndecodableObligation> {
         let mut columns = columns.into_iter();
-        let mut text = |name: &str| match columns.next() {
-            Some(KeyColumn::Text(value)) => Ok(value),
-            other => Err(UndecodableObligation {
-                detail: format!("{kind} obligation key column `{name}` is {other:?}, not text"),
-            }),
-        };
         Ok(match kind {
             ObligationKind::Ingress => Self::Ingress {
-                session_id: SessionId::from(text("session_id")?),
-                item_id: text("item_id")?,
+                session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
+                item_id: next_text(&mut columns, kind, "item_id")?,
             },
             ObligationKind::ScopeClose => Self::ScopeClose {
-                session_id: SessionId::from(text("session_id")?),
-                root: TurnId::from(text("root")?),
+                session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
+                root: TurnId::from(next_text(&mut columns, kind, "root")?),
             },
             ObligationKind::ParentEnd => Self::ParentEnd {
-                parent_kind: text("parent_kind")?,
-                parent_id: text("parent_id")?,
+                parent_kind: next_text(&mut columns, kind, "parent_kind")?,
+                parent_id: next_text(&mut columns, kind, "parent_id")?,
             },
             ObligationKind::SessionDelete => Self::SessionDelete {
-                session_id: SessionId::from(text("session_id")?),
+                session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
             },
             ObligationKind::ProcessTerminal => Self::ProcessTerminal {
-                process_id: ProcessId::parse(&text("process_id")?).map_err(|error| {
-                    UndecodableObligation {
+                process_id: ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
+                    .map_err(|error| UndecodableObligation {
                         detail: error.to_string(),
-                    }
-                })?,
+                    })?,
             },
             ObligationKind::ControlIntent => {
-                drop(text);
-                let sequence = match columns.next() {
-                    Some(KeyColumn::Integer(sequence)) => sequence,
-                    other => {
-                        return Err(UndecodableObligation {
-                            detail: format!(
-                                "control_intent obligation key column `intent_id` is {other:?}, not an integer"
-                            ),
-                        });
-                    }
-                };
+                let sequence = next_integer(&mut columns, kind, "intent_id")?;
                 Self::ControlIntent {
                     intent_id: ControlIntentId::from_sequence(u64::try_from(sequence).map_err(
                         |_| UndecodableObligation {
@@ -229,6 +212,34 @@ impl ObligationKey {
                 }
             }
         })
+    }
+}
+
+/// The next key column as text, or why it is not.
+fn next_text(
+    columns: &mut impl Iterator<Item = KeyColumn>,
+    kind: ObligationKind,
+    name: &str,
+) -> Result<String, UndecodableObligation> {
+    match columns.next() {
+        Some(KeyColumn::Text(value)) => Ok(value),
+        other => Err(UndecodableObligation {
+            detail: format!("{kind} obligation key column `{name}` is {other:?}, not text"),
+        }),
+    }
+}
+
+/// The next key column as an integer, or why it is not.
+fn next_integer(
+    columns: &mut impl Iterator<Item = KeyColumn>,
+    kind: ObligationKind,
+    name: &str,
+) -> Result<i64, UndecodableObligation> {
+    match columns.next() {
+        Some(KeyColumn::Integer(value)) => Ok(value),
+        other => Err(UndecodableObligation {
+            detail: format!("{kind} obligation key column `{name}` is {other:?}, not an integer"),
+        }),
     }
 }
 
@@ -485,4 +496,56 @@ pub trait ObligationLedger: Send + Sync {
 
     /// The state of `id`, or `None` if no row carries it.
     async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_key_round_trips_through_its_columns() {
+        let keys = [
+            ObligationKey::Ingress {
+                session_id: SessionId::from("s"),
+                item_id: "item".to_owned(),
+            },
+            ObligationKey::ControlIntent {
+                intent_id: ControlIntentId::from_sequence(7),
+            },
+            ObligationKey::SessionDelete {
+                session_id: SessionId::from("s"),
+            },
+        ];
+        for key in keys {
+            assert_eq!(
+                ObligationKey::decode(key.kind(), key.columns()),
+                Ok(key.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn a_column_set_this_build_cannot_name_is_undecodable() {
+        for (kind, columns) in [
+            (ObligationKind::SessionDelete, vec![KeyColumn::Integer(7)]),
+            (
+                ObligationKind::Ingress,
+                vec![KeyColumn::Text("s".to_owned())],
+            ),
+            (ObligationKind::ControlIntent, vec![KeyColumn::Integer(-1)]),
+            (
+                ObligationKind::ControlIntent,
+                vec![KeyColumn::Text("7".to_owned())],
+            ),
+            (
+                ObligationKind::ProcessTerminal,
+                vec![KeyColumn::Text("not a process id".to_owned())],
+            ),
+        ] {
+            assert!(
+                ObligationKey::decode(kind, columns.clone()).is_err(),
+                "{kind} decoded {columns:?}"
+            );
+        }
+    }
 }
