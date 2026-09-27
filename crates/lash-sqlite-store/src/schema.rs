@@ -894,10 +894,10 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// cross-backend differential round-trips u64::MAX through them. A pre-67
 /// database lacks the family guards, so it is rejected at open and recreated.
 /// Bumped to 68 for FIG-3260: the await-event tables moved out of this string
-/// into the shared `AWAIT_EVENT_TABLES` fragment so the declaration exists
-/// once for both carrying databases. The applied DDL is statement-identical,
-/// but the guarded `SCHEMA` text changed, so a pre-68 database is rejected at
-/// open and recreated like any other schema change.
+/// into a shared fragment so the declaration existed once for both carrying
+/// databases. The applied DDL is statement-identical, but the guarded
+/// `SCHEMA` text changed, so a pre-68 database is rejected at open and
+/// recreated like any other schema change.
 /// Bumped to 69 for FIG-3261: every formerly-anonymous CHECK gained a
 /// `ck_<table>_<concern>` name so the required-constraints gate can see it.
 /// Constraint names change the stored DDL text, so a pre-69 database is

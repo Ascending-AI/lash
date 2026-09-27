@@ -633,8 +633,7 @@ workspace job on a trusted event. A merge-queue run before this cutover spent
 test; Bazel now compiles the existing workbench unit binary on the shared pool
 and runs that case there. An untrusted (fork or Dependabot) pull request receives no cache
 credentials and therefore no Bazel partition, so it keeps the full Cargo
-workspace run — the `sqlite-await-event-helper` example included, which the
-store conformance tests spawn.
+workspace run — the full store conformance suite included.
 
 ### The workbench browser test
 

@@ -37,9 +37,8 @@
 //! outside that seam-coverage boundary until they are deliberately modeled.
 //!
 //! Beside the crash placements, [`turn_crash_matrix_error_return_fail_stop`]
-//! places an error *return* — not a crash — at the tool-attempt seam and,
-//! on journaled controllers, inside its effect journal at `claim`,
-//! `finalize` and `renew` (FIG-3524). After an unretried storage error the
+//! places an error *return* — not a crash — at the tool-attempt seam
+//! (FIG-3524). After an unretried storage error the
 //! turn must stop: the fail-stop oracle asserts no durable commit, no tool
 //! dispatch and no provider request follows, and that the typed store error
 //! reaches the caller. Each placement's ruling is a reviewable row in

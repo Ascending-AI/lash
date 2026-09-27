@@ -808,7 +808,7 @@ impl AttachmentManifest for Store {
             // registry in one statement. It runs under `BEGIN IMMEDIATE` so it
             // takes both in the global lock order (catalog, then registry)
             // rather than holding the catalog while it waits for a registry a
-            // multi-database writer holds; see `scope_fence.rs`.
+            // multi-database writer holds.
             self.conn
                 .write(move |tx| {
                     tx.query_row(sql, params![attachment_id, cutoff], |_| Ok(()))

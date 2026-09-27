@@ -13,11 +13,11 @@ use pretty_assertions::assert_eq;
 ///
 /// These are error *returns*, not crashes: the seam answers the backend's
 /// typed store error and the turn must stop — no durable commit, no tool
-/// dispatch and no provider request may follow an unretried one. The three
-/// journal placements fire inside the tool attempt's claim/execute/finalize
-/// loop through the controller's `EffectJournalFaults`; `ToolAttempt`
-/// injects the same typed error at the controller seam itself, which is the
-/// only error-return coverage a non-journaled controller can offer.
+/// dispatch and no provider request may follow an unretried one. Both
+/// placements arm at the controller seam itself, the only error-return
+/// coverage a non-journaled controller can offer: `ToolAttempt` returns the
+/// typed store error and `ToolAttemptSessionRetirement` returns the
+/// session-retirement refusal.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(super) enum ErrorReturnPlacement {
@@ -40,11 +40,7 @@ impl ErrorReturnPlacement {
 }
 
 /// What the fail-stop oracle observed after one injected error return
-/// (FIG-3524).
-///
-/// The conformance sweep fills this from the seam trace and the runner's
-/// journal-fault injector; `lash-sim` runners fill it from their own
-/// instrumentation and call the same oracle.
+/// (FIG-3524). The conformance sweep fills it from the seam trace.
 #[derive(Clone, Debug, Default)]
 pub struct FailStopObservation {
     /// Durable commits crossing the store or turn-control seam after the
@@ -267,9 +263,9 @@ async fn run_error_return_case(
             Err(error) => Some(error.code.clone()),
             Ok(_) => None,
         },
-        // Retried: the journal re-attempted the faulted call, or the faulted
-        // seam was entered again — an engine that retries a failed group
-        // child itself (Restate) runs the child's tool attempt anew.
+        // Retried: the faulted seam was entered again — an engine that
+        // retries a failed group child itself (Restate) runs the child's
+        // tool attempt anew.
         retried: continued.iter().any(faulted_seam),
     };
     let violations = fail_stop_violations(&observation, expected_code);

@@ -106,8 +106,8 @@ impl crate::testing::EffectLayer for SeamLayer {
         };
         let operation = TurnSeamOperation::Effect(operation);
         // FIG-3524: an armed error-return makes the first tool attempt that
-        // reaches the seam fail once — at the seam itself, or inside its
-        // journal claim/finalize/renew — instead of crashing the task.
+        // reaches the seam fail once, at the seam itself, instead of
+        // crashing the task.
         if matches!(
             operation,
             TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })

@@ -68,12 +68,12 @@ or Restate `scope_effect_begin`. The graph test must produce distinct addresses 
 local replay keys in different scopes. The header tests must show a required `address` and no
 universal `subject` or optional duplicate `replay` slot, while refusing the old shape.
 
-Run the durable host contracts against fresh storage. The SQLite effect-host scope
-conformance is the shared `effect_controller_` conformance family instantiated for the SQLite
-backend (`crates/lash-sqlite-store/tests/conformance.rs`), not a test of its own:
+Run the durable host contracts against fresh storage. Since the SQL effect engine's removal
+the shared `effect_controller_` conformance family mounts only on Restate's in-process
+recording context; the SQLite conformance binary keeps no effect-controller laws:
 
 ```sh
-kiln test --test_output=all //crates/lash-sqlite-store:conformance__test --test_arg=effect_controller_ --test_arg=--nocapture
+kiln test --test_output=all //crates/lash-restate:lash-restate__unit_test --test_arg=effect_controller_ --test_arg=--nocapture
 ```
 
 (The former filter `sqlite_effect_host_satisfies_scope_conformance` names no test and matched
@@ -89,7 +89,7 @@ so the gate's leftover-refusal can see it. Require the test to run rather than p
 
 ```sh
 scripts/ci/with-service.sh pg16 -- \
-  cargo test -p lash-internal-postgres-store --locked --test conformance effect_controller_ -- --nocapture
+  cargo test -p lash-internal-postgres-store --locked --test conformance session_ingress -- --nocapture
 ```
 
 ## Phase 2 — Truthful attribution

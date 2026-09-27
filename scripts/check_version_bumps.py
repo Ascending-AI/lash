@@ -893,9 +893,10 @@ IDENTIFIER_RENAME_BASELINES = {
     # `TurnCheckpoint` reach (MachineState, pending `Effect`s, messages,
     # events) never includes the sync payload or the host-supplied
     # `TurnMachineConfig`, so checkpoint bytes are identical on both sides.
-    # The field serializes only into `runtime_effect_replay.outcome_json`, an
-    # opaque carrier the SQL stores never type-decode, and is Option+default,
-    # so outcome rows written before the field existed still decode.
+    # The field serialized only into `runtime_effect_replay.outcome_json` —
+    # the SQL effect journal the engine removal (FIG-3861) deleted — an
+    # opaque carrier the SQL stores never type-decoded, and is Option+default,
+    # so outcome rows written before the field existed still decoded.
     # TURN_CHECKPOINT_SCHEMA_VERSION stays 7. One-time baseline; any further
     # guarded-shape drift re-fails the gate.
     "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (

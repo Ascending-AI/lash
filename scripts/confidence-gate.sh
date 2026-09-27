@@ -346,25 +346,6 @@ finish_current_step() {
   fi
 }
 
-# The cold-process conformance suites spawn dev-only example binaries out of
-# `target/<profile>/examples` (`lash_conformance::helper_executable`). No
-# `cargo test --test conformance` invocation builds them, and both examples
-# carry `required-features = ["testing"]`, so a build that does not name them
-# only yields them while some other workspace member happens to turn that
-# feature on. Every conformance run in this gate builds them through here
-# first, so the spawn cannot fail with ENOENT.
-# `helper_executable` resolves the helper from the *running test binary's* own
-# profile directory, so every runner with its own target directory needs its own
-# copy. Pass one to build there; omit it for the ambient target directory.
-build_conformance_helpers() {
-  local target_args=()
-  if [ -n "${1:-}" ]; then
-    target_args=(--target-dir "$1")
-  fi
-  cargo build -p lash-internal-sqlite-store --locked --features testing \
-    --example sqlite-await-event-helper "${target_args[@]}"
-}
-
 gate_postgres_image="postgres:16-alpine"
 
 # Every Postgres this gate starts is the CI image started the CI way. The
@@ -1041,7 +1022,6 @@ run_scenario_harnesses() {
   local session_graph_cases="${LASH_SESSION_GRAPH_PROPTEST_CASES:-$default_session_graph_cases}"
 
   if area_selected store; then
-    build_conformance_helpers
     step "Golden durable-store semantic read-back"
     run_cargo_tests -p lash-internal-sqlite-store --locked --test durable_read_fixture \
       sqlite_durable_fixture_reads_with_identical_semantics
@@ -1071,7 +1051,6 @@ run_scenario_harnesses() {
   fi
 
   if area_selected process; then
-    build_conformance_helpers
     step "Runtime-persistence state-machine properties"
     LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
       run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
@@ -1115,7 +1094,6 @@ run_scenario_harnesses() {
 
 run_state_machine_and_fault_matrix() {
   if area_selected process; then
-    build_conformance_helpers
     step "Runtime state-machine property runner"
     run_cargo_tests -p lash-internal-core --locked runtime_state_machine_property
     step "Durable fault matrix metadata"
@@ -1148,7 +1126,6 @@ run_state_machine_and_fault_matrix() {
   fi
 
   if area_selected effect-host; then
-    build_conformance_helpers
     step "Effect-host await-event session-cancel conformance (SQLite memory)"
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory effect_host
   fi
@@ -1161,7 +1138,6 @@ run_state_machine_and_fault_matrix() {
 
   if area_selected store; then
     step "SQLite backend fault-matrix conformance"
-    build_conformance_helpers
     cargo test -p lash-internal-sqlite-store --locked --test conformance conformance
   fi
 }
@@ -1720,7 +1696,6 @@ EOF
 
 run_local_backend_conformance() {
   step "Sqlite backend conformance"
-  build_conformance_helpers
   cargo test -p lash-internal-sqlite-store --locked --test conformance
 }
 
@@ -1758,7 +1733,6 @@ run_postgres_schema_gate() {
 
 run_postgres_conformance() {
   step "Postgres backend conformance"
-  build_conformance_helpers
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
     run_postgres_schema_gate "$LASH_POSTGRES_DATABASE_URL"
@@ -1897,7 +1871,6 @@ run_broad_postgres_evidence() {
     return
   fi
   step "Broad Postgres conformance evidence"
-  build_conformance_helpers
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
     if area_selected sim; then
@@ -2178,22 +2151,6 @@ EOF
   require_tool cargo-llvm-cov cargo-llvm-cov 0.8.7
   require_llvm_tools
   cargo llvm-cov clean --workspace
-  # cargo-llvm-cov compiles into `<target>/llvm-cov-target`, not `<target>`, so
-  # the helper examples built for every other stage are invisible to the test
-  # binaries this one runs: `lash_conformance::helper_executable` resolves the
-  # helper beside the binary that spawns it, and the cold-process conformance
-  # tests are part of `--tests`. Build them into that tree under the
-  # instrumentation environment cargo-llvm-cov exports, so they share the
-  # dependency artifacts the coverage run is about to build rather than forcing
-  # a second, uninstrumented compile of the whole closure.
-  local llvm_cov_env
-  llvm_cov_env="$(cargo llvm-cov show-env --export-prefix 2>/dev/null)"
-  (
-    # shellcheck disable=SC1090
-    eval "$llvm_cov_env"
-    build_conformance_helpers \
-      "${CARGO_LLVM_COV_TARGET_DIR:?cargo llvm-cov show-env must report its target directory}/llvm-cov-target"
-  )
   local coverage_package_args=()
   local package
   for package in "${selected_packages[@]}"; do
@@ -2415,7 +2372,6 @@ run_authority_rebind_mutation_evidence() {
   # admits, and the group settlement capture that re-arms retained authority
   # under a successor opener. A mutant the oracles do not kill is a named
   # leak, so the lane judges kills, not coverage.
-  build_conformance_helpers
   # Each sweep's selector is the suite that names the wrong state the mutant
   # opens — a mutant the selector does not kill is a named leak, not noise.
   run_mutants_recorded "lash-core-execution rebind checklist" "${out_dir}/mutants-lash-core-execution-rebind-checklist-targeted" \

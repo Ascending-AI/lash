@@ -43,7 +43,6 @@ mod admitted_head_redrive;
 mod cancelled_turn_withheld_input;
 mod cell_binding_drift;
 mod cell_orchestration_redrive;
-pub mod cold_process_turn_parent;
 mod command_drain_fence;
 mod completion_routing;
 mod direct_turn_acceptance;

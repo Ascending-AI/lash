@@ -3,6 +3,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash_core_execution::StoreError;
 use lash_sqlite_store::{
     RequiredConstraintFinding, SqliteDatabase, Store, inspect_required_constraints_at,
 };
@@ -173,4 +174,254 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
         RequiredConstraintFinding::Altered { name, .. }
             if name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
+}
+
+#[tokio::test]
+async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let bracket_path = directory.path().join("bracket.db");
+    let bracket = rusqlite::Connection::open(&bracket_path).expect("open bracket fixture");
+    bracket
+        .execute_batch(
+            "CREATE TABLE queued_runs (
+                status TEXT,
+                [CONSTRAINT ck_queued_runs_status
+                    CHECK (status IN ('pending', 'settled'))] TEXT
+            );
+            INSERT INTO queued_runs(status) VALUES ('invalid');",
+        )
+        .expect("a quoted column name does not constrain status");
+    drop(bracket);
+
+    let report = inspect_required_constraints_at(&bracket_path, SqliteDatabase::DurableCore)
+        .await
+        .expect("inspect bracket-identifier fixture");
+    assert!(report.findings().iter().any(|finding| matches!(
+        finding,
+        RequiredConstraintFinding::Missing { table, name, .. }
+            if table == "queued_runs"
+                && name == "ck_queued_runs_status"
+    )));
+
+    let quoted_keyword_path = directory.path().join("quoted-keyword.db");
+    rusqlite::Connection::open(&quoted_keyword_path)
+        .expect("open quoted-keyword fixture")
+        .execute_batch(
+            "CREATE TABLE queued_runs (
+                status TEXT,
+                \"constraint\" ck_queued_runs_status
+                    CHECK (status IN ('pending', 'settled'))
+            );",
+        )
+        .expect("create a column named like the declaration keyword");
+    let report = inspect_required_constraints_at(&quoted_keyword_path, SqliteDatabase::DurableCore)
+        .await
+        .expect("inspect quoted-keyword fixture");
+    assert!(report.findings().iter().any(|finding| matches!(
+        finding,
+        RequiredConstraintFinding::Missing { name, .. }
+            if name == "ck_queued_runs_status"
+    )));
+
+    let genuine_path = directory.path().join("genuine.db");
+    let genuine = rusqlite::Connection::open(&genuine_path).expect("open genuine fixture");
+    genuine
+        .execute_batch(
+            "CREATE TABLE queued_runs (
+                \"SESSION_ID\" TEXT,
+                \"SCOPE_ID\" TEXT,
+                \"STATUS\" TEXT,
+                \"REVISION\" INTEGER,
+                \"ADMISSION_JSON\" TEXT,
+                \"ADMITTED_GENERATION\" TEXT,
+                CONSTRAINT \"CK_QUEUED_RUNS_STATUS\"
+                    CHECK ([STATUS] IN ('pending', 'settled')),
+                CONSTRAINT \"CK_QUEUED_RUNS_REVISION\"
+                    CHECK ([REVISION] >= 0)
+            );",
+        )
+        .expect("create genuinely quoted lowercase identifiers");
+    // The custom table shadows the schema's own declaration; the rest of the
+    // catalog — including the `queued_run_members` key that references it —
+    // comes straight out of the provisioning text so the fragment-carried
+    // tables complete.
+    for statement in
+        lash_sqlite_store::testing::database_provisioning_statements(SqliteDatabase::DurableCore)
+    {
+        genuine
+            .execute_batch(statement)
+            .expect("apply the shared provisioning statements");
+    }
+    assert!(
+        genuine
+            .execute("INSERT INTO queued_runs(status) VALUES ('invalid')", [])
+            .is_err(),
+        "the genuine named check must reject invalid status"
+    );
+    drop(genuine);
+    let report = inspect_required_constraints_at(&genuine_path, SqliteDatabase::DurableCore)
+        .await
+        .expect("inspect genuine quoted check");
+    assert!(report.is_conformant(), "{report:?}");
+}
+
+#[tokio::test]
+async fn fig2837_sqlite_virtual_table_arguments_cannot_forge_a_named_check() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("virtual.db");
+    let connection = rusqlite::Connection::open(&path).expect("open virtual-table fixture");
+    connection
+        .execute_batch(
+            "CREATE VIRTUAL TABLE queued_runs USING rtree(
+                id, min, max,
+                +status CONSTRAINT ck_queued_runs_status
+                    CHECK(status IN ('pending', 'settled'))
+            );
+            INSERT INTO queued_runs VALUES (1, 0, 1, 'invalid');",
+        )
+        .expect("rtree module arguments do not declare a table CHECK");
+    drop(connection);
+
+    let error = inspect_required_constraints_at(&path, SqliteDatabase::DurableCore)
+        .await
+        .expect_err("a virtual table cannot produce a conformant constraint report");
+    assert!(matches!(
+        error,
+        StoreError::RequiredConstraintInspectionInconclusive {
+            backend: "sqlite",
+            table,
+            constraint,
+            detail,
+        } if table == "queued_runs"
+            && constraint == "ck_queued_runs_status"
+            && detail.contains("virtual tables")
+    ));
+}
+
+#[tokio::test]
+async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let checkpointed_path = directory.path().join("checkpointed.db");
+    let checkpointed =
+        rusqlite::Connection::open(&checkpointed_path).expect("open checkpointed fixture");
+    checkpointed
+        .execute_batch(&format!(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA user_version = {};
+             CREATE TABLE queued_runs (
+                 session_id TEXT,
+                 scope_id TEXT,
+                 status TEXT,
+                 revision INTEGER,
+                 admission_json TEXT,
+                 admitted_generation TEXT,
+                 CONSTRAINT ck_queued_runs_status
+                     CHECK (status IN ('pending', 'settled')),
+                 CONSTRAINT ck_queued_runs_revision
+                     CHECK (revision >= 0)
+             );",
+            SqliteDatabase::DurableCore.expected_version()
+        ))
+        .expect("create and checkpoint fixture");
+    for statement in
+        lash_sqlite_store::testing::database_provisioning_statements(SqliteDatabase::DurableCore)
+    {
+        checkpointed
+            .execute_batch(statement)
+            .expect("apply the shared provisioning statements");
+    }
+    checkpointed
+        .execute_batch(
+            "INSERT INTO queued_runs(session_id, scope_id, status, revision, admission_json, admitted_generation)
+                 VALUES ('session', 'scope', 'settled', 0, '{}', 'gen-0');",
+        )
+        .expect("seed a conforming queued-runs row");
+    checkpointed
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .expect("checkpoint the completed fixture");
+    drop(checkpointed);
+    for suffix in ["wal", "shm"] {
+        let sidecar = sqlite_sidecar(&checkpointed_path, suffix);
+        if sidecar.exists() {
+            std::fs::remove_file(sidecar).expect("remove recoverable checkpointed sidecar");
+        }
+    }
+    let checkpointed_before = std::fs::read(&checkpointed_path).expect("read main database");
+    let report = inspect_required_constraints_at(&checkpointed_path, SqliteDatabase::DurableCore)
+        .await
+        .expect("inspect checkpointed WAL database");
+    assert!(report.is_conformant(), "{report:?}");
+    assert_eq!(
+        checkpointed_before,
+        std::fs::read(&checkpointed_path).expect("reread main database"),
+        "inspection must not change durable main-database bytes"
+    );
+    let checkpointed = rusqlite::Connection::open_with_flags(
+        &checkpointed_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .expect("reopen checkpointed fixture read-only");
+    assert_eq!(
+        checkpointed
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .expect("read user_version"),
+        SqliteDatabase::DurableCore.expected_version()
+    );
+    assert_eq!(
+        checkpointed
+            .query_row("SELECT status FROM queued_runs", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("read stored row"),
+        "settled"
+    );
+    drop(checkpointed);
+
+    let live_path = directory.path().join("live-wal.db");
+    let live = rusqlite::Connection::open(&live_path).expect("open live WAL fixture");
+    live.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA wal_autocheckpoint = 0;
+         CREATE TABLE queued_runs (
+             session_id TEXT,
+             scope_id TEXT,
+             status TEXT,
+             revision INTEGER,
+             admission_json TEXT,
+             admitted_generation TEXT,
+             CONSTRAINT ck_queued_runs_status
+                 CHECK (status IN ('pending', 'settled')),
+             CONSTRAINT ck_queued_runs_revision
+                 CHECK (revision >= 0)
+         );",
+    )
+    .expect("commit schema to the live WAL");
+    for statement in
+        lash_sqlite_store::testing::database_provisioning_statements(SqliteDatabase::DurableCore)
+    {
+        live.execute_batch(statement)
+            .expect("apply the shared provisioning statements");
+    }
+    live.execute_batch(
+        "INSERT INTO queued_runs(session_id, scope_id, status, revision, admission_json, admitted_generation)
+             VALUES ('session', 'scope', 'settled', 0, '{}', 'gen-0');",
+    )
+    .expect("commit a conforming queued-runs row to the WAL");
+    let wal_path = sqlite_sidecar(&live_path, "wal");
+    assert!(wal_path.exists(), "fixture must retain a committed WAL");
+    let main_before = std::fs::read(&live_path).expect("read live main database");
+    let wal_before = std::fs::read(&wal_path).expect("read committed WAL");
+    let report = inspect_required_constraints_at(&live_path, SqliteDatabase::DurableCore)
+        .await
+        .expect("inspect schema committed only in WAL");
+    assert!(report.is_conformant(), "{report:?}");
+    assert_eq!(main_before, std::fs::read(&live_path).expect("reread main"));
+    assert_eq!(wal_before, std::fs::read(&wal_path).expect("reread WAL"));
+    assert_eq!(
+        live.query_row("SELECT status FROM queued_runs", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .expect("read row committed in WAL"),
+        "settled"
+    );
 }

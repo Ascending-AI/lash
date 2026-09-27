@@ -12,12 +12,11 @@ a call site at all. It is declared in a `statements!` block in a listed owner
 module, or — if it names no table — in that backend's connection module, and
 anything else is a refusal naming the file and line.
 
-The worked example is the effect and wait families (FIG-3380):
+The worked example is the attachment family (FIG-3380):
 
 | | shared | SQLite | PostgreSQL |
 |---|---|---|---|
-| effect | `crates/lash-store-sql/src/effect{,/replay,/group,/scope_retirement}.rs` | `crates/lash-sqlite-store/src/{effect_replay,scope_fence}.rs` | none: PostgreSQL journals no effects (ADR 0104) |
-| wait | `crates/lash-store-sql/src/wait/{waits,meta,revoked_sessions}.rs` | `crates/lash-sqlite-store/src/await_event.rs` | none: PostgreSQL journals no effects (ADR 0104) |
+| attachment | `crates/lash-store-sql/src/attachment/{manifest,condemnation,blob}.rs` | `crates/lash-sqlite-store/src/{attachments,attachment_store}.rs` | `crates/lash-postgres-store/src/postgres/attachments.rs` |
 
 ## 1. Inventory the family first
 
@@ -25,8 +24,9 @@ Collect every production statement over the family's tables, in both backends,
 before writing anything. Grep for the table name — and for its `lash_`-prefixed
 spelling — across `crates/*/src`, not just the obvious module: the statements
 this layout deletes are exactly the ones that ended up somewhere else. In the
-effect family they were in the retention sweep, the process-registry
-registration path, the store's own `open`, and two conformance helper binaries.
+effect family's conversion they had ended up in the retention sweep, the
+process-registry registration path, the store's own `open`, and two
+conformance helper binaries.
 
 Then diff the two backends statement by statement and sort each one into:
 
@@ -44,27 +44,25 @@ is not a membership class.
 ## 2. Write the shared table module
 
 ```rust
-//! `runtime_effect_group`: one row per open effect group.
+//! `attachment_manifest`: one row per attachment intent in a session.
 
 /// The table's unprefixed name.
-pub const TABLE: &str = "runtime_effect_group";
+pub const TABLE: &str = "attachment_manifest";
 
 /// Every column, in insert order.
-pub const INSERT_COLUMNS: &str = "group_key, scope_id, …";
+pub const INSERT_COLUMNS: &str = "attachment_id, session_id, canonical_uri, …";
 
-/// The group as a caller reads it back.
+/// The intent as a caller reads it back.
 ///
-/// The one projection over this table, and the full row minus `next_seq`: the
-/// counter is never read, only bumped and returned by the bump.
-pub const RECORD_COLUMNS: &str = "group_key, scope_id, …";
+/// The one lifecycle projection over this table, in the order callers decode
+/// it.
+pub const ENTRY_COLUMNS: &str = "attachment_id, session_id, canonical_uri, intent_at_ms, …";
 
 lash_store_sql::statements! {
-    /// `runtime_effect_group` statements both backends issue verbatim.
-    pub struct GroupStatements @ "effect_group" {
-        /// The durably recorded group row for `?1`.
-        select_by_key = "SELECT group_key, scope_id, …
-             FROM runtime_effect_group
-             WHERE group_key = ?1";
+    /// `attachment_manifest` statements both backends issue verbatim.
+    pub struct ManifestStatements @ "attachment_manifest" {
+        /// Every digest the manifest still roots.
+        select_rooted_ids = "SELECT DISTINCT attachment_id FROM attachment_manifest";
     }
 }
 ```
@@ -104,9 +102,9 @@ neither `column = COALESCE(?N, column)` nor `?N IS NULL OR column = ?N` can use
 an index. Add a query-plan test per named shape.
 
 Row types: if both backends carry a byte-identical private struct for the row
-and compare it the same way, that struct belongs here (see
-`wait::waits::WaitRow`). If the decoded row is already a port type of the shared
-driver that consumes it, leave the type where the driver defines it and let this
+and compare it the same way, that struct belongs here. If the decoded row is
+already a port type of the shared driver that consumes it — as the current
+families' rows are — leave the type where the driver defines it and let this
 module own only the column order.
 
 ### One statement per filter shape, never one with an optional predicate
@@ -232,18 +230,23 @@ indexes to those tests.
 
 ## 4. Write each backend's dialect-only set
 
-Same macro, same family prefix, in the backend's table module (the example is
-illustrative; PostgreSQL's effect family left with its engine, FIG-3667):
+Same macro, same family prefix, in the backend's table module:
 
 ```rust
 lash_store_sql::statements! {
-    /// `runtime_effect_group` statements only PostgreSQL issues.
-    pub(crate) struct GroupPostgresStatements @ "effect_group" {
-        /// Record a group, returning the inserted row.
+    /// `lash_attachment_manifest` statements only PostgreSQL issues.
+    pub(crate) struct ManifestPostgresStatements @ "attachment_manifest" {
+        /// Every uncommitted intent older than `?1`.
         ///
-        /// The `RETURNING` clause is the fork: it saves the read-back on the
-        /// insert path, which SQLite performs unconditionally.
-        insert_new = "INSERT INTO runtime_effect_group ( … ) …";
+        /// The ordering is the fork: PostgreSQL reports digest order, SQLite
+        /// reports oldest intent first. Both are total and neither caller
+        /// depends on the other's, so the two orders are left exactly as they
+        /// stand rather than unified inside a refactor.
+        select_uncommitted = "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
+                 committed_at_ms, owner_kind, owner_id, written_at_ms
+             FROM attachment_manifest
+             WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
+             ORDER BY attachment_id ASC";
     }
 }
 ```
@@ -258,29 +261,40 @@ quiet override.
 PostgreSQL has one dialect, so one `LazyLock`:
 
 ```rust
-static EFFECT_SQL: LazyLock<EffectSql> = LazyLock::new(|| {
+static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
-    EffectSql { group: GroupStatements::render(dialect), … }
+    AttachmentSql { manifest: ManifestStatements::render(dialect), … }
 });
 
-pub(crate) fn effect_sql() -> &'static EffectSql { &EFFECT_SQL }
+pub(crate) fn attachment_sql() -> &'static AttachmentSql { &ATTACHMENT_SQL }
 ```
 
-SQLite reaches the same tables through more than one database, so it renders
-one set per **deployment layout** and indexes:
+A SQLite family whose statements reach only its own database renders once
+against that database's **schema** — `Schema::Main.dialect()` for a
+session-catalog family, `Schema::ProcessRegistry.dialect()` for a registry
+one. A family that reaches *across* databases renders each **deployment
+layout** it can be issued under and picks at the call site:
 
 ```rust
-static EFFECT_SQL: LazyLock<[EffectSql; 3]> = LazyLock::new(|| Schema::ALL.map(EffectSql::render));
+static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
+    let catalog = Dialect::sqlite(CATALOG);
+    let beside_registry = Dialect::sqlite(CATALOG_BESIDE_REGISTRY);
+    AttachmentSql {
+        manifest: ManifestStatements::render(catalog),
+        manifest_process_owner: ManifestProcessOwnerStatements::render(beside_registry),
+        …
+    }
+});
 
-pub(crate) fn effect_sql(schema: Schema) -> &'static EffectSql { &EFFECT_SQL[schema.index()] }
+pub(crate) fn attachment_sql() -> &'static AttachmentSql { &ATTACHMENT_SQL }
 ```
 
-`Schema` (`crates/lash-sqlite-store/src/scope_fence.rs`) is `Main`,
-`EffectJournal` or `ProcessRegistry`, and it *selects a layout* rather than
-being a qualifier the dialect staples onto every table (FIG-3406). A function
-that used to take a `schema: &str` and `format!` its statement takes a
-`Schema` and indexes instead. Call sites read `sql.group.select_by_key.sql()`;
-`.name()` is the statement's reported name for tracing and store metrics.
+`Schema` (`crates/lash-sqlite-store/src/schema_layout.rs`) is `Main` or
+`ProcessRegistry`, and each yields a `Dialect` whose layout places every owned
+table in that one database (FIG-3406). A function that used to take a
+`schema: &str` and `format!` its statement renders once and indexes. Call
+sites read `sql.manifest.select_rooted_ids.sql()`; `.name()` is the
+statement's reported name for tracing and store metrics.
 
 ### The schema is a property of the table, under a layout
 
@@ -290,12 +304,18 @@ this connection reaches and the tables each one holds. The renderer resolves
 `main.attachment_manifest` to `process_registry.processes`:
 
 ```rust
-const CATALOG_TABLES: &[&str] = &[manifest::TABLE, condemnation::TABLE, "deleted_sessions"];
+const CATALOG_TABLES: &[&str] = &[
+    manifest::TABLE,
+    condemnation::TABLE,
+    "deleted_sessions",
+    "graph_nodes",
+    "runtime_turn_commits",
+];
 
 /// The session catalog with a bound process registry attached.
 const CATALOG_BESIDE_REGISTRY: TableLayout = TableLayout::new(&[
-    SchemaTables::new("main", CATALOG_TABLES),
-    SchemaTables::new("process_registry", &["processes"]),
+    SchemaTables::new(Schema::Main.qualifier(), CATALOG_TABLES),
+    SchemaTables::new(Schema::ProcessRegistry.qualifier(), &["processes"]),
 ]);
 ```
 
@@ -340,17 +360,17 @@ only job was to build the statement goes with it, and so do its tests. Tests
 that duplicated a production statement use the named one; tests of a deleted
 helper are deleted.
 
-Two shapes worth knowing, both from the effect family:
+Two shapes worth knowing, both visible in the attachment family:
 
 * A statement that was built per call because it needed a schema qualifier
-  becomes N rendered statements and an index. That is the whole point of the
-  `Schema` parameter.
-* A statement that was built per call because it needed a *variable number of
-  locations* — SQLite's fence read disjoined one or two schemas into one
-  `format!`ed predicate — becomes a short-circuiting loop over the rendered
-  per-schema statement. Both reads already ran inside the caller's transaction,
-  so the isolation is unchanged and the `OR`'s left-to-right short circuit
-  becomes an early `return`.
+  becomes a rendered statement per layout, picked by the caller. That is the
+  whole point of rendering per `Schema` or `TableLayout` at startup.
+* A statement that *cannot be rendered* under some layouts is a separate
+  named statement set, not an optional predicate: the attachment family's
+  `manifest_process_owner` statements exist only under the layout that binds
+  a process registry, and a caller with no registry bound simply never reads
+  them. The probe and the write that consults it already ran inside the
+  caller's transaction, so the isolation is unchanged.
 
 ## 7. Manifest every fork
 
@@ -359,13 +379,13 @@ One `[[dialect_only]]` entry per dialect-only statement in
 
 ```toml
 [[dialect_only]]
-statement = "effect_group.insert_new"
+statement = "queued_work_batch.insert_new"
 backends = ["sqlite", "postgres"]
-kind = "RETURNING"
+kind = "RETURNING; parameter order"
 reason = """
-PostgreSQL returns the inserted group row from the insert, so the durable
-read-back costs a second statement only on the conflict path. SQLite reads it
-back unconditionally.
+Both stores bind the shared session allocation explicitly. PostgreSQL
+returns the inserted batch id; SQLite uses the affected-row count and reads
+the batch back. Their insert call sites bind the allocation in different slots.
 """
 ```
 
@@ -459,21 +479,24 @@ rather than rendered, named as such in its manifest reason.
 
 ### Statements that span families
 
-Some statements are genuinely over more than one family: the quiescence read
-asks about effect rows, effect groups and promises in one breath, and
-PostgreSQL's session delete is one CTE over twelve tables across three
-families. Splitting them is not an option — the parts would race — so the rule
-is ownership, not containment. **One owner module, one declaration, and the
-other families' tables written down:**
+Some statements are genuinely over more than one family: the attachment GC
+probe asks about attachment rows, deleted sessions and committed turns in one
+breath, and PostgreSQL's session delete is one CTE over twelve tables across
+three families. Splitting them is not an option — the parts would race — so
+the rule is ownership, not containment. **One owner module, one declaration,
+and the other families' tables written down:**
 
 ```toml
 [[cross_family]]
-statement = "effect_journal.scope_is_quiescent"
-owner = "crates/lash-store-sql/src/effect.rs"
-touches = ["await_event_waits"]
+statement = "attachment_manifest.select_live_root_proving_process_death"
+owner = "crates/lash-store-sql/src/attachment/manifest.rs"
+touches = ["deleted_sessions", "processes", "runtime_turn_commits"]
 reason = """
-Quiescence is one question over both families; asking it as three statements
-would let a child start between them.
+An attachment owned by a process outlives its owner only until the owner's row
+is gone, and "is the owner still there?" is the same question as "may this
+root be reclaimed?". Asking it separately would read the process row outside
+the transaction that decides the attachment's fate, so the attachment family
+owns the whole predicate and reads the process family's table inside it.
 """
 ```
 
