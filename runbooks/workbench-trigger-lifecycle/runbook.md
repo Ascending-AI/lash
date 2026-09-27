@@ -99,19 +99,21 @@ and work registry are.
 
 The deferred-link companion must show all of these named cases green:
 
-- `sqlite_reopen_replays_positive_before_ambient_collision_without_resolver` and
-  `sqlite_reopen_replays_negative_before_changed_ambient_without_resolver` prove the
-  file-backed production journal wins after cold reopen, with an empty checkpoint
-  projection and no live resolver. The positive case also changes parent attribution
-  and descriptive label and introduces two colliding ambient definitions, proving the
-  canonical deferred envelope and pre-catalog mask are stable;
+- `replay_serves_a_positive_before_an_ambient_collision_from_the_journal` and
+  `replay_serves_a_negative_before_a_changed_ambient_without_resolver` prove the
+  engine's journal wins when a crashed attempt's invocation is replayed on the Restate
+  server double, with an empty checkpoint projection. The negative case replays with no
+  live resolver; the positive case reinstalls its journaled grant without resolving
+  again, and also changes parent attribution and descriptive label and introduces two
+  colliding ambient definitions, proving the canonical deferred envelope and
+  pre-catalog mask are stable;
 - `independent_link_can_accept_a_new_ambient_binding` proves the mask belongs only to
   the admitted link identity;
-- `sqlite_fault_after_resolver_return_repeats_discovery_after_reopen`,
-  `sqlite_fault_after_durable_record_never_reresolves_after_reopen`, and
-  `sqlite_fault_before_registration_reinstalls_recorded_route_after_reopen` cover the
-  three named restart boundaries against the file-backed production journal and prove
-  dependent tool execution cannot cross a failed boundary; and
+- `fault_after_resolver_return_repeats_discovery_on_the_replay`,
+  `fault_after_durable_record_never_reresolves_on_the_replay`, and
+  `fault_before_registration_reinstalls_recorded_route_on_the_replay` cover the three
+  named restart boundaries against the engine's journal and prove dependent tool
+  execution cannot cross a failed boundary; and
 - `revoked_route_refuses_without_replacing_the_journaled_grant` proves a restored route
   cannot silently acquire replacement authority.
 

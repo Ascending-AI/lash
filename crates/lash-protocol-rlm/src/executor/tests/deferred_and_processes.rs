@@ -1,5 +1,4 @@
 use super::*;
-use lash_core::testing::store_fixtures::durable_admission;
 
 const SEED: u64 = 0x5_2c0a;
 
@@ -42,27 +41,27 @@ impl lash_core::testing::EffectLayer for FailingDeferredJournalLayer {
     }
 }
 
+/// Where [`DeferredResolutionFaultLayer`] fails a deferred tool resolution.
 #[derive(Clone, Copy)]
-enum SqliteDeferredFault {
+enum DeferredResolutionFault {
+    /// After the resolver returned, before the engine journaled its answer.
     AfterResolverReturn,
+    /// After the engine journaled the resolution.
     AfterDurableRecord,
 }
 
-struct FaultingSqliteDeferredController {
-    inner: lash_sqlite_store::SqliteRuntimeEffectController,
-    fault: SqliteDeferredFault,
-}
-
-impl lash_core::AwaitEventResolver for FaultingSqliteDeferredController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        lash_core::AwaitEventResolver::await_event_authority_binding_id(&self.inner)
-    }
+/// Fails every deferred tool resolution at `fault`, in front of the
+/// handler's controller, which journals every other effect. The law's
+/// attempt then dies, and its redrive replays the journal without the layer.
+struct DeferredResolutionFaultLayer {
+    fault: DeferredResolutionFault,
 }
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
+impl lash_core::testing::EffectLayer for DeferredResolutionFaultLayer {
     async fn execute_effect(
         &self,
+        inner: &dyn lash_core::RuntimeEffectController,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
@@ -72,91 +71,155 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
                 if operation.starts_with("deferred_tool_resolution:v2:")
         );
         if !is_deferred {
-            return self.inner.execute_effect(envelope, local_executor).await;
+            return inner.execute_effect(envelope, local_executor).await;
         }
         match self.fault {
-            SqliteDeferredFault::AfterResolverReturn => {
+            DeferredResolutionFault::AfterResolverReturn => {
                 local_executor.execute(envelope).await?;
             }
-            SqliteDeferredFault::AfterDurableRecord => {
-                self.inner.execute_effect(envelope, local_executor).await?;
+            DeferredResolutionFault::AfterDurableRecord => {
+                inner.execute_effect(envelope, local_executor).await?;
             }
         }
         Err(lash_core::RuntimeEffectControllerError::new(
             lash_core::RuntimeErrorCode::RuntimeStore,
             match self.fault {
-                SqliteDeferredFault::AfterResolverReturn => "injected crash after resolver return",
-                SqliteDeferredFault::AfterDurableRecord => "injected crash after durable record",
+                DeferredResolutionFault::AfterResolverReturn => {
+                    "injected crash after resolver return"
+                }
+                DeferredResolutionFault::AfterDurableRecord => {
+                    "injected crash after durable record"
+                }
             },
         ))
     }
+}
 
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
+/// One execution of a cell inside a handler attempt on the server double:
+/// what the attempt builds its context from and runs.
+#[derive(Clone)]
+struct CellAttemptRun {
+    provider: Arc<dyn lash_core::ToolProvider>,
+    catalog: lash_core::ToolCatalog,
+    invocation: lash_core::RuntimeInvocation,
+    request: ExecRequest,
+    resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
+}
 
-    fn register_group_executors(
-        &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
+/// What one attempt's cell answered, and the law's counters right after it.
+#[derive(Debug)]
+struct CellAttemptOutcome {
+    response: ExecResponse,
+    counts: Vec<usize>,
+}
 
-    fn group_child_scoped_controller(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        binding: lash_core::GroupChildBinding,
-    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
-        self.inner.group_child_scoped_controller(admitted, binding)
-    }
+/// A handler attempt that runs `run` on the double's `backend` and records
+/// its response and `counters` in `outcomes`. A `crash` attempt then dies, as
+/// a deployment does, so the server replays the invocation into the next.
+fn cell_attempt(
+    backend: lash_core::Backend,
+    artifacts: lashlang::LashlangArtifacts,
+    run: CellAttemptRun,
+    crash: bool,
+    counters: Vec<Arc<AtomicUsize>>,
+    outcomes: Arc<std::sync::Mutex<Vec<CellAttemptOutcome>>>,
+) -> lash_restate_test::HandlerAttempt {
+    Arc::new(move |scoped| {
+        let backend = backend.clone();
+        let artifacts = artifacts.clone();
+        let run = run.clone();
+        let counters = counters.clone();
+        let outcomes = Arc::clone(&outcomes);
+        Box::pin(async move {
+            let ports = match run.layer {
+                Some(layer) => crate::testing::attempt_ports_over_layer(&backend, scoped, layer),
+                None => crate::testing::attempt_ports(&backend, scoped),
+            };
+            let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                ports,
+                run.provider,
+                run.catalog,
+                run.invocation,
+            );
+            let response = execute_code_unbounded_for_tests(
+                &mut RlmExecutionState::new(),
+                ctx,
+                run.request,
+                artifacts,
+                LashlangSurface::default(),
+                run.resolver,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+            )
+            .await;
+            let counts = counters
+                .iter()
+                .map(|counter| counter.load(Ordering::SeqCst))
+                .collect();
+            outcomes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(CellAttemptOutcome { response, counts });
+            assert!(!crash, "the attempt's deployment dies after its cell ran");
+        })
+    })
+}
 
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
-    }
+/// Run each of `crashing` in turn, each dying after its cell ran, then
+/// `redrive` on the replayed journal, in one turn handler on a fresh double.
+/// Returns every attempt's outcome in order, with `counters` read as each
+/// cell ended.
+async fn run_cell_through_crashes(
+    session_id: &str,
+    turn_id: &str,
+    crashing: Vec<CellAttemptRun>,
+    redrive: CellAttemptRun,
+    counters: &[Arc<AtomicUsize>],
+) -> Vec<CellAttemptOutcome> {
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let artifacts = crate::testing::memory_artifact_store().await;
+    let outcomes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let crashing = crashing
+        .into_iter()
+        .map(|run| {
+            cell_attempt(
+                backend.clone(),
+                artifacts.clone(),
+                run,
+                true,
+                counters.to_vec(),
+                Arc::clone(&outcomes),
+            )
+        })
+        .collect();
+    let redrive = cell_attempt(
+        backend,
+        artifacts,
+        redrive,
+        false,
+        counters.to_vec(),
+        Arc::clone(&outcomes),
+    );
+    double
+        .run_crashes_then_redriven(
+            lash_core::AdmittedScope::turn(
+                lash_core::SessionId::from(session_id),
+                lash_core::TurnId::from(turn_id),
+            ),
+            crashing,
+            redrive,
+        )
+        .await
+        .expect("the cell's handler crashed and its redrive completed");
+    std::mem::take(
+        &mut *outcomes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
 }
 
 pub(super) struct CountingDeferredResolver {
@@ -743,20 +806,19 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
     });
 }
 
-async fn run_sqlite_deferred_fault_boundary(
-    fault: SqliteDeferredFault,
-    expected_resolver_calls_after_reopen: usize,
+/// A deferred resolution whose attempt dies at `fault` and is redriven: the
+/// resolver runs again on the replay only if its answer never reached the
+/// journal.
+async fn run_deferred_fault_boundary(
+    fault: DeferredResolutionFault,
+    expected_resolver_calls_after_replay: usize,
 ) {
-    let dir = tempfile::tempdir().expect("temporary effect journal");
-    let file_name = match fault {
-        SqliteDeferredFault::AfterResolverReturn => "after-resolver.sqlite",
-        SqliteDeferredFault::AfterDurableRecord => "after-record.sqlite",
+    let session_id = match fault {
+        DeferredResolutionFault::AfterResolverReturn => "deferred-after-resolver",
+        DeferredResolutionFault::AfterDurableRecord => "deferred-after-record",
     };
-    let path = dir.path().join(file_name);
-    let session_id = format!("sqlite-{file_name}");
     let turn_id = "turn-1";
     let replay_key = "exec-code:fault";
-    let scope = lash_core::ExecutionScope::turn(&session_id, turn_id);
     let resolver_calls = Arc::new(AtomicUsize::new(0));
     let installs = Arc::new(AtomicUsize::new(0));
     let executions = Arc::new(AtomicUsize::new(0));
@@ -771,94 +833,79 @@ async fn run_sqlite_deferred_fault_boundary(
         observed_bindings: Default::default(),
         enumerations: Default::default(),
     });
-    let request = ExecRequest {
-        language: "typescript".into(),
-        code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
+    let run = CellAttemptRun {
+        provider,
+        catalog: lash_core::ToolCatalog::default(),
+        invocation: lash_core::testing::exec_code_invocation(
+            session_id,
+            turn_id,
+            0,
+            0,
+            "faulting exec",
+            replay_key,
+        ),
+        request: ExecRequest {
+            language: "typescript".into(),
+            code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
+        },
+        resolver: Some(resolver),
+        layer: None,
     };
-    let controller = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-        .await
-        .expect("open SQLite effect controller");
-    let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::clone(&provider), lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(
-            Arc::new(FaultingSqliteDeferredController { inner: controller, fault }),
-            durable_admission(&scope),
-        )
-        .expect("admit SQLite fault controller scope"), lash_core::testing::exec_code_invocation(
-            &session_id, turn_id, 0, 0, "faulting exec", replay_key,
-        ));
-    let first = execute_code_unbounded_for_tests(
-        &mut RlmExecutionState::new(),
-        first_ctx,
-        request.clone(),
-        crate::testing::memory_artifact_store().await,
-        LashlangSurface::default(),
-        Some(resolver.clone()),
-        RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
-        RlmLashlangExecutionTraceConfig::default(),
+    let first = CellAttemptRun {
+        layer: Some(Arc::new(DeferredResolutionFaultLayer { fault })),
+        ..run.clone()
+    };
+    let outcomes = run_cell_through_crashes(
+        session_id,
+        turn_id,
+        vec![first],
+        run,
+        &[resolver_calls, installs, executions],
     )
     .await;
-    assert!(first.error.is_some(), "boundary fault must stop execution");
-    assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(installs.load(Ordering::SeqCst), 0);
+    let [first, replay] = outcomes.as_slice() else {
+        panic!("one crashed attempt and one redrive ran: {outcomes:?}");
+    };
+    assert!(
+        first.response.error.is_some(),
+        "boundary fault must stop execution"
+    );
     assert_eq!(
-        executions.load(Ordering::SeqCst),
-        0,
+        first.counts,
+        [1, 0, 0],
         "a failed resolution boundary must prevent the dependent tool effect"
     );
-
-    let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-        .await
-        .expect("cold-reopen SQLite effect controller");
-    let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, provider, lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(reopened), durable_admission(&scope))
-            .expect("admit reopened SQLite controller scope"), lash_core::testing::exec_code_invocation(
-            &session_id, turn_id, 0, 0, "faulting exec", replay_key,
-        ));
-    let replay = execute_code_unbounded_for_tests(
-        &mut RlmExecutionState::new(),
-        replay_ctx,
-        request,
-        crate::testing::memory_artifact_store().await,
-        LashlangSurface::default(),
-        Some(resolver),
-        RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
-        RlmLashlangExecutionTraceConfig::default(),
-    )
-    .await;
-    assert!(replay.error.is_none(), "{:?}", replay.error);
-    assert_eq!(
-        resolver_calls.load(Ordering::SeqCst),
-        expected_resolver_calls_after_reopen
+    assert!(
+        replay.response.error.is_none(),
+        "{:?}",
+        replay.response.error
     );
-    assert_eq!(installs.load(Ordering::SeqCst), 1);
-    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        replay.counts,
+        [expected_resolver_calls_after_replay, 1, 1],
+        "resolver calls, installs and executions after the replay"
+    );
 }
 
 #[test]
-pub(super) fn sqlite_fault_after_resolver_return_repeats_discovery_after_reopen() {
-    block_on(run_sqlite_deferred_fault_boundary(
-        SqliteDeferredFault::AfterResolverReturn,
+pub(super) fn fault_after_resolver_return_repeats_discovery_on_the_replay() {
+    block_on(run_deferred_fault_boundary(
+        DeferredResolutionFault::AfterResolverReturn,
         2,
     ));
 }
 
 #[test]
-pub(super) fn sqlite_fault_after_durable_record_never_reresolves_after_reopen() {
-    block_on(run_sqlite_deferred_fault_boundary(
-        SqliteDeferredFault::AfterDurableRecord,
+pub(super) fn fault_after_durable_record_never_reresolves_on_the_replay() {
+    block_on(run_deferred_fault_boundary(
+        DeferredResolutionFault::AfterDurableRecord,
         1,
     ));
 }
 
 #[test]
-pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_reopen() {
+pub(super) fn fault_before_registration_reinstalls_recorded_route_on_the_replay() {
     block_on(async {
-        let dir = tempfile::tempdir().expect("temporary effect journal");
-        let path = dir.path().join("before-registration.sqlite");
-        let session_id = "sqlite-before-registration";
-        let turn_id = "turn-1";
-        let replay_key = "exec-code:registration";
-        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
         let resolver_calls = Arc::new(AtomicUsize::new(0));
         let installs = Arc::new(AtomicUsize::new(0));
         let executions = Arc::new(AtomicUsize::new(0));
@@ -873,77 +920,60 @@ pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_r
                 observed_bindings: Default::default(),
                 enumerations: Default::default(),
             });
-        let request = ExecRequest {
-            language: "typescript".into(),
-            code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
+        let run = CellAttemptRun {
+            provider,
+            catalog: lash_core::ToolCatalog::default(),
+            invocation: lash_core::testing::exec_code_invocation(
+                "deferred-before-registration",
+                "turn-1",
+                0,
+                0,
+                "registration exec",
+                "exec-code:registration",
+            ),
+            request: ExecRequest {
+                language: "typescript".into(),
+                code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
+            },
+            resolver: Some(resolver),
+            layer: None,
         };
-        let first_controller =
-            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-                .await
-                .expect("open SQLite effect controller");
-        let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::clone(&provider), lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(first_controller), durable_admission(&scope))
-                .expect("admit SQLite controller scope"), lash_core::testing::exec_code_invocation(
-                session_id, turn_id, 0, 0, "registration exec", replay_key,
-            ));
-        let first = execute_code_unbounded_for_tests(
-            &mut RlmExecutionState::new(),
-            first_ctx,
-            request.clone(),
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            Some(resolver.clone()),
-            RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
-            RlmLashlangExecutionTraceConfig::default(),
+        let outcomes = run_cell_through_crashes(
+            "deferred-before-registration",
+            "turn-1",
+            vec![run.clone()],
+            run,
+            &[resolver_calls, installs, executions],
         )
         .await;
-        assert!(first.error.is_some());
-        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(installs.load(Ordering::SeqCst), 1);
-        assert_eq!(executions.load(Ordering::SeqCst), 0);
-
-        let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-            .await
-            .expect("cold-reopen SQLite effect controller");
-        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::clone(&provider), lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(reopened), durable_admission(&scope))
-                .expect("admit reopened SQLite controller scope"), lash_core::testing::exec_code_invocation(
-                session_id, turn_id, 0, 0, "registration exec", replay_key,
-            ));
-        let replay = execute_code_unbounded_for_tests(
-            &mut RlmExecutionState::new(),
-            replay_ctx,
-            request,
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            Some(resolver),
-            RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
-            RlmLashlangExecutionTraceConfig::default(),
-        )
-        .await;
-        assert!(replay.error.is_none(), "{:?}", replay.error);
-        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(installs.load(Ordering::SeqCst), 2);
-        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        let [first, replay] = outcomes.as_slice() else {
+            panic!("one crashed attempt and one redrive ran: {outcomes:?}");
+        };
+        assert!(first.response.error.is_some());
+        assert_eq!(first.counts, [1, 1, 0]);
+        assert!(
+            replay.response.error.is_none(),
+            "{:?}",
+            replay.response.error
+        );
+        // The journaled resolution is never resolved again; the replay
+        // reinstalls its recorded route and runs the tool once.
+        assert_eq!(replay.counts, [1, 2, 1]);
     });
 }
 
 #[test]
-pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
+pub(super) fn replay_serves_an_ambient_failure_as_ambient() {
     block_on(async {
-        let dir = tempfile::tempdir().expect("temporary effect journal");
-        let path = dir.path().join("ambient-failure.sqlite");
-        let session_id = "sqlite-ambient-failure";
+        let session_id = "deferred-ambient-failure";
         let turn_id = "turn-1";
-        let replay_key = "exec-code:ambient-failure";
-        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
         let invocation = lash_core::testing::exec_code_invocation(
             session_id,
             turn_id,
             0,
             0,
             "ambient failure",
-            replay_key,
+            "exec-code:ambient-failure",
         );
         let program = lash_typescript::parse(r#"await web.fetch({});"#).expect("parse");
         let collision = lash_core::ToolCatalog::from_tool_definitions(vec![
@@ -956,79 +986,90 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
                 observed_bindings: Default::default(),
                 enumerations: Default::default(),
             });
-
-        let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-                .await
-                .expect("open SQLite effect controller"),
-        );
-        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::clone(&provider), collision.clone(), lash_core::ScopedEffectController::shared(Arc::clone(&controller), durable_admission(&scope))
-                .expect("admit SQLite controller scope"), invocation.clone());
-        let mut record = lash_lashlang_runtime::DeferredResolutionRecord::default();
-        record.select_link(
-            lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
-                &invocation,
-            )
-            .expect("effect invocation has a link identity"),
-        );
-        let live = lash_lashlang_runtime::resolve_and_build_deferred_environment(
-            &program,
-            &LashlangSurface::default(),
-            &collision,
-            None,
-            &mut record,
-            &ctx,
-        )
-        .await
-        .expect_err("duplicate live bindings must fail ambient classification");
-        let live_message = match live {
-            lash_lashlang_runtime::DeferredResolutionError::Ambient(error) => error.to_string(),
-            other => panic!("live failure was not Ambient: {other:?}"),
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
+        let messages = Arc::new(std::sync::Mutex::new(Vec::new()));
+        // The first attempt classifies the live collision; the redrive meets
+        // an empty catalog, so only the journal can say `Ambient`.
+        let attempt = |catalog: lash_core::ToolCatalog,
+                       crash: bool|
+         -> lash_restate_test::HandlerAttempt {
+            let backend = backend.clone();
+            let provider = Arc::clone(&provider);
+            let invocation = invocation.clone();
+            let program = program.clone();
+            let messages = Arc::clone(&messages);
+            Arc::new(move |scoped| {
+                let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                    crate::testing::attempt_ports(&backend, scoped),
+                    Arc::clone(&provider),
+                    catalog.clone(),
+                    invocation.clone(),
+                );
+                let program = program.clone();
+                let catalog = catalog.clone();
+                let messages = Arc::clone(&messages);
+                Box::pin(async move {
+                    let mut record = lash_lashlang_runtime::DeferredResolutionRecord::default();
+                    record.select_link(
+                        lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
+                            ctx.parent_invocation().expect("parent invocation"),
+                        )
+                        .expect("effect invocation has a link identity"),
+                    );
+                    let failure = lash_lashlang_runtime::resolve_and_build_deferred_environment(
+                        &program,
+                        &LashlangSurface::default(),
+                        &catalog,
+                        None,
+                        &mut record,
+                        &ctx,
+                    )
+                    .await
+                    .expect_err("the ambient failure is classified");
+                    let message = match failure {
+                        lash_lashlang_runtime::DeferredResolutionError::Ambient(error) => {
+                            error.to_string()
+                        }
+                        other => panic!("the failure was not Ambient: {other:?}"),
+                    };
+                    messages
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(message);
+                    assert!(!crash, "the attempt's deployment dies after it classified");
+                })
+            })
         };
-
-        drop(ctx);
-        drop(controller);
-        let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+        double
+            .run_crashed_then_redriven(
+                lash_core::AdmittedScope::turn(
+                    lash_core::SessionId::from(session_id),
+                    lash_core::TurnId::from(turn_id),
+                ),
+                attempt(collision, true),
+                attempt(lash_core::ToolCatalog::default(), false),
+            )
             .await
-            .expect("cold-reopen SQLite effect controller");
-        reopened.start_replay();
-        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, provider, lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(reopened), durable_admission(&scope))
-                .expect("admit reopened SQLite controller scope"), invocation);
-        let mut replay_record = lash_lashlang_runtime::DeferredResolutionRecord::default();
-        replay_record.select_link(
-            lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
-                replay_ctx.parent_invocation().expect("parent invocation"),
-            )
-            .expect("effect invocation has a link identity"),
-        );
-        let replay = lash_lashlang_runtime::resolve_and_build_deferred_environment(
-            &program,
-            &LashlangSurface::default(),
-            &lash_core::ToolCatalog::default(),
-            None,
-            &mut replay_record,
-            &replay_ctx,
-        )
-        .await
-        .expect_err("cold replay must preserve the ambient failure");
-        let replay_message = match replay {
-            lash_lashlang_runtime::DeferredResolutionError::Ambient(error) => error.to_string(),
-            other => panic!("replayed failure was not Ambient: {other:?}"),
+            .expect("the classification crashed and its redrive completed");
+        let messages = messages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let [live, replayed] = messages.as_slice() else {
+            panic!("one crashed attempt and one redrive classified: {messages:?}");
         };
-
-        assert_eq!(replay_message, live_message);
+        assert_eq!(replayed, live, "the replay preserves the ambient failure");
     });
 }
 
 #[test]
-pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_resolver() {
+pub(super) fn replay_serves_a_positive_before_an_ambient_collision_from_the_journal() {
     block_on(async {
-        let dir = tempfile::tempdir().expect("temporary effect journal");
-        let path = dir.path().join("positive-deferred.sqlite");
-        let session_id = "sqlite-positive-deferred";
+        let session_id = "deferred-positive";
         let turn_id = "turn-1";
         let replay_key = "exec-code:positive";
-        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
         let resolver_calls = Arc::new(AtomicUsize::new(0));
         let installed = Arc::new(AtomicUsize::new(0));
         let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
@@ -1053,81 +1094,77 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
             "#
             .into(),
         };
-
-        let first_controller =
-            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-                .await
-                .expect("open SQLite effect controller");
-        let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::clone(&provider), lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(first_controller), durable_admission(&scope))
-                .expect("admit SQLite controller scope"), lash_core::testing::exec_code_invocation(
+        let first = CellAttemptRun {
+            provider: Arc::clone(&provider),
+            catalog: lash_core::ToolCatalog::default(),
+            invocation: lash_core::testing::exec_code_invocation(
                 session_id,
                 turn_id,
                 0,
                 0,
                 "original descriptive label",
                 replay_key,
-            ));
-        let first = execute_code_unbounded_for_tests(
-            &mut RlmExecutionState::new(),
-            first_ctx,
-            request.clone(),
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            Some(resolver),
-            RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
-            RlmLashlangExecutionTraceConfig::default(),
-        )
-        .await;
-        assert!(first.error.is_none(), "{:?}", first.error);
-        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(installed.load(Ordering::SeqCst), 1);
-
-        let collision_controller = lash_sqlite_store::SqliteRuntimeEffectController::open(
-            &path,
-            lash_core::ExecutionScope::turn(session_id, turn_id),
-        )
-        .await
-        .expect("reopen SQLite effect controller for unrelated collision");
-        collision_controller.start_replay();
-        let unrelated_collision_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::clone(&provider), lash_core::ToolCatalog::from_tool_definitions(vec![
+            ),
+            request: request.clone(),
+            resolver: Some(resolver),
+            layer: None,
+        };
+        // A replay whose catalog collides on a path the cell never resolved:
+        // the journaled resolution replays first, and the collision is then
+        // an ordinary host failure.
+        let unrelated_collision = CellAttemptRun {
+            catalog: lash_core::ToolCatalog::from_tool_definitions(vec![
                 ambient_definition("tool:other_a", "other_a", "other", "run"),
                 ambient_definition("tool:other_b", "other_b", "other", "run"),
-            ]), lash_core::ScopedEffectController::shared(
-                Arc::new(collision_controller),
-                durable_admission(&lash_core::ExecutionScope::turn(session_id, turn_id)),
-            )
-            .expect("admit unrelated collision replay scope"), lash_core::testing::exec_code_invocation(
+            ]),
+            invocation: lash_core::testing::exec_code_invocation(
                 session_id,
                 turn_id,
                 98,
                 42,
                 "another descriptive label",
                 replay_key,
-            ));
-        let unrelated_collision = execute_code_unbounded_for_tests(
-            &mut RlmExecutionState::new(),
-            unrelated_collision_ctx,
-            ExecRequest {
-                language: "typescript".into(),
-                code: r#"
-                    if (false) {
-                        const ignored = await web.fetch({ url: "https://example.test" });
-                    }
-                    finish("journaled-positive");
-                "#
-                .into(),
-            },
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            None,
-            RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
-            RlmLashlangExecutionTraceConfig::default(),
+            ),
+            resolver: None,
+            ..first.clone()
+        };
+        // The replay under an empty state projection, changed parent
+        // attribution and a changed descriptive label. Two new ambient
+        // claimants of the recorded path would collide if catalog
+        // construction ran before the recorded path was masked, and the
+        // resolver answers again if the journal did not.
+        let replay = CellAttemptRun {
+            catalog: lash_core::ToolCatalog::from_tool_definitions(vec![
+                ambient_definition("tool:ambient_a", "ambient_a", "web", "fetch"),
+                ambient_definition("tool:ambient_b", "ambient_b", "web", "fetch"),
+            ]),
+            invocation: lash_core::testing::exec_code_invocation(
+                session_id,
+                turn_id,
+                97,
+                41,
+                "renamed descriptive label",
+                replay_key,
+            ),
+            ..first.clone()
+        };
+        let outcomes = run_cell_through_crashes(
+            session_id,
+            turn_id,
+            vec![first, unrelated_collision],
+            replay,
+            &[Arc::clone(&resolver_calls), Arc::clone(&installed)],
         )
         .await;
+        let [first, unrelated_collision, replay] = outcomes.as_slice() else {
+            panic!("two crashed attempts and one redrive ran: {outcomes:?}");
+        };
+        assert!(first.response.error.is_none(), "{:?}", first.response.error);
+        assert_eq!(first.counts, [1, 1]);
         let error = unrelated_collision
+            .response
             .error
+            .as_ref()
             .expect("unrelated ambient collision remains an ordinary host failure");
         assert!(
             !error
@@ -1135,60 +1172,29 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
                 .contains("failed to commit deferred resolution"),
             "the deferred journal replay succeeded before the unrelated collision: {error:?}"
         );
-
-        // Reopen from the file-backed production journal with an empty state
-        // projection, no resolver/installer, changed parent attribution and a
-        // changed descriptive label. Two new ambient claimants would collide
-        // if catalog construction ran before the recorded path was masked.
-        let replay_controller =
-            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-                .await
-                .expect("reopen SQLite effect controller");
-        replay_controller.start_replay();
-        let changed_catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
-            ambient_definition("tool:ambient_a", "ambient_a", "web", "fetch"),
-            ambient_definition("tool:ambient_b", "ambient_b", "web", "fetch"),
-        ]);
-        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, provider, changed_catalog, lash_core::ScopedEffectController::shared(Arc::new(replay_controller), durable_admission(&scope))
-                .expect("admit reopened SQLite controller scope"), lash_core::testing::exec_code_invocation(
-                session_id,
-                turn_id,
-                97,
-                41,
-                "renamed descriptive label",
-                replay_key,
-            ));
-        let replay = execute_code_unbounded_for_tests(
-            &mut RlmExecutionState::new(),
-            replay_ctx,
-            request,
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            None,
-            RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
-            RlmLashlangExecutionTraceConfig::default(),
-        )
-        .await;
-        assert!(replay.error.is_none(), "{:?}", replay.error);
+        assert!(
+            replay.response.error.is_none(),
+            "{:?}",
+            replay.response.error
+        );
         assert_eq!(
-            replay.terminal_finish,
+            replay.response.terminal_finish,
             Some(serde_json::json!("journaled-positive"))
         );
-        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(installed.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            replay.counts,
+            [1, 2],
+            "the replay reinstalls the journaled grant and never resolves again"
+        );
     });
 }
 
 #[test]
-pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_resolver() {
+pub(super) fn replay_serves_a_negative_before_a_changed_ambient_without_resolver() {
     block_on(async {
-        let dir = tempfile::tempdir().expect("temporary effect journal");
-        let path = dir.path().join("negative-deferred.sqlite");
-        let session_id = "sqlite-negative-deferred";
+        let session_id = "deferred-negative";
         let turn_id = "turn-1";
         let replay_key = "exec-code:negative";
-        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
         let resolver_calls = Arc::new(AtomicUsize::new(0));
         let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
             Arc::new(CountingDeferredResolver {
@@ -1196,67 +1202,68 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
                 batches: Default::default(),
                 installed: Default::default(),
             });
-        let request = deferred_matrix_request();
         let provider: Arc<dyn lash_core::ToolProvider> =
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Default::default(),
                 observed_bindings: Default::default(),
                 enumerations: Default::default(),
             });
-        let first_controller =
-            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-                .await
-                .expect("open SQLite effect controller");
-        let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::clone(&provider), lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(first_controller), durable_admission(&scope))
-                .expect("admit SQLite controller scope"), lash_core::testing::exec_code_invocation(
-                session_id, turn_id, 0, 0, "negative original", replay_key,
-            ));
-        let first = execute_code_unbounded_for_tests(
-            &mut RlmExecutionState::new(),
-            first_ctx,
-            request.clone(),
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            Some(resolver),
-            RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
-            RlmLashlangExecutionTraceConfig::default(),
-        )
-        .await;
-        let first_error = first
-            .error
-            .clone()
-            .expect("mystery.x is durably unavailable");
-        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
-
-        let replay_controller =
-            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
-                .await
-                .expect("reopen SQLite effect controller");
-        replay_controller.start_replay();
-        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, provider, lash_core::ToolCatalog::from_tool_definitions(vec![ambient_definition(
+        let first = CellAttemptRun {
+            provider,
+            catalog: lash_core::ToolCatalog::default(),
+            invocation: lash_core::testing::exec_code_invocation(
+                session_id,
+                turn_id,
+                0,
+                0,
+                "negative original",
+                replay_key,
+            ),
+            request: deferred_matrix_request(),
+            resolver: Some(resolver),
+            layer: None,
+        };
+        // `mystery.x` is live on the replay, as an ambient tool that
+        // appeared between the two attempts.
+        let replay = CellAttemptRun {
+            catalog: lash_core::ToolCatalog::from_tool_definitions(vec![ambient_definition(
                 "tool:ambient_mystery",
                 "ambient_mystery",
                 "mystery",
                 "x",
-            )]), lash_core::ScopedEffectController::shared(Arc::new(replay_controller), durable_admission(&scope))
-                .expect("admit reopened SQLite controller scope"), lash_core::testing::exec_code_invocation(
-                session_id, turn_id, 12, 33, "negative renamed", replay_key,
-            ));
-        let replay = execute_code_unbounded_for_tests(
-            &mut RlmExecutionState::new(),
-            replay_ctx,
-            request,
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            None,
-            RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
-            RlmLashlangExecutionTraceConfig::default(),
+            )]),
+            invocation: lash_core::testing::exec_code_invocation(
+                session_id,
+                turn_id,
+                12,
+                33,
+                "negative renamed",
+                replay_key,
+            ),
+            resolver: None,
+            ..first.clone()
+        };
+        let outcomes = run_cell_through_crashes(
+            session_id,
+            turn_id,
+            vec![first],
+            replay,
+            &[Arc::clone(&resolver_calls)],
         )
         .await;
-        let error = replay
+        let [first, replay] = outcomes.as_slice() else {
+            panic!("one crashed attempt and one redrive ran: {outcomes:?}");
+        };
+        let first_error = first
+            .response
             .error
+            .as_ref()
+            .expect("mystery.x is durably unavailable");
+        assert_eq!(first.counts, [1]);
+        let error = replay
+            .response
+            .error
+            .as_ref()
             .expect("journaled negative must mask the newly live ambient tool");
         // The journaled negative masks the now-live ambient `mystery.x`: the
         // replay fails exactly as the original did, rather than resolving the
@@ -1268,7 +1275,7 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
                 .message
                 .contains("failed to commit deferred resolution")
         );
-        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(replay.counts, [1]);
     });
 }
 

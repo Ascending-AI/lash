@@ -116,15 +116,6 @@ pub(crate) async fn fresh_memory_artifact_store() -> lashlang::LashlangArtifacts
     lashlang::LashlangArtifacts::of_backend(&memory_backend().await.into())
 }
 
-/// The ports of a fresh SQLite memory backend: the host a cell's effects
-/// journal on, its process-exec-env store and attachment port, and its clock.
-/// Only the laws of the SQLite engine's own journal (a cold reopen of its
-/// effect controller, an injected fault in its journal) run on it; every other
-/// cell runs on [`double_ports`].
-pub(crate) async fn memory_backend_ports() -> lash_core::testing::TestExecutionPorts<'static> {
-    lash_core::testing::TestExecutionPorts::of(&memory_backend().await.into())
-}
-
 /// The scope a context built with no parent invocation claims: the builder's
 /// default test turn. Open the handler [`double_ports`] lends for it.
 pub(crate) fn default_cell_scope() -> lash_core::AdmittedScope {
@@ -134,10 +125,9 @@ pub(crate) fn default_cell_scope() -> lash_core::AdmittedScope {
     )
 }
 
-/// The twin of [`memory_backend_ports`] on the server double: every port of
-/// `double`, with the controller `handler` lends serving the context's
-/// effects, as a Restate deployment serves a turn's cell from the turn's
-/// handler.
+/// Every port of `double`, with the controller `handler` lends serving the
+/// context's effects, as a Restate deployment serves a turn's cell from the
+/// turn's handler.
 ///
 /// Open `handler` on `double` for the scope the context claims
 /// ([`default_cell_scope`], or the scope of the invocation the context
@@ -168,6 +158,35 @@ pub(crate) fn double_ports_over_layer<'h>(
             layer,
         )),
         ..lash_core::testing::TestExecutionPorts::lent(&backend, lent)
+    }
+}
+
+/// [`double_ports`] for a handler attempt the server may re-run
+/// (`run_in_handler`, `run_crashed_then_redriven`): every port of `backend`,
+/// the double's `lash_backend()`, with `scoped`, the controller the attempt's
+/// handler hands it, serving the context's effects.
+pub(crate) fn attempt_ports<'a>(
+    backend: &lash_core::Backend,
+    scoped: lash_core::ScopedEffectController<'a>,
+) -> lash_core::testing::TestExecutionPorts<'a> {
+    lash_core::testing::TestExecutionPorts::lent(backend, scoped)
+}
+
+/// [`attempt_ports`] with `layer` in front of `backend`'s host and of
+/// `scoped`, as [`double_ports_over_layer`] puts it.
+pub(crate) fn attempt_ports_over_layer<'a>(
+    backend: &lash_core::Backend,
+    scoped: lash_core::ScopedEffectController<'a>,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> lash_core::testing::TestExecutionPorts<'a> {
+    let lent = lash_core::testing::LayeredEffectHost::layer_scoped(scoped, Arc::clone(&layer))
+        .expect("layer the attempt's controller");
+    lash_core::testing::TestExecutionPorts {
+        effect_host: Arc::new(lash_core::testing::LayeredEffectHost::new(
+            backend.effect_host(),
+            layer,
+        )),
+        ..lash_core::testing::TestExecutionPorts::lent(backend, lent)
     }
 }
 

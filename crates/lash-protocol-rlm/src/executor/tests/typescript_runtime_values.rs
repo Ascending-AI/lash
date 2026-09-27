@@ -2,7 +2,6 @@
 //! processes.
 
 use super::*;
-use lash_core::testing::store_fixtures::durable_admission;
 
 /// FIG-3079: `new Date()`, `Date.now()` and `Math.random()` inside a durable
 /// process body.
@@ -171,78 +170,105 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
 /// FIG-3079: the journaled clock and RNG never re-sample on replay, and the
 /// linked receiver alias (`__typescript_runtime`) reaches the journal the same
 /// way the lowerer's `builtin` alias does.
-#[tokio::test]
-pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reopen() {
-    let dir = tempfile::tempdir().expect("temporary effect journal");
-    let path = dir.path().join("typescript-runtime-values.sqlite");
-    let session_id = "typescript-runtime-values";
-    let turn_id = "turn-1";
-    let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
-    // The alias the linker rewrites the lowerer's `builtin` receiver to once a
-    // module call is linked; before FIG-3079 this form never reached here.
-    let receiver = lashlang::Value::Resource(lashlang::ResourceHandle::new(
-        lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
-        lashlang::LANGUAGE_RUNTIME_MODULE_PATH,
-    ));
-
-    async fn sample(
-        path: &std::path::Path,
-        scope: &lash_core::ExecutionScope,
-        session_id: &str,
-        turn_id: &str,
-        receiver: &lashlang::Value,
-    ) -> (f64, f64) {
-        let controller =
-            lash_sqlite_store::SqliteRuntimeEffectController::open(path, scope.clone())
-                .await
-                .expect("open SQLite effect controller");
-        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::new(ProcessControlToolProvider), lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(controller), durable_admission(scope))
-                .expect("admit SQLite controller scope"), lash_core::testing::exec_code_invocation(
-                session_id,
-                turn_id,
-                0,
-                0,
-                "runtime-values",
-                "replay:runtime-values",
-            ));
-        let number = async |operation: &str| {
-            let operation =
-                lash_lashlang_runtime::typescript_runtime_operation(receiver, operation, &[])
-                    .expect("the linked runtime receiver is recognised")
-                    .expect("the runtime has the operation");
-            let value = lash_lashlang_runtime::journaled_typescript_runtime_value(
-                &ctx,
-                format!("typescript.runtime:{operation}"),
-                operation,
+#[test]
+pub(super) fn typescript_runtime_values_replay_from_the_journal_after_a_crash() {
+    block_on(async {
+        let session_id = "typescript-runtime-values";
+        let turn_id = "turn-1";
+        let double =
+            crate::testing::kernel_double(0x3079, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
+        let samples = Arc::new(std::sync::Mutex::new(Vec::<(f64, f64)>::new()));
+        let sample = |crash: bool| -> lash_restate_test::HandlerAttempt {
+            let backend = backend.clone();
+            let samples = Arc::clone(&samples);
+            Arc::new(move |scoped| {
+                let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                    crate::testing::attempt_ports(&backend, scoped),
+                    Arc::new(ProcessControlToolProvider),
+                    lash_core::ToolCatalog::default(),
+                    lash_core::testing::exec_code_invocation(
+                        session_id,
+                        turn_id,
+                        0,
+                        0,
+                        "runtime-values",
+                        "replay:runtime-values",
+                    ),
+                );
+                let samples = Arc::clone(&samples);
+                Box::pin(async move {
+                    // The alias the linker rewrites the lowerer's `builtin`
+                    // receiver to once a module call is linked; before
+                    // FIG-3079 this form never reached here.
+                    let receiver = lashlang::Value::Resource(lashlang::ResourceHandle::new(
+                        lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
+                        lashlang::LANGUAGE_RUNTIME_MODULE_PATH,
+                    ));
+                    let number = async |operation: &str| {
+                        let operation = lash_lashlang_runtime::typescript_runtime_operation(
+                            &receiver,
+                            operation,
+                            &[],
+                        )
+                        .expect("the linked runtime receiver is recognised")
+                        .expect("the runtime has the operation");
+                        let value = lash_lashlang_runtime::journaled_typescript_runtime_value(
+                            &ctx,
+                            format!("typescript.runtime:{operation}"),
+                            operation,
+                        )
+                        .await
+                        .unwrap_or_else(|error| panic!("journaled `{operation}` journals: {error}"))
+                        .unwrap_or_else(|error| {
+                            panic!("journaled `{operation}` resolves: {error}")
+                        });
+                        match value {
+                            lashlang::Value::Number(number) => number,
+                            other => panic!("`{operation}` returns a number, got {other:?}"),
+                        }
+                    };
+                    let now = number(lashlang::LANGUAGE_RUNTIME_NOW_OPERATION).await;
+                    let random = number(lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION).await;
+                    samples
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push((now, random));
+                    assert!(!crash, "the attempt's deployment dies after it sampled");
+                })
+            })
+        };
+        double
+            .run_crashed_then_redriven(
+                lash_core::AdmittedScope::turn(
+                    lash_core::SessionId::from(session_id),
+                    lash_core::TurnId::from(turn_id),
+                ),
+                sample(true),
+                sample(false),
             )
             .await
-            .unwrap_or_else(|error| panic!("journaled `{operation}` journals: {error}"))
-            .unwrap_or_else(|error| panic!("journaled `{operation}` resolves: {error}"));
-            match value {
-                lashlang::Value::Number(number) => number,
-                other => panic!("`{operation}` returns a number, got {other:?}"),
-            }
+            .expect("the sampling crashed and its redrive completed");
+        let samples = samples
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let [(now, random), replayed] = samples.as_slice() else {
+            panic!("one crashed attempt and one redrive sampled: {samples:?}");
         };
-        let now = number(lashlang::LANGUAGE_RUNTIME_NOW_OPERATION).await;
-        let random = number(lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION).await;
-        (now, random)
-    }
-
-    let (now, random) = sample(&path, &scope, session_id, turn_id, &receiver).await;
-    assert!(now > 0.0, "`now` samples a positive epoch, got {now}");
-    assert!(
-        (0.0..1.0).contains(&random),
-        "`random` stays in [0, 1), got {random}"
-    );
-
-    // A cold reopen replays the recorded ability outcomes rather than sampling
-    // the clock and RNG again.
-    let replayed = sample(&path, &scope, session_id, turn_id, &receiver).await;
-    assert_eq!(
-        (now, random),
-        replayed,
-        "replay must return the journaled samples"
-    );
+        assert!(*now > 0.0, "`now` samples a positive epoch, got {now}");
+        assert!(
+            (0.0..1.0).contains(random),
+            "`random` stays in [0, 1), got {random}"
+        );
+        // The redrive replays the recorded ability outcomes rather than
+        // sampling the clock and RNG again.
+        assert_eq!(
+            (*now, *random),
+            *replayed,
+            "replay must return the journaled samples"
+        );
+    });
 }
 
 /// FIG-3079: a journaled float must decode to the double that was written.

@@ -58,6 +58,10 @@ tracing-subscriber = { workspace = true, optional = true }
 # (FIG-3668, D1 PR-S2). A dev-dependency cycle where the double links this
 # crate: only types from below the cycle cross it.
 lash-restate-test = { workspace = true }
+# The process worker a double serves process segments from, for a kernel law
+# whose process intents reach the engine's process workflow. The same
+# dev-dependency cycle as the double's, and version-less for the same reason.
+lash-core-worker = { package = "lash-internal-core-worker", path = "../lash-core-worker" }
 lash-conformance = { workspace = true }
 insta = "1"
 # ADR 0102: the crate's tests that need a concrete store or effect host run in

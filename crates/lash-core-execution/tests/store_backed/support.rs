@@ -170,6 +170,32 @@ pub async fn open_dispatch_handler(
     (double, handler)
 }
 
+/// Serve `double`'s process segments with a durable process worker over its
+/// own backend and process work, as a deployment serves them: a process
+/// intent's command reaches the engine's process workflow, which runs only
+/// with a worker installed.
+pub fn install_process_worker(double: &lash_restate_test::RestateTestBackend) {
+    let backend = double.lash_backend();
+    let process_work = backend
+        .process_work()
+        .expect("the Restate engine supplies process work");
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
+            Vec::new(),
+            crate::RuntimeHostConfig::new(
+                backend,
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            ),
+            lash_core_worker::WorkerProcessWork::External(process_work),
+            std::sync::Arc::new(crate::NoSessionWork::new()),
+            crate::testing::runtime_lease_owner(),
+        ),
+    )
+    .expect("a valid process worker configuration");
+    double.install_process_worker(worker);
+}
+
 /// Dispatch ports on the server double: `handler`, opened on `double` for
 /// [`dispatch_scope`], lends the controller, and the attachment facade is
 /// over the double's attachment port.

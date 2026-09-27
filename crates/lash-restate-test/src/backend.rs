@@ -439,21 +439,41 @@ impl RestateTestBackend {
         crashing: HandlerAttempt,
         redrive: HandlerAttempt,
     ) -> Result<(), String> {
+        self.run_crashes_then_redriven(admitted, vec![crashing], redrive)
+            .await
+    }
+
+    /// [`Self::run_crashed_then_redriven`] over several deployments that die
+    /// in turn: each of `crashing` runs until it panics, the server replays
+    /// the invocation into the next, and the last crash replays into
+    /// `redrive`. Returns an error if any of them never panicked.
+    pub async fn run_crashes_then_redriven(
+        &self,
+        admitted: AdmittedScope,
+        crashing: Vec<HandlerAttempt>,
+        redrive: HandlerAttempt,
+    ) -> Result<(), String> {
         let key = self
             .run_parked_keyed(
                 admitted,
                 Parked::CrashThenRedrive {
                     crashing,
                     redrive,
-                    crashed: false,
+                    crashed: 0,
                 },
             )
             .await?;
         match self.jobs.take(&key) {
-            Some((_, Parked::CrashThenRedrive { crashed: true, .. })) | None => Ok(()),
-            Some(_) => Err(format!(
-                "job `{key}` completed without its crashing attempt crashing"
+            Some((
+                _,
+                Parked::CrashThenRedrive {
+                    crashing, crashed, ..
+                },
+            )) if crashed < crashing.len() => Err(format!(
+                "job `{key}` completed after {crashed} of its {} crashing attempts crashed",
+                crashing.len()
             )),
+            _ => Ok(()),
         }
     }
 
@@ -578,9 +598,11 @@ const HANDLER_HOST: &str = "LashTestHandlerHost";
 enum Parked {
     Replayed(HandlerAttempt),
     CrashThenRedrive {
-        crashing: HandlerAttempt,
+        /// The attempts that crash, in the order the server runs them.
+        crashing: Vec<HandlerAttempt>,
         redrive: HandlerAttempt,
-        crashed: bool,
+        /// How many of `crashing` have crashed.
+        crashed: usize,
     },
 }
 
@@ -632,9 +654,10 @@ impl ParkedJobs {
                 redrive,
                 crashed,
             } => {
-                let attempt = Arc::clone(if *crashed { redrive } else { crashing });
+                let next = crashing.get(*crashed);
+                let attempt = Arc::clone(next.unwrap_or(redrive));
                 let job: HandlerJob = Box::new(move |scoped| attempt(scoped));
-                Some((admitted.clone(), job, !*crashed))
+                Some((admitted.clone(), job, next.is_some()))
             }
         }
     }
@@ -646,7 +669,7 @@ impl ParkedJobs {
             .unwrap_or_else(PoisonError::into_inner)
             .get_mut(key)
         {
-            *crashed = true;
+            *crashed += 1;
         }
     }
 }

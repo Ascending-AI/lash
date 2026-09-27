@@ -2098,10 +2098,8 @@ async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
 /// attempt is committed, in declaration order.
 #[tokio::test]
 async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinator() {
-    // This law stays on the SQLite engine's runtime-operation controller: its
-    // process intents realize there through the process service's local
-    // executor, while on the server double they need the engine's process
-    // worker, which this target does not install.
+    // The process intents run on the engine's process workflow, which reaches
+    // the deployment's process worker: install one over the double.
     let definition = named_beta_tool("attempt_intents");
     let calls = Arc::new(AtomicUsize::new(0));
     let target = Arc::new(std::sync::OnceLock::new());
@@ -2110,11 +2108,10 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         calls: Arc::clone(&calls),
         target: Arc::clone(&target),
     });
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    crate::support::install_process_worker(&double);
     let mut context = exact_dispatch_context(
-        crate::support::controller_dispatch_ports(
-            crate::support::runtime_operation_controller().await,
-        )
-        .await,
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
     )
     .await;
@@ -2130,7 +2127,7 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
             },
         })
     });
-    let backend = crate::support::memory_store_set().await;
+    let backend = double.stores();
     let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
     let event_types = ["signal.resume", "attempt.intent.note"]
         .into_iter()
@@ -2221,8 +2218,12 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         outcome
             .intent_outcomes
             .iter()
-            .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
+            .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. })),
+        "{:?}",
+        outcome.intent_outcomes
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[cfg(test)]
