@@ -40,7 +40,6 @@ rmp-serde = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 tokio = { workspace = true, features = ["rt", "sync"] }
-uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 # Kernel tests whose effects need an engine run on the Restate server double

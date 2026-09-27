@@ -14,11 +14,6 @@ description = "PostgreSQL-backed durable storage for the lash agent runtime."
 keywords = ["lash", "agent", "postgres", "persistence", "store"]
 categories = ["database", "asynchronous"]
 
-# The durable-read test includes lash-core's shared fixture through #[path];
-# cargo-shear does not follow that include, so it cannot see the lash-core use.
-[package.metadata.cargo-shear]
-ignored = ["lash-core"]
-
 [lib]
 name = "lash_postgres_store"
 doctest = false

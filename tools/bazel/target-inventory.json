@@ -17777,8 +17777,7 @@
         "syn",
         "tempfile",
         "thiserror",
-        "tokio",
-        "uuid"
+        "tokio"
       ],
       "doc": "//crates/lash-protocol-rlm:lash-protocol-rlm__doc",
       "manifest": "crates/lash-protocol-rlm/Cargo.toml",
