@@ -76,10 +76,6 @@ impl BoundSession {
         self.tool_child_context_source.is_some()
     }
 
-    pub(crate) fn session_id(&self) -> &SessionId {
-        &self.session_id
-    }
-
     pub(crate) fn store(&self) -> Arc<dyn RuntimePersistence> {
         Arc::clone(&self.store)
     }

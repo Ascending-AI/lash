@@ -229,7 +229,7 @@ pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
 }
 
 #[tokio::test]
-pub(super) async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
+pub(super) async fn an_input_cancel_stops_its_inflight_turn() -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let started_tx = Arc::new(StdMutex::new(Some(started_tx)));
     let provider = crate::testing::TestProvider::builder()
@@ -256,15 +256,18 @@ pub(super) async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
     let session = core.session("cancel-inflight").open().await?;
-    let stopper = session.clone();
 
     let handle = session.send(TurnInput::text("hang forever")).await?;
+    let input_id = handle.input_id().clone();
     let settled = tokio::spawn(async move { handle.output().await });
     started_rx.await.expect("provider reached");
-    assert_eq!(
-        stopper.cancel_running_turns_with_origin(Some("user".to_string())),
-        1
-    );
+    assert!(matches!(
+        session
+            .cancel(crate::CancelTarget::Input(input_id.clone()))
+            .origin("user")
+            .await?,
+        crate::CancelReceipt::Requested { .. }
+    ));
 
     let result = settled.await.expect("send task")?.result;
     assert!(matches!(
@@ -278,8 +281,11 @@ pub(super) async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
             ..
         }) if origin == "user"
     ));
-    // The registry entry is gone once the handle answered.
-    assert_eq!(stopper.cancel_running_turns(), 0);
+    // A cancel after the root settled finds nothing left to stop.
+    assert!(matches!(
+        session.cancel(crate::CancelTarget::Input(input_id)).await?,
+        crate::CancelReceipt::AlreadySettled { .. }
+    ));
     Ok(())
 }
 
@@ -378,10 +384,10 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
     core.session("queued-work-live-lease")
         .durable()
         .await?
-        .enqueue(TurnInput::text("queued while foreground owns the lease"))
+        .send(TurnInput::text("queued while foreground owns the lease"))
         .ingress(lash_core::TurnInputIngress::NextTurn)
         .id("queued-during-live-turn")
-        .send()
+        .accepted()
         .await?;
     wait_for_stable_build_count(&builds).await;
 
@@ -455,10 +461,10 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
     core.session("create-only-factory-idles")
         .durable()
         .await?
-        .enqueue(TurnInput::text("queued through create-only factory"))
+        .send(TurnInput::text("queued through create-only factory"))
         .ingress(lash_core::TurnInputIngress::NextTurn)
         .id("create-only-idle")
-        .send()
+        .accepted()
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while provider_calls.load(Ordering::SeqCst) != 1 {
@@ -507,12 +513,12 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
     core.session("create-only-factory-idles")
         .durable()
         .await?
-        .enqueue(TurnInput::text(
+        .send(TurnInput::text(
             "queued after the create-only factory idled",
         ))
         .ingress(lash_core::TurnInputIngress::NextTurn)
         .id("create-only-rearm")
-        .send()
+        .accepted()
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while provider_calls.load(Ordering::SeqCst) != 2 {
@@ -586,10 +592,10 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
     core.session("queued-work-hydration-burst")
         .durable()
         .await?
-        .enqueue(TurnInput::text("queued input 0"))
+        .send(TurnInput::text("queued input 0"))
         .ingress(lash_core::TurnInputIngress::NextTurn)
         .id("queued-input-0")
-        .send()
+        .accepted()
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(1), entered)
         .await
@@ -598,10 +604,10 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
         core.session("queued-work-hydration-burst")
             .durable()
             .await?
-            .enqueue(TurnInput::text(format!("queued input {index}")))
+            .send(TurnInput::text(format!("queued input {index}")))
             .ingress(lash_core::TurnInputIngress::NextTurn)
             .id(format!("queued-input-{index}"))
-            .send()
+            .accepted()
             .await?;
     }
 
@@ -672,12 +678,12 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
 }
 
 #[tokio::test]
-pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()> {
-    // One opened session serializes turn execution on the runtime writer
-    // lock, but a second turn is already registered while it waits for that
-    // lock. A stop sweep must reach both: the executing turn aborts, and the
-    // parked turn sees its cancelled token the moment it acquires the lock
-    // instead of starting a fresh provider call after the user pressed stop.
+pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_the_queued_one()
+-> Result<()> {
+    // One session drives one root at a time, so a second send waits queued
+    // behind the running root. Cancelling each must reach both: the running
+    // root commits its stop, and the queued input is withdrawn before it
+    // starts a fresh provider call after the user pressed stop.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -691,11 +697,21 @@ pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()
     let session = core.session("cancel-lock-queue").open().await?;
 
     let first = session.send(TurnInput::text("hang one")).await?;
+    let first_id = first.input_id().clone();
     let first_outcome = tokio::spawn(async move { first.outcome().await });
     started_rx.await.expect("first turn reached the provider");
     let second = session.send(TurnInput::text("hang two")).await?;
 
-    assert_eq!(session.cancel_running_turns(), 2);
+    assert!(matches!(
+        session
+            .cancel(crate::CancelTarget::Input(first_id.clone()))
+            .await?,
+        crate::CancelReceipt::Requested { .. }
+    ));
+    assert!(matches!(
+        second.cancel().await?,
+        crate::CancelReceipt::Withdrawn(_)
+    ));
 
     let first = first_outcome.await.expect("first send task")?;
     let second = second.outcome().await?;
@@ -703,14 +719,19 @@ pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()
     assert!(first.output.is_some(), "the running root commits its stop");
     assert_eq!(second.status, crate::TurnStatus::Cancelled);
     assert!(second.output.is_none(), "the queued input is withdrawn");
-    assert_eq!(session.cancel_running_turns(), 0);
+    assert!(matches!(
+        session.cancel(crate::CancelTarget::Input(first_id)).await?,
+        crate::CancelReceipt::AlreadySettled { .. }
+    ));
     Ok(())
 }
 
 #[tokio::test]
-pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handles() -> Result<()> {
-    // Each open() builds its own runtime and cancel registry; the documented
-    // scope of cancel_running_turns is the opened handle and its clones.
+pub(super) async fn an_input_cancel_reaches_a_send_through_a_separately_opened_handle() -> Result<()>
+{
+    // A cancel is a durable request on the root's cancellation gate, not a
+    // process-local lever: a handle opened separately for the same session
+    // reaches a send another handle made, and cancels nothing else.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -730,9 +751,12 @@ pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handle
     let _hanging_events = hanging.events();
     started_rx.await.expect("turn reached the provider");
 
-    // The other handle has its own registry: nothing to cancel there.
-    assert_eq!(handle_b.cancel_running_turns(), 0);
-    assert_eq!(handle_a.cancel_running_turns(), 1);
+    assert!(matches!(
+        handle_b
+            .cancel(crate::CancelTarget::Input(hanging.input_id().clone()))
+            .await?,
+        crate::CancelReceipt::Requested { .. }
+    ));
 
     let result = hanging.output().await?.result;
     assert!(matches!(
@@ -747,9 +771,9 @@ pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handle
 }
 
 #[tokio::test]
-pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Result<()> {
-    // A process-local stop reaches the turn as a durable request on its
-    // cancellation gate, with lash's internal evidence (FIG-3672 P9). The
+pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Result<()> {
+    // An input cancel reaches the running root as a durable request on its
+    // cancellation gate, under its default request id (FIG-3672 P9). The
     // turn honours it at its journaled peek, so the committed report names
     // that one request: one cancellation is one identity.
     let (started_tx, started_rx) = oneshot::channel::<()>();
@@ -771,10 +795,13 @@ pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Re
     let input_id = hanging.input_id().clone();
     let outcome = tokio::spawn(async move { hanging.outcome().await });
     started_rx.await.expect("turn reached the provider");
-    assert_eq!(
-        session.cancel_running_turns_with_origin(Some("user".to_string())),
-        1
-    );
+    assert!(matches!(
+        session
+            .cancel(crate::CancelTarget::Input(input_id.clone()))
+            .origin("user")
+            .await?,
+        crate::CancelReceipt::Requested { .. }
+    ));
 
     let result = outcome.await.expect("send task")?;
     assert_eq!(result.status, crate::TurnStatus::Cancelled);
@@ -791,9 +818,9 @@ pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Re
 }
 
 #[tokio::test]
-pub(super) async fn cancel_running_turns_reaches_a_sent_input() -> Result<()> {
-    // Queued drains register in the same session registry as foreground
-    // turns, so a stop sweep reaches them too.
+pub(super) async fn a_session_cancel_reaches_a_sent_input_its_waiter_drives() -> Result<()> {
+    // On the inline double the input runs in the task that waits on it; a
+    // cancel from the session still reaches that root through its gate.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -802,20 +829,24 @@ pub(super) async fn cancel_running_turns_reaches_a_sent_input() -> Result<()> {
     ))
     .provider(provider)
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
     let session = core.session("cancel-queued-drain").open().await?;
     let handle = session.send(TurnInput::text("hang queued")).await?;
+    let input_id = handle.input_id().clone();
 
     let drain = tokio::spawn(async move { handle.output().await });
     started_rx
         .await
         .expect("the sent input reached the provider");
-    assert_eq!(
-        session.cancel_running_turns_with_origin(Some("user".to_string())),
-        1
-    );
+    assert!(matches!(
+        session
+            .cancel(crate::CancelTarget::Input(input_id))
+            .origin("user")
+            .await?,
+        crate::CancelReceipt::Requested { .. }
+    ));
 
     let output = drain.await.expect("send task")?;
     assert!(matches!(
@@ -836,7 +867,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     session_id: &SessionId,
     turn_id: &TurnId,
     disposition: lash_core::facade_support::TurnCancelDisposition,
-    use_legacy_method: bool,
+    default_disposition: bool,
 ) -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
@@ -848,7 +879,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     ))
     .provider(provider)
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let handle = session
@@ -875,7 +906,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
         .request_id(request_id.clone())
         .origin("test-host")
         .reason("undelivered active input");
-    let cancel = if use_legacy_method {
+    let cancel = if default_disposition {
         cancel
     } else {
         cancel.undelivered(disposition)
@@ -956,7 +987,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
 }
 
 #[tokio::test]
-pub(super) async fn request_turn_cancel_with_disposition_drops_undelivered_active_input()
+pub(super) async fn a_root_cancel_with_the_drop_disposition_drops_undelivered_active_input()
 -> Result<()> {
     assert_session_turn_cancel_disposition(
         &SessionId::from("session-cancel-explicit-drop"),
@@ -1015,7 +1046,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
     ))
     .provider(provider)
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("active-steer-interrupt-cancel").open().await?;
     let active_turn_id = "active-steer-interrupt-turn";
@@ -1156,7 +1187,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
     .provider(provider)
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("accepted-active-steer-interrupt")
@@ -1281,7 +1312,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
             .provider(provider)
             .model(mock_model_spec())
-            .without_queued_work()
+            .map_backend(crate::tests::inline_session_work)
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-active-input-next-iteration")
@@ -1301,13 +1332,13 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         first_started_rx.await.expect("first provider call started");
         session
             .durable()
-            .enqueue(TurnInput::text("mid-turn injection marker"))
+            .send(TurnInput::text("mid-turn injection marker"))
             .id("rlm-mid-turn-injection")
             .ingress(lash_core::TurnInputIngress::active_turn(
                 active_turn_id,
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
             ))
-            .send()
+            .accepted()
             .await?;
         release_first_tx.send(()).expect("release first response");
         turn.await.expect("turn task")?;

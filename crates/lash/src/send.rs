@@ -39,7 +39,7 @@ use crate::support::{
     EffectHost, LashSession, ProtocolTurnOptions, RuntimePersistence, TurnActivity,
     TurnActivitySink, TurnInput, TurnOutcome,
 };
-use crate::turn::{TurnCancelGuard, TurnOutput, TurnReport};
+use crate::turn::{TurnOutput, TurnReport};
 
 use lash_core::facade_support::{TurnCancelDisposition, TurnCancelMode, TurnCancelReceipt};
 use lash_core::runtime::PendingTurnInputCancelReceipt;
@@ -146,15 +146,6 @@ impl SendTarget {
                 .current_cursor(durable.session_id(), lash_core::SessionRevision::new(0)),
         }
     }
-
-    /// Register an in-flight send on the open session's cancel registry, so
-    /// `cancel_running_turns*` reaches it (D1 §2.3).
-    fn register(&self, parts: &SendParts, input: &InputId) -> Option<TurnCancelGuard> {
-        match self {
-            Self::Live(session) => Some(session.turn_cancels.register_send(parts, input)),
-            Self::Durable(_) => None,
-        }
-    }
 }
 
 /// Refuse process-local turn context before anything is accepted: it cannot
@@ -254,9 +245,6 @@ impl SendBuilder {
         } = self;
         refuse_live_turn_context(&input)?;
         let context = target.context().await?;
-        if context.parts.work.refuses_sends() {
-            return Err(EmbedError::from(SendError::NoSessionWork));
-        }
         if let Some(options) = protocol_turn_options {
             input.protocol_turn_options = Some(options);
         }
@@ -279,13 +267,12 @@ impl SendBuilder {
             )
             .await?;
         let receipt = TurnInputAcceptanceReceipt::from(&enqueued);
-        let registration = target.register(&context.parts, &receipt.input_id);
         Ok(SendHandle {
             target,
             receipt,
             id,
             cursor,
-            shared: Arc::new(HandleShared::pending(registration)),
+            shared: Arc::new(HandleShared::pending()),
         })
     }
 }
@@ -403,18 +390,15 @@ pub(crate) fn status_of_outcome(outcome: &TurnOutcome) -> TurnStatus {
 // SendHandle and RootHandle
 // ---------------------------------------------------------------------------
 
-/// What every call on one handle shares: the answer once it is known, and
-/// the handle's place in the session's cancel registry.
+/// What every call on one handle shares: the answer once it is known.
 struct HandleShared {
     settled: Mutex<Option<SendOutcome>>,
-    _registration: Option<TurnCancelGuard>,
 }
 
 impl HandleShared {
-    fn pending(registration: Option<TurnCancelGuard>) -> Self {
+    fn pending() -> Self {
         Self {
             settled: Mutex::new(None),
-            _registration: registration,
         }
     }
 
@@ -500,8 +484,7 @@ impl SendHandle {
         &self.receipt.input_id
     }
 
-    /// The receipt of the input's durable acceptance: the same receipt
-    /// [`EnqueueTurnBuilder::send`](crate::EnqueueTurnBuilder::send) returns.
+    /// The receipt of the input's durable acceptance.
     pub fn receipt(&self) -> &TurnInputAcceptanceReceipt {
         &self.receipt
     }
@@ -635,7 +618,7 @@ pub(crate) fn attach(target: SendTarget, input_id: InputId) -> SendHandle {
         },
         id: None,
         cursor,
-        shared: Arc::new(HandleShared::pending(None)),
+        shared: Arc::new(HandleShared::pending()),
     }
 }
 
@@ -660,7 +643,7 @@ pub(crate) fn root(target: SendTarget, root: TurnId) -> RootHandle {
         target,
         root,
         cursor,
-        shared: Arc::new(HandleShared::pending(None)),
+        shared: Arc::new(HandleShared::pending()),
     }
 }
 
@@ -790,40 +773,4 @@ pub enum CancelReceipt {
         root: TurnId,
     },
     NotFound,
-}
-
-/// Cancel an in-flight send from the session's cancel registry: the
-/// process-local `cancel_running_turns*` lever (D1 §2.3), spawned so the
-/// lever stays synchronous.
-pub(crate) fn spawn_registry_cancel(
-    parts: SendParts,
-    input: InputId,
-    origin: Option<String>,
-    mode: TurnCancelMode,
-) {
-    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-        tracing::warn!(
-            session_id = %parts.session_id,
-            input_id = %input,
-            "cancel_running_turns outside a Tokio runtime cannot reach a sent input"
-        );
-        return;
-    };
-    runtime.spawn(async move {
-        let request = cancel::CancelRequestSpec {
-            origin,
-            mode,
-            ..Default::default()
-        };
-        if let Err(error) =
-            cancel::apply(&parts, &CancelTarget::Input(input.clone()), request).await
-        {
-            tracing::warn!(
-                session_id = %parts.session_id,
-                input_id = %input,
-                error = %error,
-                "cancel_running_turns could not cancel a sent input"
-            );
-        }
-    });
 }

@@ -188,7 +188,7 @@ impl SendBuilder {
                 receipt,
                 id: Some(id),
                 cursor,
-                shared: Arc::new(HandleShared::pending(None)),
+                shared: Arc::new(HandleShared::pending()),
             })
         })
     }

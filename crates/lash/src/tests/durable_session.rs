@@ -224,7 +224,7 @@ fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())
 }
 
@@ -284,9 +284,9 @@ async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -
 
     let durable = core.session("never-created").durable().await?;
     let error = durable
-        .enqueue(TurnInput::text("queued to a session that does not exist"))
+        .send(TurnInput::text("queued to a session that does not exist"))
         .id("orphan-enqueue")
-        .send()
+        .accepted()
         .await
         .expect_err("enqueue to an unknown id is refused");
     assert!(
@@ -329,8 +329,8 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
 
     let durable = core.session("deleted-durable").durable().await?;
     let error = durable
-        .enqueue(TurnInput::text("queued after deletion"))
-        .send()
+        .send(TurnInput::text("queued after deletion"))
+        .accepted()
         .await
         .expect_err("enqueue to a deleted id is refused");
     assert!(
@@ -357,9 +357,9 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     assert!(metadata_only.exists().await?);
     assert!(metadata_only.pending_turn_inputs().await?.is_empty());
     let accepted = metadata_only
-        .enqueue(TurnInput::text("queued against metadata-only"))
+        .send(TurnInput::text("queued against metadata-only"))
         .id("metadata-only-input")
-        .send()
+        .accepted()
         .await?;
     assert_eq!(
         metadata_only
@@ -382,9 +382,9 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     assert!(checkpointed.exists().await?);
     assert!(checkpointed.read().await?.is_some());
     checkpointed
-        .enqueue(TurnInput::text("queued against a checkpointed head"))
+        .send(TurnInput::text("queued against a checkpointed head"))
         .id("checkpointed-input")
-        .send()
+        .accepted()
         .await?;
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
     Ok(())
@@ -406,7 +406,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     let absent = core.session("sqlite-absent").durable().await?;
@@ -414,8 +414,8 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     assert!(
         matches!(
             absent
-                .enqueue(TurnInput::text("nope"))
-                .send()
+                .send(TurnInput::text("nope"))
+                .accepted()
                 .await
                 .expect_err("absent sqlite id is refused"),
             EmbedError::UnknownSession { .. }
@@ -427,9 +427,9 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     let metadata_only = core.session("sqlite-metadata-only").durable().await?;
     assert!(metadata_only.exists().await?);
     metadata_only
-        .enqueue(TurnInput::text("queued on sqlite metadata"))
+        .send(TurnInput::text("queued on sqlite metadata"))
         .id("sqlite-metadata-input")
-        .send()
+        .accepted()
         .await?;
     assert_eq!(metadata_only.pending_turn_inputs().await?.len(), 1);
 
@@ -442,9 +442,9 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     let checkpointed = core.session("sqlite-checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
     checkpointed
-        .enqueue(TurnInput::text("queued on a sqlite checkpoint"))
+        .send(TurnInput::text("queued on a sqlite checkpoint"))
         .id("sqlite-checkpoint-input")
-        .send()
+        .accepted()
         .await?;
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
 
@@ -459,8 +459,8 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     assert!(
         matches!(
             deleted
-                .enqueue(TurnInput::text("nope"))
-                .send()
+                .send(TurnInput::text("nope"))
+                .accepted()
                 .await
                 .expect_err("deleted sqlite id is refused"),
             EmbedError::Store(StoreError::SessionDeleted { .. })
@@ -479,7 +479,7 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
@@ -487,9 +487,9 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
     // A handle acquired from the core, not from the open session.
     let durable = core.session("durable-observation").durable().await?;
     let pending = durable
-        .enqueue(TurnInput::text("queued from a separate handle"))
+        .send(TurnInput::text("queued from a separate handle"))
         .id("separate-handle")
-        .send()
+        .accepted()
         .await?;
     let cancelled = durable.cancel_pending_turn_input(&pending.input_id).await?;
     assert!(matches!(
@@ -529,7 +529,7 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-no-runtime");
     // Create the session, then release every runtime: nothing is live.
@@ -544,9 +544,9 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
     Box::pin(session.close()).await?;
     let durable = core.session(session_id.clone()).durable().await?;
     let pending = durable
-        .enqueue(TurnInput::text("queued with nothing live"))
+        .send(TurnInput::text("queued with nothing live"))
         .id("no-runtime")
-        .send()
+        .accepted()
         .await?;
 
     let reopened = core.session(session_id.clone()).open().await?;
@@ -573,7 +573,7 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-beside-writer");
     let writer = core.session(session_id.clone()).open().await?;
@@ -583,14 +583,14 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
     let second = core.session(session_id.clone()).durable().await?;
 
     let a = first
-        .enqueue(TurnInput::text("from the first durable handle"))
+        .send(TurnInput::text("from the first durable handle"))
         .id("beside-a")
-        .send()
+        .accepted()
         .await?;
     let b = second
-        .enqueue(TurnInput::text("from the second durable handle"))
+        .send(TurnInput::text("from the second durable handle"))
         .id("beside-b")
-        .send()
+        .accepted()
         .await?;
 
     // A third read sees both writes: the two handles address one queue.
@@ -662,15 +662,15 @@ async fn abandoning_a_claim_a_caller_does_not_hold_moves_nothing() -> Result<()>
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-claim-token");
     let session = core.session(session_id.clone()).open().await?;
     let durable = session.durable();
     let accepted = durable
-        .enqueue(TurnInput::text("claimed input"))
+        .send(TurnInput::text("claimed input"))
         .id("claim-token")
-        .send()
+        .accepted()
         .await?;
 
     let input = durable
@@ -862,7 +862,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     .provider(mock_provider())
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core.session(session_id.clone()).open().await?;
     assert!(
@@ -880,9 +880,9 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
         .await?;
     let queued = granted
         .durable()
-        .enqueue(TurnInput::text("left pending for the grantless core"))
+        .send(TurnInput::text("left pending for the grantless core"))
         .id("fig-3353-pending")
-        .send()
+        .accepted()
         .await?;
     Box::pin(granted.close()).await?;
 
@@ -909,7 +909,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     // Precondition: on this core, `open()` really does orphan the tool. A
@@ -1161,7 +1161,7 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     // The session genuinely exists: this open created it.
@@ -1169,11 +1169,11 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
 
     let durable = core.session("no-by-id-seam").durable().await?;
     let error = durable
-        .enqueue(TurnInput::text(
+        .send(TurnInput::text(
             "queued through a catalog with no by-id seam",
         ))
         .id("no-by-id-seam-input")
-        .send()
+        .accepted()
         .await
         .expect_err("a catalog that cannot resolve by id refuses the acquisition");
     match &error {
@@ -1238,15 +1238,15 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
     ))
     .provider(provider)
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-held-input");
     let session = core.session(session_id.clone()).open().await?;
     let accepted = session
         .durable()
-        .enqueue(TurnInput::text("claimed by the drain"))
+        .send(TurnInput::text("claimed by the drain"))
         .id("held-input")
-        .send()
+        .accepted()
         .await?;
 
     let observer = core.session(session_id.clone()).durable().await?;
@@ -1315,7 +1315,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     // Building the core itself materialises its plugin host once; that is the
@@ -1327,8 +1327,8 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
         core.session("created-then-queued")
             .durable()
             .await?
-            .enqueue(TurnInput::text("too early"))
-            .send()
+            .send(TurnInput::text("too early"))
+            .accepted()
             .await
             .expect_err("an uncreated id is refused"),
         EmbedError::UnknownSession { .. }
@@ -1337,9 +1337,9 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     // ...and `create()` is the explicit two-step's first half.
     let durable = core.session("created-then-queued").create().await?;
     let accepted = durable
-        .enqueue(TurnInput::text("queued before the first turn"))
+        .send(TurnInput::text("queued before the first turn"))
         .id("created-then-queued-input")
-        .send()
+        .accepted()
         .await?;
     assert_eq!(durable.pending_turn_inputs().await?.len(), 1);
     assert!(durable.exists().await?);
@@ -1383,7 +1383,7 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("create-parent").create().await?);
 
@@ -1393,9 +1393,9 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
         .create()
         .await?;
     let accepted = first
-        .enqueue(TurnInput::text("survives the second create"))
+        .send(TurnInput::text("survives the second create"))
         .id("idempotent-input")
-        .send()
+        .accepted()
         .await?;
 
     // A second create, naming no parent, must not rewrite the relation or drop
@@ -1431,7 +1431,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("create-deleted").create().await?);
     lash_core::SessionStoreFactory::delete_session(
@@ -1469,27 +1469,27 @@ async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> 
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, "fig3544-enqueue-conflict").await?;
     let durable = core.session("fig3544-enqueue-conflict").durable().await?;
 
     let first = durable
-        .enqueue(TurnInput::text("original"))
+        .send(TurnInput::text("original"))
         .id("retry-me")
-        .send()
+        .accepted()
         .await?;
     let replay = durable
-        .enqueue(TurnInput::text("original"))
+        .send(TurnInput::text("original"))
         .id("retry-me")
-        .send()
+        .accepted()
         .await?;
     assert_eq!(replay, first, "an identical retry replays the acceptance");
 
     let conflict = durable
-        .enqueue(TurnInput::text("changed"))
+        .send(TurnInput::text("changed"))
         .id("retry-me")
-        .send()
+        .accepted()
         .await
         .expect_err("a changed submission under a used id is refused");
     let EmbedError::Runtime(error) = &conflict else {

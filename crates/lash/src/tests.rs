@@ -1,4 +1,6 @@
 use crate::admin::SessionConfigPatch;
+#[cfg(feature = "rlm")]
+use crate::support::SessionSpec;
 use crate::support::SessionWorkEngine;
 use crate::support::{
     Arc, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory, ProcessRegistry,
@@ -8,8 +10,6 @@ use crate::support::{
     TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait,
     message_text,
 };
-#[cfg(feature = "rlm")]
-use crate::support::{BTreeMap, SessionSpec};
 use lash_core::ProcessExecutionEnvStore;
 use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
@@ -18,6 +18,7 @@ use lash_core::facade_support::{
 use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
+use std::collections::BTreeMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2389,11 +2390,12 @@ mod deployment_and_testing_facade;
 mod durable_session;
 mod harness;
 pub(crate) use harness::{
-    DecoratedBackend, backend_work_facets_with_budget, drain_queued, explicit_ephemeral_facets,
-    explicit_ephemeral_facets_with_backend_work, explicit_ephemeral_facets_with_budget,
-    memory_backend, memory_backend_with_clock, memory_store_backend, memory_store_set,
-    mock_model_spec, model_spec, output_into_cancelled_by, restate_double,
-    run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_turn_input_states,
+    AcceptedSend as _, DecoratedBackend, backend_work_facets_with_budget, drain_queued,
+    explicit_ephemeral_facets, explicit_ephemeral_facets_with_backend_work,
+    explicit_ephemeral_facets_with_budget, inline_session_work, memory_backend,
+    memory_backend_with_clock, memory_store_backend, memory_store_set, mock_model_spec, model_spec,
+    output_into_cancelled_by, restate_double, run_async_test_on_stack_budget,
+    run_async_test_on_stack_size, sqlite_turn_input_states,
 };
 mod aborted_turn_groups;
 mod agent_scenarios;

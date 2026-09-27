@@ -2,11 +2,10 @@ use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 
 use crate::support::{
-    Arc, BTreeMap, LlmCallRecord, LocalTurnStop, Message, MessageRole, RuntimeHandle,
-    ScopedEffectController, SessionSnapshot, StdMutex, TokenUsage, ToolCallRecord, TurnActivity,
-    TurnActivitySink, TurnExecutionMetrics, TurnOutcome, async_trait,
+    Arc, LlmCallRecord, LocalTurnStop, Message, MessageRole, RuntimeHandle, ScopedEffectController,
+    SessionSnapshot, StdMutex, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
+    TurnExecutionMetrics, TurnOutcome, async_trait,
 };
-use lash_core::facade_support::TurnCancelMode;
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
 /// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
@@ -14,86 +13,6 @@ pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverit
 /// The namespaced [`FailureCode`](crate::provider::FailureCode) on `code`
 /// fields lives in [`crate::provider`].
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
-
-/// Host-local stops of the turns currently executing through one opened
-/// [`LashSession`](crate::LashSession) (shared by its clones).
-/// [`LashSession::cancel_running_turns`](crate::LashSession::cancel_running_turns)
-/// stops them without the caller having to thread a token around. A stop is
-/// delivered to each turn as a durable request on its cancellation gate.
-#[derive(Clone, Default)]
-pub(crate) struct TurnCancelRegistry {
-    inner: Arc<StdMutex<TurnCancelRegistryInner>>,
-}
-
-#[derive(Default)]
-struct TurnCancelRegistryInner {
-    next_id: u64,
-    active: BTreeMap<u64, RegisteredTurn>,
-}
-
-/// One turn the registry can stop: a sent input the engine drives, stopped
-/// by cancelling the input.
-struct RegisteredTurn {
-    parts: crate::send::SendParts,
-    input: lash_core::InputId,
-}
-
-impl TurnCancelRegistry {
-    /// Register a sent input until its handle is dropped (FIG-3600, D1 §2.3).
-    /// The guard removes the entry however the handle ends.
-    pub(crate) fn register_send(
-        &self,
-        parts: &crate::send::SendParts,
-        input: &lash_core::InputId,
-    ) -> TurnCancelGuard {
-        let turn = RegisteredTurn {
-            parts: parts.clone(),
-            input: input.clone(),
-        };
-        let mut inner = self.inner.lock_recover();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        inner.active.insert(id, turn);
-        TurnCancelGuard {
-            registry: Arc::clone(&self.inner),
-            id,
-        }
-    }
-
-    pub(crate) fn cancel_all(&self, origin: Option<String>) -> usize {
-        self.cancel_all_with_mode(origin, TurnCancelMode::Immediate)
-    }
-
-    /// Ask every registered turn to stop in `mode`, recording `origin`. An
-    /// `AfterStep` stop lands at each turn's next step boundary.
-    pub(crate) fn cancel_all_with_mode(
-        &self,
-        origin: Option<String>,
-        mode: TurnCancelMode,
-    ) -> usize {
-        let inner = self.inner.lock_recover();
-        for turn in inner.active.values() {
-            crate::send::spawn_registry_cancel(
-                turn.parts.clone(),
-                turn.input.clone(),
-                origin.clone(),
-                mode,
-            );
-        }
-        inner.active.len()
-    }
-}
-
-pub(crate) struct TurnCancelGuard {
-    registry: Arc<StdMutex<TurnCancelRegistryInner>>,
-    id: u64,
-}
-
-impl Drop for TurnCancelGuard {
-    fn drop(&mut self) {
-        self.registry.lock_recover().active.remove(&self.id);
-    }
-}
 
 pub(crate) fn fresh_turn_id() -> TurnId {
     TurnId::from(
@@ -251,7 +170,7 @@ pub struct TurnReport {
     ///
     /// Every turn enters through one acceptance commit before anything executes
     /// (ADR 0069), and this is the same receipt
-    /// [`EnqueueTurnBuilder::send`](crate::EnqueueTurnBuilder::send) returns: its
+    /// [`SendHandle::receipt`](crate::SendHandle::receipt) answers: its
     /// `input_id` addresses the pending row and matches the settled application.
     /// Facade sessions always populate it because session open requires an
     /// explicitly selected store. The option remains for lower-level callers.

@@ -207,9 +207,9 @@ async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_atte
     let session = core.session("queued-before-llm").open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("queued and refused"))
+        .send(TurnInput::text("queued and refused"))
         .id("queued-refused")
-        .send()
+        .accepted()
         .await?;
 
     let drained = drain_queued(&session, None)
@@ -347,9 +347,9 @@ async fn a_replay_refusal_keeps_a_queued_run_pending_and_parked() -> Result<()> 
     let session = core.session("queued-replay-refusal").open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("queued and diverging"))
+        .send(TurnInput::text("queued and diverging"))
         .id("queued-diverging")
-        .send()
+        .accepted()
         .await?;
 
     for attempt in 1..=3 {
@@ -415,9 +415,9 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    // `without_queued_work` drives a send inside the task that waits on it:
-    // nothing claims the input until a waiter runs, so the withdraw below is
-    // never a claim race.
+    // The inline session-work double drives a send inside the task that
+    // waits on it: nothing claims the input until a waiter runs, so the
+    // withdraw below is never a claim race.
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.backend.clone().into(),
         crate::TurnBudget::Unbounded,
@@ -427,7 +427,7 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
         Arc::clone(&requests),
     ))
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).open().await?;
 
@@ -721,9 +721,9 @@ async fn a_plugin_session_fault_in_a_queued_finalize_hook_is_retried_to_completi
     let session = core.session("queued-finalize-fault").open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("finalize blips once"))
+        .send(TurnInput::text("finalize blips once"))
         .id("finalize-blip")
-        .send()
+        .accepted()
         .await?;
 
     assert_queued_run_pending(drain_queued(&session, None).await);
@@ -760,9 +760,9 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
     let session = core.session(SESSION).open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("the journal blips once"))
+        .send(TurnInput::text("the journal blips once"))
         .id("journal-blip")
-        .send()
+        .accepted()
         .await?;
     let faults = backend.backend.effect_host().effect_journal_faults();
     faults.fail_next(
@@ -823,9 +823,9 @@ async fn a_journaled_live_coded_failure_replays_as_a_recorded_failed_turn() -> R
     let session = core.session("queued-journaled-failure").open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("checkpoint fails and is journaled"))
+        .send(TurnInput::text("checkpoint fails and is journaled"))
         .id("journaled-failure")
-        .send()
+        .accepted()
         .await?;
 
     assert_queued_run_pending(drain_queued(&session, None).await);

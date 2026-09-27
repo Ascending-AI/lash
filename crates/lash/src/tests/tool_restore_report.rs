@@ -81,7 +81,7 @@ async fn seed_session_with_a_persisted_tool(
     .provider(mock_provider())
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core.session(session_id.clone()).open().await?;
     granted
@@ -122,7 +122,7 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let opened = grantless_core.session(session_id.clone()).open().await?;
 
@@ -160,7 +160,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
         counters: Arc::clone(&counters),
     }))
     .tool_source_policy(lash_core::ToolSourcePolicy::Require)
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match strict_core.session(session_id.clone()).open().await {
@@ -200,7 +200,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let reopened = tolerant_core.session(session_id.clone()).open().await?;
     Box::pin(reopened.close()).await?;
@@ -220,7 +220,7 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match tolerant_core
@@ -272,7 +272,7 @@ async fn require_makes_a_queued_work_rebuild_a_terminal_failure() -> Result<()> 
     .provider(mock_provider())
     .model(mock_model_spec())
     .tool_source_policy(lash_core::ToolSourcePolicy::Require)
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
 
     // The driver the core would run for this session.

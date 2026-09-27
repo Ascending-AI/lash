@@ -550,8 +550,7 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
     let session_id = SessionId::from("in-flight");
     let receipt = session
         .durable()
-        .enqueue(lash::TurnInput::text("hold the model"))
-        .send()
+        .send(lash::TurnInput::text("hold the model"))
         .await
         .expect("accept");
     tokio::time::timeout(Duration::from_secs(20), world.gate.reached.notified())
@@ -619,7 +618,7 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
     // The live drive's own re-admission picks the row up once the turn
     // ends: no sibling ever ran, and the work is not stranded.
     world.gate.release.notify_one();
-    let outcome = attach(&world.backend, &session_id, request_of(&receipt.input_id)).await;
+    let outcome = attach(&world.backend, &session_id, request_of(receipt.input_id())).await;
     assert_eq!(answers(&outcome), ["answer 1", "answer 2"]);
     assert!(
         session

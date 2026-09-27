@@ -1177,10 +1177,10 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
 
     let outcome = session
         .durable()
-        .enqueue(lash_core::TurnInput::text("commit before dispatch"))
+        .send(lash_core::TurnInput::text("commit before dispatch"))
         .id("fig-430-retry")
-        .send()
-        .await;
+        .await
+        .map(|handle| handle.receipt().clone());
     let persisted = session
         .durable()
         .pending_turn_inputs()
@@ -1194,24 +1194,24 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
             assert_eq!(stored.input.session_id, receipt.session_id);
             assert_eq!(stored.input.source_key, receipt.source_key);
             assert_eq!(stored.input.ingress(), receipt.ingress);
-            assert_eq!(receipt.source_key.as_deref(), Some("host:fig-430-retry"));
+            assert_eq!(receipt.source_key.as_deref(), Some("fig-430-retry"));
         }
         (Err(error), stored) => panic!(
-            "enqueue returned an undifferentiated error after durable commit: \
+            "a send returned an undifferentiated error after durable commit: \
              caller_outcome={error:?}, persisted_row_count={}",
             stored.len()
         ),
         (Ok(receipt), stored) => panic!(
-            "successful enqueue must identify exactly one durable row: \
+            "a successful send must identify exactly one durable row: \
              caller_outcome={receipt:?}, persisted_rows={stored:?}"
         ),
     }
     let retry_receipt = session
         .durable()
-        .enqueue(lash_core::TurnInput::text("commit before dispatch"))
+        .send(lash_core::TurnInput::text("commit before dispatch"))
         .id("fig-430-retry")
-        .send()
         .await
+        .map(|handle| handle.receipt().clone())
         .expect("retry the same durable source identity");
     assert_eq!(
         Some(&retry_receipt.input_id),

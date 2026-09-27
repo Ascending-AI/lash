@@ -69,7 +69,6 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
     );
     let mut builder =
         lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::bounded(1))
-            .without_queued_work()
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .provider(provider)

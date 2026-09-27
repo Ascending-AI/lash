@@ -561,9 +561,9 @@ impl Backend {
         if session.durable().pending_queued_run().await?.is_none() {
             session
                 .durable()
-                .enqueue(TurnInput::text("call the probe"))
+                .send(TurnInput::text("call the probe"))
                 .id(format!("{session_id}-input"))
-                .send()
+                .accepted()
                 .await?;
         }
         drain_queued(&session, Some(DRAIN)).await

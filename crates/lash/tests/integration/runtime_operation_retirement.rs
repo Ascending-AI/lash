@@ -370,7 +370,6 @@ fn core_over(backend: lash::Backend) -> LashCore {
         .build()
         .into_handle();
     LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("mock-model")

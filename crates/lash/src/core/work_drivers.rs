@@ -2,9 +2,9 @@ use super::queued_work::NativeQueuedWorkRunHandle;
 #[cfg(test)]
 use crate::support::DurableProcessWorkerConfig;
 use crate::support::{
-    Arc, DurableProcessWorker, NativeProcessWork, NativeSubstrateConfig, NoSessionWork,
-    ProcessRegistry, ProcessWorkSubstrate, ProcessWorkWiring, SessionStoreFactory,
-    SessionWorkEngine, WorkerProcessWork, WorkerSlotSupplier, async_trait,
+    Arc, DurableProcessWorker, NativeProcessWork, NativeSubstrateConfig, ProcessRegistry,
+    ProcessWorkSubstrate, ProcessWorkWiring, SessionStoreFactory, SessionWorkEngine,
+    WorkerProcessWork, WorkerSlotSupplier, async_trait,
 };
 use lash_core::facade_support;
 use tokio_util::sync::CancellationToken;
@@ -64,19 +64,7 @@ impl ProcessWorkSource {
     }
 }
 
-/// Whether the core runs the backend's queued-work driver.
-#[derive(Clone, Copy)]
-pub(super) enum QueuedWorkSource {
-    /// The backend's own driver, or the in-process driver when it has none.
-    Backend,
-    /// No driver: the host runs every queued turn itself.
-    Disabled,
-}
-
 pub(super) enum QueuedPortSetup {
-    /// The host turned the backend's own engine off: nothing would drive an
-    /// accepted input, so a send is refused before it accepts anything.
-    Disabled,
     Native {
         driver: Arc<NativeQueuedWorkRunHandle>,
         slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
@@ -175,22 +163,15 @@ impl std::ops::Deref for HeldWork {
 pub(crate) struct ResolvedQueuedWork {
     port: Arc<dyn SessionWorkEngine>,
     wake: std::sync::Mutex<Option<facade_support::WakeDeliveryDriver>>,
-    /// No engine would drive an accepted input (FIG-3600 S5b).
-    refuses_sends: bool,
     /// The store binding the core's sessions live in.
     store_binding: lash_core::StoreBindingId,
 }
 
 impl ResolvedQueuedWork {
-    fn new(
-        port: Arc<dyn SessionWorkEngine>,
-        refuses_sends: bool,
-        store_binding: lash_core::StoreBindingId,
-    ) -> Self {
+    fn new(port: Arc<dyn SessionWorkEngine>, store_binding: lash_core::StoreBindingId) -> Self {
         Self {
             port,
             wake: std::sync::Mutex::new(None),
-            refuses_sends,
             store_binding,
         }
     }
@@ -199,12 +180,6 @@ impl ResolvedQueuedWork {
     /// the input, what names one input across the stores of one process.
     pub(crate) fn store_binding(&self) -> &lash_core::StoreBindingId {
         &self.store_binding
-    }
-
-    /// Whether a send must be refused before acceptance: no engine and no
-    /// in-process drive would ever run what it accepted.
-    pub(crate) fn refuses_sends(&self) -> bool {
-        self.refuses_sends
     }
 
     fn install_wake(&self, wake: facade_support::WakeDeliveryDriver) {
@@ -313,9 +288,7 @@ impl NativeSubstrateSlot {
     pub(crate) async fn ports(&self) -> ResolvedPorts {
         self.drivers
             .get_or_init(|| async {
-                let refuses_sends = matches!(self.setup.queued, QueuedPortSetup::Disabled);
                 let queued_port: Arc<dyn SessionWorkEngine> = match &self.setup.queued {
-                    QueuedPortSetup::Disabled => Arc::new(NoSessionWork::new()),
                     QueuedPortSetup::External { port } => Arc::clone(port),
                     QueuedPortSetup::Native {
                         driver,
@@ -375,7 +348,6 @@ impl NativeSubstrateSlot {
                 };
                 let queued = Arc::new(ResolvedQueuedWork::new(
                     queued_port,
-                    refuses_sends,
                     self.setup.store_binding.clone(),
                 ));
                 let setup = &self.setup.wake;
@@ -409,7 +381,7 @@ impl NativeSubstrateSlot {
         match &self.setup.process {
             ProcessPortSetup::NativeDefault { config, .. } => Some(
                 config
-                    .build(Arc::new(NoSessionWork::new()))
+                    .build(Arc::new(crate::support::NoSessionWork::new()))
                     .expect("native process-worker assembly was validated at build"),
             ),
             ProcessPortSetup::External { .. } => None,

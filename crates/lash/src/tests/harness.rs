@@ -218,7 +218,9 @@ impl From<DecoratedBackend> for lash_core::Backend {
 }
 
 /// The runtime settings every facade test core names: a generous commit
-/// budget, single-row queued-work batching and no queued-work driver.
+/// budget, single-row queued-work batching and, on a backend without an
+/// engine of its own, the inline session-work double
+/// ([`inline_session_work`]).
 pub(crate) fn explicit_ephemeral_facets(
     builder: crate::core::LashCoreBuilder,
 ) -> crate::core::LashCoreBuilder {
@@ -229,7 +231,24 @@ pub(crate) fn explicit_ephemeral_facets_with_budget(
     builder: crate::core::LashCoreBuilder,
     commit_budget: crate::CommitBudget,
 ) -> crate::core::LashCoreBuilder {
-    backend_work_facets_with_budget(builder, commit_budget).without_queued_work()
+    backend_work_facets_with_budget(builder, commit_budget).map_backend(inline_session_work)
+}
+
+/// `backend` with the inline session-work double when it has no engine of
+/// its own (D14): the engine drives an accepted input only once a caller
+/// waits on it, and schedules nothing in the background, so a law reads what
+/// is pending, or drains it through [`drain_queued`], before anything runs.
+/// A backend whose engine drives its sessions (the Restate double) keeps it.
+pub(crate) fn inline_session_work(backend: lash_core::Backend) -> lash_core::Backend {
+    if backend.session_work().is_some() {
+        return backend;
+    }
+    let engine: Arc<dyn lash_core::SessionWorkEngine> = Arc::new(
+        lash_core::runtime::InlineSessionWork::new(backend.build_generation().clone()),
+    );
+    lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
+        .with_session_work(Some(engine))
+        .into_backend()
 }
 
 /// The ephemeral facets with the backend's queued-work driver left running,
@@ -370,4 +389,16 @@ pub(crate) async fn drain_queued(
         result: TurnReport::from_assembled(turn),
         activities: collector.snapshot(),
     }))
+}
+
+/// The durable acceptance receipt of a send: what a law reads when it
+/// asserts on the pending row a send accepted before anything drives it.
+pub(crate) trait AcceptedSend {
+    async fn accepted(self) -> Result<lash_core::runtime::TurnInputAcceptanceReceipt>;
+}
+
+impl AcceptedSend for crate::SendBuilder {
+    async fn accepted(self) -> Result<lash_core::runtime::TurnInputAcceptanceReceipt> {
+        Ok(self.await?.receipt().clone())
+    }
 }

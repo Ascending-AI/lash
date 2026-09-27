@@ -690,7 +690,7 @@ fn model_spec_types_are_nameable(spec: ModelSpec, limits: ModelLimits) {
 
 fn cancellation_token_is_at_root(token: lash::CancellationToken, session: &lash::LashSession) {
     token.cancel();
-    let _: usize = session.cancel_running_turns();
+    let _: lash::CancelBuilder = session.cancel(lash::CancelTarget::Root("turn".into()));
 }
 
 fn turn_input_ingress_types_are_nameable(

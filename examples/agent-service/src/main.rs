@@ -617,8 +617,8 @@ async fn shutdown_signal() {
 /// This service opens a fresh session per request and detaches the turn task,
 /// so it holds no long-lived sessions to `park()`/`close()` here and no external
 /// queued-work claims to hand back. A host that caches live sessions would, at
-/// this point, `cancel_running_turns()`, then `park()` (or `close()`) each one,
-/// and `abandon_queued_work_claim` / `revoke_durable_waits` for any driver it
+/// this point, cancel each in-flight send (`SendHandle::cancel`), then
+/// `park()` (or `close()`) each one, and `abandon_queued_work_claim` / `revoke_durable_waits` for any driver it
 /// stopped mid-claim. The host also closes provider transports and flushes its
 /// trace sink, as this example does below.
 async fn drain(core: &lash::LashCore, provider: &ProviderHandle) -> anyhow_like::Result<()> {

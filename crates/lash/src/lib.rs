@@ -84,7 +84,7 @@ pub use crate::admin::{
     SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
-pub use crate::durable_session::{DurableSession, EnqueueTurnBuilder};
+pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
 pub use crate::parked_work::{
     ParkedKinds, ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage,
@@ -158,17 +158,16 @@ pub use tokio_util::sync::CancellationToken;
 pub mod prelude {
     pub use crate::{
         AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus,
-        DurableSession, EmbedError, EnqueueTurnBuilder, InputItem, LashCore, LashCoreBuilder,
-        LashSession, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget,
-        ObservableSession, ParkedSession, PendingTurnInputCancelOutcome, PluginBinding,
-        PluginOperations, PluginStack, PromptLayerSink, Result, SendBuilder, SendHandle,
-        SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin, SessionCommandReceipt,
-        SessionConfigPatch, SessionCreateRequest, SessionDeleteReport, SessionListFilter,
-        SessionRelationKind, SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin,
-        ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
-        TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
-        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
-        message_role, message_text,
+        DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits,
+        ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession,
+        ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
+        PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
+        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
+        SessionCreateRequest, SessionDeleteReport, SessionListFilter, SessionRelationKind,
+        SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin, ToolAdmin,
+        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnCause,
+        TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt,
+        TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop, message_role, message_text,
     };
 }
 

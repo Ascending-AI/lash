@@ -132,6 +132,12 @@ pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::
     explicit_durable_test_facets_over(test_file_backend(data_dir))
 }
 
+/// [`explicit_durable_test_facets`] on the inline session-work double
+/// ([`inline_work_backend`]).
+pub(super) fn inline_durable_test_facets(data_dir: &std::path::Path) -> lash::LashCoreBuilder {
+    explicit_durable_test_facets_on(inline_work_backend(test_file_backend(data_dir).into()))
+}
+
 pub(super) fn explicit_durable_test_facets_over(
     backend: Arc<lash_sqlite_store::SqliteBackend>,
 ) -> lash::LashCoreBuilder {

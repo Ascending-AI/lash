@@ -407,7 +407,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-idempotency").open().await?;
 
@@ -448,16 +448,16 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queue-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
     let pending = session
         .durable()
-        .enqueue(TurnInput::text("queued observation"))
+        .send(TurnInput::text("queued observation"))
         .id("queue-observation")
-        .send()
+        .accepted()
         .await?;
     let inputs = session.durable().pending_turn_inputs().await?;
     assert_eq!(
@@ -502,35 +502,35 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pending-input-facade-cancel").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
     let first = session
         .durable()
-        .enqueue(TurnInput::text("first"))
+        .send(TurnInput::text("first"))
         .id("edit:1")
-        .send()
+        .accepted()
         .await?;
     let second = session
         .durable()
-        .enqueue(TurnInput::text("second"))
+        .send(TurnInput::text("second"))
         .id("edit:2")
-        .send()
+        .accepted()
         .await?;
     let third = session
         .durable()
-        .enqueue(TurnInput::text("third"))
+        .send(TurnInput::text("third"))
         .id("edit:3")
-        .send()
+        .accepted()
         .await?;
 
     let bulk = session
         .durable()
         .cancel_pending_turn_inputs([
-            lash_core::PendingTurnInputCancelTarget::source_key("host:edit:1"),
-            lash_core::PendingTurnInputCancelTarget::source_key("host:missing"),
+            lash_core::PendingTurnInputCancelTarget::source_key("edit:1"),
+            lash_core::PendingTurnInputCancelTarget::source_key("missing"),
         ])
         .await?;
     assert_eq!(bulk.len(), 2);
@@ -546,7 +546,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     let suffix = session
         .durable()
         .cancel_pending_turn_input_suffix(lash_core::PendingTurnInputCancelTarget::source_key(
-            "host:edit:2",
+            "edit:2",
         ))
         .await?;
     let lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } = suffix else {
@@ -1515,7 +1515,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("direct-turn-acceptance").open().await?;
 

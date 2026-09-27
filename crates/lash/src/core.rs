@@ -32,8 +32,7 @@ use queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
 pub(crate) use work_drivers::HeldWork;
 use work_drivers::{
     DriveLifetime, NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup,
-    ProcessWorkSelection, ProcessWorkSource, QueuedPortSetup, QueuedWorkSource,
-    WakeDeliveryDriverSetup,
+    ProcessWorkSelection, ProcessWorkSource, QueuedPortSetup, WakeDeliveryDriverSetup,
 };
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
@@ -361,7 +360,6 @@ impl LashCore {
             binding,
             parent_session_id,
             process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
-            turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
     }
 
@@ -692,9 +690,7 @@ impl LashCore {
             QueuedPortSetup::External { port } => Arc::clone(port),
             // The outer dispatcher owns the native queued-work lane; nested
             // process runtimes must not start a competing dispatcher.
-            QueuedPortSetup::Disabled | QueuedPortSetup::Native { .. } => {
-                Arc::new(NoSessionWork::new())
-            }
+            QueuedPortSetup::Native { .. } => Arc::new(NoSessionWork::new()),
         };
         worker_config(
             &plugin_host,
@@ -822,7 +818,6 @@ pub struct LashCoreBuilder {
     // installed on the native process-registry decorator at build time.
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
-    queued_work_source: QueuedWorkSource,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
 }
@@ -855,7 +850,6 @@ impl LashCoreBuilder {
             worker_slot_supplier: None,
             process_event_sink: None,
             process_tool_visibility_filter: None,
-            queued_work_source: QueuedWorkSource::Backend,
             live_replay_store: None,
             process_observation_config: Default::default(),
         }
@@ -1180,7 +1174,6 @@ impl LashCoreBuilder {
         let residents = Arc::new(residents::ResidentSessions::default());
         let (queued_port, session_driver, installed_driver) = Self::resolve_queued_work(
             Arc::clone(&residents),
-            self.queued_work_source,
             backend.session_work(),
             session_execution_owner.clone(),
             env.clone(),
@@ -1326,7 +1319,6 @@ impl LashCoreBuilder {
     #[allow(clippy::too_many_arguments)]
     fn resolve_queued_work(
         residents: Arc<residents::ResidentSessions>,
-        queued_work_source: QueuedWorkSource,
         backend_engine: Option<Arc<dyn lash_core::SessionWorkEngine>>,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
@@ -1344,7 +1336,6 @@ impl LashCoreBuilder {
         Arc<dyn lash_core::SessionDriver>,
     ) {
         let owner = session_execution_owner.clone();
-        let build_generation = env.core.backend().build_generation().clone();
         let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
             NativeQueuedWorkRunConfig {
                 residents,
@@ -1358,26 +1349,12 @@ impl LashCoreBuilder {
                 process_lifecycle_available,
             },
         )));
-        match (queued_work_source, backend_engine) {
-            // The host turned the backend's own engine off: a send is
-            // refused, since nothing would drive what it accepted.
-            (QueuedWorkSource::Disabled, Some(_)) => {
-                (QueuedPortSetup::Disabled, driver.clone(), driver)
-            }
-            // No engine on the backend and the host drains queued work itself:
-            // a waiting send drives its session in the caller's task (D1 §2.4;
-            // S5d deletes `without_queued_work` and this arm together).
-            (QueuedWorkSource::Disabled, None) => {
-                let port: Arc<dyn lash_core::SessionWorkEngine> =
-                    Arc::new(lash_core::runtime::InlineSessionWork::new(build_generation));
+        match backend_engine {
+            Some(port) => {
                 let installed = install_session_driver(&port, driver.clone(), &owner);
                 (QueuedPortSetup::External { port }, driver, installed)
             }
-            (QueuedWorkSource::Backend, Some(port)) => {
-                let installed = install_session_driver(&port, driver.clone(), &owner);
-                (QueuedPortSetup::External { port }, driver, installed)
-            }
-            (QueuedWorkSource::Backend, None) => (
+            None => (
                 QueuedPortSetup::Native {
                     driver: Arc::clone(&driver),
                     slot_supplier: worker_slot_supplier,
@@ -1387,6 +1364,14 @@ impl LashCoreBuilder {
                 driver,
             ),
         }
+    }
+
+    /// Replace the builder's backend with `layer` over it: a test double's
+    /// session work, or a decorated port.
+    #[cfg(test)]
+    pub(crate) fn map_backend(mut self, layer: impl FnOnce(Backend) -> Backend) -> Self {
+        self.backend = layer(self.backend);
+        self
     }
 
     pub fn advanced(self) -> AdvancedLashCoreBuilder {
@@ -1425,16 +1410,6 @@ impl LashCoreBuilder {
         config: crate::process_observation::ProcessObservationConfig,
     ) -> Self {
         self.process_observation_config = config;
-        self
-    }
-
-    /// Run no queued-work driver: the host runs every queued turn itself.
-    ///
-    /// By default the core runs the backend's driver — the in-process driver
-    /// on SQLite and PostgreSQL, the engine's where the backend supplies one
-    /// ([`Backend::queued_work`](lash_core::Backend::queued_work)).
-    pub fn without_queued_work(mut self) -> Self {
-        self.queued_work_source = QueuedWorkSource::Disabled;
         self
     }
 }

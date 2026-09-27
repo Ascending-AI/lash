@@ -388,7 +388,7 @@ impl crate::plugins::SessionPlugin for EngineSessionPlugin {
 
 fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {
     process_test_builder(backend)
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -446,7 +446,7 @@ fn prune_recovery_core(
         .plugin(Arc::new(EnginePlugin(
             engine as Arc<dyn lash_core::ProcessEngine>,
         )))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -1952,7 +1952,7 @@ async fn durable_admission_core(
             ),
         ))
         .process_event_sink(Arc::new(sink))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(lash_core::LeaseOwnerIdentity::opaque(
             owner,
             format!("{owner}:incarnation"),
@@ -1989,7 +1989,7 @@ fn process_test_core_with_sink(
 ) -> Result<LashCore> {
     process_test_builder(backend)
         .process_event_sink(sink)
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())
 }
 

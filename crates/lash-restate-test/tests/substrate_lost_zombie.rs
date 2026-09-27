@@ -66,7 +66,6 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
         .model(model_spec())
-        .without_queued_work()
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "lash-restate-test",
             "substrate-lost-zombie",

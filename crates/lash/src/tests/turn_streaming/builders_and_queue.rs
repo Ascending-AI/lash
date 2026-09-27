@@ -127,7 +127,7 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
     )
     .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -252,7 +252,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     ))
     .provider(provider)
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-started-cancel-target").open().await?;
     let expected_turn_id = "turn-started-cancel-target-id";
@@ -267,14 +267,15 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         panic!("first pull-stream activity must deliver turn identity");
     };
     assert_eq!(turn_id, expected_turn_id);
-    let receipt = session
-        .request_turn_cancel(
-            &turn_id,
-            "turn-started-cancel-request",
-            Some("pull-stream-host".to_string()),
-            Some("cancel from first activity".to_string()),
-        )
-        .await?;
+    let crate::CancelReceipt::Requested { receipt, .. } = session
+        .cancel(crate::CancelTarget::Root(turn_id.clone()))
+        .request_id("turn-started-cancel-request")
+        .origin("pull-stream-host")
+        .reason("cancel from first activity")
+        .await?
+    else {
+        panic!("the running root must receive the cancellation request");
+    };
     assert!(matches!(
         receipt.outcome,
         crate::TurnCancelOutcome::Requested(ref evidence)
@@ -306,21 +307,21 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("idle-input-application").open().await?;
     let cursor = session.observe().current_remote_observation().cursor;
     let empty_admission = session
         .durable()
-        .enqueue(TurnInput::text(""))
+        .send(TurnInput::text(""))
         .id("idle-empty-source")
-        .send()
+        .accepted()
         .await?;
     let admission = session
         .durable()
-        .enqueue(TurnInput::text("queued canonical input"))
+        .send(TurnInput::text("queued canonical input"))
         .id("idle-source")
-        .send()
+        .accepted()
         .await?;
 
     let root = session
@@ -363,7 +364,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     let live = &live[0];
     assert_ne!(live.input_id, empty_admission.input_id);
     assert_eq!(live.input_id, admission.input_id);
-    assert_eq!(live.source_key.as_deref(), Some("host:idle-source"));
+    assert_eq!(live.source_key.as_deref(), Some("idle-source"));
     assert_eq!(live.turn_id, root.as_str());
     assert_eq!(live.checkpoint, None);
     assert!(
@@ -396,15 +397,15 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
             },
         ),
     ))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-input-application-gap").open().await?;
     let stale_cursor = session.observe().current_remote_observation().cursor;
     let admission = session
         .durable()
-        .enqueue(TurnInput::text("survives replay gap"))
+        .send(TurnInput::text("survives replay gap"))
         .id("gap-source")
-        .send()
+        .accepted()
         .await?;
     let root = session
         .attach(admission.input_id.clone())
@@ -430,7 +431,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         applications.as_slice(),
         [application]
             if application.input_id == admission.input_id
-                && application.source_key.as_deref() == Some("host:gap-source")
+                && application.source_key.as_deref() == Some("gap-source")
                 && application.turn_id == root
                 && application.checkpoint.is_none()
                 && session
@@ -439,5 +440,71 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
                     .iter()
                     .any(|message| message.id == application.committed_message_id)
     ));
+    Ok(())
+}
+
+/// A core whose engine drives its sends in the background, answering every
+/// model call with `answer`.
+async fn answering_core(answer: &'static str) -> Result<LashCore> {
+    explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        memory_backend().await.into(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("mailbox-binding")
+            .complete(move |_| async move { Ok(text_response(answer)) })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())
+}
+
+/// The settled-root mailbox is shared by every driver in the process, and a
+/// keyed input's id derives from its session and key alone, so two stores
+/// can hold the same session and input ids. A handle answers only from a
+/// root its own stores ran: a root another store's driver left behind under
+/// the same ids is not its answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+pub(super) async fn a_send_never_answers_from_a_root_another_store_ran() -> Result<()> {
+    let first = answering_core("answered by the first store").await?;
+    let second = answering_core("answered by the second store").await?;
+    let first_session = first.session("shared-session").open().await?;
+    let second_session = second.session("shared-session").open().await?;
+
+    // The first store's root settles and its driver deposits the report; no
+    // handle takes it, so it stays in the mailbox under the shared ids.
+    let unread = first_session
+        .send(TurnInput::text("ask"))
+        .id("shared-input")
+        .await?;
+    let shared_input = unread.input_id().clone();
+    drop(unread);
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let applied = first_session.durable().turn_input_applications().await?;
+            if applied
+                .iter()
+                .any(|application| application.input_id == shared_input)
+            {
+                return Result::Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the first store's root settles")?;
+
+    let second_handle = second_session
+        .send(TurnInput::text("ask"))
+        .id("shared-input")
+        .await?;
+    assert_eq!(second_handle.input_id(), &shared_input);
+    let output = second_handle.output().await?;
+    assert_eq!(
+        output.assistant_message(),
+        Some("answered by the second store")
+    );
     Ok(())
 }

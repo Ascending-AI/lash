@@ -210,7 +210,6 @@ async fn core(
             .expect("memory backend"),
     );
     LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("gpt-5.4")

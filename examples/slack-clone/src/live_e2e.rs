@@ -619,7 +619,6 @@ async fn finish_live_core<T>(
 }
 
 async fn finish_smoke_stream_with_timeout(
-    stream_session: &lash::LashSession,
     handle: lash::SendHandle,
     turn_timeout: Duration,
 ) -> std::result::Result<(lash::TurnReport, usize), FailureReason> {
@@ -639,9 +638,13 @@ async fn finish_smoke_stream_with_timeout(
             Ok((result.result, activity_count))
         }
         Ok(Err(primary)) => {
-            stream_session.cancel_running_turns_with_origin(Some(
-                "slack-clone-live-e2e smoke stream failure".to_string(),
-            ));
+            if let Err(cancel_error) = handle
+                .cancel()
+                .origin("slack-clone-live-e2e smoke stream failure")
+                .await
+            {
+                log_err!("slack-clone-live-e2e: smoke-stream cancel failed: {cancel_error}");
+            }
             while let Some(activity) = live_stream.next().await {
                 if let Err(drain_error) = activity {
                     log_err!(
@@ -660,9 +663,13 @@ async fn finish_smoke_stream_with_timeout(
             let primary = FailureReason::TurnTimedOut {
                 agent: "smoke-stream".to_string(),
             };
-            stream_session.cancel_running_turns_with_origin(Some(
-                "slack-clone-live-e2e smoke stream timeout".to_string(),
-            ));
+            if let Err(cancel_error) = handle
+                .cancel()
+                .origin("slack-clone-live-e2e smoke stream timeout")
+                .await
+            {
+                log_err!("slack-clone-live-e2e: smoke-stream cancel failed: {cancel_error}");
+            }
             // The handle's activity channel is bounded. Keep receiving after
             // cancellation so a producer blocked in emit can reach its owned
             // completion JoinHandle before factory shutdown.
@@ -713,7 +720,7 @@ async fn run_smoke_probes(
             .send(TurnInput::text("Reply now."))
             .await
             .map_err(FailureReason::harness)?;
-        finish_smoke_stream_with_timeout(&stream_session, handle, TURN_TIMEOUT).await
+        finish_smoke_stream_with_timeout(handle, TURN_TIMEOUT).await
     }
     .await;
     let (stream, stream_activity_count) =

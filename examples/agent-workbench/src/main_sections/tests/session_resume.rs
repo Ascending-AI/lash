@@ -54,7 +54,6 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     let first_core = explicit_durable_test_facets(&data_dir)
         .provider(first_provider)
         .model(model.clone())
-        .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build first workbench core");
     let first_session = first_core
@@ -218,7 +217,6 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     let resumed_core = explicit_durable_test_facets(&data_dir)
         .provider(resumed_provider)
         .model(model)
-        .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build reconstructed workbench core");
     let resumed_session_ids =

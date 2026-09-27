@@ -44,7 +44,7 @@ fn restart_core(
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(lash_core::LeaseOwnerIdentity::opaque(
             owner,
             format!("{owner}:incarnation"),

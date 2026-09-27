@@ -185,9 +185,9 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
     let session = core.session("automatic-queued-retry").open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("first admitted input"))
+        .send(TurnInput::text("first admitted input"))
         .id("first")
-        .send()
+        .accepted()
         .await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -204,9 +204,9 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
     );
     session
         .durable()
-        .enqueue(TurnInput::text("later arrival"))
+        .send(TurnInput::text("later arrival"))
         .id("later")
-        .send()
+        .accepted()
         .await?;
     probe.hook_release.add_permits(1);
     tokio::time::timeout(
@@ -262,9 +262,9 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
     );
     session
         .durable()
-        .enqueue(TurnInput::text("distinct submission"))
+        .send(TurnInput::text("distinct submission"))
         .id("distinct")
-        .send()
+        .accepted()
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
@@ -390,9 +390,9 @@ async fn cold_queued_child_process() -> Result<()> {
     if crash {
         session
             .durable()
-            .enqueue(TurnInput::text("cold input"))
+            .send(TurnInput::text("cold input"))
             .id("cold-input")
-            .send()
+            .accepted()
             .await?;
         let running_session = session.clone();
         let running = tokio::spawn(async move { drain_queued(&running_session, None).await });
@@ -631,9 +631,9 @@ async fn exhausted_input_root_resumes_or_is_withdrawn_without_new_input() -> Res
         let session = core.session("exhausted-queued-run").open().await?;
         session
             .durable()
-            .enqueue(TurnInput::text("single submission"))
+            .send(TurnInput::text("single submission"))
             .id("original")
-            .send()
+            .accepted()
             .await?;
         tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -954,13 +954,13 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
                     let source = if call == 1 {
                         let session = durable.lock_recover().clone().unwrap();
                         session
-                            .enqueue(TurnInput::text("withheld after tool stop"))
+                            .send(TurnInput::text("withheld after tool stop"))
                             .id("withheld-input")
                             .ingress(lash_core::TurnInputIngress::active_turn(
                                 lash_core::TurnId::from("stopped-withheld"),
                                 lash_core::TurnInputCheckpointBoundary::BeforeCompletion,
                             ))
-                            .send()
+                            .accepted()
                             .await
                             .unwrap();
                         "await tools.app_lookup({});"
@@ -978,14 +978,14 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::new(StopQueuedTool))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stopped-withheld").open().await?;
     *durable.lock_recover() = Some(session.durable());
     session
         .durable()
-        .enqueue(TurnInput::text("start tool stop"))
-        .send()
+        .send(TurnInput::text("start tool stop"))
+        .accepted()
         .await?;
     let output = drain_queued(&session, Some("stopped-withheld"))
         .await?
@@ -1006,7 +1006,7 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
             .turn_input_applications()
             .await?
             .iter()
-            .any(|application| application.source_key.as_deref() == Some("host:withheld-input"))
+            .any(|application| application.source_key.as_deref() == Some("withheld-input"))
     );
     assert!(session.durable().pending_queued_run().await?.is_none());
     Ok(())

@@ -152,11 +152,6 @@ impl EmbedError {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SendError {
-    /// The core runs no session work on its backend, and cannot drive the
-    /// session in the caller's task either, so an accepted input would never
-    /// run. Nothing was accepted.
-    #[error("the core runs no session work on this backend")]
-    NoSessionWork,
     /// The input carries process-local turn context (a protocol extension,
     /// live plugin inputs, a per-turn prompt) that cannot cross
     /// durable acceptance. Nothing was accepted. Session configuration is the
@@ -357,10 +352,7 @@ impl EmbedError {
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
             | Self::UnknownSession { .. } => true,
-            Self::Send(error) => matches!(
-                **error,
-                SendError::NoSessionWork | SendError::LiveTurnContext { .. }
-            ),
+            Self::Send(error) => matches!(**error, SendError::LiveTurnContext { .. }),
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(err) => err.is_terminal(),

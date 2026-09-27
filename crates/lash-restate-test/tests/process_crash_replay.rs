@@ -116,7 +116,6 @@ fn build_core(restate: &RestateTestBackend, executions: &Arc<AtomicUsize>) -> la
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(executions),
         }) as Arc<dyn lash_core::ToolProvider>)
-        .without_queued_work()
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "lash-restate-test",
             "process-crash-replay",

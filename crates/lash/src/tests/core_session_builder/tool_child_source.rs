@@ -12,7 +12,7 @@ fn builder(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
 }
 
 /// What the backend's tool-child host holds now, asked by installing this

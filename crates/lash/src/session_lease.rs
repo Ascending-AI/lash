@@ -223,7 +223,7 @@ mod tests {
             )
             .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-            .without_queued_work()
+            .map_backend(crate::tests::inline_session_work)
             .build(crate::testing::runtime_lease_owner())
             .expect("build clock-domain fixture core");
         ClockDomainFixture { core, store }

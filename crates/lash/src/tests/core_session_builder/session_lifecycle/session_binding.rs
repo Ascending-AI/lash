@@ -109,14 +109,14 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     assert_eq!(assistant_prose(&result.activities), "receiving-provider");
 
     let turn_id = lash_sansio::TurnId::from("owner-preserved-turn");
-    resumed
-        .request_turn_cancel(
-            &turn_id,
-            "resume-owner-request",
-            Some("test".to_string()),
-            None,
-        )
-        .await?;
+    assert!(matches!(
+        resumed
+            .cancel(crate::CancelTarget::Root(turn_id.clone()))
+            .request_id("resume-owner-request")
+            .origin("test")
+            .await?,
+        crate::CancelReceipt::Requested { .. }
+    ));
 
     let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
         source_catalog.as_ref(),
@@ -132,7 +132,10 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     );
     let duplicate = source_driver
         .request_cancel(crate::TurnCancelRequest::new(
-            crate::TurnAddress::new("owner-preserved", &turn_id),
+            crate::TurnAddress::new(
+                "owner-preserved",
+                lash_core::drive::physical_turn_of(&turn_id, 0),
+            ),
             "resume-owner-probe",
             Some("test".to_string()),
         ))

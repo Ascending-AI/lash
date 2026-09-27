@@ -28,12 +28,12 @@
 //! [`SessionStoreFactory::open_existing_store_by_id`](lash_core::SessionStoreFactory::open_existing_store_by_id),
 //! never `create_store`. Resolution happens at most once per handle (shared by
 //! its clones) and is reused afterwards. Every queue operation therefore
-//! requires a session id the store already knows: enqueueing to an id that was
+//! requires a session id the store already knows: sending to an id that was
 //! never created fails with [`EmbedError::UnknownSession`], and to a deleted
 //! one with [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
 //! Nothing is stored and no driver is woken in either case. Create the session
 //! first — `core.session(id).create()`, or `open()` if a runtime is wanted
-//! anyway — then enqueue.
+//! anyway — then send.
 //!
 //! A catalog that cannot resolve a session by id at all is a different answer
 //! from a session that is not there: it surfaces as
@@ -66,7 +66,7 @@ use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch, QueuedWorkClaim,
-    TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
+    TurnInputClaim,
 };
 use lash_sansio::SessionId;
 use tokio::sync::OnceCell;
@@ -232,19 +232,6 @@ impl DurableSession {
             Err(EmbedError::UnknownSession { .. })
             | Err(EmbedError::Store(lash_core::StoreError::SessionDeleted { .. })) => Ok(None),
             Err(err) => Err(err),
-        }
-    }
-
-    /// Creates a builder for durably enqueueing turn input.
-    ///
-    /// The session id must already be known to the store; see the
-    /// [module documentation](self).
-    pub fn enqueue(&self, input: TurnInput) -> EnqueueTurnBuilder {
-        EnqueueTurnBuilder {
-            durable: self.clone(),
-            input,
-            id: None,
-            ingress: TurnInputIngress::NextTurn,
         }
     }
 
@@ -452,58 +439,5 @@ impl DurableSession {
                 session_id: self.session_id.clone(),
                 message,
             })
-    }
-}
-
-/// Builder for configuring enqueue turn.
-///
-/// The builder owns its [`DurableSession`] (a cheap shared handle), so
-/// `session.durable().enqueue(input).send().await` reads as one expression.
-pub struct EnqueueTurnBuilder {
-    durable: DurableSession,
-    input: TurnInput,
-    id: Option<String>,
-    ingress: TurnInputIngress,
-}
-
-impl EnqueueTurnBuilder {
-    /// Sets the idempotency identifier for the enqueued input.
-    pub fn id(mut self, id: impl Into<String>) -> Self {
-        self.id = Some(id.into());
-        self
-    }
-
-    pub fn ingress(mut self, ingress: TurnInputIngress) -> Self {
-        self.ingress = ingress;
-        self
-    }
-
-    /// Persist the input and return stable durable-acceptance identity.
-    ///
-    /// For retryable host requests, supply [`id`](Self::id) again after an
-    /// ambiguous transport failure; its source key is the idempotency identity.
-    /// Mutable queue lifecycle state is available from
-    /// [`DurableSession::pending_turn_inputs`].
-    ///
-    /// The session must already exist: an unknown or deleted id is refused
-    /// without storing anything or waking any driver.
-    pub async fn send(self) -> Result<TurnInputAcceptanceReceipt> {
-        let source_key = self.id.map(|id| format!("host:{id}"));
-        let store = self.durable.store().await?;
-        let enqueued = self
-            .durable
-            .ops
-            .enqueue_turn_input(store, self.input, self.ingress, source_key)
-            .await?;
-        Ok(TurnInputAcceptanceReceipt::from(&enqueued))
-    }
-}
-
-impl std::future::IntoFuture for EnqueueTurnBuilder {
-    type Output = Result<TurnInputAcceptanceReceipt>;
-    type IntoFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Self::Output>>>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        Box::pin(self.send())
     }
 }

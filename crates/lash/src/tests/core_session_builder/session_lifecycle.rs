@@ -605,7 +605,7 @@ async fn typed_core_builders_require_explicit_runtime_settings() {
         crate::TurnBudget::Unbounded,
     )
     .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())

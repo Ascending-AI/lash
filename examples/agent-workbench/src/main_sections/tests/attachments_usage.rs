@@ -328,8 +328,7 @@ fn attachment_usage_gate_core(
     );
     let mut builder = explicit_durable_test_facets_on(backend.backend)
         .provider(provider)
-        .model(model)
-        .without_queued_work();
+        .model(model);
     if let Some(trace_sink) = trace_sink {
         builder = builder
             .trace_sink(trace_sink)

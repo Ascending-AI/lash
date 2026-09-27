@@ -106,19 +106,20 @@ pub(crate) async fn admit_turn_input(
     // The Durable Session never creates (ADR 0097), and the workbench admits
     // input for a session whose first turn may not have run yet. `create()` is
     // the explicit, idempotent verb for that: it writes the catalog entry and
-    // builds no runtime, so the admission is not a side effect of the enqueue.
+    // builds no runtime, so the admission is not a side effect of the send.
     let acceptance = state
         .core
         .session(session_id.clone())
         .create()
         .await
         .map_err(|error| state.session_admission_error(session_id, surface, error))?
-        .enqueue(input)
+        .send(input)
         .ingress(ingress)
         .id(source_id)
-        .send()
         .await
-        .map_err(|error| state.session_admission_error(session_id, surface, error))?;
+        .map_err(|error| state.session_admission_error(session_id, surface, error))?
+        .receipt()
+        .clone();
     reject_if_active_turn_settled(state, &acceptance).await?;
     let accepted_state = lash::persistence::TurnInputState::open(acceptance.ingress.clone());
     let receipt = TurnInputReceipt {

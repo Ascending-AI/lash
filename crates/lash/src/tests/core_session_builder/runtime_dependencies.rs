@@ -13,7 +13,8 @@ use lash_sansio::SessionId;
 /// A standard-mode builder over a fresh memory backend with a model and
 /// provider already named.
 async fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
-    peer_coherence_builder_over(memory_backend().await.into()).without_queued_work()
+    peer_coherence_builder_over(memory_backend().await.into())
+        .map_backend(crate::tests::inline_session_work)
 }
 
 fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
@@ -28,7 +29,7 @@ fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::Lash
 async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
         LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
-            .without_queued_work()
+            .map_backend(crate::tests::inline_session_work)
             .provider(mock_provider())
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner()),
@@ -47,7 +48,7 @@ async fn commit_budget_is_required_for_builder_construction_and_deserialization(
 async fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
         LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
-            .without_queued_work()
+            .map_backend(crate::tests::inline_session_work)
             .provider(mock_provider())
             .model(mock_model_spec())
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
@@ -92,7 +93,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
         .model(mock_model_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())
     };
 
@@ -362,7 +363,7 @@ async fn backend_process_work_configures_the_core_registry() -> Result<()> {
         .clone();
     let core =
         explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(backend.into()))
-            .without_queued_work()
+            .map_backend(crate::tests::inline_session_work)
             .build(crate::testing::runtime_lease_owner())?;
 
     assert!(Arc::ptr_eq(&core.process_registry(), &driver_registry));

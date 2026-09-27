@@ -1531,7 +1531,7 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
             append_count: Arc::clone(&append_count),
             max_appends: 1,
         }))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
@@ -1594,7 +1594,7 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
             append_count: Arc::clone(&append_count),
             max_appends: 1,
         }))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
@@ -1651,14 +1651,14 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
             append_count: Arc::clone(&append_count),
             max_appends: 1,
         }))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("switch frames from queued work"))
+        .send(TurnInput::text("switch frames from queued work"))
         .id("queued-continue-as")
-        .send()
+        .accepted()
         .await?;
 
     let output = drain_queued(&session, None)
@@ -1762,7 +1762,7 @@ finish({ established: established.total });"#,
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(provider)
         .model(mock_model_spec())
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let established = session
@@ -1786,9 +1786,9 @@ finish({ established: established.total });"#,
         .await?;
     session
         .durable()
-        .enqueue(TurnInput::text("switch frames with a durable seed"))
+        .send(TurnInput::text("switch frames with a durable seed"))
         .id("queued-continue-as-seed")
-        .send()
+        .accepted()
         .await?;
 
     let turn_session = session.clone();
@@ -1799,9 +1799,9 @@ finish({ established: established.total });"#,
         .expect("first provider call signal should arrive");
     session
         .durable()
-        .enqueue(TurnInput::text("keep this pending across the frame switch"))
+        .send(TurnInput::text("keep this pending across the frame switch"))
         .id("queued-after-continue-as")
-        .send()
+        .accepted()
         .await?;
     release_first_provider_call.notify_one();
     let output = turn

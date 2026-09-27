@@ -108,10 +108,9 @@ async fn store_maintenance_fixture(
             .build()
             .expect("store-maintenance model spec"),
     );
-    let core = explicit_durable_test_facets_over(backend)
+    let core = explicit_durable_test_facets_on(crate::tests::inline_work_backend(backend.into()))
         .provider(provider)
         .model(model)
-        .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build store-maintenance core");
     let process_observer = core

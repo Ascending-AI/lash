@@ -124,7 +124,7 @@ impl SummaryBackend {
                 ),
             ))
             .process_event_sink(Arc::new(sink.clone()))
-            .without_queued_work()
+            .map_backend(crate::tests::inline_session_work)
             .build(lash_core::LeaseOwnerIdentity::opaque(
                 owner,
                 format!("{owner}:incarnation"),

@@ -1,6 +1,6 @@
 use super::tests::{
-    detached_trigger_store, explicit_durable_test_facets, run_async_test_on_stack_budget,
-    spawn_restate_ingress_capture, text_response,
+    detached_trigger_store, explicit_durable_test_facets, inline_durable_test_facets,
+    run_async_test_on_stack_budget, spawn_restate_ingress_capture, text_response,
 };
 use super::*;
 use lash::SessionId;
@@ -109,10 +109,9 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .build()
         .expect("model spec");
     let event_tx = SessionEventRegistry::new(16);
-    let core = explicit_durable_test_facets(&data_dir)
+    let core = inline_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -276,12 +275,13 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .durable()
         .await
         .expect("durable handle for the raced session")
-        .enqueue(lash::TurnInput::text("must not be stranded"))
+        .send(lash::TurnInput::text("must not be stranded"))
         .ingress(checked_ingress)
         .id("settle-race-input")
-        .send()
         .await
-        .expect("enqueue after the checked turn settled");
+        .expect("send after the checked turn settled")
+        .receipt()
+        .clone();
     let race_error = reject_if_active_turn_settled(&state, &raced)
         .await
         .expect_err("settled active-turn input must be rejected");

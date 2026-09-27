@@ -65,7 +65,6 @@ fn core_over(backend: lash::Backend) -> LashCore {
         .build()
         .into_handle();
     LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .without_queued_work()
         .provider(provider)
         .plugin(lash_core::testing::process_engine_plugin_fixture())
         .model(

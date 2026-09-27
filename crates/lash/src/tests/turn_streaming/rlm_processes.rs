@@ -12,7 +12,7 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
             .provider(queued_text_provider(vec![typescript_block(&source)]))
             .model(mock_model_spec())
-            .without_queued_work()
+            .map_backend(crate::tests::inline_session_work)
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-leaf-append-stale-rollback")
@@ -210,7 +210,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .provider(first_provider)
     .model(mock_model_spec())
     .tools(Arc::new(FrameStateDeferredTools))
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
 
@@ -325,7 +325,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     let reopened_core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(follow_on_provider)
         .model(mock_model_spec())
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     let execution_state = reopened_session
@@ -456,14 +456,14 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
             append_count: Arc::clone(&append_count),
             max_appends: 2,
         }))
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
         .durable()
-        .enqueue(TurnInput::text("start chained frame handoff"))
+        .send(TurnInput::text("start chained frame handoff"))
         .id("queued-chained-continue-as")
-        .send()
+        .accepted()
         .await?;
 
     let output = drain_queued(&session, None)
@@ -507,7 +507,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let controller = EffectRecorder::default();
     let backend = controller.layered_over(backend);
     let core = LashCore::standard_builder(backend.into(), crate::TurnBudget::Unbounded)
-        .without_queued_work()
+        .map_backend(crate::tests::inline_session_work)
         .provider(agent_frame_switch_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AgentFrameSwitchTools))
@@ -945,14 +945,14 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
             .into_handle(),
     )
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
         .durable()
-        .enqueue(TurnInput::text("what is the status of the migration?"))
+        .send(TurnInput::text("what is the status of the migration?"))
         .id("fig1573-queued-request")
-        .send()
+        .accepted()
         .await?;
     drop(first_session);
     drop(first_core);
@@ -1003,7 +1003,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
             .into_handle(),
     )
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
@@ -1096,18 +1096,18 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
             .into_handle(),
     )
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
         .durable()
-        .enqueue(TurnInput::text("what is the status of the migration?"))
+        .send(TurnInput::text("what is the status of the migration?"))
         .id("fig1573-queued-request")
         .ingress(lash_core::TurnInputIngress::active_turn(
             interrupted_turn_id,
             lash_core::TurnInputCheckpointBoundary::default(),
         ))
-        .send()
+        .accepted()
         .await?;
     {
         let running = first_session
@@ -1142,7 +1142,7 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
             .into_handle(),
     )
     .model(mock_model_spec())
-    .without_queued_work()
+    .map_backend(crate::tests::inline_session_work)
     .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
@@ -1233,7 +1233,7 @@ pub(super) fn gated_app_lookup_provider(
 }
 
 #[tokio::test]
-pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary() -> Result<()> {
+pub(super) async fn an_after_step_cancel_stops_at_the_step_boundary() -> Result<()> {
     let started = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1252,7 +1252,6 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stop-after-step").open().await?;
-    let stopper = session.clone();
 
     let handle = session
         .send(TurnInput::text("use the tool, then stop"))
@@ -1261,13 +1260,14 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     // task, so the events follower is what starts the turn.
     let mut events = handle.events();
     started.notified().await;
-    assert_eq!(
-        stopper.cancel_running_turns_with_origin_and_mode(
-            Some("shutdown".to_string()),
-            crate::TurnCancelMode::AfterStep
-        ),
-        1
-    );
+    assert!(matches!(
+        handle
+            .cancel()
+            .origin("shutdown")
+            .mode(crate::TurnCancelMode::AfterStep)
+            .await?,
+        crate::CancelReceipt::Requested { .. }
+    ));
     released.store(true, Ordering::SeqCst);
     release.notify_one();
 
@@ -1294,12 +1294,11 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
         1,
         "no further model call starts after the step boundary"
     );
-    assert_eq!(stopper.cancel_running_turns(), 0);
     Ok(())
 }
 
 #[tokio::test]
-pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort() -> Result<()> {
+pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() -> Result<()> {
     let started = Arc::new(tokio::sync::Notify::new());
     let provider_calls = Arc::new(AtomicUsize::new(0));
     // The response never arrives, so an after-step stop can never land by
@@ -1318,28 +1317,45 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("escalate-after-step").open().await?;
-    let stopper = session.clone();
 
     let handle = session.send(TurnInput::text("hang, then escalate")).await?;
     // This core runs no session work: a waiter drives the input in its own
     // task, so the events follower is what starts the turn.
     let _events = handle.events();
     started.notified().await;
-    assert_eq!(
-        stopper.cancel_running_turns_with_mode(crate::TurnCancelMode::AfterStep),
-        1
-    );
+    let requested = |receipt: crate::CancelReceipt| match receipt {
+        crate::CancelReceipt::Requested { receipt, .. } => receipt.outcome,
+        other => panic!("the running root must receive the request, got {other:?}"),
+    };
+    assert!(matches!(
+        requested(
+            handle
+                .cancel()
+                .mode(crate::TurnCancelMode::AfterStep)
+                .await?
+        ),
+        lash_core::facade_support::TurnCancelOutcome::Requested(_)
+    ));
     for _ in 0..32 {
         tokio::task::yield_now().await;
     }
-    assert_eq!(
-        stopper.cancel_running_turns_with_mode(crate::TurnCancelMode::AfterStep),
-        1,
+    assert!(
+        matches!(
+            requested(
+                handle
+                    .cancel()
+                    .mode(crate::TurnCancelMode::AfterStep)
+                    .await?
+            ),
+            lash_core::facade_support::TurnCancelOutcome::AlreadyRequested(_)
+        ),
         "the after-step stop leaves the turn running until its step closes"
     );
-    assert_eq!(
-        stopper.cancel_running_turns_with_origin(Some("operator".to_string())),
-        1,
+    assert!(
+        matches!(
+            requested(handle.cancel().origin("operator").await?),
+            lash_core::facade_support::TurnCancelOutcome::Escalated(_)
+        ),
         "escalation aborts the still-running turn"
     );
 
@@ -1353,7 +1369,6 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     assert_eq!(evidence.mode, crate::TurnCancelMode::Immediate);
     assert_eq!(evidence.honoured_after_step, None);
     assert!(result.tool_calls.is_empty(), "the response never arrived");
-    assert_eq!(stopper.cancel_running_turns(), 0);
     Ok(())
 }
 

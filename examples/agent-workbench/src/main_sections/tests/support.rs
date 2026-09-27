@@ -99,6 +99,16 @@ impl DecoratedBackend {
     }
 }
 
+/// `backend` driven by the inline session-work double
+/// ([`inert_queued_work_port`](crate::inert_queued_work_port)): an accepted
+/// input runs only in the task that waits on it, so a law holds a turn open
+/// and reads what is pending or claimed beside it.
+pub(crate) fn inline_work_backend(backend: lash::Backend) -> lash::Backend {
+    DecoratedBackend::over(backend)
+        .with_queued_work(crate::inert_queued_work_port())
+        .into()
+}
+
 impl From<DecoratedBackend> for lash::Backend {
     fn from(decorated: DecoratedBackend) -> Self {
         decorated.layered.into_backend()

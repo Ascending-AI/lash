@@ -17,9 +17,7 @@ use crate::support::{
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{UnreportedUsageAttempt, UsageReconciliationReport};
-use lash_core::{
-    LiveReplayStoreError, SessionObservationEvent, TurnCancelMode, facade_support::LiveReplayGap,
-};
+use lash_core::{LiveReplayStoreError, SessionObservationEvent, facade_support::LiveReplayGap};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
     RemoteSessionObservationEvent,
@@ -205,7 +203,7 @@ impl SessionBuilder {
     /// [`open`](Self::open) would have used, and stops there: no runtime, no
     /// Session Execution Lease, no plugin session, no lifecycle event. Use it
     /// when a host admits durable input for a session whose first turn has not
-    /// run yet — `core.session(id).create().await?.enqueue(input).send().await?`
+    /// run yet — `core.session(id).create().await?.send(input).await?`
     /// — instead of reaching into the catalog with a hand-built request.
     ///
     /// Idempotent: creating an id that already exists rebinds it and preserves
@@ -449,7 +447,6 @@ impl SessionBuilder {
             binding,
             parent_session_id: recorded_parent_session_id,
             process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
-            turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
     }
 
@@ -653,7 +650,6 @@ pub struct LashSession {
     pub(crate) binding: Arc<BoundSession>,
     pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
-    pub(crate) turn_cancels: crate::turn::TurnCancelRegistry,
 }
 
 /// Lightweight, consuming handle returned by [`LashSession::park`].
@@ -724,8 +720,8 @@ impl LashSession {
     /// This consumes the session and requires exclusive ownership: any cloned
     /// [`LashSession`] handle or in-flight turn keeps a live reference to the
     /// same runtime, so `close` returns [`EmbedError::SessionStillInUse`] until
-    /// those are dropped or finished. Cancel running turns first with
-    /// [`cancel_running_turns`](Self::cancel_running_turns) if needed.
+    /// those are dropped or finished. Cancel a running send first with
+    /// [`SendHandle::cancel`](crate::SendHandle::cancel) if needed.
     ///
     /// To keep a handle for later resumption instead of discarding the session,
     /// use [`park`](Self::park).
@@ -755,7 +751,7 @@ impl LashSession {
     ///   [`LashSession`] or an in-flight turn holds another reference and makes
     ///   `park` return [`EmbedError::SessionStillInUse`]. Because an executing
     ///   turn holds such a reference, parking is effectively an *idle-session*
-    ///   operation: finish or [`cancel_running_turns`](Self::cancel_running_turns)
+    ///   operation: finish or cancel ([`SendHandle::cancel`](crate::SendHandle::cancel))
     ///   first. The store commit itself does not observe an active turn; the
     ///   exclusive-ownership guard is what makes mid-turn parking an explicit
     ///   error rather than a silent partial flush.
@@ -916,159 +912,6 @@ impl LashSession {
         Ok(receipt)
     }
 
-    /// Request cooperative cancellation of exactly one turn in this session.
-    ///
-    /// The request is compiled onto the deployment's keyed-promise control
-    /// seam, which every effect host journals, so another process or a
-    /// replayed owner observes the request. `origin` is opaque host-domain data that Lash records
-    /// without interpretation. Detached effects are not guaranteed to stop.
-    /// `turn_id` is routing identity, not authorization; hosts must authorize
-    /// callers before invoking this API. Undelivered active-turn input is
-    /// deferred to the next turn; use
-    /// [`request_turn_cancel_with_disposition`](Self::request_turn_cancel_with_disposition)
-    /// to choose a different disposition.
-    pub async fn request_turn_cancel(
-        &self,
-        turn_id: &TurnId,
-        request_id: impl Into<String>,
-        origin: Option<String>,
-        reason: Option<String>,
-    ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
-        self.request_turn_cancel_with_disposition(
-            turn_id,
-            request_id,
-            origin,
-            reason,
-            lash_core::facade_support::TurnCancelDisposition::Defer,
-        )
-        .await
-    }
-
-    /// Request cooperative cancellation of exactly one turn in this session,
-    /// choosing how Lash handles active-turn input the turn did not deliver.
-    ///
-    /// The request is compiled onto the deployment's keyed-promise control
-    /// seam, which every effect host journals, so another process or a
-    /// replayed owner observes the request. `origin` is opaque host-domain data that Lash records
-    /// without interpretation. Detached effects are not guaranteed to stop.
-    /// `turn_id` is routing identity, not authorization; hosts must authorize
-    /// callers before invoking this API. `undelivered` is first-writer-wins for
-    /// the addressed turn.
-    pub async fn request_turn_cancel_with_disposition(
-        &self,
-        turn_id: &TurnId,
-        request_id: impl Into<String>,
-        origin: Option<String>,
-        reason: Option<String>,
-        undelivered: lash_core::facade_support::TurnCancelDisposition,
-    ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
-        self.request_turn_cancel_with_mode(
-            turn_id,
-            request_id,
-            origin,
-            reason,
-            undelivered,
-            TurnCancelMode::Immediate,
-        )
-        .await
-    }
-
-    /// Request cancellation of exactly one turn in this session, choosing
-    /// both the undelivered-input disposition and when the stop is honoured.
-    ///
-    /// [`TurnCancelMode::Immediate`] fires the turn's cooperative token and
-    /// backtracks uncommitted work to the last checkpoint.
-    /// [`TurnCancelMode::AfterStep`] lets the current protocol iteration run
-    /// to its step boundary (response streamed, tool calls completed,
-    /// checkpoint committed) and stops there; nothing backtracks. An immediate
-    /// request on a turn that already holds an after-step request escalates
-    /// it and reports [`TurnCancelOutcome::Escalated`](lash_core::facade_support::TurnCancelOutcome::Escalated);
-    /// a same-or-weaker request reports `AlreadyRequested`. No timer escalates
-    /// on Lash's behalf; that is host policy.
-    ///
-    /// Both of those outcomes require agreeing with the accepted
-    /// undelivered-input disposition: the first request the turn's
-    /// cancellation gate accepts owns that policy for the rest of the turn.
-    /// A repeat asking for a different `undelivered` is refused with
-    /// [`TurnCancelOutcome::PolicyConflict`](lash_core::facade_support::TurnCancelOutcome::PolicyConflict),
-    /// which names the requested and accepted policies and the accepted
-    /// request, and changes nothing — not the honoured policy, not the durable
-    /// request row, not the queued inputs. Escalating timing never substitutes
-    /// the disposition; it only changes when the accepted policy is applied.
-    pub async fn request_turn_cancel_with_mode(
-        &self,
-        turn_id: &TurnId,
-        request_id: impl Into<String>,
-        origin: Option<String>,
-        reason: Option<String>,
-        undelivered: lash_core::facade_support::TurnCancelDisposition,
-        mode: TurnCancelMode,
-    ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
-        let mut request = lash_core::facade_support::TurnCancelRequest::new(
-            lash_core::facade_support::TurnAddress::new(self.session_id(), turn_id),
-            request_id,
-            origin,
-        )
-        .undelivered(undelivered)
-        .mode(mode);
-        request.reason = reason;
-        lash_core::facade_support::TurnWorkDriver::for_session(
-            self.binding.effect_host(),
-            self.binding.session_id(),
-            self.binding.store(),
-        )
-        .request_cancel(request)
-        .await
-        .map_err(EmbedError::Runtime)
-    }
-
-    /// Cancel every turn currently executing through this opened session
-    /// (including its clones) and report how many were signalled.
-    ///
-    /// This process-local lever records no origin. User controls, shutdown,
-    /// and provider plumbing should call
-    /// [`cancel_running_turns_with_origin`](Self::cancel_running_turns_with_origin).
-    /// Each signalled turn receives the stop as a durable request on its own
-    /// cancellation gate, with lash's internal evidence, and honours it where
-    /// it honours any request. Host-facing stop controls should still retain
-    /// an exact turn id and call
-    /// [`request_turn_cancel`](Self::request_turn_cancel), which carries the
-    /// host's own request id and reaches separately opened handles too.
-    /// A cancelled turn finishes with
-    /// `TurnOutcome::Stopped(TurnStop::Cancelled)` and commits like any other
-    /// turn; the session stays usable.
-    ///
-    /// Scope: turns started from this `LashSession` instance and its clones.
-    /// A handle opened separately for the same session id has its own
-    /// registry and is not reached.
-    pub fn cancel_running_turns(&self) -> usize {
-        self.cancel_running_turns_with_origin(None)
-    }
-
-    /// Cancel active process-local turns with an opaque host-defined origin.
-    pub fn cancel_running_turns_with_origin(&self, origin: Option<String>) -> usize {
-        self.turn_cancels.cancel_all(origin)
-    }
-
-    /// Stop active process-local turns in the given mode and report how many
-    /// were signalled. [`TurnCancelMode::Immediate`] is
-    /// [`cancel_running_turns`](Self::cancel_running_turns);
-    /// [`TurnCancelMode::AfterStep`] lets each turn finish its current
-    /// protocol iteration and stop at that step boundary.
-    pub fn cancel_running_turns_with_mode(&self, mode: TurnCancelMode) -> usize {
-        self.cancel_running_turns_with_origin_and_mode(None, mode)
-    }
-
-    /// [`cancel_running_turns_with_mode`](Self::cancel_running_turns_with_mode)
-    /// with an opaque host-defined origin recorded on the evidence.
-    pub fn cancel_running_turns_with_origin_and_mode(
-        &self,
-        origin: Option<String>,
-        mode: TurnCancelMode,
-    ) -> usize {
-        self.turn_cancels.cancel_all_with_mode(origin, mode)
-    }
-
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),
@@ -1105,7 +948,7 @@ impl LashSession {
     ///
     /// ```ignore
     /// let pending = session.durable().pending_turn_inputs().await?;
-    /// session.durable().enqueue(input).id("draft-1").send().await?;
+    /// session.durable().send(input).id("draft-1").await?;
     /// ```
     pub fn durable(&self) -> DurableSession {
         DurableSession::from_binding(
