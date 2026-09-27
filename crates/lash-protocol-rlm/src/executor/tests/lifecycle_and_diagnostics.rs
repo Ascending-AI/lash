@@ -108,6 +108,66 @@ fn colliding_host_catalog() -> lash_core::ToolCatalog {
     ])
 }
 
+/// Pauses after the first journaled cell checkpoint has observed no stop.
+/// The VM reaches this effect only after running 2^20 instructions in the
+/// infinite loop. The layer releases it only after the host records a stop.
+struct SpinningCellCheckpoint {
+    entered: lash_core::CancellationToken,
+    stop_recorded: lash_core::CancellationToken,
+    first_gate: Mutex<Option<lash_core::AwaitEventKey>>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::testing::EffectLayer for SpinningCellCheckpoint {
+    async fn execute_effect(
+        &self,
+        inner: &dyn lash_core::RuntimeEffectController,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        let first_checkpoint = envelope
+            .invocation
+            .effect_id
+            .starts_with("turn_cancel.cell_checkpoint.1.");
+        if first_checkpoint {
+            let lash_core::RuntimeEffectCommand::PeekAwaitEvent { key } = &envelope.command else {
+                panic!("the cell checkpoint peeks its cancellation gate");
+            };
+            *self.first_gate.lock_recover() = Some(key.clone());
+        }
+        let outcome = inner.execute_effect(envelope, local_executor).await?;
+        if first_checkpoint {
+            assert!(
+                matches!(
+                    &outcome,
+                    lash_core::RuntimeEffectOutcome::PeekAwaitEvent { resolution: None }
+                ),
+                "the running loop must observe an unset gate before the host stops it"
+            );
+            self.entered.cancel();
+            self.stop_recorded.cancelled().await;
+        }
+        Ok(outcome)
+    }
+
+    async fn resolve_await_event(
+        &self,
+        inner: &dyn lash_core::AwaitEventResolver,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        let outcome = inner.resolve_await_event(key, resolution).await?;
+        if self.first_gate.lock_recover().as_ref() == Some(key) {
+            assert!(
+                matches!(outcome, lash_core::ResolveOutcome::Accepted),
+                "the mid-spin stop must resolve the observed gate"
+            );
+            self.stop_recorded.cancel();
+        }
+        Ok(outcome)
+    }
+}
+
 async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let mut state = RlmExecutionState::new();
     // The deferred-resolution site installs its own invocation, so its
@@ -478,6 +538,7 @@ pub(super) async fn execute_and_collect_inventory(
     }
 }
 
+/// A stop recorded before execution is observed at the cell's first checkpoint.
 #[test]
 pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
     block_on(async {
@@ -548,7 +609,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 ),
             )
             .await
-            .unwrap_or_else(|_| panic!("{language}: running code did not observe cancellation"));
+            .unwrap_or_else(|_| panic!("{language}: the pre-armed stop was not observed"));
             handler.close().await.expect("close the cell's handler");
 
             let error = response.error.expect("host cancellation is classified");
@@ -584,6 +645,115 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 "{language}: a cold restore must exclude the cancelled tail"
             );
         }
+    });
+}
+
+#[test]
+pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
+    block_on(async {
+        let mut state = RlmExecutionState::for_engine("typescript");
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the first cell's handler");
+        let first = execute_code_with_channel_and_bounds(
+            &mut state,
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: "let survives: number = 7;".to_string(),
+            },
+            crate::testing::memory_artifact_store().await,
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+        )
+        .await;
+        handler
+            .close()
+            .await
+            .expect("close the first cell's handler");
+        assert_eq!(first.error, None);
+
+        let checkpoint = Arc::new(SpinningCellCheckpoint {
+            entered: lash_core::CancellationToken::new(),
+            stop_recorded: lash_core::CancellationToken::new(),
+            first_gate: Mutex::new(None),
+        });
+        let stop = lash_core::CancellationToken::new();
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the spinning cell's handler");
+        let context = lash_core::testing::code_execution_context_stopped_on(
+            crate::testing::double_ports_over_layer(&double, &handler, checkpoint.clone()),
+            stop.clone(),
+        )
+        .await;
+        let execution = async {
+            execute_code_with_channel_and_bounds(
+                &mut state,
+                context,
+                ExecRequest {
+                    language: "typescript".to_string(),
+                    code: "let cancelledTail: number = 1; while (true) {}".to_string(),
+                },
+                crate::testing::memory_artifact_store().await,
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+                crate::plugin::RlmChannel::Cell,
+            )
+            .await
+        };
+        let response = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (response, ()) = tokio::join!(execution, async {
+                checkpoint.entered.cancelled().await;
+                stop.cancel();
+                checkpoint.stop_recorded.cancelled().await;
+            });
+            response
+        })
+        .await
+        .expect("the running loop reaches a checkpoint and observes the mid-spin stop");
+        handler
+            .close()
+            .await
+            .expect("close the spinning cell's handler");
+
+        assert_eq!(
+            response
+                .error
+                .expect("the stopped cell reports an error")
+                .kind,
+            lash_core::CellFailureKind::Host
+        );
+        assert!(state.rlm.globals().get("cancelledTail").is_none());
+        assert!(state.rlm.globals().get("survives").is_some());
+        let snapshot = hydrate_snapshot(
+            state
+                .snapshot_execution_state(lash_core::FleetFormat::current())
+                .expect("snapshot after mid-spin cancellation"),
+        );
+        let mut restored = RlmExecutionState::for_engine("typescript");
+        restored
+            .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+            .expect("cold restore after mid-spin cancellation");
+        assert!(restored.rlm.globals().get("cancelledTail").is_none());
+        assert!(restored.rlm.globals().get("survives").is_some());
     });
 }
 
