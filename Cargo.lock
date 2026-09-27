@@ -2865,6 +2865,7 @@ dependencies = [
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
  "lash-internal-restate",
+ "lash-internal-restate-test",
  "lash-internal-s3-store",
  "lash-internal-sqlite-store",
  "lash-runtime",

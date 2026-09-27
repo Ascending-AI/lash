@@ -17,11 +17,12 @@
 //!   entirely.
 //! * `direct-turn`: the killed-worker case for a turn a host sent and waited
 //!   on. A send accepts before the engine drives it (ADR 0069), so the request
-//!   is durable while the provider is still parked, and the peer that takes
-//!   the lane recovers it through its own engine's session drive under the
-//!   same generation fence. The lane is re-staged after
-//!   the kill in the `takeover` shape, because the in-process drop the harness
-//!   kills with does release the lane and a dead worker does not.
+//!   is durable while the provider is still parked. The worker dies with its
+//!   turn attempt cut inside the model call; the server keeps the invocation
+//!   and re-drives it on the peer that takes the lane, under the same
+//!   generation fence. The lane is re-staged after the kill in the `takeover`
+//!   shape, because the cut attempt's lease guard does release the lane and a
+//!   dead worker does not.
 //! * `livelock`: the cause the procedure names for repeated CAS rejections,
 //!   induced directly at the persistence seam. ADR 0077 admission refuses a
 //!   second public turn while the lane is held, so this phase deliberately
@@ -36,11 +37,14 @@
 //! nothing waits for it to notice, because it never will: that absence is the
 //! point of the scenario.
 //!
-//! Every phase runs on SQLite, whose effect engine still drives these turns in
-//! process, and prints one JSON `checkpoint` line. PostgreSQL is storage only
-//! (ADR 0104): its session lease is exercised under Restate by the workers E2E
-//! until FIG-3600 replaces session leases. Session ids carry a per-run suffix,
-//! so no phase truncates tables.
+//! Every phase runs lash-restate's engine, the only driver of a turn (ADR
+//! 0104), on the in-process Restate server double over a SQLite store set, and
+//! prints one JSON `checkpoint` line. One engine serves every core of a phase,
+//! and exactly one core's session driver drives its turns: a phase that means
+//! a turn to run on another worker drops the worker before it and waits for
+//! its driver to go. PostgreSQL's session lease is exercised under a live
+//! Restate server by the workers E2E. Session ids carry a per-run suffix, so no
+//! phase truncates tables.
 
 use lash::SessionId;
 use lash::sync::MutexExt;
@@ -261,13 +265,12 @@ impl<S: tracing::Subscriber> Layer<S> for LeaseTraceCapture {
 /// requires the same observations from both.
 struct Backend {
     name: &'static str,
-    /// The one substrate every core of the phase runs on, its RLM factory's
-    /// Lashlang artifacts included.
+    /// The engine every core of the phase runs on, its RLM factory's Lashlang
+    /// artifacts included.
     backend: lash::Backend,
     factory: Arc<dyn SessionStoreFactory>,
-    /// The SQLite substrate itself, kept so a worker can be given handles
-    /// carrying its own failover window ([`Self::backend_with`]).
-    sqlite: Arc<lash_sqlite_store::SqliteBackend>,
+    /// The server double the engine reaches, and the engine itself.
+    double: lash_restate_test::RestateTestBackend,
     /// Held so the SQLite root outlives the phase.
     _scratch: tempfile::TempDir,
 }
@@ -278,43 +281,93 @@ impl Backend {
     }
 
     async fn sqlite() -> Result<Self> {
-        let scratch = tempfile::tempdir().context("scratch dir for the SQLite backend")?;
-        let backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::open(scratch.path().join("sessions"))
+        let scratch = tempfile::tempdir().context("scratch dir for the SQLite store set")?;
+        let stores = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(scratch.path().join("sessions"))
                 .await
-                .context("open the SQLite backend")?,
+                .context("open the SQLite store set")?,
         );
+        let factory: Arc<dyn SessionStoreFactory> = stores.session_store_factory();
+        let engine_stores: Arc<dyn lash::StoreSet> = stores;
+        let double = lash_restate_test::backend_with(
+            0,
+            lash_restate_test::ServerConfig::default(),
+            move |_| engine_stores,
+        )
+        .await
+        .context("build the Restate server double over the SQLite store set")?;
         Ok(Self {
             name: "sqlite",
-            factory: backend.session_store_factory(),
-            backend: Arc::clone(&backend).into(),
-            sqlite: backend,
+            factory,
+            backend: double.lash_backend(),
+            double,
             _scratch: scratch,
         })
     }
 
-    /// Fresh handles on this backend's databases whose durable effect-replay
-    /// leases expire on `timings` instead of the default term. A host shares
-    /// the `LeaseTimings` it configures on its runtime with the effect lane
-    /// (`SqliteEffectReplayOptions::lease_timings`), so a worker that means
-    /// for its claims to lapse on a short failover window must claim them
-    /// through a backend configured to that window.
-    async fn backend_with(&self, timings: lash::durability::LeaseTimings) -> Result<lash::Backend> {
-        let sqlite = self
-            .sqlite
-            .reopen_with_options_and_clock(
-                lash_sqlite_store::SqliteBackendOptions {
-                    effect_replay: lash_sqlite_store::SqliteEffectReplayOptions {
-                        lease_timings: timings,
-                        ..lash_sqlite_store::SqliteEffectReplayOptions::default()
-                    },
-                    ..self.sqlite.options().clone()
-                },
-                self.backend.clock(),
-            )
-            .await
-            .context("reopen the SQLite backend on the worker's failover window")?;
-        Ok(Arc::new(sqlite).into())
+    /// Wait until no core's session driver serves the engine, so the next
+    /// core built installs its own and drives the phase's next turn.
+    async fn await_driver_released(&self) -> Result<()> {
+        let slot = self.double.restate().session_work_engine().driver_slot();
+        tokio::time::timeout(GATE_TIMEOUT, async {
+            while slot.installed().is_some() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .context("the dropped worker's session driver was never released")
+    }
+
+    /// Kill the worker whose turn is parked in its model call: every
+    /// invocation the server is running is held back, and the turn's running
+    /// attempt is cut inside the model call, before the server stores its
+    /// result, as a dying process cuts it. The server keeps the invocations;
+    /// dropping the returned holds lets it re-drive them on whichever worker
+    /// serves the engine by then.
+    async fn kill_mid_turn(&self) -> Result<Vec<lash_restate_test::Hold>> {
+        let server = self.double.server();
+        let turn_service = self
+            .double
+            .service_name(lash_restate_test::TURN_DRIVER_SERVICE);
+        let mut holds = Vec::new();
+        let mut cut = 0;
+        for invocation in server.invocations() {
+            if invocation.status == "completed" {
+                continue;
+            }
+            // `Service/key/handler`; only a keyed invocation can be held.
+            let mut parts = invocation.target.splitn(2, '/');
+            let (Some(service), Some(rest)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            let Some((key, _handler)) = rest.rsplit_once('/') else {
+                continue;
+            };
+            let hold = server.hold(service, key);
+            tokio::pin!(hold);
+            // One poll places the hold; it then waits for the running attempt
+            // to stop, which for the turn is the cut below.
+            let placed = tokio::select! {
+                biased;
+                hold = &mut hold => Some(hold),
+                () = std::future::ready(()) => None,
+            };
+            if service == turn_service
+                && invocation.status == "running"
+                && server.crash(&invocation.id)
+            {
+                cut += 1;
+            }
+            holds.push(match placed {
+                Some(hold) => hold,
+                None => hold.await,
+            });
+        }
+        ensure!(
+            cut == 1,
+            "the dead worker's turn attempt was not cut ({cut} cut)"
+        );
+        Ok(holds)
     }
 
     /// A core wired for one deterministic turn on this backend. The owner is
@@ -325,17 +378,7 @@ impl Backend {
         owner: LeaseOwnerIdentity,
         timings: lash::durability::LeaseTimings,
     ) -> Result<TurnCore> {
-        self.core_on(&self.backend.clone(), provider, owner, timings)
-    }
-
-    /// A core wired for one deterministic turn over `backend`'s handles.
-    fn core_on(
-        &self,
-        backend: &lash::Backend,
-        provider: lash::provider::ProviderHandle,
-        owner: LeaseOwnerIdentity,
-        timings: lash::durability::LeaseTimings,
-    ) -> Result<TurnCore> {
+        let backend = &self.backend;
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -377,13 +420,38 @@ struct TurnCore {
 }
 
 impl TurnCore {
+    /// Open `session_id`, retrying typed store contention the way a host does:
+    /// the engine may be committing the session's drive at the same moment
+    /// (a re-driven turn of a dead worker, say), and a contended open is
+    /// retried unchanged.
     async fn open(&self, session_id: &SessionId) -> Result<lash::LashSession> {
-        self.core
-            .session(session_id)
-            .open()
-            .await
-            .with_context(|| format!("open session `{session_id}`"))
+        let deadline = tokio::time::Instant::now() + GATE_TIMEOUT;
+        loop {
+            match self.core.session(session_id).open().await {
+                Ok(session) => return Ok(session),
+                Err(error)
+                    if open_is_contended(&error) && tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                Err(error) => {
+                    return Err(anyhow::Error::from(error))
+                        .with_context(|| format!("open session `{session_id}`"));
+                }
+            }
+        }
     }
+}
+
+fn open_is_contended(error: &lash::EmbedError) -> bool {
+    matches!(
+        error,
+        lash::EmbedError::Store(StoreError::Contended)
+            | lash::EmbedError::Session(lash::SessionError::Store {
+                source: StoreError::Contended,
+                ..
+            })
+    )
 }
 
 fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
@@ -652,6 +720,8 @@ async fn lease_takeover(
         .await
         .map_err(anyhow::Error::msg)?;
     drop(seed_session);
+    drop(seed);
+    backend.await_driver_released().await?;
 
     let store = backend.store(&session_id).await?;
     let abandoned = store
@@ -663,6 +733,14 @@ async fn lease_takeover(
         .context("an unheld lane is acquirable")?;
     capture.reset();
 
+    // A real turn sweeps the lane. Its claim is the takeover. The sweeper is
+    // another process: the successor under a fresh incarnation. It is built
+    // first, so its session driver is the one that drives the sweep.
+    let sweeper = backend.core(
+        scripted_provider(),
+        owner("triage-successor-worker", "triage-successor-worker:boot-2"),
+        quiet_timings(),
+    )?;
     let observer = backend.core(
         scripted_provider(),
         owner("triage-observer", "triage-observer:boot-1"),
@@ -674,13 +752,6 @@ async fn lease_takeover(
         .await
         .map_err(anyhow::Error::msg)?;
 
-    // A real turn sweeps the lane. Its claim is the takeover. The sweeper is
-    // another process: the successor under a fresh incarnation.
-    let sweeper = backend.core(
-        scripted_provider(),
-        owner("triage-successor-worker", "triage-successor-worker:boot-2"),
-        quiet_timings(),
-    )?;
     let sweeper_session = sweeper.open(&session_id).await?;
     let swept = sweeper_session
         .send(lash::TurnInput::text(TURN_PROMPT))
@@ -995,6 +1066,7 @@ async fn direct_turn_recovery(
     let seed_acceptance = seeded.result.acceptance.clone();
     drop(seed_session);
     drop(seed);
+    backend.await_driver_released().await?;
 
     let store = backend.store(&session_id).await?;
     let seed_applications = store
@@ -1011,15 +1083,8 @@ async fn direct_turn_recovery(
     // The direct turn that never gets to commit. Its worker uses a short lease
     // term so the successor's wait for a dead holder stays inside the phase
     // gate; nothing here depends on the lane lapsing rather than being taken.
-    // The worker claims through a backend carrying the same term: the durable
-    // effect lease on the parked `llm_call` is the claim the successor ends
-    // up waiting on, and a `LeaseTimings` governs a host's effect-replay
-    // leases just as it governs its session lease — on the default term the
-    // parked call's claim would hold for thirty seconds, the length of the
-    // gate itself.
     let provider = StallingProvider::new();
-    let dead = backend.core_on(
-        &backend.backend_with(short_lived_timings()).await?,
+    let dead = backend.core(
         provider.handle.clone(),
         abandoned_by.clone(),
         short_lived_timings(),
@@ -1044,12 +1109,17 @@ async fn direct_turn_recovery(
         .map_err(anyhow::Error::msg)
         .context("read the session's pending inputs while the direct drive is parked")?;
 
-    // No abandonment and no cancellation runs; the guard drop does still spawn a token-scoped
-    // best-effort release, which is why the lane is re-staged below.
+    // The worker dies: its turn attempt is cut in the model call and the
+    // server holds the invocations back until a successor serves the engine.
+    // No abandonment and no cancellation runs; the cut attempt's guard drop
+    // does still spawn a token-scoped best-effort release, which is why the
+    // lane is re-staged below.
+    let held = backend.kill_mid_turn().await?;
     abandoned.abort();
     let _ = abandoned.await;
     drop(dead);
     drop(provider);
+    backend.await_driver_released().await?;
 
     // Retried, because the in-process drop release is asynchronous and the dying lease can
     // still be live for the rest of its term; a release that lands after this claim is scoped
@@ -1057,12 +1127,11 @@ async fn direct_turn_recovery(
     let abandoned_lease = stage_abandoned_lane(store.as_ref(), &session_id, &abandoned_by).await?;
     capture.reset();
 
-    // A peer takes the lane through its own engine's session drive. It was
-    // told nothing about the abandoned request: it finds the pending row in
-    // the store and attaches to it, which asks its engine to drive the session.
-    // The peer is another process: the same owner under a fresh incarnation.
-    // A core's engine names its admissions by its incarnation, so a second
-    // core under the seed's incarnation would replay the seed's admission.
+    // A peer takes the lane through the engine's session drive. It was told
+    // nothing about the abandoned request: the server re-drives the dead
+    // worker's held invocations on it once it serves the engine, and it finds
+    // the pending row in the store and attaches to it. The peer is another
+    // process: the same owner under a fresh incarnation.
     let sweeper = backend.core(
         scripted_provider(),
         owner("triage-direct-successor", "triage-direct-successor:boot-2"),
@@ -1075,6 +1144,9 @@ async fn direct_turn_recovery(
         .await
         .map_err(anyhow::Error::msg)
         .context("the successor reads the session's pending inputs")?;
+    // The successor serves the engine now: the server may re-drive the dead
+    // worker's invocations on it.
+    drop(held);
     let (drain_ran, drain_empty_reason, recovered_committed) = match orphaned.first() {
         Some(orphan) => {
             let recovered = tokio::time::timeout(

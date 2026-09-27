@@ -8,9 +8,10 @@ set -euo pipefail
 # fourth phase runs the killed-worker recovery against a *direct* turn, which is
 # recoverable at all only because direct ingress accepts before it drives.
 #
-# Every phase runs on SQLite. PostgreSQL is storage only (ADR 0104), so its
-# session lease is exercised under Restate by the workers E2E. The companion
-# owns no container and no host port.
+# Every phase runs lash-restate's engine on the in-process Restate server double
+# over a SQLite store set. PostgreSQL's session lease is exercised under a live
+# Restate server by the workers E2E. The companion owns no container and no
+# host port.
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"

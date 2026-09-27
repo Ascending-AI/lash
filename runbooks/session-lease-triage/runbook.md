@@ -18,9 +18,10 @@ kill, fence, or terminalize work.
 LASH_SESSION_LEASE_ARTIFACT_DIR=<fresh-dir> just session-lease-triage-e2e
 ```
 
-The companion owns no container and no host port. It runs every phase on SQLite and reports
-`backends: sqlite`. PostgreSQL is storage only (ADR 0104): its session lease runs under Restate
-in the workers E2E until FIG-3600 replaces session leases. Session ids carry a
+The companion owns no container and no host port. It runs every phase on lash-restate's
+engine, the only driver of a turn (ADR 0104), on the in-process Restate server double over a
+SQLite store set, and reports `backends: sqlite`. PostgreSQL's session lease runs under a live
+Restate server in the workers E2E until FIG-3600 replaces session leases. Session ids carry a
 per-run suffix (a session id is single-use, ADR 0049), so a shared database needs no
 truncation and repeated runs never collide. It emits
 `session-lease-triage e2e passed: scenarios=4` only after every phase assertion holds on
@@ -37,8 +38,8 @@ row*: a TTL-zero claim made straight through the store, so no guard and no renew
 exist behind it, which is what a killed or frozen worker leaves behind. Nothing releases the
 lane on the dead worker's behalf and nothing waits for it to notice, because it never will.
 That absence is the scenario, not a shortcut around it. Phase 3b stages the same row for the
-same reason: aborting a future and dropping a core is the only kill available in-process, and
-that drop still releases the lane, which a dead worker does not.
+same reason: the killed worker's cut turn attempt still drops its lease guard, and that drop
+releases the lane, which a dead worker does not.
 
 Emitter liveness is exactly what separates the two loser shapes, and the harness deliberately
 tests the harder one. A *live* holder that loses its lane additionally logs its own
@@ -190,16 +191,17 @@ do not show the head moving on, or a handoff event appears alongside.
 
 **Setup.** `08-direct-turn-recovery.jsonl`. One committed direct turn materializes the
 session and reports the acceptance identity it was admitted under. A second direct turn is
-then parked inside a provider that never returns, and its worker is killed: the in-flight
-future is aborted and the core dropped, so no claim abandonment and no cancellation of the
-accepted row ever runs. Dropping the core in-process *does* still spawn a token-scoped
-best-effort lane release, which a killed worker would never have managed, so the lane is
+then parked inside a provider that never returns, and its worker is killed: the server double
+cuts the turn's running attempt inside the model call and holds the worker's invocations back,
+and the core is dropped, so no claim abandonment and no cancellation of the accepted row ever
+runs. The cut attempt's lease guard *does* still spawn a token-scoped best-effort lane
+release, which a killed worker would never have managed, so the lane is
 re-staged afterwards in the Phase 2 shape — a TTL-zero claim made straight through the store
 for the dead worker's identity, no guard and no renewal task behind it. The successor
 therefore has to take a held, lapsed lane over rather than walk into an empty one. A separate
-core, a fresh incarnation, then reads the session's pending inputs and attaches to the one it
-finds, which asks its own engine to drive the session; it is told nothing else about the
-abandoned request.
+core, a fresh incarnation, then serves the engine, reads the session's pending inputs and
+attaches to the one it finds; the server re-drives the dead worker's held invocations on it. It
+is told nothing else about the abandoned request.
 
 **Action.** Read `seed_acceptance_input_id`/`seed_acceptance_source_key` and
 `seed_acceptance_settled`, the `pending_reads_while_parked` envelope, then `drain_ran`,
