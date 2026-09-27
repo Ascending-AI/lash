@@ -1,20 +1,20 @@
-//! The defects the soak found that `main` has not fixed, and what the smoke
-//! leaves out until each is fixed.
+//! The defects the soak found, and what the smoke leaves out until each is
+//! fixed.
 //!
-//! Each [`OpenFinding`] names the step kinds that expose it and a replay
-//! that shows it. [`smoke_without`] is the union of those kinds: the smoke
-//! mode, which must stay green on `main`, draws none of them, and the
-//! release soak draws every kind. Each finding has an ignored regression
-//! test in `tests/chaos_soak.rs` that runs its replay and fails while the
-//! defect stands. The change that fixes one deletes its entry here and the
-//! `ignore` of its test; the registry test refuses a mismatch, and the smoke
-//! draws the kinds again.
+//! Each [`Finding`] names the step kinds that expose it and a replay that
+//! shows it. [`smoke_without`] is the union of the [`OPEN`] findings' kinds:
+//! the smoke mode, which must stay green on `main`, draws none of them, and
+//! the release soak draws every kind. Each finding has a regression test in
+//! `tests/chaos_soak.rs` that runs its replay: ignored while the defect
+//! stands, live once it is [`FIXED`]. The change that fixes one moves its
+//! entry from [`OPEN`] to [`FIXED`] and deletes the `ignore` of its test; the
+//! registry test refuses a mismatch, and the smoke draws the kinds again.
 
 use super::{EpochReport, run_epoch};
 
 /// A defect the soak found, with the replay that shows it.
 #[derive(Clone, Copy, Debug)]
-pub struct OpenFinding {
+pub struct Finding {
     /// The id the ignore reason and the report name: `FIG-3873 S<n>`.
     pub id: &'static str,
     /// What goes wrong, in one line.
@@ -28,7 +28,7 @@ pub struct OpenFinding {
     pub without: &'static [&'static str],
 }
 
-impl OpenFinding {
+impl Finding {
     /// Run the finding's replay: one epoch of its plan.
     pub async fn replay(&self) -> EpochReport {
         let without: Vec<String> = self.without.iter().map(|kind| (*kind).to_owned()).collect();
@@ -37,8 +37,8 @@ impl OpenFinding {
 }
 
 /// Every defect the soak found that `main` still has.
-pub const OPEN: &[OpenFinding] = &[
-    OpenFinding {
+pub const OPEN: &[Finding] = &[
+    Finding {
         id: "FIG-3873 S1",
         summary: "a session with a queued command wedges: its admitted head root \
                   fails every claim as `session_execution_lane_busy: missed its head \
@@ -59,7 +59,7 @@ pub const OPEN: &[OpenFinding] = &[
             "roll",
         ],
     },
-    OpenFinding {
+    Finding {
         id: "FIG-3873 S2",
         summary: "a queued-work (command) root whose first attempt dies replays \
                   divergently: Restate journal mismatch 570 (recorded `set state` at \
@@ -70,7 +70,7 @@ pub const OPEN: &[OpenFinding] = &[
         steps: 200,
         without: &[],
     },
-    OpenFinding {
+    Finding {
         id: "FIG-3873 S3",
         summary: "a session deleted while a root is in flight across a deployment \
                   death never finishes deleting: the close names the root, the turn \
@@ -81,7 +81,7 @@ pub const OPEN: &[OpenFinding] = &[
         steps: 96,
         without: &["command"],
     },
-    OpenFinding {
+    Finding {
         id: "FIG-3873 S4",
         summary: "deleting a session whose root is running, when the host dies \
                   inside the first delete and a retry completes it, leaves the \
@@ -94,7 +94,14 @@ pub const OPEN: &[OpenFinding] = &[
         steps: 68,
         without: &["command", "delete"],
     },
-    OpenFinding {
+];
+
+/// The defects the soak found that `main` has fixed: each replay must pass.
+pub const FIXED: &[Finding] = &[
+    // FIG-3896: a recovery tick cancelled after the store granted its
+    // deployment the lease left the lease to a holder nobody ran, so no
+    // deployment claimed a due obligation again.
+    Finding {
         id: "FIG-3873 S5",
         summary: "after a deployment kill, a cancelled root whose externally owned \
                   child it ended never finishes its scope close: the root's \
@@ -125,8 +132,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_open_finding_names_optional_kinds() {
-        for finding in OPEN {
+    fn every_finding_names_optional_kinds() {
+        for finding in OPEN.iter().chain(FIXED) {
             for kind in finding.exposed_by.iter().chain(finding.without) {
                 assert!(
                     super::super::plan::OPTIONAL_KINDS.contains(kind),

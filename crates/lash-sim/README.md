@@ -287,7 +287,9 @@ A defect the soak finds that `main` has not fixed is an entry in
 short replay. Each entry has an ignored regression test in
 `tests/chaos_soak.rs` that fails while the defect stands. The smoke leaves
 out every open finding's kinds so it stays green on `main`; the release soak
-draws every kind and stays red until the findings are fixed.
+draws every kind and stays red until the findings are fixed. The fix moves
+the entry to `chaos_soak::findings::FIXED` and makes its regression test
+live, so its replay keeps passing.
 
 ```sh
 kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_smoke --nocapture

@@ -314,6 +314,14 @@ whose trust lapsed is a follower until its next successful renew. Losing the
 lease stops leader duties, never the host. The host sets `generation_rank`
 (ADR 0014 lever; default 0) and resigns at shutdown and on drain.
 
+A deployment has one holder for its whole life, and its election attempts
+run on a task of their own, never in the tick that first asks for its
+duties. A tick cancelled after the store granted the lease (a shutdown
+aborting a recovery pass) would otherwise drop the only holder that could
+renew or resign the row, which would then name a holder nobody runs until
+its TTL lapses. The task resigns when the deployment goes away, whatever its
+attempt answered.
+
 ### 1.7 Duties
 
 | Duty | Who |

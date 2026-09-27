@@ -7,11 +7,12 @@
 //! `chaos_soak_smoke` is the short mode: two epochs, about two minutes, over
 //! every step kind no open finding exposes. `chaos_soak_release` is the
 //! release gate's 90-minute soak over every step kind (`just chaos-soak`),
-//! ignored in every ordinary run. Each open finding
-//! (`lash_sim::chaos_soak::findings::OPEN`) has an ignored regression test
-//! here that replays it; the change that fixes one deletes its `ignore` and
-//! its registry entry, and [`every_open_finding_has_one_regression_test`]
-//! refuses a mismatch.
+//! ignored in every ordinary run. Each finding has a regression test here
+//! that replays it: ignored while it is open
+//! (`lash_sim::chaos_soak::findings::OPEN`), live once it is fixed
+//! (`findings::FIXED`). The change that fixes one moves its entry and deletes
+//! its `ignore`, and [`every_finding_has_one_regression_test`] refuses a
+//! mismatch.
 
 use std::time::Duration;
 
@@ -65,23 +66,27 @@ async fn chaos_soak_release() {
 }
 
 macro_rules! regressions {
-    ($( #[ignore = $reason:literal] $name:ident => $id:literal; )*) => {
+    (@reason $reason:literal) => { Some($reason) };
+    (@reason) => { None };
+    ($( $(#[ignore = $reason:literal])? $name:ident => $id:literal; )*) => {
         $(
-            #[ignore = $reason]
+            $(#[ignore = $reason])?
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $name() {
                 let finding = findings::OPEN
                     .iter()
+                    .chain(findings::FIXED)
                     .find(|finding| finding.id == $id)
-                    .unwrap_or_else(|| panic!("{} is not an open finding", $id));
+                    .unwrap_or_else(|| panic!("{} is not a finding", $id));
                 let epoch = finding.replay().await;
                 println!("{}", epoch.evidence());
                 assert!(epoch.passed(), "{}: {}\n{}", finding.id, finding.summary, epoch.evidence());
             }
         )*
 
-        /// Every generated regression test: its finding id and its ignore reason.
-        const REGRESSIONS: &[(&str, &str)] = &[$(($id, $reason)),*];
+        /// Every generated regression test: its finding id and its ignore
+        /// reason, `None` for a live test.
+        const REGRESSIONS: &[(&str, Option<&str>)] = &[$(($id, regressions!(@reason $($reason)?))),*];
     };
 }
 
@@ -94,15 +99,19 @@ regressions! {
     s3_delete_with_an_orphaned_root_stays_due => "FIG-3873 S3";
     #[ignore = "FIG-3873 S4: an interrupted delete of a running root's session leaks its cancel-gate wait on the old build"]
     s4_interrupted_delete_leaks_the_cancel_gate_wait => "FIG-3873 S4";
-    #[ignore = "FIG-3873 S5: a killed deployment's cancelled root never settles its scope close"]
     s5_cancelled_root_scope_close_stays_claimed_after_a_kill => "FIG-3873 S5";
 }
 
-/// The regression tests and the open findings agree: one ignored test per
-/// open finding, ignored under the finding's id.
+/// The regression tests and the findings agree: one test per finding,
+/// ignored under the finding's id while it is open and live once it is
+/// fixed.
 #[test]
-fn every_open_finding_has_one_regression_test() {
-    for finding in findings::OPEN {
+fn every_finding_has_one_regression_test() {
+    for (finding, open) in findings::OPEN
+        .iter()
+        .map(|finding| (finding, true))
+        .chain(findings::FIXED.iter().map(|finding| (finding, false)))
+    {
         let tests: Vec<_> = REGRESSIONS
             .iter()
             .filter(|(id, _)| *id == finding.id)
@@ -114,17 +123,27 @@ fn every_open_finding_has_one_regression_test() {
             finding.id,
             tests.len()
         );
-        assert!(
-            tests[0].1.starts_with(finding.id),
-            "{}'s regression test is ignored as `{}`",
-            finding.id,
-            tests[0].1
-        );
+        match (open, tests[0].1) {
+            (true, Some(reason)) => assert!(
+                reason.starts_with(finding.id),
+                "{}'s regression test is ignored as `{reason}`",
+                finding.id
+            ),
+            (true, None) => panic!("{} is open, but its regression test runs", finding.id),
+            (false, Some(reason)) => panic!(
+                "{} is fixed, but its regression test is ignored as `{reason}`",
+                finding.id
+            ),
+            (false, None) => {}
+        }
     }
     for (id, _) in REGRESSIONS {
         assert!(
-            findings::OPEN.iter().any(|finding| finding.id == *id),
-            "a regression test names {id}, which is not an open finding"
+            findings::OPEN
+                .iter()
+                .chain(findings::FIXED)
+                .any(|finding| finding.id == *id),
+            "a regression test names {id}, which is not a finding"
         );
     }
 }
