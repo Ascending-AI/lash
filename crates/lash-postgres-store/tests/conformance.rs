@@ -120,21 +120,169 @@ fn sync_await<T: Send + 'static>(
 /// The promise authority a storage law's turn-control protocol runs through.
 ///
 /// PostgreSQL journals no effects (ADR 0104): a deployment's promises are its
-/// Restate engine's. A storage law that mints, settles and reads turn-control
-/// promises only to drive what the store records needs a real authority, so
-/// it borrows the same scratch SQLite engine [`pg_law_backend`] opens. What
-/// the law certifies is the PostgreSQL rows; the authority is scaffolding the
-/// caller's guard keeps alive until the law finishes.
+/// Restate engine's, so the authority is the engine's own deployment effect
+/// host on the in-process server double, minting, settling and reading
+/// durable waits through the double's endpoint. What the law certifies is
+/// the PostgreSQL rows; the guard keeps the double alive until the law
+/// finishes.
 async fn promise_authority() -> (
-    (tempfile::TempDir, lash_sqlite_store::SqliteBackend),
+    lash_restate_test::RestateTestBackend,
     Arc<dyn lash_core_execution::EffectHost>,
 ) {
-    let engine_dir = tempfile::tempdir().expect("promise authority directory");
-    let engine = lash_sqlite_store::SqliteBackend::open(engine_dir.path())
-        .await
-        .expect("open the promise authority's scratch engine");
-    let host: Arc<dyn lash_core_execution::EffectHost> = engine.effect_host();
-    ((engine_dir, engine), host)
+    let backend =
+        lash_restate_test::backend(restate_seed(), lash_restate_test::ServerConfig::default())
+            .await
+            .expect("boot the promise authority's Restate server double");
+    let host: Arc<dyn lash_core_execution::EffectHost> = backend.restate().restate_effect_host();
+    (backend, host)
+}
+
+/// The seed of a fixture's server double: `LASH_RESTATE_TEST_SEED` replays
+/// one, otherwise each fixture draws a fresh one.
+fn restate_seed() -> u64 {
+    if let Some(seed) = std::env::var("LASH_RESTATE_TEST_SEED")
+        .ok()
+        .and_then(|seed| seed.parse::<u64>().ok())
+    {
+        return seed;
+    }
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after the epoch")
+        .as_nanos();
+    (nanos & u128::from(u64::MAX)) as u64 ^ NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A law attempt, repacked as one of the double's handler attempts: it
+/// reports what it observed through its own channel, so the handler's job
+/// ends when the attempt ends.
+fn handler_attempt(
+    attempt: lash_conformance::ConformanceTurnAttempt,
+) -> lash_restate_test::HandlerAttempt {
+    Arc::new(move |scoped| {
+        let attempt = Arc::clone(&attempt);
+        Box::pin(async move {
+            attempt(scoped).await;
+        })
+    })
+}
+
+/// `ConformanceTurnRunner` over [`RestateTestBackend::run_in_handler`]: every
+/// turn a law drives runs inside a handler of the double's deployment, on the
+/// handler-scoped controller a Restate tier actually lends its turns, instead
+/// of on a host scoped from the calling task.
+///
+/// [`RestateTestBackend::run_in_handler`]: lash_restate_test::RestateTestBackend::run_in_handler
+struct DoubleTurnRunner {
+    backend: lash_restate_test::RestateTestBackend,
+}
+
+impl DoubleTurnRunner {
+    fn shared(
+        backend: lash_restate_test::RestateTestBackend,
+    ) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
+        Arc::new(Self { backend })
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
+    async fn run_turn(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        self.backend
+            .run_in_handler(admitted, handler_attempt(attempt))
+            .await
+            .unwrap_or_else(|error| panic!("the law's turn did not run in its handler: {error}"));
+    }
+
+    async fn run_crashed_then_redriven_turn(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        crashing: lash_conformance::ConformanceTurnAttempt,
+        redrive: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        self.backend
+            .run_crashed_then_redriven(
+                admitted,
+                handler_attempt(crashing),
+                handler_attempt(redrive),
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!("the law's crashed turn did not redrive in its handler: {error}")
+            });
+    }
+
+    async fn run_turn_until_crash(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+        crash: lash_conformance::ConformanceCrash,
+    ) {
+        // Inside the handler the crash kills the attempt where it stands —
+        // the double's redelivery would re-run the crashed job, so a retried
+        // attempt parks forever instead: the law's next `run_turn` is the
+        // recovery the tier promises, not Restate's retry.
+        let crashing: lash_restate_test::HandlerAttempt = {
+            let crash = crash.clone();
+            Arc::new(move |scoped| {
+                let attempt = Arc::clone(&attempt);
+                let crash = crash.clone();
+                Box::pin(async move {
+                    if crash.has_fired() {
+                        std::future::pending::<()>().await;
+                    }
+                    tokio::select! {
+                        biased;
+                        () = crash.fired() => {
+                            panic!("the conformance crash killed the attempt")
+                        }
+                        end = attempt(scoped) => {
+                            panic!("the crashing attempt ended ({end:?}) before its crash fired")
+                        }
+                    }
+                })
+            })
+        };
+        tokio::select! {
+            biased;
+            () = crash.fired() => {}
+            result = self.backend.run_in_handler(admitted, crashing) => {
+                panic!("the crashing turn's handler ended ({result:?}) before its crash fired")
+            }
+        }
+    }
+}
+
+/// A backend for a law whose turns must run inside a Restate handler:
+/// lash-restate's engine on the in-process server double, its engine stores
+/// decorated into `storage`'s PostgreSQL store set, so the effects a handler
+/// executes land on the store under test. Returns the law's stores, the
+/// engine's deployment effect host, and the handler-bound turn runner.
+async fn double_law_backend(
+    storage: &PostgresStorage,
+) -> (
+    (tempfile::TempDir, lash_restate_test::RestateTestBackend),
+    Arc<dyn lash_core_execution::StoreSet>,
+    Arc<dyn lash_core_execution::EffectHost>,
+    Arc<dyn lash_conformance::ConformanceTurnRunner>,
+) {
+    let (attachments, stores) = pg_law_stores(storage);
+    let engine_stores = Arc::clone(&stores);
+    let backend = lash_restate_test::backend_with(
+        restate_seed(),
+        lash_restate_test::ServerConfig::default(),
+        move |_| engine_stores,
+    )
+    .await
+    .expect("boot the law's Restate double over PostgreSQL stores");
+    let host: Arc<dyn lash_core_execution::EffectHost> = backend.restate().restate_effect_host();
+    let runner = DoubleTurnRunner::shared(backend.clone());
+    ((attachments, backend), stores, host, runner)
 }
 
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
@@ -160,10 +308,12 @@ fn pg_law_stores(
 }
 
 /// A backend for a law's runtime over `storage`'s store set. These laws drive
-/// real turns, so the host must execute effects: a full SQLite engine in a
-/// scratch directory is the one executing host an in-process test can drive.
-/// The store under test is still Postgres; the guard keeps the attachment
-/// bytes and the engine's scratch directory alive.
+/// real turns through `stream_turn`, so the host must execute effects outside
+/// a handler: a full SQLite engine in a scratch directory is the one
+/// executing host an in-process test can drive that way, and the laws stay on
+/// it until the B4 lane removes the SQL effect host. The store under test is
+/// still Postgres; the guard keeps the attachment bytes and the engine's
+/// scratch directory alive.
 async fn pg_law_backend(
     storage: &PostgresStorage,
 ) -> (
@@ -1842,10 +1992,12 @@ mod root_control {
     lash_conformance::drive_admission_tests!(@laws [] {
         let Some((lock, storage)) = storage().await else { return; };
         reset(storage.pool()).await;
-        let (attachments, stores) = pg_law_stores(&storage);
-        let (engine_guard, host) = promise_authority().await;
-        let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
-        ((lock, storage, attachments, engine_guard), "pg-root-control", host, stores, runner)
+        // Drive-admission turns run inside the engine's handlers: the double
+        // lends each attempt the handler-scoped controller a Restate tier
+        // runs it on, over this test's PostgreSQL stores.
+        let ((attachments, double), stores, host, runner) =
+            double_law_backend(&storage).await;
+        ((lock, storage, attachments, double), "pg-root-control", host, stores, runner)
     }; [
     (a_terminal_root_never_reparks, "s7b-0"),
     (a_diverged_root_parks_once_holds_claims_blocks_admission_and_completes_after_restore, "s7b-15"),

@@ -6,19 +6,8 @@
 # A row whose recipe is "parked" runs nowhere yet: it must name the `ticket`
 # (FIG-n) that brings the invocation back and the `reason` it is parked, and
 # no other row may carry either field.
-
-[[deferred]]
-file = "crates/lash-sqlite-store/tests/conformance/suite.rs"
-claimant = "conformance::suite"
-suite = "turn_crash_level_1_tests"
-recipe = "parked"
-ticket = "FIG-3668"
-reason = "the level-one matrix crashes in process, and the journaled SQLite engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"
-
-[[deferred]]
-file = "crates/lash-sqlite-store/tests/conformance/suite.rs"
-claimant = "conformance_memory::suite"
-suite = "turn_crash_level_1_tests"
-recipe = "parked"
-ticket = "FIG-3668"
-reason = "the level-one matrix crashes in process, and the journaled SQLite engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"
+#
+# This shard held the `turn_crash_level_1_tests` rows the SQLite suite parked;
+# FIG-3668 deletes that mount entirely: the level-one matrix already runs on
+# the Restate double (`tests::turn_crash_on_the_double`), so no deferred
+# invocation remains under this ticket.

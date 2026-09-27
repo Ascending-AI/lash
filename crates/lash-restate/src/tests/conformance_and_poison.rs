@@ -220,6 +220,25 @@ lash_conformance::effect_controller_replay_mismatch_tests!({
     )
 });
 
+// Derivation-authority terminals are engine-neutral: the executor's error
+// wins the journal no matter which controller serves it, so FIG-3668 ports
+// the leg off the SQLite suite onto the in-process recording context. The
+// retry leg stays on the SQLite suite: it asserts the SQL controller
+// surfaces a retryable derivation error to the caller, where a Restate
+// controller retries the journaled step under its own redelivery.
+lash_conformance::effect_controller_response_derivation_tests!(@catalogue {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let make_context = Arc::clone(&context);
+    (context, move || {
+        replayable_conformance_invocation(Arc::clone(&make_context))
+    })
+}; [
+    (
+        effect_controller_response_derivation_terminals,
+        "effect-controller-response-derivation-terminals"
+    ),
+]);
+
 /// The RLM protocol factory the FIG-3587 drift laws redrive cells with, its
 /// Lashlang artifacts in [`RECOVERY_ARTIFACT_BACKEND`]. The laws' turns start
 /// no process: there is no process substrate.

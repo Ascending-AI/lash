@@ -37,36 +37,7 @@ fn host(
     host
 }
 
-// The durable SQLite tier answers the effect-group contract the same way the
-// in-memory reference host does (FIG-1564).
-lash_conformance::effect_group_host_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let hosts = backend.clone();
-    (backend, move |executors| {
-        host(&hosts, executors) as Arc<dyn EffectHost>
-    })
-});
-
-// A close racing its own children's settlements seats one terminal per child.
-lash_conformance::effect_group_close_race_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let hosts = backend.clone();
-    (backend, move |executors| {
-        host(&hosts, executors) as Arc<dyn EffectHost>
-    })
-});
-
 lash_conformance::effect_group_unwired_host_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let hosts = backend.clone();
-    (backend, move |executors| {
-        host(&hosts, executors) as Arc<dyn EffectHost>
-    })
-});
-
-// A cancelled child's cancellation is journaled as its terminal, and a host
-// that was not running when the close happened reads it back (FIG-1564).
-lash_conformance::effect_group_cancelled_child_terminal_tests!({
     let backend = TestEngineBackend::open(SUBSTRATE).await;
     let hosts = backend.clone();
     (backend, move |executors| {

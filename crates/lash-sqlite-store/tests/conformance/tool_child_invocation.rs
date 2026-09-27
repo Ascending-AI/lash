@@ -78,9 +78,8 @@ fn fixture() -> (
     )
 }
 
-// The durable SQLite tier answers the tool-child invocation contract
-// (FIG-2266).
-lash_conformance::tool_child_invocation_tests!({ fixture() });
-
-// The batch-group law answers on the same substrate (FIG-3397).
+// The batch-group law answers on the same substrate (FIG-3397). Its Restate
+// double mount is parked (FIG-3725/FIG-3697): group children dispatch but
+// their replies and the opener's-end incorporation diverge, so this SQLite
+// leg stays until the lane that removes the SQL effect host.
 lash_conformance::tool_batch_group_tests!({ fixture() });

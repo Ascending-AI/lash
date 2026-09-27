@@ -48,12 +48,8 @@ use crate::backend_fixture::{Substrate, TestBackend, TestEngineBackend, sync_awa
 mod attachment_store;
 #[path = "await_event_discovery.rs"]
 mod await_event_discovery;
-#[path = "cancelled_turn_withheld_input.rs"]
-mod cancelled_turn_withheld_input;
 #[path = "claim_atomicity.rs"]
 mod claim_atomicity;
-#[path = "direct_turn_acceptance.rs"]
-mod direct_turn_acceptance;
 #[path = "drain_end.rs"]
 mod drain_end;
 #[path = "effect_group.rs"]
@@ -74,16 +70,12 @@ mod process_prune_reclaim;
 mod process_retention;
 #[path = "restored_claim_cede.rs"]
 mod restored_claim_cede;
-#[path = "session_close.rs"]
-mod session_close;
 #[path = "session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "session_ingress.rs"]
 mod session_ingress;
 #[path = "session_meta.rs"]
 mod session_meta;
-#[path = "session_read_view.rs"]
-mod session_read_view;
 #[path = "sleep_replay.rs"]
 mod sleep_replay;
 #[path = "store_maintenance.rs"]
@@ -92,10 +84,6 @@ mod store_maintenance;
 mod tool_child_invocation;
 #[path = "trigger_occurrence_retention.rs"]
 mod trigger_occurrence_retention;
-#[path = "turn_runner.rs"]
-mod turn_runner;
-#[path = "wake_delivery.rs"]
-mod wake_delivery;
 
 include!("append_identity.rs");
 include!("effect_lease_fencing.rs");
@@ -1327,81 +1315,6 @@ fn journaled_crash_invocation(
     .with_effect_journal_faults(faults)
 }
 
-/// The error-return sweep's journal (FIG-3524): its short renew interval lets
-/// a `renew` fault fire while the parked tool attempt is still open.
-fn error_return_journal() -> TestEngineBackend {
-    sync_await(async move {
-        TestEngineBackend::open_with(
-            SUBSTRATE,
-            with_lease_timings(
-                lash_core_execution::facade_support::LeaseTimings::new(
-                    std::time::Duration::from_secs(60),
-                    std::time::Duration::from_millis(50),
-                )
-                .expect("error-return effect lease timings"),
-            ),
-            crate::backend_fixture::system_clock(),
-        )
-        .await
-    })
-}
-
-/// The `make` element of a turn-crash runner fixture: opens a crash-law
-/// scenario's session store over the fixture's substrate.
-type JournalStoreOpener =
-    Box<dyn Fn(&str) -> Arc<lash_sqlite_store::Store> + Send + Sync + 'static>;
-
-/// The `(guard, stores, make, host, runner)` tuple the turn-crash runner
-/// macros destructure: `guard` keeps the fixture's backends alive, `host` is
-/// the journal's own effect host and `runner` cuts its turns.
-type JournalRunnerFixture = (
-    Retained<TestEngineBackend>,
-    Arc<dyn lash_core_execution::StoreSet>,
-    JournalStoreOpener,
-    Arc<dyn EffectHost>,
-    Arc<dyn lash_conformance::ConformanceTurnRunner>,
-);
-
-/// A turn-crash runner fixture over `journal`'s own effect host: the runner
-/// cuts turns with that journal's fault injector.
-fn journal_runner_fixture(journal: TestEngineBackend) -> JournalRunnerFixture {
-    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-    let retained: Retained<TestEngineBackend> = Retained::default();
-    let stores = retained.open_blocking().as_stores();
-    retained.keep(&journal);
-    let host = journal.effect_host();
-    let faults = host.effect_journal_faults();
-    let host = host as Arc<dyn EffectHost>;
-    (
-        retained,
-        stores,
-        Box::new(move |scenario: &str| scenarios.concrete_store(scenario)),
-        Arc::clone(&host),
-        lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
-    )
-}
-
-lash_conformance::turn_crash_matrix_tests!({ journal_runner_fixture(error_return_journal()) });
-
-// The level-one matrix crashes each turn in process. On the journaled SQLite
-// engine the crashed attempt's group child keeps running and renewing its
-// effect lease, which nothing in the process can stop, so the successor waits
-// on it forever. The real SIGKILL matrix covers this engine's crash recovery.
-lash_conformance::turn_crash_level_1_tests!(
-    #[ignore = "parked: an in-process crash cannot stop the journaled engine's attempt (FIG-3668)"]
-    {
-        journal_runner_fixture(crash_journal())
-    }
-);
-
-// The turn crash laws that run their turns on a turn runner: the FIG-3571
-// generation-refusal pair, the direct-acceptance crash and the cancel-closure
-// cuts, on the crash journal's own host. A crash drops the turn's task, and
-// the recovery is a fresh runtime over the same stores and journal.
-lash_conformance::turn_crash_runner_tests!({ journal_runner_fixture(crash_journal()) });
-
-lash_conformance::effect_layer_group_child_tests!({ journal_runner_fixture(crash_journal()) });
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
@@ -1613,60 +1526,6 @@ fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
         .expect("query sqlite_master")
 }
 
-lash_conformance::effect_host_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let reopen = backend.clone();
-    (backend, move || {
-        let backend = reopen.clone();
-        sync_await(async move { backend.reopen().await.effect_host() }) as Arc<dyn EffectHost>
-    })
-});
-
-lash_conformance::turn_work_driver_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let host = backend.effect_host() as Arc<dyn EffectHost>;
-    let law_backend = backend.as_stores();
-    (
-        backend,
-        host,
-        law_backend,
-        lash_conformance::await_event_registration_observed,
-    )
-});
-
-lash_conformance::effect_host_await_event_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let reopen = backend.clone();
-    let foreign: Retained<TestEngineBackend> = Retained::default();
-    (
-        (backend, foreign.clone()),
-        move || {
-            let backend = reopen.clone();
-            sync_await(async move { backend.reopen().await.effect_host() }) as Arc<dyn EffectHost>
-        },
-        lash_conformance::effect_host_journaled_wait_registration_witness,
-        // Another backend is another registry.
-        move || foreign.open_blocking().effect_host() as Arc<dyn EffectHost>,
-    )
-});
-
-lash_conformance::tool_batch_parallelism_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    let host = backend.effect_host() as Arc<dyn EffectHost>;
-    let law_backend = backend.as_stores();
-    (
-        backend,
-        "sqlite",
-        Arc::clone(&host),
-        law_backend,
-        // The producers this crate reaches. `Promise.all` on the RLM bridge and
-        // the Lashlang aggregate on the process bridge register the same law
-        // from the crates that own them.
-        vec![lash_conformance::parallel_model_tool_calls_producer()],
-        lash_conformance::HostTurnRunner::shared(host),
-    )
-});
-
 /// Every store-backed backend issues completion keys: the promise rows
 /// live as long as the backend, file or memory, and a key resolves for
 /// that whole lifetime (ADR 0102).
@@ -1686,39 +1545,6 @@ async fn sqlite_backends_issue_completion_keys() {
         lash_core_execution::CompletionKeyPreparation::Issued(_)
     ));
 }
-
-lash_conformance::effect_host_cold_await_event_tests!({
-    let backend = TestEngineBackend::open(SUBSTRATE).await;
-    // The parked-owner vector abandons an in-progress effect, so its cold
-    // successor must wait one lease TTL before reclaiming it. A one-second
-    // test policy preserves that semantic wait without spending the
-    // production-default 30 seconds; the derived renewal interval also starts
-    // after the vector's 250ms proof that the original owner remains parked.
-    let lease_timings = lash_core_execution::facade_support::LeaseTimings::from_ttl(
-        std::time::Duration::from_secs(1),
-    )
-    .expect("cold-instance conformance lease timings");
-    let reopen = backend.clone();
-    let catalog = backend.clone();
-    let make = move || {
-        let backend = reopen.clone();
-        sync_await(async move {
-            backend
-                .reopen_with(
-                    with_lease_timings(lease_timings),
-                    crate::backend_fixture::system_clock(),
-                )
-                .await
-                .effect_host()
-        }) as Arc<dyn EffectHost>
-    };
-    let make_catalog = move || {
-        let backend = catalog.clone();
-        sync_await(async move { backend.reopen().await.session_store_factory() })
-            as Arc<dyn lash_core_execution::SessionStoreFactory>
-    };
-    (backend, make, make_catalog)
-});
 
 #[tokio::test]
 async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
@@ -1979,14 +1805,11 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
     assert_eq!(released_lease, 0, "finalizing releases the lease");
 }
 
-lash_conformance::effect_controller_replay_tests!({
-    let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
-    let (backend, controller) = open_effect_controller(scope.clone()).await;
-    (backend, move || {
-        sqlite_conformance_invocation(controller.clone(), scope.clone())
-    })
-});
-
+// `lash-restate` mounts the engine-neutral terminals leg on its recording
+// context; both laws also keep their SQL-controller leg here: the retry leg
+// asserts the controller surfaces a retryable derivation error to its
+// caller, where a Restate controller retries the journaled step under its
+// own redelivery, and it leaves with the SQL effect engine in B4.
 lash_conformance::effect_controller_response_derivation_tests!({
     let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
     let (backend, controller) = open_effect_controller(scope.clone()).await;
@@ -2120,20 +1943,14 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
     );
 }
 
+// `effect_host_retirement_tests!` stays out of the Restate double: its laws
+// record a journaled effect and assert the retirement's deleted-row count,
+// and Restate owns invocation-journal retention natively. The mount leaves
+// with the SQL effect journal in B4.
 lash_conformance::effect_host_retirement_tests!({
     let backend = TestEngineBackend::open(SUBSTRATE).await;
     let host = backend.effect_host() as Arc<dyn EffectHost>;
     (backend, host)
-});
-
-lash_conformance::effect_controller_replay_mismatch_tests!({
-    let scope = durable_turn_scope("session", "turn");
-    let (backend, controller) = open_effect_controller(scope.clone()).await;
-    (
-        backend,
-        move || sqlite_conformance_invocation(controller.clone(), scope.clone()),
-        "sqlite_effect_replay_hash_conflict",
-    )
 });
 
 lash_conformance::retention_tests!({

@@ -8191,7 +8191,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:conformance__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:conformance__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8199,7 +8199,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8207,7 +8207,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8215,7 +8215,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:integration__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:integration__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8223,7 +8223,7 @@
         "testing"
       ],
       "kind": "bin",
-      "label": "//crates/lash-postgres-store:lash-migrate__bin__fv_03307499",
+      "label": "//crates/lash-postgres-store:lash-migrate__bin__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8231,7 +8231,7 @@
         "testing"
       ],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-postgres-store:lash-migrate__bin__unit_test__fv_03307499",
+      "label": "//crates/lash-postgres-store:lash-migrate__bin__unit_test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8423,7 +8423,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_03307499",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8431,7 +8431,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:migrate__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:migrate__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8439,7 +8439,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8447,7 +8447,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8455,7 +8455,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8463,7 +8463,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_drift__test__fv_03307499",
+      "label": "//crates/lash-postgres-store:schema_drift__test__fv_89021ca5",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -10685,6 +10685,12 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_f68749f7",
+      "package": "lash-internal-restate-test"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lash-restate-test:lash-restate-test__fv_fd9ff782",
       "package": "lash-internal-restate-test"
     },
@@ -10716,6 +10722,12 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-restate:lash-restate",
+      "package": "lash-internal-restate"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
@@ -17591,6 +17603,8 @@
         "lash-internal-core-execution",
         "lash-internal-lashlang",
         "lash-internal-postgres-store",
+        "lash-internal-restate",
+        "lash-internal-restate-test",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-store-sql",

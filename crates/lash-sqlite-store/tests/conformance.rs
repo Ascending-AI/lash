@@ -42,8 +42,6 @@ mod attachment_owner_kind;
 mod cold_process_await_event;
 #[path = "conformance/schema_refusal.rs"]
 mod schema_refusal;
-#[path = "conformance/turn_cancel_closure.rs"]
-mod turn_cancel_closure;
 
 use backend_fixture::durable_turn_scope;
 use lash_conformance::cold_process_turn_parent;

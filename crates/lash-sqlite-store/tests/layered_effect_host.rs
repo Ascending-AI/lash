@@ -6,10 +6,9 @@ use std::sync::{Arc, Mutex};
 use lash_core_execution::testing::{EffectLayer, LayeredEffectHost};
 use lash_core_execution::{
     AdmittedScope, EffectAddress, EffectGroupHandle, EffectHost, ExecutionScope, GroupExecutors,
-    GroupSettlement, GroupWakePolicy, LoserPolicy, RuntimeAttribution, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeErrorCode,
+    GroupSettlement, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::SqliteBackend;
@@ -61,145 +60,6 @@ impl EffectLayer for RecordingLayer {
         self.record(format!("settle:{}", settlement.position));
         Ok(settlement)
     }
-}
-
-/// Runs every child as a language-runtime value naming its own replay key.
-struct EchoChildren;
-
-impl GroupExecutors for EchoChildren {
-    fn executor_for(
-        &self,
-        envelope: &RuntimeEffectEnvelope,
-    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        let key = envelope.invocation.replay_key().to_string();
-        Some(RuntimeEffectLocalExecutor::testing(move |_| async move {
-            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
-                value: serde_json::json!(key),
-            })
-        }))
-    }
-}
-
-fn group(scope: &ExecutionScope, key: &str, children: usize) -> RuntimeEffectGroup {
-    let invocation = |replay_key: String, label: &str| {
-        RuntimeEffectInvocation::new(
-            EffectAddress::new(scope.clone(), replay_key).expect("a valid effect address"),
-            RuntimeAttribution::none(),
-            label,
-        )
-    };
-    RuntimeEffectGroup::try_new(
-        invocation(format!("{key}:group"), "effect-group"),
-        key.to_string(),
-        (0..children)
-            .map(|child| {
-                RuntimeEffectEnvelope::new(
-                    invocation(format!("{key}:child:{child}"), "child"),
-                    RuntimeEffectCommand::LanguageRuntimeValue {
-                        operation: format!("{key}:child:{child}"),
-                    },
-                )
-            })
-            .collect(),
-        GroupWakePolicy::All,
-        LoserPolicy::RunToCompletion,
-    )
-    .expect("a well-formed group")
-}
-
-/// A recording layer over a memory backend opens a group; the backend's
-/// journal, not the layer, decides every later answer about it. A second,
-/// unlayered host over the same backend reopens the group the layered
-/// controller recorded and is refused a narrower shape under its key, and the
-/// settlements the layered controller reads are the ones the journal ranked.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_layered_group_is_arbitrated_by_the_backend_journal() {
-    let backend = SqliteBackend::memory()
-        .await
-        .expect("open a memory backend");
-    backend
-        .effect_host()
-        .register_group_executors(Arc::new(EchoChildren))
-        .expect("the fresh host takes the resolver");
-    let layer = Arc::new(RecordingLayer::default());
-    let layered = LayeredEffectHost::new(
-        backend.effect_host(),
-        Arc::clone(&layer) as Arc<dyn EffectLayer>,
-    );
-    let scope = ExecutionScope::runtime_operation("layered-group");
-    let admitted = || AdmittedScope::runtime_operation("layered-group");
-
-    let view = layered.scoped(admitted()).expect("the layered host scopes");
-    let mut handle = view
-        .controller()
-        .open_effect_group(group(&scope, "layered", 2))
-        .await
-        .expect("the layered controller opens the group on the journal");
-
-    // Another host over the same databases never saw the layer: what it
-    // answers comes from the rows the layered open wrote.
-    let unlayered = backend
-        .reopen()
-        .await
-        .expect("reopen the backend")
-        .effect_host();
-    unlayered
-        .register_group_executors(Arc::new(EchoChildren))
-        .expect("the reopened host takes the resolver");
-    let unlayered_view = unlayered.scoped(admitted()).expect("the raw host scopes");
-    let refusal = unlayered_view
-        .controller()
-        .open_effect_group(group(&scope, "layered", 1))
-        .await
-        .expect_err("the journal holds a two-child group under this key");
-    assert_eq!(refusal.code, RuntimeErrorCode::RuntimeEffectGroupShape);
-    let reopened = unlayered_view
-        .controller()
-        .open_effect_group(group(&scope, "layered", 2))
-        .await
-        .expect("the same shape reopens the recorded group");
-    assert_eq!(reopened.group_key(), handle.group_key());
-
-    let mut consumed = Vec::new();
-    while !handle.is_exhausted() {
-        let settlement =
-            view.controller()
-                .await_next_settlement(
-                    &mut handle,
-                    lash_core::TurnCancelWait::unobserved(
-                        lash_core_execution::CancellationToken::new(),
-                    ),
-                )
-                .await
-                .expect("the journal serves each rank");
-        consumed.push(settlement.position);
-        let recorded = unlayered_view
-            .controller()
-            .read_group_settlement("layered", consumed.len() as u64)
-            .await
-            .expect("the raw host reads the rank")
-            .expect("the rank the layered caller consumed is recorded");
-        assert_eq!(
-            recorded.sequence, settlement.sequence,
-            "both hosts read one journal's ranks"
-        );
-    }
-    view.controller()
-        .close_effect_group(handle, LoserPolicy::RunToCompletion)
-        .await
-        .expect("close the group");
-
-    let mut positions = consumed.clone();
-    positions.sort_unstable();
-    assert_eq!(positions, vec![0, 1]);
-    let mut expected = vec!["open:layered".to_string()];
-    expected.extend(consumed.iter().map(|position| format!("settle:{position}")));
-    assert_eq!(
-        layer.seen(),
-        expected,
-        "the layer saw the one open and each settlement it forwarded, and \
-         nothing the unlayered host did"
-    );
 }
 
 /// An effect run through a layered controller is journaled by the backend:
@@ -281,71 +141,12 @@ where
     .expect("runtime thread")
 }
 
-/// The whole shared effect-group host contract, answered through a recording
-/// layer: every host the suite asks for is a layered view of one memory
-/// backend's journal.
+/// The shared effect-group host contract's unwired leg, answered through a
+/// recording layer: the Restate double resolves group children at the
+/// endpoint, so it has no unwired-host form for these laws and the layered
+/// SQLite host keeps them until the SQL effect host leaves (B4).
 mod layered_effect_group_host_laws {
     use super::*;
-
-    lash_conformance::effect_group_host_tests!({
-        let backend = SqliteBackend::memory()
-            .await
-            .expect("open a memory backend");
-        let layer = Arc::new(RecordingLayer::default());
-        let hosts = backend.clone();
-        (
-            backend,
-            move |executors: Option<Arc<dyn GroupExecutors>>| {
-                let backend = hosts.clone();
-                let host = sync_await(async move {
-                    backend
-                        .reopen()
-                        .await
-                        .expect("reopen the backend")
-                        .effect_host()
-                });
-                if let Some(executors) = executors {
-                    host.register_group_executors(executors)
-                        .expect("a freshly opened host has no resolver yet");
-                }
-                Arc::new(LayeredEffectHost::new(
-                    host,
-                    Arc::clone(&layer) as Arc<dyn EffectLayer>,
-                )) as Arc<dyn EffectHost>
-            },
-        )
-    });
-
-    // A close racing its own children's settlements seats one terminal per
-    // child, through the same layered host.
-    lash_conformance::effect_group_close_race_tests!({
-        let backend = SqliteBackend::memory()
-            .await
-            .expect("open a memory backend");
-        let layer = Arc::new(RecordingLayer::default());
-        let hosts = backend.clone();
-        (
-            backend,
-            move |executors: Option<Arc<dyn GroupExecutors>>| {
-                let backend = hosts.clone();
-                let host = sync_await(async move {
-                    backend
-                        .reopen()
-                        .await
-                        .expect("reopen the backend")
-                        .effect_host()
-                });
-                if let Some(executors) = executors {
-                    host.register_group_executors(executors)
-                        .expect("a freshly opened host has no resolver yet");
-                }
-                Arc::new(LayeredEffectHost::new(
-                    host,
-                    Arc::clone(&layer) as Arc<dyn EffectLayer>,
-                )) as Arc<dyn EffectHost>
-            },
-        )
-    });
 
     lash_conformance::effect_group_unwired_host_tests!({
         let backend = SqliteBackend::memory()
