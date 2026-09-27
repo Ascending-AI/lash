@@ -253,13 +253,13 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
         self.inner.load_session_meta().await
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        input: lash_core::PendingTurnInputDraft,
-    ) -> Result<lash_core::PendingTurnInput, StoreError> {
-        let observation = self.metrics.observe_call("enqueue_pending_turn_input");
+        batch: lash_core::PendingTurnInputBatch,
+    ) -> Result<Vec<lash_core::PendingTurnInput>, StoreError> {
+        let observation = self.metrics.observe_call("enqueue_pending_turn_inputs");
         let started = observation.started_at;
-        let result = self.inner.enqueue_pending_turn_input(input).await;
+        let result = self.inner.enqueue_pending_turn_inputs(batch).await;
         self.metrics
             .record_timing("queue_enqueue", started.elapsed());
         drop(observation);

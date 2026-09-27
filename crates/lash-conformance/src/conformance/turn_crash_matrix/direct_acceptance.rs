@@ -25,13 +25,13 @@ impl crate::store::RuntimePersistenceDecorator for CountingAcceptanceStore {
         self.inner.as_ref()
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        draft: crate::PendingTurnInputDraft,
-    ) -> Result<crate::PendingTurnInput, StoreError> {
+        batch: crate::PendingTurnInputBatch,
+    ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
         self.enqueues
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inner.enqueue_pending_turn_input(draft).await
+        self.inner.enqueue_pending_turn_inputs(batch).await
     }
 }
 

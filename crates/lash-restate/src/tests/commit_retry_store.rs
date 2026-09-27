@@ -462,11 +462,11 @@ impl lash_core::TurnInputStore for CommitRetryStore {
             .await
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        input: lash_core::PendingTurnInputDraft,
-    ) -> Result<lash_core::PendingTurnInput, lash_core::StoreError> {
-        self.inner.enqueue_pending_turn_input(input).await
+        batch: lash_core::PendingTurnInputBatch,
+    ) -> Result<Vec<lash_core::PendingTurnInput>, lash_core::StoreError> {
+        self.inner.enqueue_pending_turn_inputs(batch).await
     }
 
     async fn load_run_spec(

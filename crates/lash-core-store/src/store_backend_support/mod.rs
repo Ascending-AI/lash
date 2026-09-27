@@ -9,6 +9,7 @@ pub mod required_constraints;
 mod run_spec_admission;
 mod session_ingress;
 mod session_meta;
+mod turn_input_batch;
 mod turn_input_lifecycle_sql;
 
 pub use append_identity::decode_append_request_identity;
@@ -29,6 +30,9 @@ pub use session_ingress::{
 pub use session_meta::{
     CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
     guard_rebind_lineage, guard_session_meta_relation_rewrite,
+};
+pub use turn_input_batch::{
+    TurnInputDraftAdmission, decide_turn_input_draft_admission, turn_input_submission_digest,
 };
 pub use turn_input_lifecycle_sql::{
     accepted_turn_input_state_predicate_sql, active_turn_input_state_predicate_sql,

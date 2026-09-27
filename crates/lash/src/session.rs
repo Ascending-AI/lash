@@ -858,6 +858,24 @@ impl LashSession {
         crate::SendBuilder::new(crate::send::SendTarget::Live(self.clone()), input)
     }
 
+    /// Accept `inputs` durably as one request under one shared spec, and ask
+    /// the engine to drive the session (FIG-3842).
+    ///
+    /// Awaiting the builder yields one [`SendHandle`](crate::SendHandle) per
+    /// input, in request order. New ids are enqueued in request order as one
+    /// contiguous block; an id already accepted with the same content returns
+    /// its existing handle; an id accepted with other content, or one id
+    /// named twice, refuses the whole request and accepts nothing.
+    pub fn send_batch<I>(&self, inputs: impl IntoIterator<Item = I>) -> crate::SendBatchBuilder
+    where
+        I: Into<crate::BatchInput>,
+    {
+        crate::SendBatchBuilder::new(
+            crate::send::SendTarget::Live(self.clone()),
+            inputs.into_iter().map(Into::into).collect(),
+        )
+    }
+
     /// Re-attach to an input accepted earlier: after a restart, or from
     /// another handle. Never commits anything.
     pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {

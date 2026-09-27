@@ -632,6 +632,19 @@ pub enum StoreError {
         session_id: SessionId,
         input_id: InputId,
     },
+    /// A turn-input batch named one input twice, by source key or input id
+    /// (FIG-3842). The whole request was refused; nothing was stored.
+    #[error("turn-input batch of session `{session_id}` names {name} more than once")]
+    PendingTurnInputBatchDuplicate { session_id: SessionId, name: String },
+    /// A turn-input batch for session `session_id` carried a draft for
+    /// `draft_session_id` (FIG-3842). Nothing was stored.
+    #[error(
+        "turn-input batch of session `{session_id}` carries a draft for session `{draft_session_id}`"
+    )]
+    PendingTurnInputBatchForeignSession {
+        session_id: SessionId,
+        draft_session_id: SessionId,
+    },
     /// Different run spec bytes arrived under a hash the session already
     /// interned (FIG-3838). Nothing was stored.
     #[error("run spec `{hash}` of session `{session_id}` is already interned with different bytes")]
@@ -955,6 +968,10 @@ impl StoreError {
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
             Self::PendingTurnInputIdConflict { .. } => "PendingTurnInputIdConflict",
+            Self::PendingTurnInputBatchDuplicate { .. } => "PendingTurnInputBatchDuplicate",
+            Self::PendingTurnInputBatchForeignSession { .. } => {
+                "PendingTurnInputBatchForeignSession"
+            }
             Self::RunSpecHashCollision { .. } => "RunSpecHashCollision",
             Self::PendingTurnInputRunSpecMismatch { .. } => "PendingTurnInputRunSpecMismatch",
             Self::RunSpecMissing { .. } => "RunSpecMissing",

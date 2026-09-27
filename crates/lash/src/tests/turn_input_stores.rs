@@ -51,31 +51,35 @@ impl lash_core::TurnInputStore for SnapshotStore {
         Ok(Vec::new())
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        input: lash_core::PendingTurnInputDraft,
-    ) -> std::result::Result<lash_core::PendingTurnInput, lash_core::store::StoreError> {
+        batch: lash_core::PendingTurnInputBatch,
+    ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
         let mut seq = self.pending_turn_input_seq.lock_recover();
-        *seq += 1;
-        let state = lash_core::TurnInputState::open(input.ingress.clone());
-        let stored = lash_core::PendingTurnInput {
-            input_id: input
-                .input_id
-                .unwrap_or_else(|| format!("snapshot-ti-{}", *seq))
-                .into(),
-            session_id: input.session_id,
-            enqueue_seq: *seq,
-            source_key: input.source_key,
-            state,
-            enqueued_at_ms: now_epoch_ms(),
-            run_spec: input
-                .run_spec
-                .hash()
-                .expect("hash the snapshot input's spec"),
-            input: input.input,
-        };
-        self.pending_turn_inputs.lock_recover().push(stored.clone());
-        Ok(stored)
+        let mut admitted = Vec::new();
+        for input in batch.into_drafts() {
+            *seq += 1;
+            let state = lash_core::TurnInputState::open(input.ingress.clone());
+            let stored = lash_core::PendingTurnInput {
+                input_id: input
+                    .input_id
+                    .unwrap_or_else(|| format!("snapshot-ti-{}", *seq))
+                    .into(),
+                session_id: input.session_id,
+                enqueue_seq: *seq,
+                source_key: input.source_key,
+                state,
+                enqueued_at_ms: now_epoch_ms(),
+                run_spec: input
+                    .run_spec
+                    .hash()
+                    .expect("hash the snapshot input's spec"),
+                input: input.input,
+            };
+            self.pending_turn_inputs.lock_recover().push(stored.clone());
+            admitted.push(stored);
+        }
+        Ok(admitted)
     }
 
     async fn list_pending_turn_inputs(
@@ -279,10 +283,10 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         Ok(Vec::new())
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        _input: lash_core::PendingTurnInputDraft,
-    ) -> std::result::Result<lash_core::PendingTurnInput, lash_core::store::StoreError> {
+        _batch: lash_core::PendingTurnInputBatch,
+    ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
         unreachable!("BoundSessionStore does not serve pending turn input")
     }
 

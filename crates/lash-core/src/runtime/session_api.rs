@@ -1035,34 +1035,73 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     source_key: Option<String>,
     run_spec: crate::RunSpec,
 ) -> Result<crate::PendingTurnInput, RuntimeError> {
-    super::turn_loop::ensure_durable_effect_input(&input)?;
+    enqueue_turn_inputs_to_store(
+        session_id,
+        store,
+        queued_work,
+        vec![(input, source_key)],
+        ingress,
+        run_spec,
+    )
+    .await?
+    .pop()
+    .ok_or_else(|| {
+        RuntimeError::new(
+            RuntimeErrorCode::StoreCommitFailed,
+            "a batch of one admitted no pending turn input",
+        )
+    })
+}
+
+/// Durably accept `inputs`, each filed under its source key, as one request
+/// under one shared `ingress` and `run_spec` (FIG-3842), and ask the engine
+/// for a drive per accepted next-turn row. The rows come back in request
+/// order; a refusal accepted nothing.
+pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
+    session_id: SessionId,
+    store: Arc<dyn crate::RuntimePersistence>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
+    inputs: Vec<(crate::TurnInput, Option<String>)>,
+    ingress: crate::TurnInputIngress,
+    run_spec: crate::RunSpec,
+) -> Result<Vec<crate::PendingTurnInput>, RuntimeError> {
     let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
-    let mut draft =
-        crate::PendingTurnInputDraft::new(session_id, ingress, input).with_run_spec(run_spec);
-    // A keyed input's id is its key's: a host re-attaches by the key alone.
-    if let Some(key) = source_key.as_deref() {
-        draft.input_id = Some(crate::PendingTurnInputDraft::keyed_input_id(
-            &draft.session_id,
-            key,
-        ));
+    let mut drafts = Vec::with_capacity(inputs.len());
+    for (input, source_key) in inputs {
+        super::turn_loop::ensure_durable_effect_input(&input)?;
+        let mut draft =
+            crate::PendingTurnInputDraft::new(session_id.clone(), ingress.clone(), input)
+                .with_run_spec(run_spec.clone());
+        // A keyed input's id is its key's: a host re-attaches by the key alone.
+        if let Some(key) = source_key.as_deref() {
+            draft.input_id = Some(crate::PendingTurnInputDraft::keyed_input_id(
+                &draft.session_id,
+                key,
+            ));
+        }
+        draft.source_key = source_key;
+        drafts.push(draft);
     }
-    draft.source_key = source_key;
+    let batch = crate::PendingTurnInputBatch::new(session_id, drafts)
+        .map_err(super::error::runtime_error_from_turn_input_admission)?;
     store
         .read_session_state_version()
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?;
     let enqueued = store
-        .enqueue_pending_turn_input(draft)
+        .enqueue_pending_turn_inputs(batch)
         .await
         .map_err(super::error::runtime_error_from_turn_input_admission)?;
     if is_next_turn {
         // One drive request per accepted row (FIG-3600): an engine dedupes a
         // repeated ask for the same row, and a drive admits whatever else is
         // pending too.
-        queued_work.schedule_drive(
-            &enqueued.session_id,
-            crate::engine::DriveRequestId::new(enqueued.input_id.to_string()),
-        );
+        for row in &enqueued {
+            queued_work.schedule_drive(
+                &row.session_id,
+                crate::engine::DriveRequestId::new(row.input_id.to_string()),
+            );
+        }
     }
     Ok(enqueued)
 }

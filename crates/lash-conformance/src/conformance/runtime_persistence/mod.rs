@@ -101,6 +101,7 @@ mod root_terminals;
 mod run_specs;
 mod suite_and_receipts;
 mod turn_bound_claims;
+mod turn_input_batches;
 mod turn_inputs_and_reopen;
 mod turn_parks;
 
@@ -122,6 +123,7 @@ pub mod runtime_persistence_macro_support {
     pub use super::run_specs::*;
     pub use super::suite_and_receipts::*;
     pub use super::turn_bound_claims::*;
+    pub use super::turn_input_batches::*;
     pub use super::turn_inputs_and_reopen::*;
     pub use super::turn_parks::*;
     pub use crate::conformance::durable_queued_drain_wait::*;

@@ -482,124 +482,101 @@ impl TurnInputStore for PostgresSessionStore {
         Ok(applied)
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        draft: lash_core_execution::PendingTurnInputDraft,
-    ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
+        batch: lash_core_execution::PendingTurnInputBatch,
+    ) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+        use lash_core_execution::store_backend_support as support;
+        let session_id = batch.session_id();
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
-        ensure_session_not_closing_tx(&mut tx, &draft.session_id).await?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        ensure_session_not_closing_tx(&mut tx, session_id).await?;
+        // The session's write authority, held to the commit: every ingress
+        // producer takes it before it allocates, so the absences read below
+        // hold and the block allocated below is contiguous (FIG-3842).
+        super::lock_session_history_mutation_tx(&mut tx, session_id).await?;
         let now = self.clock.timestamp_ms();
-        let enqueue_seq = super::allocate_ingress_sequence_tx(&mut tx, &draft.session_id).await?;
-        let enqueue_seq_u64 = u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?;
-        let input_id = draft.input_id.clone().unwrap_or_else(|| {
-            lash_core_execution::store_backend_support::derive_pending_turn_input_id(
-                &draft.session_id,
-                draft.source_key.as_deref(),
-                now,
-                enqueue_seq_u64,
-            )
-        });
-        let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
-        let submission_digest = draft.submission_digest().map_err(|err| {
-            StoreError::Backend(format!(
-                "failed to digest pending turn input submission: {err}"
-            ))
-        })?;
-        let ingress_json = encode_json(&draft.ingress)?;
-        let input_json = encode_json(&draft.input)?;
-        let run_spec = admit_run_spec_tx(&mut tx, &draft).await?;
-        let input = if let Some(source_key) = draft.source_key.as_deref() {
-            let row = sqlx::query(
-                crate::turn_ingress::turn_ingress_sql()
-                    .pending_inputs_postgres
-                    .insert_or_adopt_existing
-                    .sql(),
-            )
-            .bind(enqueue_seq)
-            .bind(&input_id)
-            .bind(draft.session_id.as_str())
-            .bind(source_key)
-            .bind(&ingress_json)
-            .bind(state.as_str())
-            .bind(&input_json)
-            .bind(now as i64)
-            .bind(&submission_digest)
-            .bind(run_spec.column())
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;
-            let existing_digest: String =
-                row.try_get("submission_digest").map_err(store_sqlx_error)?;
-            let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-            if existing_digest != submission_digest {
-                return Err(StoreError::PendingTurnInputSourceKeyConflict {
-                    session_id: draft.session_id.clone(),
-                    source_key: source_key.to_string(),
-                    existing_input_id: input.input_id.clone(),
-                });
-            }
-            input
-        } else if draft.input_id.is_some() {
-            let row = sqlx::query(
-                crate::turn_ingress::turn_ingress_sql()
-                    .pending_inputs_postgres
-                    .insert_or_adopt_by_input_id
-                    .sql(),
-            )
-            .bind(enqueue_seq)
-            .bind(&input_id)
-            .bind(draft.session_id.as_str())
-            .bind(&draft.source_key)
-            .bind(&ingress_json)
-            .bind(state.as_str())
-            .bind(&input_json)
-            .bind(now as i64)
-            .bind(&submission_digest)
-            .bind(run_spec.column())
-            .fetch_one(&mut *tx)
-            .await
-            // The `ON CONFLICT (input_id)` arbiter absorbs the id's unique
-            // violation, so only an unrelated insert failure reaches here.
-            .map_err(store_sqlx_error)?;
-            let existing_digest: String =
-                row.try_get("submission_digest").map_err(store_sqlx_error)?;
-            draft.adopt_provisioned_row(
-                pending_turn_input_from_row(pending_turn_input_row(row)?)?,
-                &existing_digest,
-            )?
-        } else {
-            sqlx::query(
-                crate::turn_ingress::turn_ingress_sql()
-                    .pending_inputs_postgres
-                    .insert_new
-                    .sql(),
-            )
-            .bind(enqueue_seq)
-            .bind(&input_id)
-            .bind(draft.session_id.as_str())
-            .bind(&draft.source_key)
-            .bind(&ingress_json)
-            .bind(state.as_str())
-            .bind(&input_json)
-            .bind(now as i64)
-            .bind(&submission_digest)
-            .bind(run_spec.column())
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;
-            load_pending_turn_input(&mut tx, &draft.session_id, &input_id)
-                .await?
-                .ok_or_else(|| {
-                    StoreError::Backend("pending turn input insert disappeared".to_string())
-                })?
-        };
+        let sql = crate::turn_ingress::turn_ingress_sql();
+        let mut interned = std::collections::BTreeSet::new();
+        let mut admitted = Vec::with_capacity(batch.drafts().len());
+        for draft in batch.drafts() {
+            let submission_digest = support::turn_input_submission_digest(draft)?;
+            let by_source_key: Option<(String, String)> = match draft.source_key.as_deref() {
+                Some(source_key) => {
+                    sqlx::query_as(sql.pending_inputs.select_id_by_source_key.sql())
+                        .bind(session_id.as_str())
+                        .bind(source_key)
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .map_err(store_sqlx_error)?
+                }
+                None => None,
+            };
+            let by_input_id: Option<(String, String)> =
+                match (&by_source_key, draft.input_id.as_deref()) {
+                    (None, Some(input_id)) => {
+                        sqlx::query_as(sql.pending_inputs.select_session_by_input_id.sql())
+                            .bind(input_id)
+                            .fetch_optional(&mut *tx)
+                            .await
+                            .map_err(store_sqlx_error)?
+                    }
+                    _ => None,
+                };
+            let input_id = match support::decide_turn_input_draft_admission(
+                draft,
+                &submission_digest,
+                by_source_key,
+                by_input_id,
+            )? {
+                support::TurnInputDraftAdmission::Existing { input_id } => input_id,
+                support::TurnInputDraftAdmission::New => {
+                    let enqueue_seq =
+                        super::allocate_ingress_sequence_tx(&mut tx, session_id).await?;
+                    let input_id = match draft.input_id.clone() {
+                        Some(input_id) => input_id,
+                        None => support::derive_pending_turn_input_id(
+                            session_id,
+                            draft.source_key.as_deref(),
+                            now,
+                            u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?,
+                        ),
+                    };
+                    let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
+                    let run_spec = admit_run_spec_tx(&mut tx, draft, &mut interned).await?;
+                    sqlx::query(sql.pending_inputs.insert_new.sql())
+                        .bind(enqueue_seq)
+                        .bind(&input_id)
+                        .bind(session_id.as_str())
+                        .bind(&draft.source_key)
+                        .bind(encode_json(&draft.ingress)?)
+                        .bind(state.as_str())
+                        .bind(encode_json(&draft.input)?)
+                        .bind(&submission_digest)
+                        .bind(now as i64)
+                        .bind(run_spec.column())
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|err| {
+                            pending_turn_input_insert_error(err, session_id, &input_id)
+                        })?;
+                    input_id
+                }
+            };
+            admitted.push(
+                load_pending_turn_input(&mut tx, session_id, &input_id)
+                    .await?
+                    .ok_or_else(|| {
+                        StoreError::Backend("admitted pending turn input disappeared".to_string())
+                    })?,
+            );
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(input)
+        Ok(admitted)
     }
 
     async fn load_run_spec(
@@ -1161,14 +1138,16 @@ impl TurnInputStore for PostgresSessionStore {
 /// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse
 /// a steering spec that differs from its running turn's, then intern a
 /// non-default spec once per hash and refuse different bytes under an
-/// interned hash. Both refusals roll the whole admission back.
+/// interned hash. Both refusals roll the whole admission back. A hash this
+/// batch's transaction already interned (`interned`) is not interned again.
 ///
-/// The session lock the enqueue took to allocate its sequence serializes
-/// concurrent interns of one session, and a spec row is never rewritten, so
-/// the read-back sees the bytes this or an earlier admission interned.
+/// The session lock the enqueue holds serializes concurrent interns of one
+/// session, and a spec row is never rewritten, so the read-back sees the
+/// bytes this or an earlier admission interned.
 async fn admit_run_spec_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     draft: &lash_core_execution::PendingTurnInputDraft,
+    interned: &mut std::collections::BTreeSet<String>,
 ) -> Result<lash_core_execution::store_backend_support::RunSpecAdmission, StoreError> {
     use lash_core_execution::store_backend_support as support;
     let spec = support::RunSpecAdmission::of(draft)?;
@@ -1195,7 +1174,9 @@ async fn admit_run_spec_tx(
                 .map(|(state, hash)| (state.as_str(), hash.as_deref())),
         )?;
     }
-    if let Some((hash, canonical)) = spec.interned() {
+    if let Some((hash, canonical)) = spec.interned()
+        && !interned.contains(hash)
+    {
         sqlx::query(sql.run_specs.intern.sql())
             .bind(draft.session_id.as_str())
             .bind(hash)
@@ -1210,6 +1191,7 @@ async fn admit_run_spec_tx(
             .await
             .map_err(store_sqlx_error)?;
         spec.check_interned(&draft.session_id, &stored)?;
+        interned.insert(hash.to_string());
     }
     Ok(spec)
 }

@@ -739,6 +739,109 @@ async fn an_unobserved_root_answers_with_a_reported_gap(engine: Engine) -> Resul
     Ok(())
 }
 
+/// Assert `refused` is the typed identity conflict a refused batch answers.
+fn assert_identity_conflict(refused: std::result::Result<Vec<crate::SendHandle>, EmbedError>) {
+    let Err(EmbedError::Runtime(error)) = &refused else {
+        panic!(
+            "expected a typed refusal, got {:?}",
+            refused.map(|handles| handles.len())
+        );
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::DurableIdentityConflict,
+        "{error:?}"
+    );
+}
+
+/// One batch answers one handle per input, in request order, and each input
+/// is answered by the root that applied it (FIG-3842). Resending the batch
+/// answers the same inputs and runs nothing again. A batch naming an
+/// accepted id with other content, or one id twice, accepts nothing.
+async fn a_batch_answers_one_handle_per_input_in_request_order(engine: Engine) -> Result<()> {
+    let fixture = fixture(engine, 4).await?;
+    let session = fixture.core.session("send-batch").open().await?;
+    let batch = || {
+        [
+            ("batch-a", TurnInput::text("first")),
+            ("batch-b", TurnInput::text("second")),
+            ("batch-c", TurnInput::text("third")),
+        ]
+    };
+
+    let handles = session.send_batch(batch()).await?;
+    assert_eq!(
+        handles
+            .iter()
+            .map(crate::SendHandle::id)
+            .collect::<Vec<_>>(),
+        ["batch-a", "batch-b", "batch-c"]
+            .map(|id| Some(lash_core::TurnId::from(id)))
+            .iter()
+            .map(Option::as_ref)
+            .collect::<Vec<_>>(),
+        "one handle per input, in request order"
+    );
+    let input_ids = handles
+        .iter()
+        .map(|handle| handle.input_id().clone())
+        .collect::<Vec<_>>();
+    for handle in handles {
+        let outcome = handle.outcome().await?;
+        assert_eq!(outcome.status, crate::TurnStatus::Answered);
+        assert!(
+            outcome.root.is_some() && outcome.output.is_some(),
+            "{outcome:?}"
+        );
+    }
+    let calls = fixture.calls.load(Ordering::SeqCst);
+
+    let resent = session.send_batch(batch()).await?;
+    assert_eq!(
+        resent
+            .iter()
+            .map(|handle| handle.input_id().clone())
+            .collect::<Vec<_>>(),
+        input_ids,
+        "a resent batch answers the inputs it accepted"
+    );
+    for handle in resent {
+        assert_eq!(handle.outcome().await?.status, crate::TurnStatus::Answered);
+    }
+    assert_eq!(
+        fixture.calls.load(Ordering::SeqCst),
+        calls,
+        "nothing ran again"
+    );
+
+    assert_identity_conflict(
+        session
+            .send_batch([
+                ("batch-d", TurnInput::text("new")),
+                ("batch-b", TurnInput::text("changed")),
+            ])
+            .await,
+    );
+    assert_identity_conflict(
+        session
+            .send_batch([
+                ("batch-e", TurnInput::text("once")),
+                ("batch-e", TurnInput::text("twice")),
+            ])
+            .await,
+    );
+    for never in ["batch-d", "batch-e"] {
+        let outcome = session.attach_id(never).outcome().await?;
+        assert_eq!(
+            outcome.status,
+            crate::TurnStatus::Cancelled,
+            "`{never}` of a refused batch was never accepted"
+        );
+    }
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
 macro_rules! send_handle_laws {
     ($engine:ident, $engine_variant:expr) => {
         mod $engine {
@@ -767,6 +870,11 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
                 super::replay_gaps_reach_both_streams_and_sinks($engine_variant).await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_batch_answers_one_handle_per_input_in_request_order() -> Result<()> {
+                super::a_batch_answers_one_handle_per_input_in_request_order($engine_variant).await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

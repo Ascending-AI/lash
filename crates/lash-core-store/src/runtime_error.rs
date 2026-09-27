@@ -459,6 +459,7 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
     match err {
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
+        | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
         | crate::store::StoreError::RunSpecHashCollision { .. }) => {
             RuntimeError::new(RuntimeErrorCode::DurableIdentityConflict, err.to_string())
         }
@@ -475,6 +476,7 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
     match err {
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
+        | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
         | crate::store::StoreError::RunSpecHashCollision { .. }
         | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }) => {
             runtime_error_from_turn_input_admission(err)

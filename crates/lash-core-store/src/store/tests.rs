@@ -960,7 +960,15 @@ fn decorator_surface_covers_every_component_trait_method() {
         "the component-trait scan must cover every segment: {declared:?}"
     );
 
-    let forwarded = forwarded_operations(decorator);
+    let mut forwarded = forwarded_operations(decorator);
+    for convenience in super::runtime_persistence_decorator::SELF_ROUTED_CONVENIENCES {
+        assert!(
+            declared.contains(*convenience) && !forwarded.contains(*convenience),
+            "a self-routed convenience is declared by a component trait and never forwarded: \
+             {convenience}"
+        );
+        forwarded.insert((*convenience).to_string());
+    }
     let missing: Vec<_> = declared.difference(&forwarded).cloned().collect();
     let extra: Vec<_> = forwarded.difference(&declared).cloned().collect();
 

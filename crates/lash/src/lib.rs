@@ -97,8 +97,8 @@ pub use crate::parked_work::{
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::send::{
-    CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle, SendBuilder, SendHandle,
-    SendOutcome, TurnEvents, TurnStatus,
+    BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle,
+    SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, TurnEvents, TurnStatus,
 };
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
@@ -357,13 +357,14 @@ pub mod persistence {
     pub use lash_core::runtime::{
         AcceptedTurnInputDrive, AcceptedTurnInputRefusal, ActiveTurnIngress, DeliveryPolicy,
         ForkPoint, ForkSessionReceipt, ForkSessionRequest, LiveReplayOutcome,
-        LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics,
-        PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork,
-        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
-        QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy,
-        QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-        QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
-        SessionCommandPayload, SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
+        LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputBatch,
+        PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, ProcessWakeSource,
+        QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
+        QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkClaim, QueuedWorkClaimBoundary,
+        QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+        QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
+        RuntimeCheckpointComponents, RuntimeSessionState, SessionCommandPayload,
+        SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
         TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
         TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
         TurnInputState, TurnInputStateKind, TurnWorkPayload,

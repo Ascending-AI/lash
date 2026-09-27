@@ -374,7 +374,7 @@ pub use turn_input_ingress::ingress_message_id;
 #[cfg(not(feature = "testing"))]
 pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
-    AcceptedTurnInputDrive, AcceptedTurnInputRefusal, PendingTurnInput,
+    AcceptedTurnInputDrive, AcceptedTurnInputRefusal, PendingTurnInput, PendingTurnInputBatch,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
     PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput,

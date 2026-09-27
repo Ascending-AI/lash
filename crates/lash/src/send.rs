@@ -13,6 +13,7 @@
 //! remembers its answer, so a later call answers the same outcome without
 //! driving again.
 
+mod batch;
 mod cancel;
 mod follow;
 mod mailbox;
@@ -46,6 +47,7 @@ use lash_core::facade_support::{TurnCancelDisposition, TurnCancelMode, TurnCance
 use lash_core::runtime::PendingTurnInputCancelReceipt;
 use lash_core::store::{ParkId, ParkReason};
 
+pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
 pub(crate) use mailbox::deposit_settled_root;
 

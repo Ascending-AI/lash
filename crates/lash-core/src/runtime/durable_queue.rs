@@ -131,14 +131,34 @@ impl DurableSessionOps {
         source_key: Option<String>,
         run_spec: crate::RunSpec,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
+        self.enqueue_turn_inputs(store, vec![(input, source_key)], ingress, run_spec)
+            .await?
+            .pop()
+            .ok_or_else(|| store_error("a batch of one admitted no pending turn input"))
+    }
+
+    /// Durably accept `inputs`, each filed under its source key, as one
+    /// request under one shared `ingress` and `run_spec` (FIG-3842), then
+    /// wake the queued-work driver.
+    ///
+    /// The rows come back in request order. An input a stored row already
+    /// answers returns that row; the others are enqueued in request order as
+    /// one contiguous block. A conflict, or one id named twice, refuses the
+    /// whole request and accepts nothing.
+    pub async fn enqueue_turn_inputs(
+        &self,
+        store: &Arc<dyn crate::RuntimePersistence>,
+        inputs: Vec<(crate::TurnInput, Option<String>)>,
+        ingress: crate::TurnInputIngress,
+        run_spec: crate::RunSpec,
+    ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
-        let enqueued = super::session_api::enqueue_turn_input_to_store(
+        let enqueued = super::session_api::enqueue_turn_inputs_to_store(
             self.session_id.clone(),
             Arc::clone(store),
             Arc::clone(&self.queued_work),
-            input,
+            inputs,
             ingress,
-            source_key,
             run_spec,
         )
         .await?;
@@ -146,7 +166,10 @@ impl DurableSessionOps {
             store,
             SessionQueueEventKind::Enqueued,
             if is_next_turn {
-                vec![enqueued.input_id.to_string()]
+                enqueued
+                    .iter()
+                    .map(|row| row.input_id.to_string())
+                    .collect()
             } else {
                 Vec::new()
             },

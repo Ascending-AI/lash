@@ -115,6 +115,14 @@ pub(super) enum SurfaceMethod {
     /// [`TurnInputStore::enqueue_pending_turn_input`] of a keyed next-turn
     /// input under a non-default run spec, which interns the spec (FIG-3838).
     EnqueueRunSpecInput,
+    /// [`TurnInputStore::enqueue_pending_turn_inputs`] of a batch under the
+    /// sweep's run spec that resends the spec input and adds a new one, or
+    /// (`conflicting`) adds a new one beside the spec input with changed
+    /// content, which every backend refuses whole, without residue
+    /// (FIG-3842).
+    EnqueueTurnInputBatch {
+        conflicting: bool,
+    },
     /// [`TurnInputStore::load_run_spec`] of the spec the sweep interned
     /// (`known`), or of a hash no input names.
     LoadRunSpec {
@@ -229,6 +237,12 @@ impl SurfaceMethod {
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
+            Self::EnqueueTurnInputBatch { conflicting: false } => {
+                "surface:enqueue_turn_input_batch"
+            }
+            Self::EnqueueTurnInputBatch { conflicting: true } => {
+                "surface:enqueue_turn_input_batch_conflicting"
+            }
             Self::LoadRunSpec { known: true } => "surface:load_run_spec",
             Self::LoadRunSpec { known: false } => "surface:load_run_spec_unknown",
             Self::BindRootInputs { conflicting: false } => "surface:bind_root_inputs",
@@ -547,6 +561,11 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::LoadRunSpec { known: true }),
             surface(SurfaceMethod::EnqueueRunSpecInput),
             surface(SurfaceMethod::EnqueueRunSpecInput),
+            // A batch resends the spec input and adds one; resending the
+            // batch adds nothing; a conflicting batch is refused whole.
+            surface(SurfaceMethod::EnqueueTurnInputBatch { conflicting: false }),
+            surface(SurfaceMethod::EnqueueTurnInputBatch { conflicting: false }),
+            surface(SurfaceMethod::EnqueueTurnInputBatch { conflicting: true }),
             surface(SurfaceMethod::LoadRunSpec { known: true }),
             surface(SurfaceMethod::LoadRunSpec { known: false }),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
@@ -1505,6 +1524,46 @@ impl BackendRunner {
                 format!(
                     "run_spec_is_interned_hash={}",
                     input.run_spec == surface_run_spec_hash()
+                )
+            }
+            SurfaceMethod::EnqueueTurnInputBatch { conflicting } => {
+                let draft = |key: &str, text: &str| {
+                    PendingTurnInputDraft::new(
+                        &session_id,
+                        TurnInputIngress::NextTurn,
+                        TurnInput::text(text),
+                    )
+                    .with_source_key(key)
+                    .with_run_spec(surface_run_spec())
+                };
+                let (added, resent_text) = if conflicting {
+                    (
+                        "surface:batch-refused-input",
+                        "changed input under a run spec",
+                    )
+                } else {
+                    ("surface:batch-input", "input under a run spec")
+                };
+                let rows = store
+                    .enqueue_pending_turn_inputs(lash_core::PendingTurnInputBatch::new(
+                        session_id.clone(),
+                        vec![
+                            // Every backend mints unkeyed ids its own way, so
+                            // the sweep names each row it adds.
+                            draft(added, "input added by a batch")
+                                .with_input_id(format!("{session_id}:{added}")),
+                            draft("surface:run-spec-input", resent_text)
+                                .with_input_id(format!("{session_id}:run-spec-input")),
+                        ],
+                    )?)
+                    .await?;
+                format!(
+                    "keys={:?} run_specs_interned={}",
+                    rows.iter()
+                        .map(|row| row.source_key.as_deref())
+                        .collect::<Vec<_>>(),
+                    rows.iter()
+                        .all(|row| row.run_spec == surface_run_spec_hash())
                 )
             }
             SurfaceMethod::LoadRunSpec { known } => {

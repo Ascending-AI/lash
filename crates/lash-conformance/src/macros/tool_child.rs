@@ -84,7 +84,7 @@ macro_rules! admitted_head_redrive_tests {
     };
 }
 
-/// Register the turn-config laws (FIG-3600 S6, D3 §5.2; FIG-3838): a root
+/// Register the turn-config laws (FIG-3600 S6, D3 §5.2; FIG-3838, FIG-3842): a root
 /// resolves its run spec against its session config once, as a recorded
 /// step, and every replay of the root runs under that record. The fixture is the admitted-head one: a guard, a
 /// prefix, the tier's effect host, the store set under test and its
@@ -112,6 +112,10 @@ macro_rules! turn_config_tests {
             (a_root_resolves_its_spec_once_across_a_crash, "run-spec-once"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_missing_definition_retries_unrecorded_until_it_is_deployed, "run-spec-missing"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_batch_shares_one_spec_that_each_root_resolves_once, "run-spec-batch"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_batch_keeps_its_turn_lane_place_behind_the_command_lane, "run-spec-batch-order"));
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*

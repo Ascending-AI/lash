@@ -13,15 +13,10 @@ pub const COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingres
      claim_owner_id, claim_owner_incarnation_id,
      claim_token, claim_session_lease_generation, run_spec_hash";
 
-/// The columns written after allocation under the session lock.
+/// The columns written after allocation under the session's write authority.
 pub const INSERT_COLUMNS: &str =
     "enqueue_seq, input_id, session_id, source_key, ingress_json, state,
      input_json, submitted_ingress_json, submission_digest, enqueued_at_ms, run_spec_hash";
-
-/// The columns written by the PostgreSQL insert.
-pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, input_id, session_id, source_key,
-     ingress_json, state, input_json, submitted_ingress_json, submission_digest,
-     enqueued_at_ms, run_spec_hash";
 
 /// The facts source-key replay consults (FIG-3544).
 ///
@@ -94,6 +89,43 @@ crate::statements! {
     /// `every_release_statement_clears_the_whole_claim_identity` in this
     /// crate's suite holds them to it.
     pub struct PendingInputStatements @ "pending_turn_input" {
+        /// Admit input `?2` of session `?3` at sequence `?1`, allocated from
+        /// the session's shared counter under the session's write authority,
+        /// which the admitting transaction holds to its commit.
+        ///
+        /// `?5` is written to both `ingress_json` (the mutable current scope)
+        /// and `submitted_ingress_json` (immutable); `?8` is the submission
+        /// digest and `?10` the interned run spec's hash, NULL for the default
+        /// spec (FIG-3838).
+        insert_new = "INSERT INTO pending_turn_inputs (
+                 enqueue_seq, input_id, session_id, source_key, ingress_json, state,
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms,
+                 run_spec_hash
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?8, ?9, ?10)";
+
+        /// The id and admission-time submission digest session `?1` already
+        /// filed under source key `?2`.
+        ///
+        /// Read under the session's write authority, which every admission
+        /// takes before it reads, so the absence it answers holds until the
+        /// admitting transaction commits. The verdict compares the digest and
+        /// reads the row back only on a match, so the unbounded `input_json` is
+        /// never read to decide a replay (FIG-3544).
+        select_id_by_source_key = "SELECT input_id, submission_digest
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND source_key = ?2";
+
+        /// The session and immutable submission digest of the row that already
+        /// holds input id `?1`, in any session: a provisioned id is unique
+        /// across the store, so the enqueue that provisioned it adopts the row
+        /// or refuses a foreign one (FIG-3513). Another session's concurrent
+        /// admission of the same id is not serialized by this session's
+        /// authority; the id's unique constraint refuses the second insert.
+        select_session_by_input_id = "SELECT session_id, submission_digest
+             FROM pending_turn_inputs
+             WHERE input_id = ?1";
+
         select_by_id = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,

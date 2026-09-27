@@ -242,6 +242,19 @@ impl DurableSession {
         crate::SendBuilder::new(crate::send::SendTarget::Durable(self.clone()), input)
     }
 
+    /// Accept `inputs` durably as one request under one shared spec; the
+    /// same acceptance as
+    /// [`LashSession::send_batch`](crate::LashSession::send_batch).
+    pub fn send_batch<I>(&self, inputs: impl IntoIterator<Item = I>) -> crate::SendBatchBuilder
+    where
+        I: Into<crate::BatchInput>,
+    {
+        crate::SendBatchBuilder::new(
+            crate::send::SendTarget::Durable(self.clone()),
+            inputs.into_iter().map(Into::into).collect(),
+        )
+    }
+
     /// Re-attach to an input accepted earlier, by its input id.
     pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {
         crate::send::attach(crate::send::SendTarget::Durable(self.clone()), input_id)

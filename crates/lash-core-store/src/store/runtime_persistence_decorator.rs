@@ -1,6 +1,17 @@
 use super::*;
 use crate::SessionId;
 
+/// Provided conveniences a decorator answers through its own primitive
+/// instead of forwarding them to `inner()`: a decorator that intercepts the
+/// primitive intercepts every call of the convenience too. They are left out
+/// of `persistence_operations!`, so the component trait's default applies;
+/// the surface lint reads this list.
+#[cfg(test)]
+pub(super) const SELF_ROUTED_CONVENIENCES: &[&str] = &[
+    // Exactly `enqueue_pending_turn_inputs` of a batch of one (FIG-3842).
+    "enqueue_pending_turn_input",
+];
+
 /// Every persistence operation a decorator forwards, grouped by the component
 /// trait that declares it.
 ///
@@ -14,7 +25,8 @@ use crate::SessionId;
 /// Adding an operation to a component trait and not to this list is the drift
 /// this shape exists to prevent; the
 /// `decorator_surface_covers_every_component_trait_method` lint in
-/// `store::tests` fails when the two disagree.
+/// `store::tests` fails when the two disagree, except for the self-routed
+/// conveniences named above.
 macro_rules! persistence_operations {
     ($emit:ident) => {
         $emit! {
@@ -58,7 +70,7 @@ macro_rules! persistence_operations {
                 fn authorize_turn_cancel_closure(&self, session_execution_lease: &SessionExecutionLeaseAuthority, authorization: &crate::TurnCancelClosureAuthorization) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
                 fn pending_turn_cancel_closures(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
                 fn pending_turn_cancel_closure_pins(&self) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
-                fn enqueue_pending_turn_input(&self, input: crate::PendingTurnInputDraft) -> Result<crate::PendingTurnInput, StoreError>;
+                fn enqueue_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch) -> Result<Vec<crate::PendingTurnInput>, StoreError>;
                 fn load_run_spec(&self, session_id: &SessionId, hash: &crate::run_spec::RunSpecHash) -> Result<Option<crate::run_spec::RunSpec>, StoreError>;
                 fn list_pending_turn_inputs(&self, session_id: &SessionId) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
                 fn list_turn_input_applications(&self, session_id: &SessionId) -> Result<Vec<crate::TurnInputApplication>, StoreError>;
@@ -137,7 +149,8 @@ macro_rules! emit_decorator_trait {
         /// the operations they intercept. Every other operation, including
         /// convenience methods with defaults on the component traits, is
         /// forwarded to the inner handle by the blanket component-trait
-        /// implementations generated below.
+        /// implementations generated below; the self-routed conveniences
+        /// alone run their trait default over this decorator's own primitive.
         ///
         /// A decorator must not implement the component traits directly; doing
         /// so would overlap those blanket implementations.

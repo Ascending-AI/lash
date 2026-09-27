@@ -600,3 +600,202 @@ pub async fn a_missing_definition_retries_unrecorded_until_it_is_deployed(
         "the recovered root leaves no park"
     );
 }
+
+/// Accept `keys` as one batch of next-turn inputs under `spec` (FIG-3842),
+/// answering their input ids in request order.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the session store admits the batch"
+)]
+async fn enqueue_batch(
+    store: &Arc<dyn crate::RuntimePersistence>,
+    session_id: &lash_sansio::SessionId,
+    keys: &[&str],
+    spec: &crate::RunSpec,
+) -> Vec<crate::InputId> {
+    let drafts = keys
+        .iter()
+        .map(|key| {
+            crate::PendingTurnInputDraft::new(
+                session_id.clone(),
+                crate::TurnInputIngress::next_turn(),
+                crate::TurnInput::text(*key),
+            )
+            .with_source_key(*key)
+            .with_run_spec(spec.clone())
+        })
+        .collect();
+    store
+        .enqueue_pending_turn_inputs(
+            crate::PendingTurnInputBatch::new(session_id.clone(), drafts)
+                .expect("the law's batch names each key once"),
+        )
+        .await
+        .expect("accept the law's batch")
+        .into_iter()
+        .map(|row| row.input_id)
+        .collect()
+}
+
+/// A batch shares one spec, and its roots resolve it once each: four inputs
+/// sent as one batch under a definition spec, with a claim bound of two, run
+/// as two roots in request order, each resolving the definition once and
+/// running on its shape; the session's own model is never taken.
+pub async fn a_batch_shares_one_spec_that_each_root_resolves_once(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "run-spec-batch", &effect_host, &stores, 2).await;
+    let models = record_models(&mut parts);
+    let resolutions = Arc::new(AtomicUsize::new(0));
+    parts.host.providers.run_definitions = definitions_with(CountingDefinition {
+        name: "run-spec-batch",
+        model: PINNED_MODEL,
+        resolved: Arc::clone(&resolutions),
+    });
+    let keys = ["batch-1", "batch-2", "batch-3", "batch-4"];
+    let inputs = enqueue_batch(
+        &parts.store,
+        &parts.session_id,
+        &keys,
+        &definition_spec("run-spec-batch"),
+    )
+    .await;
+    let outcome = drive(&runner, &parts, "run-spec-batch-drive").await;
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(
+        committed_roots(&outcome),
+        vec!["batch-1", "batch-3"],
+        "two roots in request order: {outcome:?}"
+    );
+    assert_eq!(
+        parts.applications().await,
+        vec![
+            (inputs[0].clone(), TurnId::from("batch-1")),
+            (inputs[1].clone(), TurnId::from("batch-1")),
+            (inputs[2].clone(), TurnId::from("batch-3")),
+            (inputs[3].clone(), TurnId::from("batch-3")),
+        ],
+        "each input applied once, in request order"
+    );
+    assert_eq!(
+        resolutions.load(Ordering::SeqCst),
+        2,
+        "the shared spec resolved once per root"
+    );
+    assert_eq!(recorded(&models), vec![PINNED_MODEL, PINNED_MODEL]);
+    assert_eq!(head_config(&parts).await.model.id, SESSION_MODEL);
+}
+
+/// A batch keeps its place in the turn lane, and the command lane still
+/// drains first (ADR 0101 §4): with a single send, then a config command,
+/// then a batch under a pinned spec, then another single send all pending at
+/// one boundary, the command applies before any turn-lane claim, and the
+/// turn lane runs in admission order: the first send, the batch as one root
+/// on its own shape, the last send. Both sends run on the commanded model.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "run-spec-batch-order", &effect_host, &stores, 8).await;
+    let models = record_models(&mut parts);
+    let before = enqueue(
+        &parts,
+        "before the command",
+        "order-before",
+        crate::RunSpec::default(),
+    )
+    .await;
+    let request = parts.request("run-spec-batch-order-drive");
+    let store = Arc::clone(&parts.store);
+    let session_id = parts.session_id.clone();
+    let (outcome, batch, after) = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        let store = Arc::clone(&store);
+        let session_id = session_id.clone();
+        Box::pin(async move {
+            runtime
+                .submit_session_command(
+                    crate::SessionCommand::ApplyConfigPatch {
+                        patch: Box::new(crate::ApplyConfigPatch {
+                            model: Some(model(COMMANDED_MODEL)),
+                            ..crate::ApplyConfigPatch::default()
+                        }),
+                    },
+                    "run-spec-batch-order-command",
+                )
+                .await
+                .expect("the config command is accepted");
+            let batch = enqueue_batch(
+                &store,
+                &session_id,
+                &["order-batch-1", "order-batch-2", "order-batch-3"],
+                &pinned_spec(),
+            )
+            .await;
+            let after = store
+                .enqueue_pending_turn_input(
+                    crate::PendingTurnInputDraft::new(
+                        session_id.clone(),
+                        crate::TurnInputIngress::next_turn(),
+                        crate::TurnInput::text("after the batch"),
+                    )
+                    .with_source_key("order-after"),
+                )
+                .await
+                .expect("accept the send after the batch")
+                .input_id;
+            let outcome = lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                .await
+                .expect("the drive runs");
+            (outcome, batch, after)
+        })
+    })
+    .await;
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    let applications = parts.applications().await;
+    let root_of = |input: &crate::InputId| {
+        applications
+            .iter()
+            .find(|(applied, _)| applied == input)
+            .map(|(_, root)| root.clone())
+            .expect("every input is applied")
+    };
+    let roots = [&before, &batch[0], &after].map(root_of);
+    assert_eq!(
+        applications
+            .iter()
+            .map(|(input, _)| input)
+            .collect::<Vec<_>>(),
+        [&before, &batch[0], &batch[1], &batch[2], &after].to_vec(),
+        "the turn lane applied in admission order: {applications:?}"
+    );
+    assert!(
+        batch.iter().all(|input| root_of(input) == roots[1]),
+        "the batch ran as one root: {applications:?}"
+    );
+    assert_eq!(
+        roots[1],
+        TurnId::from("order-batch-1"),
+        "the batch's root is started by its first input in request order"
+    );
+    assert_eq!(
+        committed_roots(&outcome),
+        roots.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "three roots, one per shape run, in admission order: {outcome:?}"
+    );
+    assert_eq!(
+        recorded(&models),
+        vec![COMMANDED_MODEL, PINNED_MODEL, COMMANDED_MODEL],
+        "the command applied before the first turn-lane claim; the batch ran on its own shape"
+    );
+    assert_eq!(head_config(&parts).await.model.id, COMMANDED_MODEL);
+}

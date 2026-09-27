@@ -10,39 +10,6 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only SQLite issues.
     pub(crate) struct PendingInputSqliteStatements @ "pending_turn_input" {
-        /// `?9` is allocated from the shared session counter under the write lock.
-        ///
-        /// `?4` is written to both `ingress_json` (the mutable current scope)
-        /// and `submitted_ingress_json` (immutable); `?7` is the submission
-        /// digest and `?10` the interned run spec's hash, NULL for the default
-        /// spec (FIG-3838).
-        insert_new = "INSERT INTO pending_turn_inputs (enqueue_seq,
-                 input_id, session_id, source_key, ingress_json, state,
-                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms,
-                 run_spec_hash
-             )
-             VALUES (?9, ?1, ?2, ?3, ?4, ?5, ?6, ?4, ?7, ?8, ?10)";
-
-        /// The id and admission-time submission digest session `?1` already
-        /// filed under source key `?2`.
-        ///
-        /// SQLite compares the digest and reads the row back only on a match,
-        /// under one write lock, so the unbounded `input_json` is never read to
-        /// decide a replay. PostgreSQL cannot hold "read the absence, then
-        /// insert" atomic under READ COMMITTED, so it detects the conflict in
-        /// the insert itself and has no counterpart to this read.
-        select_id_by_source_key = "SELECT input_id, submission_digest
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND source_key = ?2";
-
-        /// The session and immutable submission digest of the row that already
-        /// holds input id `?1`, in any session: a
-        /// provisioned id is unique across the store, so the enqueue that
-        /// provisioned it adopts the row or refuses a foreign one.
-        select_session_by_input_id = "SELECT session_id, submission_digest
-             FROM pending_turn_inputs
-             WHERE input_id = ?1";
-
         /// The facts the settlement verdict consults about input `?2` of
         /// session `?1`.
         ///

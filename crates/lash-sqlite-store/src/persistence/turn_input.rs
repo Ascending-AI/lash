@@ -497,121 +497,16 @@ impl TurnInputStore for Store {
             .map_err(sqlite_error)?
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        draft: lash_core_execution::PendingTurnInputDraft,
-    ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
-        let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
+        batch: lash_core_execution::PendingTurnInputBatch,
+    ) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+        let drafts = batch.drafts().len() as u64;
+        let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core_execution::PendingTurnInput, StoreError> = (|| {
-                    ensure_session_not_deleted_conn(tx, &draft.session_id)?;
-                    ensure_session_not_closing_conn(tx, &draft.session_id)?;
-                    let submission_digest = draft.submission_digest().map_err(|err| {
-                        StoreError::Backend(format!(
-                            "failed to digest pending turn input submission: {err}"
-                        ))
-                    })?;
-                    if let Some(source_key) = draft.source_key.as_deref() {
-                        let existing: Option<(String, String)> = tx
-                            .query_row(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .pending_inputs_sqlite
-                                    .select_id_by_source_key
-                                    .sql(),
-                                params![draft.session_id.as_str(), source_key],
-                                |row| Ok((row.get(0)?, row.get(1)?)),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        if let Some((input_id, existing_digest)) = existing {
-                            if existing_digest != submission_digest {
-                                return Err(StoreError::PendingTurnInputSourceKeyConflict {
-                                    session_id: draft.session_id.clone(),
-                                    source_key: source_key.to_string(),
-                                    existing_input_id: input_id.into(),
-                                });
-                            }
-                            return load_pending_turn_input_by_id_conn(
-                                tx,
-                                &draft.session_id,
-                                &input_id,
-                            )?
-                            .ok_or_else(|| {
-                                StoreError::Backend(
-                                    "pending turn input source row disappeared".to_string(),
-                                )
-                            });
-                        }
-                    }
-                    if let Some(input_id) = draft.input_id.as_deref() {
-                        let holder: Option<(String, String)> = tx
-                            .query_row(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .pending_inputs_sqlite
-                                    .select_session_by_input_id
-                                    .sql(),
-                                params![input_id],
-                                |row| Ok((row.get(0)?, row.get(1)?)),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        if let Some((holder, existing_digest)) = holder {
-                            let existing = load_pending_turn_input_by_id_conn(
-                                tx,
-                                &SessionId::from(holder),
-                                input_id,
-                            )?
-                            .ok_or_else(|| {
-                                StoreError::Backend(
-                                    "pending turn input id row disappeared".to_string(),
-                                )
-                            })?;
-                            return draft.adopt_provisioned_row(existing, &existing_digest);
-                        }
-                    }
-                    let input_id = draft.input_id.clone().unwrap_or_else(|| {
-                        lash_core_execution::store_backend_support::derive_pending_turn_input_id(
-                            &draft.session_id,
-                            draft.source_key.as_deref(),
-                            now,
-                            nonce,
-                        )
-                    });
-                    let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
-                    let run_spec = admit_run_spec_conn(tx, &draft)?;
-                    tx.execute(
-                        crate::turn_ingress::turn_ingress_sql()
-                            .pending_inputs_sqlite
-                            .insert_new
-                            .sql(),
-                        params![
-                            input_id.as_str(),
-                            draft.session_id.as_str(),
-                            draft.source_key.as_deref(),
-                            encode_json(&draft.ingress)?,
-                            state.as_str(),
-                            encode_json(&draft.input)?,
-                            submission_digest.as_str(),
-                            now as i64,
-                            crate::session_ingress::allocate_sequence(tx, &draft.session_id)?,
-                            run_spec.column(),
-                        ],
-                    )
-                    .map_err(|err| {
-                        crate::sqlite_pending_turn_input_insert_error(
-                            err,
-                            &draft.session_id,
-                            &input_id,
-                        )
-                    })?;
-                    load_pending_turn_input_by_id_conn(tx, &draft.session_id, &input_id)?
-                        .ok_or_else(|| {
-                            StoreError::Backend("pending turn input insert disappeared".to_string())
-                        })
-                })(
-                );
+                let outcome = enqueue_pending_turn_inputs_conn(tx, &batch, now, first_nonce);
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
@@ -1258,13 +1153,105 @@ impl TurnInputStore for Store {
     }
 }
 
+/// Admit every draft of `batch` under the database write lock the caller's
+/// transaction holds (FIG-3842): a draft a stored row already answers returns
+/// that row, and every other draft is inserted in request order at the next
+/// positions of the session's ingress sequence. Any refusal rolls the whole
+/// batch back.
+fn enqueue_pending_turn_inputs_conn(
+    tx: &Connection,
+    batch: &lash_core_execution::PendingTurnInputBatch,
+    now: u64,
+    first_nonce: u64,
+) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+    use lash_core_execution::store_backend_support as support;
+    let session_id = batch.session_id();
+    ensure_session_not_deleted_conn(tx, session_id)?;
+    ensure_session_not_closing_conn(tx, session_id)?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let mut interned = std::collections::BTreeSet::new();
+    let mut admitted = Vec::with_capacity(batch.drafts().len());
+    for (nonce, draft) in (first_nonce..).zip(batch.drafts()) {
+        let submission_digest = support::turn_input_submission_digest(draft)?;
+        let by_source_key = match draft.source_key.as_deref() {
+            Some(source_key) => tx
+                .query_row(
+                    sql.pending_inputs.select_id_by_source_key.sql(),
+                    params![session_id.as_str(), source_key],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(sqlite_error)?,
+            None => None,
+        };
+        let by_input_id = match (&by_source_key, draft.input_id.as_deref()) {
+            (None, Some(input_id)) => tx
+                .query_row(
+                    sql.pending_inputs.select_session_by_input_id.sql(),
+                    params![input_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(sqlite_error)?,
+            _ => None,
+        };
+        let input_id = match support::decide_turn_input_draft_admission(
+            draft,
+            &submission_digest,
+            by_source_key,
+            by_input_id,
+        )? {
+            support::TurnInputDraftAdmission::Existing { input_id } => input_id,
+            support::TurnInputDraftAdmission::New => {
+                let input_id = draft.input_id.clone().unwrap_or_else(|| {
+                    support::derive_pending_turn_input_id(
+                        session_id,
+                        draft.source_key.as_deref(),
+                        now,
+                        nonce,
+                    )
+                });
+                let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
+                let run_spec = admit_run_spec_conn(tx, draft, &mut interned)?;
+                tx.execute(
+                    sql.pending_inputs.insert_new.sql(),
+                    params![
+                        crate::session_ingress::allocate_sequence(tx, session_id)?,
+                        input_id.as_str(),
+                        session_id.as_str(),
+                        draft.source_key.as_deref(),
+                        encode_json(&draft.ingress)?,
+                        state.as_str(),
+                        encode_json(&draft.input)?,
+                        submission_digest.as_str(),
+                        now as i64,
+                        run_spec.column(),
+                    ],
+                )
+                .map_err(|err| {
+                    crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
+                })?;
+                input_id
+            }
+        };
+        admitted.push(
+            load_pending_turn_input_by_id_conn(tx, session_id, &input_id)?.ok_or_else(|| {
+                StoreError::Backend("admitted pending turn input disappeared".to_string())
+            })?,
+        );
+    }
+    Ok(admitted)
+}
+
 /// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse
 /// a steering spec that differs from its running turn's, then intern a
 /// non-default spec once per hash and refuse different bytes under an
-/// interned hash. Both refusals roll the whole admission back.
+/// interned hash. Both refusals roll the whole admission back. A hash this
+/// batch's transaction already interned (`interned`) is not interned again.
 fn admit_run_spec_conn(
     tx: &Connection,
     draft: &lash_core_execution::PendingTurnInputDraft,
+    interned: &mut std::collections::BTreeSet<String>,
 ) -> Result<lash_core_execution::store_backend_support::RunSpecAdmission, StoreError> {
     use lash_core_execution::store_backend_support as support;
     let spec = support::RunSpecAdmission::of(draft)?;
@@ -1287,7 +1274,9 @@ fn admit_run_spec_conn(
                 .map(|(state, hash)| (state.as_str(), hash.as_deref())),
         )?;
     }
-    if let Some((hash, canonical)) = spec.interned() {
+    if let Some((hash, canonical)) = spec.interned()
+        && !interned.contains(hash)
+    {
         tx.execute(
             sql.run_specs.intern.sql(),
             params![draft.session_id.as_str(), hash, canonical],
@@ -1301,6 +1290,7 @@ fn admit_run_spec_conn(
             )
             .map_err(sqlite_error)?;
         spec.check_interned(&draft.session_id, &stored)?;
+        interned.insert(hash.to_string());
     }
     Ok(spec)
 }

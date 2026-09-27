@@ -410,34 +410,91 @@ impl PendingTurnInputDraft {
             &preimage,
         ))
     }
+}
 
-    /// Adopt the row a provisioned `input_id` already names, for turn-input
-    /// store implementors enqueueing a draft that carries its own id.
-    ///
-    /// A provisioned id names one admission (ADR 0069 §6): a submission whose
-    /// digest equals the stored row's immutable
-    /// [`submission_digest`](Self::submission_digest), in the same session, is
-    /// the same admission re-run and returns the existing row, whatever its
-    /// lifecycle state; a different digest, or the same id in another session,
-    /// is a typed
-    /// [`StoreError::PendingTurnInputIdConflict`](crate::store::StoreError::PendingTurnInputIdConflict).
-    pub fn adopt_provisioned_row(
-        &self,
-        existing: PendingTurnInput,
-        existing_submission_digest: &str,
-    ) -> Result<PendingTurnInput, crate::store::StoreError> {
-        let digest = self.submission_digest().map_err(|err| {
-            crate::store::StoreError::Backend(format!(
-                "failed to digest pending turn input submission: {err}"
-            ))
-        })?;
-        if existing.session_id != self.session_id || digest != existing_submission_digest {
-            return Err(crate::store::StoreError::PendingTurnInputIdConflict {
-                session_id: self.session_id.clone(),
-                input_id: existing.input_id,
-            });
+/// The drafts one session admits as one request, in request order
+/// (FIG-3842).
+///
+/// A store admits a batch in one transaction: every draft an existing row
+/// already answers returns that row, wherever it sits and whatever became of
+/// it, and every other draft is enqueued in request order as one contiguous
+/// block of the session's ingress sequence, with no other producer's item in
+/// between. A draft that conflicts with a stored row refuses the whole
+/// request and nothing is stored, spec rows included.
+///
+/// Construction refuses a request that names one input twice, by source key
+/// or input id, and a draft for another session: nothing a store could
+/// answer position by position.
+#[derive(Clone, Debug)]
+pub struct PendingTurnInputBatch {
+    session_id: SessionId,
+    drafts: Vec<PendingTurnInputDraft>,
+}
+
+impl PendingTurnInputBatch {
+    /// A batch of `session_id`'s `drafts`, in request order.
+    pub fn new(
+        session_id: impl Into<SessionId>,
+        drafts: Vec<PendingTurnInputDraft>,
+    ) -> Result<Self, crate::store::StoreError> {
+        let session_id = session_id.into();
+        let mut seen = std::collections::BTreeSet::new();
+        for draft in &drafts {
+            if draft.session_id != session_id {
+                return Err(
+                    crate::store::StoreError::PendingTurnInputBatchForeignSession {
+                        session_id,
+                        draft_session_id: draft.session_id.clone(),
+                    },
+                );
+            }
+            let names = [
+                draft.source_key.as_deref().map(|key| ("source key", key)),
+                draft.input_id.as_deref().map(|id| ("input id", id)),
+            ];
+            for (kind, name) in names.into_iter().flatten() {
+                if !seen.insert((kind, name)) {
+                    return Err(crate::store::StoreError::PendingTurnInputBatchDuplicate {
+                        session_id,
+                        name: format!("{kind} `{name}`"),
+                    });
+                }
+            }
         }
-        Ok(existing)
+        Ok(Self { session_id, drafts })
+    }
+
+    /// A batch of one draft: what a single enqueue admits.
+    pub fn one(draft: PendingTurnInputDraft) -> Self {
+        Self {
+            session_id: draft.session_id.clone(),
+            drafts: vec![draft],
+        }
+    }
+
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    /// The drafts, in request order.
+    pub fn drafts(&self) -> &[PendingTurnInputDraft] {
+        &self.drafts
+    }
+
+    pub fn into_drafts(self) -> Vec<PendingTurnInputDraft> {
+        self.drafts
+    }
+
+    /// The one row a batch of [`one`](Self::one) admitted.
+    pub fn only(
+        mut admitted: Vec<PendingTurnInput>,
+    ) -> Result<PendingTurnInput, crate::store::StoreError> {
+        match (admitted.pop(), admitted.is_empty()) {
+            (Some(row), true) => Ok(row),
+            _ => Err(crate::store::StoreError::Backend(
+                "a batch of one did not admit exactly one pending turn input".to_string(),
+            )),
+        }
     }
 }
 

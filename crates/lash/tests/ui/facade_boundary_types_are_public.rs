@@ -14,7 +14,7 @@ use lash::messages::MessageRole;
 use lash::persistence::{
     AdmissionId, CheckpointKind, DriveEpochSeal, DriveEpochStore, GcReport, GraphAppend,
     LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceResult,
-    OperationId, OrphanedTurnInputScope, PendingFollowOn, PendingTurnInputDraft,
+    OperationId, OrphanedTurnInputScope, PendingFollowOn, PendingTurnInputBatch,
     PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
     QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RootStore, RootTerminal,
@@ -222,10 +222,10 @@ impl TurnInputStore for FacadeStore {
         Ok(false)
     }
 
-    async fn enqueue_pending_turn_input(
+    async fn enqueue_pending_turn_inputs(
         &self,
-        _input: PendingTurnInputDraft,
-    ) -> Result<lash::PendingTurnInput, StoreError> {
+        _batch: PendingTurnInputBatch,
+    ) -> Result<Vec<lash::PendingTurnInput>, StoreError> {
         unreachable!("compile-only facade store")
     }
 
