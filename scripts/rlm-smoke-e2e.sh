@@ -30,7 +30,11 @@ if [[ -z "$smoke_host_bin" ]]; then
   else
     build_command=("$repo/scripts/hermetic-build.sh" build)
   fi
-  "${build_command[@]}" "--symlink_prefix=$symlink_prefix" "$smoke_host_label" \
+  # `build:shared` downloads no action outputs (`remote_download_outputs=
+  # minimal`), so the host binary this script launches must be pulled
+  # explicitly, as `hermetic-build.sh run` already does.
+  "${build_command[@]}" "--symlink_prefix=$symlink_prefix" \
+    --remote_download_outputs=toplevel "$smoke_host_label" \
     2>&1 | tee "$build_log"
   smoke_host_bin="${symlink_prefix}bin/runbooks/rlm-smoke/rlm-smoke"
 fi

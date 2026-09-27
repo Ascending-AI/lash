@@ -3512,7 +3512,13 @@ prepare_workbench_binary() {
     log "no kiln fork here (.kiln.bazelrc is absent); building locally"
     build_command=("$repo_root/scripts/hermetic-build.sh" --local build)
   fi
+  # `build:shared` downloads no action outputs (`remote_download_outputs=
+  # minimal`), so pull the workbench binary the launch below execs. The flag
+  # is inert on the local fallback, which has no remote outputs to fetch. The
+  # invocation stays one line: check_judged_build_geometry.py reads config and
+  # label off the `build_command` line.
   "${build_command[@]}" --config=judged "--symlink_prefix=$symlink_prefix" "$workbench_bazel_label" \
+    --remote_download_outputs=toplevel \
     || die "building $workbench_bazel_label --config=judged failed"
   local built="${symlink_prefix}bin/examples/agent-workbench/agent-workbench"
   [[ -x "$built" ]] || die "the judged build produced no binary at $built"

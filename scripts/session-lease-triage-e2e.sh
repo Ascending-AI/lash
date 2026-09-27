@@ -40,7 +40,10 @@ trap on_exit EXIT
 symlink_prefix="$artifact_dir/bazel-"
 if command -v kiln >/dev/null 2>&1; then
   # A kiln fork: build and test through the shared executor.
+  # `build:shared` downloads no action outputs (`remote_download_outputs=
+  # minimal`), so pull the harness binary the phases below launch.
   kiln build "--symlink_prefix=$symlink_prefix" \
+    --remote_download_outputs=toplevel \
     //runbooks/restate-postgres-workers:lash-e2e-session-lease-triage__bin \
     2>&1 | tee "$artifact_dir/build.log"
   harness_bin="${symlink_prefix}bin/runbooks/restate-postgres-workers/lash-e2e-session-lease-triage__bin"
