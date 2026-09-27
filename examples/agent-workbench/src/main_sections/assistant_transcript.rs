@@ -34,11 +34,15 @@ pub(crate) fn workbench_owns_committed_agent_reply(output: &TurnReport) -> bool 
 /// drive still holding the lane — before the append is made again
 /// (FIG-3925).
 ///
-/// The retry is bounded the way the workbench's other contention retry is:
-/// [`SESSION_OPEN_MAX_ATTEMPTS`] appends inside [`SESSION_OPEN_RETRY_BUDGET`]
-/// with the same jittered backoff. An already-committed reply id skips the
-/// append, so a retry that lands after its own commit is still idempotent.
-/// Only the typed conflict retries; every other error stays terminal.
+/// The retry is bounded by [`SESSION_OPEN_MAX_ATTEMPTS`] conflicting appends
+/// paced by the same jittered backoff as the workbench's other contention
+/// retry — and by nothing else. A wall-clock budget measures how slow the
+/// host is, not how contended the session is: every millisecond spent parked
+/// behind a competing commit or waiting out a busy store would spend the
+/// allowance before a single retry ran, so only lost head CASes count
+/// (FIG-3936). An already-committed reply id skips the append, so a retry
+/// that lands after its own commit is still idempotent. Only the typed
+/// conflict retries; every other error stays terminal.
 #[expect(
     clippy::expect_used,
     reason = "every break out of the retry loop follows a conflicting attempt that just \
@@ -62,9 +66,6 @@ where
     let mut reloaded: Option<lash::LashSession> = None;
     let mut last_conflict = None;
     for attempt in 1..=SESSION_OPEN_MAX_ATTEMPTS {
-        if attempt > 1 && started.elapsed() >= SESSION_OPEN_RETRY_BUDGET {
-            break;
-        }
         let session = reloaded.as_ref().unwrap_or(session);
         let already_committed = session
             .read_view()
@@ -93,10 +94,7 @@ where
                     break;
                 }
                 reloaded = Some(reopen().await.map_err(AppError::session_open)?);
-                let Some(delay) = contention_retry_delay(attempt, started) else {
-                    break;
-                };
-                tokio::time::sleep(delay).await;
+                tokio::time::sleep(contention_retry_delay(attempt)).await;
             }
             Err(error) => return Err(AppError::runtime(error)),
         }
@@ -107,7 +105,6 @@ where
             "turn_id": turn_id,
             "attempt_cap": SESSION_OPEN_MAX_ATTEMPTS,
             "elapsed_ms": started.elapsed().as_millis(),
-            "latency_budget_ms": SESSION_OPEN_RETRY_BUDGET.as_millis(),
             "outcome": "temporarily_unavailable",
         }),
     );

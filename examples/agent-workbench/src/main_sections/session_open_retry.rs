@@ -73,9 +73,10 @@ where
                 if attempt == SESSION_OPEN_MAX_ATTEMPTS {
                     break;
                 }
-                let Some(delay) = contention_retry_delay(attempt, started) else {
+                let delay = contention_retry_delay(attempt);
+                if delay > SESSION_OPEN_RETRY_BUDGET.saturating_sub(started.elapsed()) {
                     break;
-                };
+                }
                 tokio::time::sleep(delay).await;
             }
             Err(error) => return Err(error),
@@ -96,18 +97,13 @@ where
 
 /// The jittered backoff between a bounded contention retry's attempts: the
 /// base doubles from 1 ms up to a 16 ms ceiling, jittered per process so
-/// contending callers do not re-collide in lockstep. `None` once
-/// [`SESSION_OPEN_RETRY_BUDGET`] has no room left for the wait.
-pub(crate) fn contention_retry_delay(
-    attempt: usize,
-    started: tokio::time::Instant,
-) -> Option<Duration> {
+/// contending callers do not re-collide in lockstep. The caller owns any
+/// wall-clock budget the wait must fit.
+pub(crate) fn contention_retry_delay(attempt: usize) -> Duration {
     static RETRY_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let base_ms = 1_u64 << (attempt - 1).min(4);
     let sequence = RETRY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let delay = Duration::from_millis(base_ms + sequence % (base_ms + 1));
-    let remaining = SESSION_OPEN_RETRY_BUDGET.saturating_sub(started.elapsed());
-    (delay <= remaining).then_some(delay)
+    Duration::from_millis(base_ms + sequence % (base_ms + 1))
 }
 
 pub(crate) fn session_open_is_contended(error: &lash::EmbedError) -> bool {
