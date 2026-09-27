@@ -343,10 +343,12 @@ async fn root_route(
 /// application names the turn, and every input applied by that turn receives the
 /// same retained leaf boundary.
 ///
-/// For a caller holding the handle the turn just committed on, a boundary that
-/// cannot be derived is a defect, not a wait: it fails loudly here rather than
-/// silently skipping the retention and the ledger write. The polling repair path
-/// wants the opposite answer and calls [`try_retain_applied_turn_boundary`].
+/// The derivation reads the store's committed view, so a handle opened before
+/// the turn committed is no excuse: a boundary that cannot be derived from a
+/// view that post-dates the application is a defect, not a wait, and it fails
+/// loudly here rather than silently skipping the retention and the ledger
+/// write. The polling repair path wants the opposite answer and calls
+/// [`try_retain_applied_turn_boundary`].
 pub async fn retain_applied_turn_boundary(
     core: &LashCore,
     ledger: &EventLedger,
@@ -360,11 +362,11 @@ pub async fn retain_applied_turn_boundary(
 
 /// [`retain_applied_turn_boundary`] for a caller that is still waiting.
 ///
-/// `Ok(false)` means the turn's application is not on this handle's active path
-/// *yet*, so nothing was retained and the caller should poll again. Only the
-/// thread-root repair may treat that as a legal state: it reads applications
-/// from the store while the graph comes from a handle opened earlier, so it can
-/// legitimately see the application before the commit that carries it.
+/// `Ok(false)` means the store holds no application for `input_id` *yet* — the
+/// input is admitted but no turn has committed it — so nothing was retained
+/// and the caller should poll again. Only the thread-root repair may treat
+/// that as a legal state: the root's admission is recorded at send time, ahead
+/// of the commit that applies it.
 pub async fn try_retain_applied_turn_boundary(
     core: &LashCore,
     ledger: &EventLedger,
@@ -400,7 +402,17 @@ async fn retain_boundary(
     else {
         return Ok(false);
     };
-    let Some(leaf) = committed_turn_boundary(session, &applications, &turn_id)? else {
+    // Application records are commit evidence. Read the graph from the store
+    // at this instant — the commit that wrote the application — rather than
+    // this handle's resident view, which the engine can advance past on a
+    // driver this process does not hold (a re-driven turn on a later boot).
+    let view = session
+        .durable()
+        .read()
+        .await
+        .context("read the committed channel view for fork boundary")?
+        .context("a committed turn application implies a readable committed view")?;
+    let Some(leaf) = committed_turn_boundary(&view, &applications, &turn_id)? else {
         if derivation == Derivation::MayBePending {
             return Ok(false);
         }
@@ -429,18 +441,16 @@ async fn retain_boundary(
 /// exact leaf selected by this turn. When there is no later application, the
 /// current leaf is still this turn's boundary (the ordinary under-lock path).
 ///
-/// `None` means the turn's application is not on this handle's active graph
-/// path *yet*. Application records are read from the store while the graph comes
-/// from the handle's own state, so a caller polling with a handle opened before
-/// the turn committed can legitimately see the application first. That is a
-/// "come back later", not a broken graph, and the caller's wait loop is what
-/// resolves it.
+/// `view` must post-date the commit that wrote `applications`: both are read
+/// from the store, so a view taken after the application is visible carries
+/// the commit's nodes. `None` then means the application is not on the active
+/// graph path — a broken graph, not a "come back later".
 fn committed_turn_boundary(
-    session: &LashSession,
+    view: &lash::persistence::SessionReadView,
     applications: &[lash::TurnInputApplication],
     turn_id: &lash::TurnId,
 ) -> Result<Option<String>> {
-    let graph = session.read_view().session_graph().clone();
+    let graph = view.session_graph().clone();
     let nodes_by_id: std::collections::HashMap<&str, _> = graph
         .nodes
         .iter()

@@ -872,7 +872,16 @@ impl ChannelBot {
             threads::retain_applied_turn_boundary(&self.core, &self.ledger, session, input_id)
                 .await?;
         }
-        match reply_from_transcript(session, input_id) {
+        // The application was read from the store, so the transcript comes
+        // from the same authority: a handle opened before an engine-driven
+        // turn committed legitimately lacks its messages.
+        let view = session
+            .durable()
+            .read()
+            .await
+            .context("read the committed view for transcript replay")?
+            .context("a committed mention implies a readable committed view")?;
+        match reply_from_transcript(&view, input_id) {
             Some(reply) => {
                 self.owe_and_post(record, reply, ReplySource::Transcript)
                     .await
@@ -1232,8 +1241,10 @@ impl Drop for SessionLockLease {
 /// that carry tool calls in a standard-mode loop. Returns `None` when the turn
 /// committed no assistant text at all, which the caller reports honestly rather
 /// than papering over.
-fn reply_from_transcript(session: &LashSession, input_id: &str) -> Option<String> {
-    let read_view = session.read_view();
+fn reply_from_transcript(
+    read_view: &lash::persistence::SessionReadView,
+    input_id: &str,
+) -> Option<String> {
     let mut turn_id: Option<TurnId> = None;
     let mut answer: Option<String> = None;
     for entry in read_view.chronological_projection().into_entries() {
