@@ -428,6 +428,7 @@ pub(super) fn claim_queued_work_rows_sqlite(
                         "queued_work_claim_fencing_token",
                         write.next_claim_fencing_token,
                     )?,
+                    i64::try_from(now).unwrap_or(i64::MAX),
                 ],
             )
             .map_err(sqlite_error)?;
@@ -675,6 +676,7 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
                         write.next_claim_fencing_token,
                     )?,
                     redrive_of.map(lash_core_execution::TurnId::as_str),
+                    i64::try_from(now).unwrap_or(i64::MAX),
                 ],
             )
             .map_err(sqlite_error)?;

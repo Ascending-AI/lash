@@ -41,21 +41,22 @@ fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
 #[derive(Clone)]
 pub struct DurableSessionOps {
     session_id: SessionId,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
+    ingress: super::drive::IngressRelay,
     live_replay_store: Arc<dyn LiveReplayStore>,
 }
 
 impl DurableSessionOps {
-    /// Bind the session identity, the queued-work port that receives driver
-    /// wakes, and the Live Replay publisher queue events are published through.
+    /// Bind the session identity, the ingress relay that delivers what an
+    /// acceptance admits (ADR 0109 §3), and the Live Replay publisher queue
+    /// events are published through.
     pub fn new(
         session_id: SessionId,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
+        ingress: super::drive::IngressRelay,
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
         Self {
             session_id,
-            queued_work,
+            ingress,
             live_replay_store,
         }
     }
@@ -63,6 +64,19 @@ impl DurableSessionOps {
     /// The session these operations are bound to.
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
+    }
+
+    /// The ingress obligation of the accepted input or batch `item_id`, when
+    /// its delivery to the engine stalled (ADR 0109 §3).
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub async fn stalled_ingress(
+        &self,
+        item_id: &str,
+    ) -> Result<Option<crate::store::StalledObligation>, crate::StoreError> {
+        self.ingress.stalled(item_id).await
     }
 
     /// A head that cannot be read is not an error for a best-effort
@@ -118,11 +132,11 @@ impl DurableSessionOps {
         }
     }
 
-    /// Durably accept host turn input under `run_spec`, then wake the
-    /// queued-work driver.
+    /// Durably accept host turn input under `run_spec`, then deliver the
+    /// drive its admission owes (ADR 0109 §3).
     ///
-    /// Success acknowledges durable acceptance only; the wake is a separate
-    /// best-effort signal reconciled from the pending row.
+    /// Success acknowledges durable acceptance only; a delivery that fails is
+    /// retried by the ingress relay from the row's obligation.
     pub async fn enqueue_turn_input(
         &self,
         store: &Arc<dyn crate::RuntimePersistence>,
@@ -139,7 +153,7 @@ impl DurableSessionOps {
 
     /// Durably accept `inputs`, each filed under its source key, as one
     /// request under one shared `ingress` and `run_spec` (FIG-3842), then
-    /// wake the queued-work driver.
+    /// deliver the drive each admission owes (ADR 0109 §3).
     ///
     /// The rows come back in request order. An input a stored row already
     /// answers returns that row; the others are enqueued in request order as
@@ -153,10 +167,10 @@ impl DurableSessionOps {
         run_spec: crate::RunSpec,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
-        let enqueued = super::session_api::enqueue_turn_inputs_to_store(
+        let enqueued = enqueue_turn_inputs_to_store(
             self.session_id.clone(),
             Arc::clone(store),
-            Arc::clone(&self.queued_work),
+            &self.ingress,
             inputs,
             ingress,
             run_spec,
@@ -370,4 +384,78 @@ impl DurableSessionOps {
     ) -> Result<bool, crate::StoreError> {
         Ok(store.load_session_meta().await?.is_some())
     }
+}
+
+pub(in crate::runtime) async fn enqueue_turn_input_to_store(
+    session_id: SessionId,
+    store: Arc<dyn crate::RuntimePersistence>,
+    ingress_relay: &super::drive::IngressRelay,
+    input: crate::TurnInput,
+    ingress: crate::TurnInputIngress,
+    source_key: Option<String>,
+    run_spec: crate::RunSpec,
+) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
+    enqueue_turn_inputs_to_store(
+        session_id,
+        store,
+        ingress_relay,
+        vec![(input, source_key)],
+        ingress,
+        run_spec,
+    )
+    .await?
+    .pop()
+    .ok_or_else(|| {
+        crate::RuntimeError::new(
+            crate::RuntimeErrorCode::StoreCommitFailed,
+            "a batch of one admitted no pending turn input",
+        )
+    })
+}
+
+/// Durably accept `inputs`, each filed under its source key, as one request
+/// under one shared `ingress` and `run_spec` (FIG-3842), then deliver the
+/// drive each admitted row's ingress obligation owes (ADR 0109 §3). The rows
+/// come back in request order; a refusal accepted nothing.
+pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
+    session_id: SessionId,
+    store: Arc<dyn crate::RuntimePersistence>,
+    ingress_relay: &super::drive::IngressRelay,
+    inputs: Vec<(crate::TurnInput, Option<String>)>,
+    ingress: crate::TurnInputIngress,
+    run_spec: crate::RunSpec,
+) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
+    let mut drafts = Vec::with_capacity(inputs.len());
+    for (input, source_key) in inputs {
+        super::turn_loop::ensure_durable_effect_input(&input)?;
+        let mut draft =
+            crate::PendingTurnInputDraft::new(session_id.clone(), ingress.clone(), input)
+                .with_run_spec(run_spec.clone());
+        // A keyed input's id is its key's: a host re-attaches by the key alone.
+        if let Some(key) = source_key.as_deref() {
+            draft.input_id = Some(crate::PendingTurnInputDraft::keyed_input_id(
+                &draft.session_id,
+                key,
+            ));
+        }
+        draft.source_key = source_key;
+        drafts.push(draft);
+    }
+    let batch = crate::PendingTurnInputBatch::new(session_id, drafts)
+        .map_err(super::error::runtime_error_from_turn_input_admission)?;
+    store.read_session_state_version().await.map_err(|err| {
+        crate::RuntimeError::new(crate::RuntimeErrorCode::StoreCommitFailed, err.to_string())
+    })?;
+    let enqueued = store
+        .enqueue_pending_turn_inputs(batch)
+        .await
+        .map_err(super::error::runtime_error_from_turn_input_admission)?;
+    // Each admission armed its row's ingress obligation; deliver them now
+    // (ADR 0109 §3). An attempt that fails is the relay's to retry: the
+    // inputs are accepted either way. A row a resend answered is delivered
+    // only if its obligation is still due.
+    for row in &enqueued {
+        ingress_relay.deliver_admitted(row.input_id.as_str()).await;
+    }
+    Ok(enqueued)
 }

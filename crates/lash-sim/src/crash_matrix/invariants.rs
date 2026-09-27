@@ -265,6 +265,50 @@ impl ObligationProbe for TurnProbe {
     }
 }
 
+/// Accepted inputs whose `Ingress` obligation (S8-I, ADR 0109 §3) is due or
+/// claimed: the drive's claim of the row delivers it, so an input the end
+/// state drove owes nothing. A deleted session's rows left with it, and a
+/// stalled obligation carries its reason, typed.
+struct IngressObligationProbe;
+
+#[async_trait::async_trait]
+impl ObligationProbe for IngressObligationProbe {
+    fn kind(&self) -> &'static str {
+        "ingress_obligation"
+    }
+
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        expected: &Expected,
+    ) -> Result<Vec<String>, String> {
+        let backend = world.backend();
+        let ledger = backend.obligation_ledger(ObligationKind::Ingress);
+        let factory = backend.session_store_factory();
+        let mut unsettled = Vec::new();
+        for input in &expected.inputs {
+            let item = lash_core::PendingTurnInputDraft::keyed_input_id(
+                &input.session,
+                input.root.as_str(),
+            );
+            let id = lash_core::store::ingress_obligation::ingress_obligation_id(item.as_str());
+            match ledger
+                .state(&id)
+                .await
+                .map_err(|error| format!("read obligation {id}: {error}"))?
+            {
+                Some(ObligationState::Delivered | ObligationState::Stalled) => {}
+                None if factory.session_was_deleted(&input.session).await == Ok(true) => {}
+                state => unsettled.push(format!(
+                    "input `{}` of `{}` owes its drive: its ingress obligation is {state:?}",
+                    input.root, input.session
+                )),
+            }
+        }
+        Ok(unsettled)
+    }
+}
+
 /// `SessionDelete` obligations (S8-D) that are due or claimed. The ledger
 /// arms one only when a `CloseSession` intent is acknowledged, so the closed
 /// sessions are the ones the intents name; a deleted session's obligation
@@ -383,6 +427,7 @@ impl ObligationProbe for ProcessTerminalProbe {
 pub fn obligation_probes() -> Vec<Box<dyn ObligationProbe>> {
     vec![
         Box::new(TurnProbe),
+        Box::new(IngressObligationProbe),
         Box::new(ControlIntentProbe),
         Box::new(ParentEndPlanProbe),
         Box::new(SessionDeleteProbe),

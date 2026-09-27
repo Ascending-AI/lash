@@ -753,21 +753,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .collect()
     }
 
-    async fn list_reconcilable_sessions(
-        &self,
-        after: Option<&SessionId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<SessionId>, StoreError> {
-        let sql = &crate::session_roots::session_roots_sql().verbs;
-        let rows: Vec<String> = sqlx::query_scalar(sql.sessions.sql())
-            .bind(after.map_or("", SessionId::as_str))
-            .bind(limit.get() as i64)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(crate::support::store_sqlx_error)?;
-        Ok(rows.into_iter().map(SessionId::from).collect())
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: lash_core_execution::store::ParkFeedCursor,

@@ -302,27 +302,30 @@ def squeeze(text: str) -> str:
 
 
 # Every `<column> <op> '<literal>` shape a spelled vocabulary predicate takes,
-# as (squeezed needle, readable spelling).
+# as (the operator's pattern after the column, readable spelling). Whitespace
+# and casing never hide a predicate: every gap is optional whitespace and the
+# match ignores case.
 VOCABULARY_LITERAL_SHAPES = (
-    ("in('", "IN ('…')"),
-    ("notin('", "NOT IN ('…')"),
-    ("='", "= '…'"),
-    ("<>'", "<> '…'"),
+    (r"\s+in\s*\(\s*'", "IN ('…')"),
+    (r"\s+not\s+in\s*\(\s*'", "NOT IN ('…')"),
+    (r"\s*=\s*'", "= '…'"),
+    (r"\s*<>\s*'", "<> '…'"),
 )
 
 
 def spelled_vocabulary_literals(sql: str, column: str) -> list[str]:
     """Every place `sql` compares `column` against a quoted literal.
 
-    A `{{term(column)}}` token is not such a comparison, which is the whole
+    The column is matched as a whole identifier, so `obligation_state = 'due'`
+    (the ADR 0109 obligation columns) is not a spelling of `state`. A
+    `{{term(column)}}` token is not such a comparison, which is the whole
     point: the token is how a statement names the predicate without spelling
     the vocabulary.
     """
-    squeezed = squeeze(sql)
-    needle_column = squeeze(column)
     found: list[str] = []
     for operator, spelling in VOCABULARY_LITERAL_SHAPES:
-        if f"{needle_column}{operator}" in squeezed:
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(column)}{operator}"
+        if re.search(pattern, sql, re.IGNORECASE):
             found.append(f"{column} {spelling}")
     return found
 

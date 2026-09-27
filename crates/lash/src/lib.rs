@@ -98,7 +98,8 @@ pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::send::{
     BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle,
-    SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, TurnEvents, TurnStatus,
+    SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, StalledDelivery, TurnEvents,
+    TurnStatus,
 };
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};

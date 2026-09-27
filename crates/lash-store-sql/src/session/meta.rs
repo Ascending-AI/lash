@@ -187,15 +187,6 @@ crate::statements! {
     /// Statements for parked-root control and recovery.
     pub struct MetaRootVerbStatements @ "session_meta" {
         raise_epoch = "UPDATE session_meta SET drive_epoch = drive_epoch + 1, drive_admission_id = ?2, drive_root_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
-        /// Live sessions after `?1`, at most `?2`, that a drive could admit
-        /// work for: not closing, and held by no park a verb has yet to
-        /// resolve (a park a redrive names is being resolved). A parked
-        /// session admits nothing, and the verb that resolves its park asks
-        /// for the drive itself.
-        sessions = "SELECT session_id FROM session_meta WHERE session_id > ?1 AND closing_intent IS NULL
-            AND NOT EXISTS (SELECT 1 FROM turn_parks WHERE turn_parks.session_id = session_meta.session_id
-                AND turn_parks.resume_intent IS NULL)
-            ORDER BY session_id LIMIT ?2";
     }
 }
 

@@ -188,6 +188,10 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         &self,
         kind: lash_core_execution::store::ObligationKind,
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
+        // Ingress spans two tables (ADR 0109 §3).
+        if kind == lash_core_execution::store::ObligationKind::Ingress {
+            return crate::ingress_obligation::ingress_ledger(self.inner.storage.pool());
+        }
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             kind,
             self.inner.storage.pool().clone(),

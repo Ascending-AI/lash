@@ -20,13 +20,14 @@ use crate::{PluginError, ProcessAwaitOutput, SessionId};
 /// engine that runs each session's drive.
 ///
 /// Acceptance is the store's: an item is durable before anyone is told about
-/// it. The engine is then asked to drive the session, fire-and-forget; it
-/// serializes drives per session (one authorized drive at a time) and dedupes
-/// a request id across its runs, so a repeated ask for the same request never
-/// drives twice. A lost ask is healed by the session's next ask (a drive
-/// admits whatever is pending, not only the item that asked) or by the
-/// reconcile sweep, `drive::reconcile_session_work`; its production caller is
-/// the engine-neutral reconcile pass (S7), not yet wired.
+/// it, and its admission transaction records the drive it owes as an ingress
+/// obligation (ADR 0109 §3). The producer then asks the engine for that drive
+/// through [`request_drive`](Self::request_drive); the obligation relay
+/// retries an ask that did not reach the engine. The engine serializes
+/// drives per session (one authorized drive at a time) and dedupes a request
+/// id across its runs, so a repeated ask for the same request never drives
+/// twice, and a drive admits whatever is pending, not only the item that
+/// asked.
 ///
 /// The engine runs the kernel's drive through the [`SessionDriver`] the core
 /// installs; it never decides what a drive admits.
@@ -89,15 +90,12 @@ pub trait SessionWorkEngine: Send + Sync {
     }
 
     /// Whether the engine still holds live work for `session`: an in-flight
-    /// drive, turn, or other invocation whose resumption re-decides the
-    /// session's open ingress itself. The reconcile sweep leaves such a
-    /// session alone — its ask was not lost, its owner is simply still
-    /// running — while a session with no live engine work and open ingress
-    /// gets the re-ask it is owed.
+    /// drive, turn, or other invocation. The two-phase session delete (ADR
+    /// 0109 §4) waits while it answers `true`, so a replayed drive never
+    /// finds its session gone.
     ///
     /// The default answers `false`: an engine that cannot see its live work
-    /// is asked anyway, because the cost of a redundant ask (the drive
-    /// finds the work held and stops) is below the cost of a lost one.
+    /// holds no delete back.
     async fn session_work_in_flight(&self, _session: &SessionId) -> bool {
         false
     }
@@ -138,7 +136,6 @@ pub trait SessionDriver: Send + Sync {
         &self,
         _cursor: &crate::engine::ReconcileCursor,
         _page: std::num::NonZeroUsize,
-        _tick: &str,
     ) -> Result<crate::engine::ReconcileCursor, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "SessionDriver::reconcile",

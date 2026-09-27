@@ -348,7 +348,7 @@ impl Fixture {
     }
     /// One reconcile tick an hour on, with the `ControlIntent` relay
     /// claiming its due obligations.
-    async fn reconcile(&self, work: &Arc<Work>, close: &Arc<Close>, tick: &str) -> ReconcileTick {
+    async fn reconcile(&self, work: &Arc<Work>, close: &Arc<Close>) -> ReconcileTick {
         let later: Arc<dyn crate::Clock> =
             ShiftedClock::new(Arc::clone(&self.parts.host.clock), LATER_MS);
         let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> = vec![
@@ -367,7 +367,6 @@ impl Fixture {
             },
             &ReconcileCursor::default(),
             NonZeroUsize::MIN.saturating_add(63),
-            tick,
         )
         .await
     }
@@ -841,7 +840,7 @@ pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
             ));
         }
         assert_eq!(f.obligation(&intent).await, Some(ObligationState::Due));
-        let report = f.reconcile(&work, &close, "recover").await;
+        let report = f.reconcile(&work, &close).await;
         assert!(report.failures.is_empty(), "{:?}", report.failures);
         assert_eq!(Fixture::intent_pass(&report).delivered, 1);
         assert_eq!(
@@ -908,7 +907,7 @@ pub async fn engine_refusals_are_retained_and_listed(
     assert!(!f.parts.epoch().await.control_pending);
     // The relay does not retry it, and the scope owner closes the ended
     // root's scope.
-    let report = f.reconcile(&work, &close, "after-refusal").await;
+    let report = f.reconcile(&work, &close).await;
     assert!(report.failures.is_empty(), "{:?}", report.failures);
     assert_eq!(Fixture::intent_pass(&report).claimed, 0);
     assert!(work.0.events.lock().expect("events").contains(&"close"));
@@ -1346,7 +1345,7 @@ pub async fn a_redrive_the_root_ran_past_is_never_applied_again(
         .verb(RootVerb::Cancel)
         .await
         .expect("cancel the re-parked root");
-    let report = f.reconcile(&work, &close, "after-repark").await;
+    let report = f.reconcile(&work, &close).await;
     assert!(report.failures.is_empty(), "{:?}", report.failures);
     let resumes = work
         .0
@@ -1443,25 +1442,54 @@ pub async fn a_stale_paused_listing_never_reparks_a_resumed_root(
         .expect("the re-parked root can be cancelled");
 }
 
-/// A parked session admits nothing until a verb resolves it, so the
-/// reconcile drive arm does not ask it to drive every tick. Once a cancel
-/// resolved the park and was acknowledged, a lost drive ask (a crash between
-/// the acknowledgement and its schedule) is re-asked by the next tick.
-pub async fn a_parked_session_is_asked_to_drive_only_once_its_park_resolves(
+/// Reconcile never scans the catalog for undriven input (ADR 0109 §3): an
+/// accepted input's drive is asked for through its ingress obligation —
+/// here while its session is parked, where the drive it asks for stops at
+/// the park. The engine accepting the ask does not deliver the obligation
+/// (D19): its claim holds while the drive runs, so neither the producer nor
+/// the tick asks again. The verb that resolves the park drives the session
+/// on through its own follow-on drive.
+pub async fn a_parked_session_is_asked_to_drive_only_through_its_ingress_obligation(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let f = Fixture::new(prefix, "parked-drive-ask", &host, &stores).await;
-    f.parts.enqueue("behind", Some("behind-root")).await;
+    let behind = f.parts.enqueue("behind", Some("behind-root")).await;
     let (work, close) = f.control(false, false);
-    let parked = f.reconcile(&work, &close, "parked").await;
+    let scheduled = |work: &Work| {
+        work.0
+            .events
+            .lock()
+            .expect("events")
+            .iter()
+            .filter(|event| **event == "schedule")
+            .count()
+    };
+    let parked = f.reconcile(&work, &close).await;
     assert!(parked.failures.is_empty(), "{:?}", parked.failures);
-    assert!(
-        !parked.drives.scheduled.contains(&f.parts.session_id),
-        "a parked session is not asked to drive"
+    assert_eq!(scheduled(&work), 0, "reconcile scans no session for input");
+    let ledger = stores.obligation_ledger(ObligationKind::Ingress);
+    let relay = lash_core::runtime::drive::IngressRelay::new(
+        Arc::clone(&ledger),
+        Arc::clone(&work) as Arc<dyn crate::SessionWorkEngine>,
+        Arc::clone(&f.parts.host.clock),
     );
+    let id = ingress_obligation::ingress_obligation_id(behind.as_str());
+    assert_eq!(
+        ledger.state(&id).await.expect("armed state"),
+        Some(ObligationState::Due),
+        "the input's acceptance armed its obligation"
+    );
+    relay.deliver_admitted(behind.as_str()).await;
+    assert_eq!(scheduled(&work), 1, "the obligation asks for the drive");
+    assert_eq!(
+        ledger.state(&id).await.expect("requested state"),
+        Some(ObligationState::Claimed),
+        "an accepted ask is not a delivery: the drive's admission settles it"
+    );
+    relay.deliver_admitted(behind.as_str()).await;
     let cancel = f.verb(RootVerb::Cancel).await.expect("cancel");
     // The engine half ran and was acknowledged under the verb's claim; the
     // drive ask after it was lost with the process, so the claim lapses
@@ -1482,15 +1510,16 @@ pub async fn a_parked_session_is_asked_to_drive_only_once_its_park_resolves(
             ..
         })
     ));
-    let resolved = f.reconcile(&work, &close, "resolved").await;
+    let resolved = f.reconcile(&work, &close).await;
     assert!(resolved.failures.is_empty(), "{:?}", resolved.failures);
-    // The follow-on drive is the obligation's to deliver: the relay retakes
-    // the lapsed claim and asks for it.
+    // The follow-on drive is the intent obligation's to deliver: the relay
+    // retakes the lapsed claim and asks for it. Nothing asks for the input
+    // again: its own ask is still claimed, and the tick scans no session.
     assert_eq!(Fixture::intent_pass(&resolved).delivered, 1);
-    assert!(work.0.events.lock().expect("events").contains(&"schedule"));
-    assert!(
-        resolved.drives.scheduled.contains(&f.parts.session_id),
-        "the resolved session's open send is asked again"
+    assert_eq!(
+        scheduled(&work),
+        2,
+        "the resolved park's follow-on drive is the only other ask"
     );
 }
 
@@ -1730,7 +1759,7 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
         None => {}
     }
     // The intent's obligation relay settles the lost intent within a tick.
-    let report = f.reconcile(&work, &close, "lost-ack").await;
+    let report = f.reconcile(&work, &close).await;
     assert!(report.failures.is_empty(), "{:?}", report.failures);
     assert_eq!(Fixture::intent_pass(&report).delivered, 1);
     assert!(
@@ -1825,7 +1854,7 @@ pub async fn a_failing_child_cancel_never_wedges_its_roots_cancel_or_fork(
             ["release", "schedule"]
         );
         // The ended root's scope is its recovery owner's to close.
-        let report = f.reconcile(&work, &close, "child-cancel").await;
+        let report = f.reconcile(&work, &close).await;
         assert!(report.failures.is_empty(), "{:?}", report.failures);
         assert!(work.0.events.lock().expect("events").contains(&"close"));
         if verb == RootVerb::Cancel {
@@ -2044,7 +2073,7 @@ pub async fn a_refused_follow_on_drive_keeps_the_intents_obligation_due(
         *work.0.events.lock().expect("events"),
         ["release", "close", "drive-refused"]
     );
-    let report = f.reconcile(&work, &close, "follow-on").await;
+    let report = f.reconcile(&work, &close).await;
     assert!(report.failures.is_empty(), "{:?}", report.failures);
     assert_eq!(Fixture::intent_pass(&report).delivered, 1);
     assert_eq!(

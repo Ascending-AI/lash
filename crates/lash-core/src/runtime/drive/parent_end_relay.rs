@@ -93,6 +93,7 @@ impl ObligationRelay for ParentEndRelay {
         &self,
         _id: &ObligationId,
         key: &ObligationKey,
+        _attempt: u32,
     ) -> Result<(), DeliveryFailure> {
         let ObligationKey::ParentEnd {
             parent_kind,
@@ -322,6 +323,7 @@ mod tests {
             &self,
             id: &ObligationId,
             _key: &ObligationKey,
+            _attempt: u32,
         ) -> Result<(), DeliveryFailure> {
             self.deliveries.lock().expect("deliveries").push(id.clone());
             self.outcome.lock().expect("outcome").clone()
@@ -356,6 +358,7 @@ mod tests {
             RelayPass {
                 claimed: 4,
                 delivered: 0,
+                requested: 0,
                 retried: 0,
                 stalled: 4,
                 claim_lost: 0,

@@ -1047,6 +1047,22 @@ impl RestateAdminClient {
         .await
     }
 
+    /// The paused `LashSession/{session}` drives, on every lane of the
+    /// service (FIG-3795): at most one per lane in practice, since the object
+    /// runs one drive at a time and a paused one holds it.
+    pub(crate) async fn paused_session_drives(
+        &self,
+        session: &str,
+    ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
+        let session = sql_string_literal(session);
+        let paused = RestateInvocationLifecycle::Paused.sql_literal();
+        let drives = service_lanes_sql(crate::LashService::SessionDriver.name());
+        self.query_json(&format!(
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {drives} AND target_handler_name = 'drive' AND target_service_key = {session} ORDER BY id"
+        ))
+        .await
+    }
+
     pub(crate) async fn paused_work_page(
         &self,
         after: Option<&str>,

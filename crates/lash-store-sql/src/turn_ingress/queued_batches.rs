@@ -123,7 +123,10 @@ crate::statements! {
              ORDER BY enqueue_seq ASC";
 
         /// Claim batch `?2` of session `?1` for claim `?3`, lease token `?4`,
-        /// generation `?5`, fencing token `?6`.
+        /// generation `?5`, fencing token `?6`, at `?7`.
+        ///
+        /// The claim is the batch's admission, so it delivers the batch's
+        /// ingress obligation in the same write (ADR 0109 §3).
         ///
         /// The generation predicate stays on the statement as the backstop of
         /// [`queued_work_batch_claimability`](lash_core::store_backend_support::queued_work_batch_claimability):
@@ -133,7 +136,17 @@ crate::statements! {
              SET claim_id = ?3,
                  claim_token = ?4,
                  claim_fencing_token = ?6,
-                 claim_session_lease_generation = ?5
+                 claim_session_lease_generation = ?5,
+                 obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN 'delivered' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_due_at_ms END,
+                 obligation_claim_token = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_claim_token END,
+                 obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_stall_reason END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN ?7 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND batch_id = ?2
                AND (
@@ -162,10 +175,20 @@ crate::statements! {
 
         /// Give up claim `?2`/`?3` on session `?1`, restoring the interrupted
         /// predecessor identity `?4`/`?5` the claim displaced.
+        ///
+        /// A row handed back to the queue owes its session a drive again: a
+        /// delivered ingress obligation is due at once (ADR 0109 §3), and
+        /// its next claim asks under a fresh attempt.
         abandon_claim = "UPDATE queued_work_batches
              SET claim_id = ?4,
                  claim_token = ?5,
-                 claim_session_lease_generation = 0
+                 claim_session_lease_generation = 0,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
              WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3";
 
         /// Settle batch `?2` of session `?1` under claim `?3`/`?4` by removing
@@ -189,5 +212,134 @@ crate::statements! {
             claim_token = NULL, claim_session_lease_generation = 0
             WHERE session_id = ?1 AND claim_token IS NOT NULL";
         delete_batch = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND batch_id = ?2";
+    }
+}
+
+/// The obligation columns a claim reads back (ADR 0109 §1.3): the id, the
+/// attempt count after the claim, then the row's key.
+pub const OBLIGATION_CLAIM_COLUMNS: &str =
+    "obligation_id, obligation_attempts, session_id, batch_id";
+
+/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
+/// with the stall's reason, last error and instant before the key.
+pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, session_id, batch_id";
+
+/// A due obligation's instant and id, read without claiming it: what the
+/// ingress ledger merges across its two tables before it claims either
+/// (ADR 0109 §3).
+///
+/// Narrow because the merge only orders by due instant and names which table
+/// to claim from; the claim itself reads [`OBLIGATION_CLAIM_COLUMNS`].
+pub const OBLIGATION_DUE_COLUMNS: &str = "obligation_due_at_ms, obligation_id";
+
+crate::statements! {
+    /// `queued_work_batches` obligation statements (ADR 0109): an admitted
+    /// batch owes its session a drive. Both backends issue them verbatim;
+    /// every settling write compares the state and, while claimed, the claim
+    /// token.
+    pub struct QueuedBatchObligationStatements @ "queued_work_batch" {
+        /// Arm the row keyed `?1`, `?2` as obligation `?3`, due at `?4`, if
+        /// it owes nothing.
+        obligation_arm = "UPDATE queued_work_batches
+             SET obligation_id = ?3, obligation_state = 'due', obligation_attempts = 0,
+                 obligation_due_at_ms = ?4, obligation_claim_token = NULL,
+                 obligation_stall_reason = NULL, obligation_last_error = NULL,
+                 obligation_settled_at_ms = NULL
+             WHERE session_id = ?1 AND batch_id = ?2 AND obligation_state IS NULL";
+
+        /// At most `?2` obligations due at `?1`, a lapsed claim included,
+        /// oldest due first.
+        obligation_select_due = "SELECT obligation_id FROM queued_work_batches
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2";
+
+        /// The due instant and id of at most `?2` obligations due at `?1`,
+        /// oldest due first: what the ingress ledger merges across its two
+        /// tables before it claims either.
+        obligation_peek_due = "SELECT obligation_due_at_ms, obligation_id FROM queued_work_batches
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2";
+
+        /// Claim obligation `?1` under token `?2` until `?3` if it is still
+        /// due at `?4`.
+        obligation_claim_due_row = "UPDATE queued_work_batches
+             SET obligation_state = 'claimed', obligation_claim_token = ?2,
+                 obligation_attempts = obligation_attempts + 1, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state IN ('due', 'claimed')
+               AND obligation_due_at_ms <= ?4
+             RETURNING obligation_id, obligation_attempts, session_id, batch_id";
+
+        /// Claim `due` obligation `?1` under token `?2` until `?3`, whatever
+        /// its backoff: a producer's own immediate attempt.
+        obligation_claim = "UPDATE queued_work_batches
+             SET obligation_state = 'claimed', obligation_claim_token = ?2,
+                 obligation_attempts = obligation_attempts + 1, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state = 'due'
+             RETURNING obligation_id, obligation_attempts, session_id, batch_id";
+
+        /// Settle claim `?2` on obligation `?1` delivered at `?3`.
+        obligation_settle_delivered = "UPDATE queued_work_batches
+             SET obligation_state = 'delivered', obligation_claim_token = NULL,
+                 obligation_due_at_ms = NULL, obligation_last_error = NULL,
+                 obligation_settled_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
+        /// error `?4`.
+        obligation_settle_retry = "UPDATE queued_work_batches
+             SET obligation_state = 'due', obligation_claim_token = NULL,
+                 obligation_due_at_ms = ?3, obligation_last_error = ?4
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Stall claim `?2` on obligation `?1` for reason `?3` with error
+        /// `?4` at `?5`.
+        obligation_settle_stall = "UPDATE queued_work_batches
+             SET obligation_state = 'stalled', obligation_claim_token = NULL,
+                 obligation_due_at_ms = NULL, obligation_stall_reason = ?3,
+                 obligation_last_error = ?4, obligation_settled_at_ms = ?5
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Re-arm stalled obligation `?1`, due at `?2`, its attempts reset.
+        obligation_rearm = "UPDATE queued_work_batches
+             SET obligation_state = 'due', obligation_attempts = 0, obligation_due_at_ms = ?2,
+                 obligation_stall_reason = NULL, obligation_settled_at_ms = NULL
+             WHERE obligation_id = ?1 AND obligation_state = 'stalled'";
+
+        /// At most `?2` stalled obligations after id `?1`, in id order.
+        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, session_id, batch_id
+             FROM queued_work_batches
+             WHERE obligation_state = 'stalled' AND obligation_id > ?1
+             ORDER BY obligation_id
+             LIMIT ?2";
+
+        /// How many obligations are stalled.
+        obligation_count_stalled = "SELECT COUNT(*) FROM queued_work_batches WHERE obligation_state = 'stalled'";
+
+        /// Obligation `?1`'s state.
+        obligation_select_state = "SELECT obligation_state FROM queued_work_batches WHERE obligation_id = ?1";
+    }
+}
+
+impl crate::obligation::ObligationStatementSet for QueuedBatchObligationStatements {
+    fn obligation_sql(&self) -> crate::obligation::ObligationSql<'_> {
+        crate::obligation::ObligationSql {
+            key_columns: 2,
+            arm: &self.obligation_arm,
+            select_due: &self.obligation_select_due,
+            claim_due_row: &self.obligation_claim_due_row,
+            claim: &self.obligation_claim,
+            settle_delivered: &self.obligation_settle_delivered,
+            settle_retry: &self.obligation_settle_retry,
+            settle_stall: &self.obligation_settle_stall,
+            rearm: &self.obligation_rearm,
+            select_stalled: &self.obligation_select_stalled,
+            count_stalled: &self.obligation_count_stalled,
+            select_state: &self.obligation_select_state,
+        }
     }
 }

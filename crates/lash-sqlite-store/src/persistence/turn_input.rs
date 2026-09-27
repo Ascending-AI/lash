@@ -1231,6 +1231,10 @@ fn enqueue_pending_turn_inputs_conn(
                 .map_err(|err| {
                     crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
                 })?;
+                // The admitted input owes its session a drive (ADR 0109 §3):
+                // the row is armed in the transaction that admits it, so no
+                // crash between the commit and the drive ask loses the ask.
+                crate::ingress_obligation::arm_turn_input_tx(tx, session_id, &input_id, now)?;
                 input_id
             }
         };

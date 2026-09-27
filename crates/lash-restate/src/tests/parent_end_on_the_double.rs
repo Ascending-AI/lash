@@ -775,7 +775,6 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
         &parts,
         &lash_core::engine::ReconcileCursor::default(),
         PAGE,
-        "parent-end-tick-1",
     )
     .await;
     let parent_end_pass = |tick: &lash_core::engine::ReconcileTick| {
@@ -794,8 +793,7 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
         "the tick claimed and delivered the unapplied plan's obligation: {:?}",
         first.failures
     );
-    let second =
-        lash_core::drive::reconcile_once(&parts, &first.next, PAGE, "parent-end-tick-2").await;
+    let second = lash_core::drive::reconcile_once(&parts, &first.next, PAGE).await;
     assert_eq!(
         parent_end_pass(&second).claimed,
         0,

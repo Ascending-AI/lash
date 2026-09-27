@@ -7,7 +7,7 @@ Accepted 2026-09-27 (FIG-3600 S8). It records Sam's S8 rulings of that date.
 leader lease). The per-ledger slices under *Slice plan* build the rest, and
 each slice updates this status when it lands. Landed: S8-D, the two-phase
 session delete (§4); S8-S, scope close on the root row (§3, §6); S8-C,
-control intents; S8-P, parent-end plans (§3).
+control intents; S8-P, parent-end plans (§3); S8-I, ingress (§3, §7).
 
 **S8-T (process terminal publication) is implemented.** Every transaction
 that makes a process terminal arms the row's `ProcessTerminal` obligation;
@@ -362,7 +362,7 @@ and is not a second ingress.
 
 | Kind | Table (both stores) | Armed by | Delivered when | Replaces |
 |---|---|---|---|---|
-| `Ingress` | `session_ingress` | the admission transaction | the engine accepted drive request `ingress:{obligation_id}` | the drives arm and `session_work_in_flight` (deleted) |
+| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | the admission transaction | the drive's claim of the row admitted it, in the claim's own transaction; the engine accepting drive request `{obligation_id}:{attempt}` only holds the relay's claim | the drives arm (`session_work_in_flight` stays: §4's delete gate reads it) |
 | `ControlIntent` | `control_intents` | the verb's transaction | the engine half is applied, the intent settled, and its follow-on drive `intent:{id}` accepted | the intents arm; the `attempts` column (use `obligation_attempts`) |
 | `ScopeClose` | `session_roots` | the root's terminal transaction | the close's own transaction | the scopes arm |
 | `ParentEnd` | `parent_end_plans` | the plan's record | every child's cancel delivered or refused | the parent-end slot and the native worker sweep |
@@ -380,9 +380,31 @@ child that refused, so one unreachable child stalls its plan, never the rows
 behind it. On SQLite `parent_end_plans` and `processes` live in the registry
 file: they are armed in that file's transaction, not the catalog's.
 
+**Ingress (S8-I).** The ingress rows live in `pending_turn_inputs` and
+`queued_work_batches` until the ADR 0101 table cutover folds them into
+`session_ingress`; the ingress ledger is the two tables' ledgers composed, a
+due page being the oldest due rows of both. A row's obligation id is
+`ingress:{item_id}` (its `ti:` input id or `qwb:` batch id), derived rather
+than read back. The engine accepting the relay's ask does not deliver it:
+the drive's claim of the row — its admission — delivers it, in the claim's
+own write, whatever state the obligation was in. The relay's claim so covers
+only the ask and the admission after it. Its ask is the drive request
+`{obligation_id}:{attempt}` (`ingress:{item_id}:{attempt}`), the attempt
+being the claim's: the engine dedupes a request id against an invocation it
+lost (an operator kill) as well as a live one, so a claim that lapsed with
+nothing admitted is asked again under the next attempt, and past the attempt
+ceiling stalls typed instead. A waiter on an input attaches to the first
+attempt's drive. There is no repair scan for ingress. A native wake asks for
+its batch's first attempt once and leaves the rest to the relay.
+
 **Parks.** The parks arm no longer resumes a paused drive blindly: a pause
 after the engine's own retries is recorded as a turn park, and only a redrive
-verb resumes it.
+verb resumes it. A drive paused in its admission is parked on the root the
+session's next admission names (an unfinished queued run, an owed follow-on,
+else the head input unless a command precedes it); a session already parked
+keeps its park, and its verb resumes the drive with the root. A drive whose
+next work names no root stays paused for the engine's operator; one whose
+session is gone is killed.
 
 **Repair.** The leader keeps one rate-bounded repair pass per kind that
 reports, and arms, a row that should owe an obligation and does not. It never
@@ -449,6 +471,18 @@ The settlement waiter's command drain (`session_api.rs`, the
 the SQL session-execution lease, not a drive epoch. Before any PR removes that
 lease, the drain is fenced by the drive epoch and a test races it against a
 live engine drive.
+
+S8-I fences it by the session's current drive fence, read after the lane is
+taken: a drive that seals an admission after that read refuses the drain's
+commit, and the drain stops for the drive (law
+`a_settlement_drain_is_refused_by_a_drive_that_seals_after_its_fence`, on the
+Restate double, SQLite and PostgreSQL). The drain never raises the epoch
+itself: a raise supersedes a drive mid-admission, and a superseded drive
+stops, leaving what it was asked for to nobody now that no arm re-asks. A
+drain that retries after a refusal presents the fence then current, so it
+shares that fence with the drive that sealed it; mutual exclusion with that
+drive is still the lease's. Removing the lease needs the drain to seal an
+admission of its own, and to ask for a hand-over drive before it does.
 
 ## 8. Slice plan
 

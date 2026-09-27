@@ -58,8 +58,7 @@
 
 use crate::core::HeldWork;
 use crate::support::{
-    Arc, EffectHost, EmbedError, Result, RuntimePersistence, SessionStoreFactory,
-    SessionWorkEngine, TurnInput,
+    Arc, EffectHost, EmbedError, Result, RuntimePersistence, SessionStoreFactory, TurnInput,
 };
 use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
@@ -109,6 +108,7 @@ impl DurableSession {
         session_id: SessionId,
         catalog: Arc<dyn SessionStoreFactory>,
         work: HeldWork,
+        ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
@@ -116,7 +116,7 @@ impl DurableSession {
         Self {
             ops: DurableSessionOps::new(
                 session_id.clone(),
-                work.engine() as Arc<dyn SessionWorkEngine>,
+                ingress,
                 Arc::clone(&live_replay_store),
             ),
             acquisition: DurableAcquisition::Catalog,
@@ -132,10 +132,15 @@ impl DurableSession {
 
     /// The binding's store and ports are reused as-is, beside the catalog the
     /// store came from.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a binding-derived Durable Session reuses each of the binding's ports as-is"
+    )]
     pub(crate) fn from_binding(
         session_id: SessionId,
         store: Arc<dyn RuntimePersistence>,
         work: HeldWork,
+        ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn SessionStoreFactory>,
@@ -144,7 +149,7 @@ impl DurableSession {
         Self {
             ops: DurableSessionOps::new(
                 session_id.clone(),
-                work.engine() as Arc<dyn SessionWorkEngine>,
+                ingress,
                 Arc::clone(&live_replay_store),
             ),
             acquisition: DurableAcquisition::Bound(store),

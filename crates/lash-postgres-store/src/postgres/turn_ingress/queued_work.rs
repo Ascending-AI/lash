@@ -10,6 +10,16 @@
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only PostgreSQL issues.
     pub(crate) struct QueuedBatchPostgresStatements @ "queued_work_batch" {
+        /// At most `?2` ingress obligations due at `?1`, oldest due first,
+        /// each row locked for the caller's claim and skipped by every
+        /// concurrent claimant: two deployments' relays take disjoint pages
+        /// (ADR 0109 §1.7).
+        obligation_select_due_locking = "SELECT obligation_id FROM queued_work_batches
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
+
         insert_new = "INSERT INTO queued_work_batches (
                  enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
                  authority_json, merge_key, enqueued_at_ms
@@ -194,10 +204,20 @@ lash_store_sql::statements! {
         /// instead; it holds the database lock for the whole loop, so the
         /// batch is atomic either way and only PostgreSQL saves round trips by
         /// writing it as one statement.
+        ///
+        /// A row handed back to the queue owes its session a drive again: a
+        /// delivered ingress obligation is due at once (ADR 0109 §3), and
+        /// its next claim asks under a fresh attempt.
         abandon_claims = "UPDATE queued_work_batches AS batch
              SET claim_id = abandoned.restore_claim_id,
                  claim_token = abandoned.restore_claim_token,
-                 claim_session_lease_generation = 0
+                 claim_session_lease_generation = 0,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
              FROM unnest(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4::TEXT[], ?5::TEXT[])
                   AS abandoned(session_id, claim_id, claim_token,
                                restore_claim_id, restore_claim_token)

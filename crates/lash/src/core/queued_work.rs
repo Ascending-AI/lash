@@ -86,8 +86,16 @@ impl NativeQueuedWorkRunHandle {
         work: &Arc<dyn lash_core::SessionWorkEngine>,
     ) -> Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> {
         let backend = self.config.env.core.backend();
+        // Ingress first (ADR 0109 §3): an admitted input's drive is the
+        // work every other kind's session waits behind.
         let mut relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
-            Vec::new();
+            vec![Arc::new(
+                lash_core::runtime::drive::IngressRelay::over_backend(
+                    backend,
+                    Arc::clone(work),
+                    Arc::clone(&self.config.env.core.clock),
+                ),
+            )];
         let scope_close: Option<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> =
             lash_core::runtime::drive::scope_close_relay(
                 self.config.env.core.control.scope_close_obligations.clone(),
@@ -390,11 +398,10 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         &self,
         cursor: &lash_core::engine::ReconcileCursor,
         page: std::num::NonZeroUsize,
-        tick: &str,
     ) -> std::result::Result<lash_core::engine::ReconcileCursor, lash_core::StoreError> {
         // The environment's build-time queued port is a placeholder; the
-        // drive arm asks the port the substrate resolved — the engine the
-        // core's sends schedule on.
+        // relays and arms ask the port the substrate resolved — the engine
+        // the core's sends deliver to.
         let work: Arc<dyn lash_core::SessionWorkEngine> =
             match self.substrate_slot.get().and_then(std::sync::Weak::upgrade) {
                 Some(slot) => slot.ports().await.queued_port(),
@@ -418,10 +425,10 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                 },
             );
         // Which recovery duties this deployment runs this tick (ADR 0109
-        // §1.7). The obligation slices register their relays here: scope
-        // close is S8-S's (ADR 0109 §3), and the parent-end ledger row is its
-        // ParentEnd obligation, delivered through the same process registry
-        // and port the drain slot sees.
+        // §1.7). The obligation slices register their relays here: ingress
+        // is S8-I's and scope close S8-S's (ADR 0109 §3), and the parent-end
+        // ledger row is its ParentEnd obligation, delivered through the same
+        // process registry and port the drain slot sees.
         let duties = self.config.recovery.duties().await;
         // The process-terminal and parent-end relays need this tick's process
         // port, so they join the relays the core registers without one.
@@ -463,7 +470,6 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
             },
             cursor,
             page,
-            tick,
         )
         .await;
         for failure in &report.failures {

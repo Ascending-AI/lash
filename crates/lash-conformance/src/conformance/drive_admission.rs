@@ -80,11 +80,20 @@ impl DriveParts {
         }
     }
 
+    pub(super) async fn runtime(&self) -> crate::LashRuntime {
+        self.runtime_over(Arc::clone(&self.store)).await
+    }
+
+    /// The law's runtime over `store`: the session's own store, or a law's
+    /// decorator of it.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: the law's runtime builds"
     )]
-    pub(super) async fn runtime(&self) -> crate::LashRuntime {
+    pub(super) async fn runtime_over(
+        &self,
+        store: Arc<dyn crate::RuntimePersistence>,
+    ) -> crate::LashRuntime {
         let state = self.initial_state();
         let policy = state.policy.clone();
         Box::pin(
@@ -93,7 +102,7 @@ impl DriveParts {
                 .with_policy(policy)
                 .with_initial_state(state)
                 .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-                .with_store(Arc::clone(&self.store))
+                .with_store(store)
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )
@@ -297,6 +306,9 @@ pub async fn one_authorized_drive_per_session(
 
 /// L-S2: one drive claims every item of the claimable prefix under one root:
 /// three accepted inputs within the claim bound are answered by one turn.
+/// Each acceptance armed its row's ingress obligation, and the drive's claim
+/// of the row delivered it in the claim's own write (ADR 0109 §3): no ask
+/// was ever made, and nothing is owed after.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -311,6 +323,16 @@ pub async fn one_drive_claims_many_items(
     let first = parts.enqueue("first", Some("many-items-root")).await;
     let second = parts.enqueue("second", None).await;
     let third = parts.enqueue("third", None).await;
+    let ingress = stores.obligation_ledger(lash_core::store::ObligationKind::Ingress);
+    let obligations = [&first, &second, &third]
+        .map(|input| lash_core::store::ingress_obligation::ingress_obligation_id(input.as_str()));
+    for id in &obligations {
+        assert_eq!(
+            ingress.state(id).await.expect("the armed state"),
+            Some(lash_core::store::ObligationState::Due),
+            "each acceptance armed its row's ingress obligation"
+        );
+    }
     let request = parts.request("many-items-drive");
     let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
         let request = request.clone();
@@ -334,6 +356,13 @@ pub async fn one_drive_claims_many_items(
         "one root answers every item it claimed"
     );
     assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one model call");
+    for id in &obligations {
+        assert_eq!(
+            ingress.state(id).await.expect("the settled state"),
+            Some(lash_core::store::ObligationState::Delivered),
+            "the drive's claim of the row delivered its ingress obligation"
+        );
+    }
 }
 
 /// L-S3: a redrive of an admitted root drives exactly the claim its first

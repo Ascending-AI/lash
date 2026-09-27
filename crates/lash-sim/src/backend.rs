@@ -167,7 +167,10 @@ impl SimEngine {
     /// the server's grant order stays a function of the seed. A drive the
     /// engine refused ends the wait too; the handle then reports why.
     async fn await_input_drive(&self, session: &lash::LashSession, input: &lash::InputId) {
-        let request = lash_core::engine::DriveRequestId::new(input.to_string());
+        let request = lash_core::drive::ingress_drive_request(
+            input.as_str(),
+            lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        );
         let session_id = session.session_id();
         loop {
             match self

@@ -10,7 +10,7 @@
 //! where it stands — its host tasks aborted, every attempt the engine was
 //! running on it dropped and replayed — and [`CrashWorld::restart`] brings up
 //! a fresh process (a new core, a new owner incarnation, a new interval with
-//! a fresh cursor and tick nonce).
+//! a fresh cursor).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -34,11 +34,10 @@ pub type CoreBuild = Arc<
 /// hung.
 const TICK_WALL_LIMIT: Duration = Duration::from_secs(30);
 
-/// One recovery interval: its cursor and its tick ids, owned by the process
-/// that runs it. A restart starts a fresh one.
+/// One recovery interval: its cursor, owned by the process that runs it. A
+/// restart starts a fresh one.
 struct Interval {
     cursor: lash_core::engine::ReconcileCursor,
-    ticks: lash_core::engine::ReconcileTicks,
     /// Engine time at the interval's last tick, or at its start.
     last_tick_ms: u64,
 }
@@ -47,7 +46,6 @@ impl Interval {
     fn fresh(now_ms: u64) -> Self {
         Self {
             cursor: lash_core::engine::ReconcileCursor::default(),
-            ticks: lash_core::engine::ReconcileTicks::start("crash-matrix"),
             last_tick_ms: now_ms,
         }
     }
@@ -354,17 +352,10 @@ impl CrashWorld {
             .proxy
             .current()
             .ok_or_else(|| "no deployment is up to tick".to_owned())?;
-        let (cursor, tick_id) = {
-            let mut interval = self.interval.lock().await;
-            (interval.cursor.clone(), interval.ticks.next_tick())
-        };
+        let cursor = self.interval.lock().await.cursor.clone();
         let pass = self.spawn_host(async move {
             driver
-                .reconcile(
-                    &cursor,
-                    std::num::NonZeroUsize::MIN.saturating_add(63),
-                    &tick_id,
-                )
+                .reconcile(&cursor, std::num::NonZeroUsize::MIN.saturating_add(63))
                 .await
         });
         match tokio::time::timeout(TICK_WALL_LIMIT, pass).await {

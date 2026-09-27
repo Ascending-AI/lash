@@ -564,6 +564,17 @@ impl TurnInputStore for PostgresSessionStore {
                         .map_err(|err| {
                             pending_turn_input_insert_error(err, session_id, &input_id)
                         })?;
+                    // The admitted input owes its session a drive (ADR 0109
+                    // §3): the row is armed in the transaction that admits
+                    // it. A row an earlier submission admitted already
+                    // carries its obligation and is left as it stands.
+                    crate::ingress_obligation::arm_turn_input_tx(
+                        &mut tx,
+                        session_id,
+                        input_id.as_str(),
+                        now,
+                    )
+                    .await?;
                     input_id
                 }
             };

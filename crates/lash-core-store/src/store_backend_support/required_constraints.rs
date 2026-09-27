@@ -1060,9 +1060,15 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     ),
     obligation_constraint(
         &[SqliteConstraintDatabase::DurableCore],
-        "session_ingress",
-        "lash_session_ingress",
-        "ck_session_ingress_obligation",
+        "pending_turn_inputs",
+        "lash_pending_turn_inputs",
+        "ck_pending_turn_inputs_obligation",
+    ),
+    obligation_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        "queued_work_batches",
+        "lash_queued_work_batches",
+        "ck_queued_work_batches_obligation",
     ),
     obligation_constraint(
         &[SqliteConstraintDatabase::DurableCore],

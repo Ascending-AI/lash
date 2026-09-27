@@ -114,6 +114,7 @@ impl ObligationRelay for ScriptedRelay {
         &self,
         _id: &ObligationId,
         key: &ObligationKey,
+        _attempt: u32,
     ) -> Result<(), DeliveryFailure> {
         let label = key_label(key);
         self.attempts

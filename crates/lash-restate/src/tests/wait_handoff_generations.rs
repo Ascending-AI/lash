@@ -664,7 +664,6 @@ impl HandOff {
         build: &'static str,
         lease: &RecoveryLease,
         cursor: &lash_core::engine::ReconcileCursor,
-        tick: &str,
     ) -> lash_core::engine::ReconcileTick {
         let sessions = lash_core::StoreSet::session_store_factory(&self.stores);
         let drain = lash_core::StoreSet::generation_drain(&self.stores);
@@ -694,7 +693,6 @@ impl HandOff {
             },
             cursor,
             NonZeroUsize::new(16).unwrap_or(NonZeroUsize::MIN),
-            tick,
         )
         .await
     }
@@ -965,9 +963,7 @@ async fn l3f_a_hand_over_survives_the_recovery_leaders_death() {
     roll.until_leading(&leader).await;
     follower.step().await;
 
-    let idle = roll
-        .tick("N+1", &follower, &Default::default(), "follower-1")
-        .await;
+    let idle = roll.tick("N+1", &follower, &Default::default()).await;
     assert!(
         !idle.led && idle.drain_hand_over == Default::default(),
         "{case}: a follower's tick wakes nothing: {idle:?}"
@@ -976,9 +972,7 @@ async fn l3f_a_hand_over_survives_the_recovery_leaders_death() {
         roll.segment_runs(&process_id, 1).is_empty(),
         "{case}: nothing handed over before a leader's tick"
     );
-    let led = roll
-        .tick("N+1", &leader, &Default::default(), "leader-1")
-        .await;
+    let led = roll.tick("N+1", &leader, &Default::default()).await;
     assert_eq!(
         (
             led.led,
@@ -1003,9 +997,7 @@ async fn l3f_a_hand_over_survives_the_recovery_leaders_death() {
     );
 
     roll.until_leading(&follower).await;
-    let taken_over = roll
-        .tick("N+1", &follower, &Default::default(), "follower-2")
-        .await;
+    let taken_over = roll.tick("N+1", &follower, &Default::default()).await;
     assert_eq!(
         (
             taken_over.led,
@@ -1026,9 +1018,7 @@ async fn l3f_a_hand_over_survives_the_recovery_leaders_death() {
         Default::default(),
         "{case}: N's generation holds no live process once the successor runs"
     );
-    let drained = roll
-        .tick("N+1", &follower, &taken_over.next, "follower-3")
-        .await;
+    let drained = roll.tick("N+1", &follower, &taken_over.next).await;
     assert_eq!(
         drained.drain_hand_over,
         Default::default(),
@@ -1056,7 +1046,7 @@ async fn l3r_the_newest_generation_leads_the_rolling_deploys_hand_over() {
     roll.until_leading(&lease_n).await;
     roll.mark_n_draining().await;
 
-    let own = roll.tick("N", &lease_n, &Default::default(), "n-1").await;
+    let own = roll.tick("N", &lease_n, &Default::default()).await;
     assert_eq!(
         (own.led, own.drain_hand_over),
         (true, Default::default()),
@@ -1073,14 +1063,12 @@ async fn l3r_the_newest_generation_leads_the_rolling_deploys_hand_over() {
     let lease_next = law_lease(&roll, 2);
     roll.until_leading(&lease_next).await;
     lease_n.step().await;
-    let deposed = roll.tick("N", &lease_n, &Default::default(), "n-2").await;
+    let deposed = roll.tick("N", &lease_n, &Default::default()).await;
     assert!(
         !deposed.led && deposed.drain_hand_over == Default::default(),
         "{case}: N, outranked, runs no leader duty: {deposed:?}"
     );
-    let newest = roll
-        .tick("N+1", &lease_next, &Default::default(), "next-1")
-        .await;
+    let newest = roll.tick("N+1", &lease_next, &Default::default()).await;
     assert_eq!(
         (
             newest.led,

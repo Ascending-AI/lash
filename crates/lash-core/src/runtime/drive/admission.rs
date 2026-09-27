@@ -282,11 +282,7 @@ impl AdmitDriveRunner {
             .list_pending_turn_inputs(session_id)
             .await
             .map_err(|error| store_fault("pending turn input read", error))?;
-        let head = open
-            .iter()
-            .filter(|read| read.input.state == crate::TurnInputState::DeferredNextTurn)
-            .min_by_key(|read| read.input.enqueue_seq);
-        let Some(head) = head else {
+        let Some(head) = lash_core_execution::runtime::head_input(&open) else {
             return Ok(None);
         };
         // A root the input is bound to drives it: the root whose claim took
@@ -296,24 +292,11 @@ impl AdmitDriveRunner {
             .root_binding(session_id, &head.input.input_id)
             .await
             .map_err(|error| store_fault("input root binding read", error))?;
-        let root = match (bound, &head.status) {
-            (Some(root), _) => root,
-            (None, crate::PendingTurnInputReadStatus::TurnBound { turn_id, .. }) => turn_id.clone(),
-            (None, _) => input_root(&head.input),
-        };
-        Ok(Some((root, head.input.input_id.clone())))
+        Ok(Some((
+            lash_core_execution::runtime::head_input_root(head, bound),
+            head.input.input_id.clone(),
+        )))
     }
-}
-
-/// The root of a drive that starts with `input`: the host's id for it (its
-/// source key) when it has one, else its input id (FIG-3600, ruling Q4).
-pub(in crate::runtime) fn input_root(input: &crate::PendingTurnInput) -> TurnId {
-    TurnId::from(
-        input
-            .source_key
-            .as_deref()
-            .unwrap_or_else(|| input.input_id.as_str()),
-    )
 }
 
 /// The root a fresh queued run is admitted under: named by its admission, so

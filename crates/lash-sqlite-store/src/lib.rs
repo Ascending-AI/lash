@@ -122,6 +122,7 @@ mod fleet_format;
 mod forks;
 mod generation_drain;
 mod graph;
+mod ingress_obligation;
 mod lifecycle;
 mod location;
 mod obligation_ledger;

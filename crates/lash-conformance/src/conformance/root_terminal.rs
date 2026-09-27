@@ -477,7 +477,6 @@ async fn reconcile_tick(
     stores: &Arc<dyn crate::StoreSet>,
     relay: &lash_core::runtime::drive::ScopeCloseRelay,
     clock: &dyn lash_core::Clock,
-    tick: &str,
 ) -> lash_core::engine::ReconcileTick {
     let factory = stores.session_store_factory();
     let work = crate::NoSessionWork::new();
@@ -496,7 +495,6 @@ async fn reconcile_tick(
         },
         &lash_core::engine::ReconcileCursor::default(),
         std::num::NonZeroUsize::new(64).unwrap_or(std::num::NonZeroUsize::MIN),
-        tick,
     )
     .await;
     let obligation_failures: Vec<_> = report
@@ -728,7 +726,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         inner: Arc::clone(&parts.host.clock),
         offset_ms: lash_core::runtime::drive::relay::RelayPolicy::default().claim_ttl_ms + 1,
     };
-    let first = reconcile_tick(&stores, &relay, &lapsed, "root-close-recover").await;
+    let first = reconcile_tick(&stores, &relay, &lapsed).await;
     let pass = scope_close_pass(&first);
     assert_eq!(
         (pass.claimed, pass.delivered),
@@ -741,7 +739,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         "the delivered close settled the obligation"
     );
     let closed_once = closes.closes().len();
-    let second = reconcile_tick(&stores, &relay, &lapsed, "root-close-again").await;
+    let second = reconcile_tick(&stores, &relay, &lapsed).await;
     let pass = scope_close_pass(&second);
     assert_eq!(pass.claimed, 0, "the second tick claimed nothing: {pass:?}");
     assert_eq!(
@@ -802,7 +800,6 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         &stores,
         &scope_close_relay(&stores, closes.clone()),
         parts.host.clock.as_ref(),
-        "root-close-parked",
     )
     .await;
     assert_eq!(

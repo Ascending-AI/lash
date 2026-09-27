@@ -208,7 +208,10 @@ async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
         Duration::from_secs(20),
         backend.attach_drive(
             &lash_core::SessionId::from("drop"),
-            lash_core::engine::DriveRequestId::new(receipt.input_id.to_string()),
+            lash_core::drive::ingress_drive_request(
+                receipt.input_id.as_str(),
+                lash_core::drive::FIRST_INGRESS_ATTEMPT,
+            ),
         ),
     )
     .await

@@ -78,6 +78,7 @@ impl ObligationRelay for ScopeCloseRelay {
         &self,
         _id: &ObligationId,
         key: &ObligationKey,
+        _attempt: u32,
     ) -> Result<(), DeliveryFailure> {
         let ObligationKey::ScopeClose { session_id, root } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
@@ -153,7 +154,10 @@ pub async fn deliver_scope_close(
     let id = scope_close_obligation_id(&terminal.session_id, &terminal.root);
     match deliver_now(relay, &id, clock).await? {
         RelayVerdict::Delivered | RelayVerdict::ClaimLost => Ok(ScopeCloseAttempt::Delivered),
-        RelayVerdict::Retried { .. } => Ok(ScopeCloseAttempt::Owed { retryable: true }),
+        // Asked, and still owed until its consumer settles it.
+        RelayVerdict::Retried { .. } | RelayVerdict::Requested => {
+            Ok(ScopeCloseAttempt::Owed { retryable: true })
+        }
         RelayVerdict::Stalled(_) => Ok(ScopeCloseAttempt::Owed { retryable: false }),
         RelayVerdict::NotDue => {
             if relay.ledger().state(&id).await?.is_none() {

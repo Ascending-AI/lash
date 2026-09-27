@@ -3981,21 +3981,26 @@ owner = "crates/lash-store-sql/src/session/meta.rs"
 touches = ["control_intents"]
 reason = "Admission reads the epoch and pending destructive control in one snapshot. A cancel or fork that still owes its engine half (pending, or failed and retryable) blocks a new seal until its old engine execution has been released and its intent acknowledged; one the engine refused for good blocks nothing."
 
-[[cross_family]]
-statement = "session_meta.sessions"
-owner = "crates/lash-store-sql/src/session/meta.rs"
-touches = ["turn_parks"]
-reason = "The reconcile drive arm lists the sessions a drive could admit work for in one catalog read. A session an unresolved park holds admits nothing until a verb resolves the park, and the verb asks for the drive itself, so the listing leaves it out instead of asking it to drive every tick."
-
 [[dialect_only]]
-statement = "session_ingress.obligation_select_due_locking"
+statement = "pending_turn_input.obligation_select_due_locking"
 backends = ["postgres"]
 kind = "row locking"
 reason = """
 Every PostgreSQL deployment claims due obligations, so the due page is read
 `FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
 §1.7). SQLite has one writer and only the recovery leader claims there; it
-reads the same page through the shared `session_ingress.obligation_select_due`.
+reads the same page through the shared `pending_turn_input.obligation_select_due`.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.obligation_select_due_locking"
+backends = ["postgres"]
+kind = "row locking"
+reason = """
+Every PostgreSQL deployment claims due obligations, so the due page is read
+`FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
+§1.7). SQLite has one writer and only the recovery leader claims there; it
+reads the same page through the shared `queued_work_batch.obligation_select_due`.
 """
 
 [[dialect_only]]

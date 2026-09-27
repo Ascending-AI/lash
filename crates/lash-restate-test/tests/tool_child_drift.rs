@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::engine::{DriveOutcome, DriveRequestId, RootOutcome};
+use lash_core::engine::{DriveOutcome, RootOutcome};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::{
@@ -342,7 +342,10 @@ async fn start_turn(called: Called) -> Turn {
         .id(TURN)
         .await
         .expect("accept the turn input");
-    let request = DriveRequestId::new(handle.input_id().to_string());
+    let request = lash_core::drive::ingress_drive_request(
+        handle.input_id().as_str(),
+        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+    );
     let live = Arc::new(Mutex::new(Some(first)));
     // The acceptance scheduled the drive under the input's own request: the
     // attach waits on that one drive, across the redeploys, until it stops.

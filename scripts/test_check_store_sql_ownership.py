@@ -313,6 +313,29 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         )
         self.assert_refused("spells `status = '…'` over `runtime_effect_replay`")
 
+    def test_a_column_whose_name_ends_in_a_vocabulary_column_is_not_that_column(self) -> None:
+        """The spelled-vocabulary rule matches the column as a whole identifier.
+
+        `obligation_state = 'due'` compares the obligation columns (ADR 0109
+        §1.1), not the table's `state` vocabulary; `state = 'accepted'` is
+        still the spelling the rule refuses.
+        """
+        # Precondition: the substring rule this replaces matched the suffix.
+        self.assertIn("state='", GATE.squeeze("obligation_state = 'due'"))
+        self.assertEqual(
+            GATE.spelled_vocabulary_literals(
+                "UPDATE pending_turn_inputs SET obligation_state = 'due' WHERE obligation_state = 'delivered'",
+                "state",
+            ),
+            [],
+        )
+        self.assertEqual(
+            GATE.spelled_vocabulary_literals(
+                "SELECT 1 FROM pending_turn_inputs WHERE state = 'accepted'", "state"
+            ),
+            ["state = '…'"],
+        )
+
     def test_vocabulary_columns_on_a_table_the_family_does_not_own_is_refused(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",

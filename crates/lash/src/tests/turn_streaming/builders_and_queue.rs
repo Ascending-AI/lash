@@ -95,7 +95,7 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
             panic!("admission must use the session drive scope: {:?}", pair[0]);
         };
         assert_eq!(session_id.as_str(), "durable-default-effect-host");
-        assert!(drain_id.starts_with("drive:ti:"), "{drain_id}");
+        assert!(drain_id.starts_with("drive:ingress:ti:"), "{drain_id}");
         assert!(drive_ids.insert(drain_id), "each send has its own drive");
         assert_eq!(
             pair[1],

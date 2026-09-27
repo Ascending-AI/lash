@@ -361,10 +361,16 @@ const fn s8(
 /// tests in `tests/crash_point_matrix.rs` are checked against it.
 pub const MATRIX: &[CaseSpec] = &[
     // --- Ingress (S-1..S-4) ------------------------------------------------
+    // An input's ingress obligation is delivered by the drive's claim of the
+    // row, not by the engine accepting the ask (ADR 0109 §3): the relay's
+    // claim covers the ask and the admission after it. A host that dies at
+    // the ask, or an engine that loses the drive before it admits the row,
+    // leaves that claim to lapse, and the relay asks again under the next
+    // attempt: those cells are bounded by the lapsed claim.
     today(
         Seam::Ingress,
         CrashPoint::AfterStateCommit,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaim,
         "an accepted input whose drive ask never left the dead host is driven once by the recovery tick",
     ),
     today(
@@ -388,7 +394,7 @@ pub const MATRIX: &[CaseSpec] = &[
     today(
         Seam::Ingress,
         CrashPoint::InvocationLost,
-        DetectionBound::LostImmediateSqliteFailover,
+        DetectionBound::LapsedClaim,
         "a drive whose invocation the engine lost before it admitted anything leaves the input to the recovery tick",
     ),
     // --- Control intents (S-6, S-7, S-9) ----------------------------------

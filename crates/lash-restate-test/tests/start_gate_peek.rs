@@ -19,7 +19,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::engine::DriveRequestId;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
@@ -118,7 +117,10 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .id("turn-1")
         .await
         .expect("accept the turn input");
-    let request = DriveRequestId::new(handle.input_id().to_string());
+    let request = lash_core::drive::ingress_drive_request(
+        handle.input_id().as_str(),
+        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+    );
     let server = backend.server();
     let drive = tokio::time::timeout(
         std::time::Duration::from_secs(8),

@@ -170,6 +170,14 @@ table lash_pending_turn_inputs
   column ingress_json text not-null
   column input_id text not-null
   column input_json text not-null
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column run_spec_hash text nullable
   column session_id text not-null
   column source_key text nullable
@@ -177,6 +185,7 @@ table lash_pending_turn_inputs
   column submission_digest text not-null
   column submitted_ingress_json text not-null
   unique (input_id)
+  unique (obligation_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
 table lash_process_artifact_cleanup
@@ -400,10 +409,19 @@ table lash_queued_work_batches
   column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null
   column merge_key text nullable
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text nullable
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text nullable
   column session_id text not-null
   column source_key text nullable
   column work_kind text not-null
   unique (batch_id)
+  unique (obligation_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
 table lash_queued_work_items
@@ -1127,14 +1145,6 @@ table lash_session_ingress
   column kind text not-null
   column lane text not-null
   column merge_key text nullable
-  column obligation_attempts integer not-null default
-  column obligation_claim_token text nullable
-  column obligation_due_at_ms bigint nullable
-  column obligation_id text nullable
-  column obligation_last_error text nullable
-  column obligation_settled_at_ms bigint nullable
-  column obligation_stall_reason text nullable
-  column obligation_state text nullable
   column payload_json text not-null
   column session_id text not-null
   column source_key text nullable
@@ -1145,7 +1155,6 @@ table lash_session_ingress
   column wake_process_id text nullable
   column wake_sequence bigint nullable
   unique (item_id)
-  unique (obligation_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
 table lash_session_ingress_sequence

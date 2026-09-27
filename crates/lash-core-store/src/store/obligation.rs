@@ -360,7 +360,8 @@ impl ObligationState {
 }
 
 /// Why an obligation stalled (`obligation_stall_reason`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StallReason {
     /// Its retryable failures reached the kind's attempt ceiling.
     AttemptsExhausted,

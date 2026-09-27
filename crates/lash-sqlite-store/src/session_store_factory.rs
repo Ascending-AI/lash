@@ -625,29 +625,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         .map_err(sqlite_error)?
     }
 
-    async fn list_reconcilable_sessions(
-        &self,
-        after: Option<&SessionId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<SessionId>, StoreError> {
-        let after = after.map_or_else(String::new, ToString::to_string);
-        let Some(conn) = self.control_ledger().await? else {
-            return Ok(Vec::new());
-        };
-        conn.call(move |conn| {
-            let sql = &crate::session_roots::session_roots_sql().verbs;
-            let mut statement = conn.prepare(sql.sessions.sql())?;
-            statement
-                .query_map(params![after, limit.get() as i64], |row| {
-                    row.get::<_, String>(0)
-                })?
-                .map(|row| row.map(SessionId::from))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .await
-        .map_err(sqlite_error)
-    }
-
     async fn compact_turn_park_feed(
         &self,
         through: lash_core_execution::store::ParkFeedCursor,

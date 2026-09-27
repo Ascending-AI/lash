@@ -45,7 +45,7 @@ use lash_core::{GenerationOptions, ModelSpec, PromptLayer, RunSpec};
 
 use lash_core::facade_support::{TurnCancelDisposition, TurnCancelMode, TurnCancelReceipt};
 use lash_core::runtime::PendingTurnInputCancelReceipt;
-use lash_core::store::{ParkId, ParkReason};
+use lash_core::store::{ParkId, ParkReason, StallReason};
 
 pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
@@ -431,6 +431,26 @@ pub enum TurnStatus {
     Failed,
     Cancelled,
     Parked(ParkedTurn),
+    /// The input was accepted, but its delivery to the engine stalled (ADR
+    /// 0109 §3): no root took it, and none will until an operator re-arms
+    /// its obligation. Not terminal: the input stays durable, and a host
+    /// re-awaits it once re-armed.
+    Stalled(StalledDelivery),
+}
+
+/// An accepted input the engine was never handed: its ingress obligation
+/// stalled.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StalledDelivery {
+    pub session_id: SessionId,
+    pub input_id: InputId,
+    pub reason: StallReason,
+    /// Delivery attempts made before it stalled.
+    pub attempts: u32,
+    /// The last delivery failure, as the relay recorded it.
+    pub last_error: Option<String>,
+    /// When it stalled, in milliseconds since the Unix epoch.
+    pub stalled_at_ms: u64,
 }
 
 /// A root that parked (ADR 0104 O3): durable and non-terminal.
@@ -472,6 +492,12 @@ impl SendOutcome {
                 reason: lash_remote_protocol::RemoteTurnParkReason::from(&parked.reason),
                 since_ms: parked.since_ms,
                 attempts: parked.attempts,
+            },
+            TurnStatus::Stalled(stalled) => lash_remote_protocol::RemoteTurnStatus::Stalled {
+                reason: stalled.reason.as_str().to_owned(),
+                attempts: stalled.attempts,
+                last_error: stalled.last_error.clone(),
+                stalled_at_ms: stalled.stalled_at_ms,
             },
         };
         lash_remote_protocol::RemoteSendOutcome {

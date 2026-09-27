@@ -54,7 +54,9 @@ pub struct RuntimeObservation {
     pub plugin_services: Option<ObservationPluginServices>,
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
     pub queue_store: Option<Arc<dyn crate::RuntimePersistence>>,
-    pub queued_work: Arc<dyn crate::SessionWorkEngine>,
+    /// The ingress relay an acceptance through this observation delivers
+    /// with (ADR 0109 §3).
+    pub ingress: super::drive::IngressRelay,
     /// Fingerprint of the resident authority at publication time, compared
     /// across publishes to detect revision-stable resident changes without
     /// retaining the resident state itself.
@@ -136,7 +138,7 @@ impl RuntimeObservation {
                 .session
                 .as_ref()
                 .and_then(|session| session.history_store()),
-            queued_work: Arc::clone(runtime.host.queued_work()),
+            ingress: runtime.ingress_relay(),
             authority_fingerprint,
         }
     }
@@ -698,7 +700,7 @@ impl RuntimeHandle {
             .ok_or_else(super::session_api::queued_turn_input_store_required)?;
         let ops = super::DurableSessionOps::new(
             SessionId::from(observation.session_id().to_string()),
-            Arc::clone(&observation.queued_work),
+            observation.ingress.clone(),
             Arc::clone(&self.live_replay_store),
         );
         Ok((ops, store))

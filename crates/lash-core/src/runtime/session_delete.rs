@@ -443,7 +443,12 @@ impl ObligationRelay for SessionDeleteRelay {
         self.policy
     }
 
-    async fn deliver(&self, id: &ObligationId, key: &ObligationKey) -> Result<(), DeliveryFailure> {
+    async fn deliver(
+        &self,
+        id: &ObligationId,
+        key: &ObligationKey,
+        _attempt: u32,
+    ) -> Result<(), DeliveryFailure> {
         let ObligationKey::SessionDelete { session_id } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "a {} key on the session_delete ledger",

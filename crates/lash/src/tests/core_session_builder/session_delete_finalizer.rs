@@ -244,11 +244,7 @@ async fn the_reconcile_tick_finishes_a_held_delete() -> Result<()> {
         Arc::clone(&core.store_factory),
     );
     driver
-        .reconcile(
-            &lash_core::engine::ReconcileCursor::default(),
-            page(),
-            "held-delete",
-        )
+        .reconcile(&lash_core::engine::ReconcileCursor::default(), page())
         .await?;
     assert!(
         !was_deleted(&core).await?,
@@ -256,11 +252,7 @@ async fn the_reconcile_tick_finishes_a_held_delete() -> Result<()> {
     );
     clock.advance(2_000);
     driver
-        .reconcile(
-            &lash_core::engine::ReconcileCursor::default(),
-            page(),
-            "held-delete",
-        )
+        .reconcile(&lash_core::engine::ReconcileCursor::default(), page())
         .await?;
     assert!(
         was_deleted(&core).await?,

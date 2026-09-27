@@ -155,6 +155,10 @@ lash_store_sql::statements! {
         /// The restored spelling is read out of the row's `ingress_json`, so a
         /// next-turn row restores to `deferred_next_turn` and an active-turn
         /// row to `pending_active`; the JSON extraction is the fork.
+        ///
+        /// A row handed back to the queue owes its session a drive again: a
+        /// delivered ingress obligation is due at once (ADR 0109 §3), and
+        /// its next claim asks under a fresh attempt.
         abandon_claim = "UPDATE pending_turn_inputs
              SET state = CASE
                      WHEN {{accepted_turn_input_state(state)}} THEN
@@ -170,7 +174,13 @@ lash_store_sql::statements! {
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
                  claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL
+                 claim_bound_receipt_input_id = NULL,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
              WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3";
 
         /// The batch form of [`abandon_claim`](Self::abandon_claim), over the
@@ -183,6 +193,10 @@ lash_store_sql::statements! {
         /// `abandoning_a_batch_of_claims_seeks_the_claim_index` pins that —
         /// where a correlated `EXISTS` would scan. PostgreSQL binds three real
         /// arrays and joins `unnest` instead.
+        ///
+        /// A row handed back to the queue owes its session a drive again: a
+        /// delivered ingress obligation is due at once (ADR 0109 §3), and
+        /// its next claim asks under a fresh attempt.
         abandon_claims = "UPDATE pending_turn_inputs
              SET state = CASE
                      WHEN {{accepted_turn_input_state(state)}} THEN
@@ -198,7 +212,13 @@ lash_store_sql::statements! {
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
                  claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL
+                 claim_bound_receipt_input_id = NULL,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
              WHERE (session_id, claim_id, claim_token) IN (
                  SELECT json_extract(abandoned.value, '$[0]'),
                         json_extract(abandoned.value, '$[1]'),

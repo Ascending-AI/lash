@@ -61,7 +61,12 @@ impl ObligationRelay for ProcessTerminalRelay {
         self.ledger.as_ref()
     }
 
-    async fn deliver(&self, id: &ObligationId, key: &ObligationKey) -> Result<(), DeliveryFailure> {
+    async fn deliver(
+        &self,
+        id: &ObligationId,
+        key: &ObligationKey,
+        _attempt: u32,
+    ) -> Result<(), DeliveryFailure> {
         let ObligationKey::ProcessTerminal { process_id } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "a {} key on the process_terminal ledger",

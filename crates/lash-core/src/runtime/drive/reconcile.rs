@@ -1,59 +1,47 @@
 //! Reconciliation (ADR 0104 O2/O3/O4, FIG-3600 S7, HoS decisions 69–70): the
 //! guaranteed owner of every piece of session work whose owner was lost.
 //!
-//! One tick, [`reconcile_once`], is engine-neutral and idempotent. It runs
-//! three arms, each bounded by the tick's page and resuming from its own
-//! cursor, so a tick never serializes the fleet and one arm's failure never
-//! stops another. Due obligations — among them control intents' engine
-//! halves, parent-end plans and the scope closes a terminal write armed
-//! (ADR 0109 §3) — are claimed through every registered kind's due index
-//! before the leader-only arms, not scanned out of their tables:
+//! One tick, [`reconcile_once`], is engine-neutral and idempotent. Every
+//! deployment first runs the obligation relays' due passes (ADR 0109 §1.4)
+//! — among them control intents' engine halves, the scope closes a terminal
+//! write armed, parent-end plans and the ingress its admission armed (ADR
+//! 0109 §3) — claimed through every registered kind's due index, not scanned
+//! out of their tables. Then the recovery leader runs the arms below, each
+//! bounded by the tick's page and resuming from its own cursor, so a tick
+//! never serializes the fleet and one arm's failure never stops another:
 //!
 //! 1. **Parks (O3).** The engine's own view of stalled work becomes lash
 //!    parks: [`SessionControlEngine::reconcile_parks`] reads what the engine
-//!    stopped retrying (turns and processes) and records it through a
-//!    [`ParkRecoveryWriter`]; a paused admission-only drive is resumed, never
-//!    parked. One execution the pass cannot settle is reported and passed
-//!    over, never failing the page.
-//! 2. **Drives (O2).** Every live session with open ingress that no
-//!    unresolved park holds is asked for a drive. Acceptance commits a row and then asks the engine to drive,
-//!    fire-and-forget; a process that dies between the two, a lost send, or a
-//!    re-ask the engine deduplicated all leave a durable row nothing drives,
-//!    and this arm asks again.
-//! 3. **Drain hand-over (FIG-3799).** Every live process of a generation an
+//!    stopped retrying (turns, drives and processes) and records it through
+//!    a [`ParkRecoveryWriter`]. Nothing the engine paused is resumed here:
+//!    only a redrive verb resumes a park. One execution the pass cannot
+//!    settle is reported and passed over, never failing the page.
+//! 2. **Drain hand-over (FIG-3799).** Every live process of a generation an
 //!    operator marked draining is woken to hand its open wait to a successor
 //!    on the newest build: [`drain_hand_over_slot`].
 //!
+//! Undriven ingress has no arm: every admitted turn input and queued batch
+//! carries an ingress obligation armed in its admission transaction, which
+//! the producer delivers at once and the ingress relay retries through its
+//! due index (ADR 0109 §3). No pass scans the session catalog for it.
+//!
 //! The engine supplies only the schedule: each engine runs the tick on an
 //! interval inside the driver's deployment and carries the
-//! [`ReconcileCursor`] forward. A tick never runs inside a drive, and it
-//! takes its tick id from the caller, which owns the clock and the journal.
-//!
-//! Every drive ask names its own request, derived from the tick and the row
-//! it answers, never from the session alone: the engine dedupes a request id
-//! across its runs, so an ask keyed by the session could be swallowed by a
-//! drive already past its last admission, and the row would strand.
-//!
-//! Today's open ingress is the `pending_turn_inputs` and `queued_work` rows,
-//! read per session because no store answers "sessions with open ingress"
-//! across the catalog; the drive arm pages over the live catalog by session
-//! id. S8's switch to the one session-ingress table replaces this scan with
-//! that table's cross-session keyset read.
+//! [`ReconcileCursor`] forward. A tick never runs inside a drive.
 
 use std::num::NonZeroUsize;
-
 use std::sync::Arc;
 
 use super::park::StoreParkRecovery;
 use super::relay::{ObligationRelay, relay_due, relay_kind};
 use crate::engine::{
-    DriveReconcileReport, DriveRequestId, EnginePage, ReconcileArm, ReconcileCursor,
-    ReconcileFailure, ReconcileTick, ScopeCloseSink, SlotPass,
+    EnginePage, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, ScopeCloseSink,
+    SlotPass,
 };
 use crate::runtime::recovery_lease::RecoveryDuties;
 use crate::{
-    Clock, ProcessRegistry, ProcessWorkSubstrate, SessionId, SessionStoreFactory,
-    SessionWorkEngine, StoreError,
+    Clock, ProcessRegistry, ProcessWorkSubstrate, SessionStoreFactory, SessionWorkEngine,
+    StoreError,
 };
 
 /// What one tick reaches: the catalog, the engine, the scope owner, and the
@@ -94,16 +82,8 @@ pub struct ReconcileProcesses<'a> {
     pub generation: &'a crate::engine::BuildGeneration,
 }
 
-/// The drive request a tick asks for when `session`'s oldest open row is
-/// `row`: unique per tick and row.
-#[must_use]
-pub fn reconcile_drive_request(tick: &str, row: &str) -> DriveRequestId {
-    DriveRequestId::new(format!("reconcile:{tick}:{row}"))
-}
-
 /// Run one reconcile tick from `cursor`, each paged arm reading at most
-/// `page` items. `tick` names this tick (the engine's journaled tick id):
-/// drive asks from one tick dedupe, asks from two do not.
+/// `page` items.
 ///
 /// Idempotent: every arm's effect is a store write or an engine call that a
 /// second tick over the same state repeats as a no-op. Nothing here fails the
@@ -113,7 +93,6 @@ pub async fn reconcile_once(
     parts: &ReconcileParts<'_>,
     cursor: &ReconcileCursor,
     page: NonZeroUsize,
-    tick: &str,
 ) -> ReconcileTick {
     let mut report = ReconcileTick {
         next: cursor.clone(),
@@ -178,30 +157,7 @@ pub async fn reconcile_once(
         }
     }
 
-    // 2. Drives: ask again for every session with open ingress.
-    match reconcile_session_drives(
-        parts.sessions,
-        parts.work,
-        tick,
-        cursor.drives.as_ref(),
-        page,
-    )
-    .await
-    {
-        Ok(drives) => {
-            report.next.drives = drives.next.clone();
-            report.drives = drives;
-        }
-        Err(error) => {
-            report.next.drives = cursor.drives.clone();
-            report.failures.push(ReconcileFailure {
-                arm: ReconcileArm::Drives,
-                error: error.to_string(),
-            });
-        }
-    }
-
-    // 3. The slot other slices fill.
+    // 2. The slot other slices fill.
     if let Some(processes) = parts.processes {
         match drain_hand_over_slot(&processes, cursor.drain.as_ref(), page).await {
             Ok(hand_over) => {
@@ -301,81 +257,4 @@ pub async fn drain_hand_over_slot(
     // over.
     report.next = None;
     Ok(report)
-}
-
-/// The drive arm: ask `engine` to drive every live session with open
-/// ingress, reading at most `page` sessions after `after` in session-id
-/// order. The catalog lists no session an unresolved park holds: it admits
-/// nothing until a verb resolves the park, and that verb asks for the drive
-/// itself, so an ask every tick would only pile up drives that admit
-/// nothing.
-///
-/// A session whose store cannot be read is reported, not fatal: one broken
-/// session never stops the others' recovery. Only a catalog that cannot be
-/// listed fails the pass. A session the engine still holds live work for is
-/// left alone: its ask was not lost, its owner is simply still running, and
-/// a sibling drive would fence it.
-pub async fn reconcile_session_drives(
-    sessions: &dyn SessionStoreFactory,
-    engine: &dyn SessionWorkEngine,
-    tick: &str,
-    after: Option<&SessionId>,
-    page: NonZeroUsize,
-) -> Result<DriveReconcileReport, StoreError> {
-    let mut live = sessions
-        .list_reconcilable_sessions(after, page.saturating_add(1))
-        .await?;
-    let mut report = DriveReconcileReport::default();
-    if live.len() > page.get() {
-        live.truncate(page.get());
-        report.next = live.last().cloned();
-    }
-    for session in live {
-        report.scanned += 1;
-        match oldest_open_row(sessions, &session).await {
-            Ok(Some(row)) => {
-                // Checked after the row read: a row's writer registered
-                // with the engine before it wrote, so a live owner is
-                // visible here and keeps its session — a suspended
-                // invocation's resumption re-decides the session's open
-                // ingress itself, and a sibling drive would only fence it.
-                if engine.session_work_in_flight(&session).await {
-                    continue;
-                }
-                engine.schedule_drive(&session, reconcile_drive_request(tick, &row));
-                report.scheduled.push(session);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                tracing::warn!(
-                    session_id = session.as_str(),
-                    error = %error,
-                    "reconcile could not read the session's open ingress"
-                );
-                report.unreadable.push((session, error.to_string()));
-            }
-        }
-    }
-    Ok(report)
-}
-
-/// The id of one of `session`'s open ingress rows (its oldest turn input,
-/// else its oldest queued batch), if it has any.
-async fn oldest_open_row(
-    sessions: &dyn SessionStoreFactory,
-    session: &SessionId,
-) -> Result<Option<String>, StoreError> {
-    let Some(store) = sessions.open_existing_store_by_id(session).await? else {
-        return Ok(None);
-    };
-    // The row only names the ask; the drive admits whatever is open.
-    let inputs = store.list_pending_turn_inputs(session).await?;
-    if let Some(read) = inputs.iter().min_by_key(|read| read.input.enqueue_seq) {
-        return Ok(Some(format!("input:{}", read.input.input_id)));
-    }
-    let batches = store.list_pending_queued_work(session).await?;
-    Ok(batches
-        .iter()
-        .min_by_key(|batch| batch.enqueue_seq)
-        .map(|batch| format!("batch:{}", batch.batch_id)))
 }

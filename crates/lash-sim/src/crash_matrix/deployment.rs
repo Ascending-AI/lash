@@ -115,8 +115,9 @@ impl Trip {
 /// host process can die.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HostSite {
-    /// The host's drive ask after an acceptance committed
-    /// (`SessionWorkEngine::schedule_drive`): the ask never leaves.
+    /// The host's drive ask after an acceptance committed: the ingress
+    /// obligation's awaited `SessionWorkEngine::request_drive` (the host dies
+    /// there) or a fire-and-forget `schedule_drive` (the ask never leaves).
     DriveAsk,
     /// `SessionControlEngine::release_root`, before the engine sees it.
     ReleaseRootBefore,
@@ -405,6 +406,23 @@ impl SessionWorkEngine for CrashSessionWork {
         self.inner.await_drive(session, request).await
     }
 
+    /// The awaited drive ask an admitted row's ingress obligation delivers
+    /// (ADR 0109 §3): a host that dies here never hears the engine's answer,
+    /// so the claim its delivery took lapses and the relay retakes it.
+    async fn request_drive(
+        &self,
+        session: &SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> Result<(), lash_core::engine::EngineRefusal> {
+        let detail = format!("{session}/{}", request.as_str());
+        match self.faults.take(HostSite::DriveAsk, &detail) {
+            Some(ArmEffect::Crash) => return die().await,
+            Some(effect) => return Err(refusal(effect, HostSite::DriveAsk)),
+            None => {}
+        }
+        self.inner.request_drive(session, request).await
+    }
+
     async fn session_work_in_flight(&self, session: &SessionId) -> bool {
         self.inner.session_work_in_flight(session).await
     }
@@ -580,14 +598,6 @@ impl SessionStoreFactory for CrashSessionFactory {
         limit: std::num::NonZeroUsize,
     ) -> StoreResult<Vec<lash_core::store::ControlIntent>> {
         self.inner.list_control_intents(after, limit).await
-    }
-
-    async fn list_reconcilable_sessions(
-        &self,
-        after: Option<&SessionId>,
-        limit: std::num::NonZeroUsize,
-    ) -> StoreResult<Vec<SessionId>> {
-        self.inner.list_reconcilable_sessions(after, limit).await
     }
 
     async fn open_existing_store_by_id(

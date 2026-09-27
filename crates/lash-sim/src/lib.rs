@@ -6,6 +6,8 @@ mod canonical_scripts;
 mod clock;
 pub mod content_oracle;
 pub mod crash_matrix;
+#[cfg(test)]
+mod ingress_bound;
 mod lease;
 #[cfg(test)]
 mod obligation_bounds;

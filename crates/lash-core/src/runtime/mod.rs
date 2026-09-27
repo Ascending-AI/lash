@@ -31,6 +31,7 @@ pub(crate) use lash_core_execution::runtime::effect;
 mod claim_settlement;
 #[doc(hidden)]
 pub mod coalescing_scheduler;
+mod command_settlement;
 mod environment;
 mod error;
 mod observation_publisher;

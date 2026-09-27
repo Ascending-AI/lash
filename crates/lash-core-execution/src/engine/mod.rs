@@ -29,6 +29,7 @@ mod contracts;
 mod control;
 mod drive;
 mod groups;
+mod ingress;
 mod reconcile;
 /// The determinism harness every slice that makes the drive deterministic
 /// proves its change with (FIG-3672).
@@ -75,9 +76,10 @@ pub use drive::{
     drive_root_start_replay_key, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
+pub use ingress::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
 pub use reconcile::{
-    DriveReconcileReport, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick,
-    ReconcileTicks, RecoveryLeaseConfig, RecoveryLeaseTimings, RelayPass, SlotPass,
+    ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, RecoveryLeaseConfig,
+    RecoveryLeaseTimings, RelayPass, SlotPass,
 };
 
 #[cfg(test)]

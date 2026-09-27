@@ -1,7 +1,8 @@
 //! Laws of the session drive's scheduling (FIG-3600, D5): one scheduled
 //! drive is bounded per invocation and hands its remainder to a
-//! continuation request, and the engine driver's reconcile tick re-asks
-//! work whose drive schedule was lost.
+//! continuation request, and the engine driver's reconcile tick relays the
+//! ingress obligation of work whose immediate delivery was lost (ADR 0109
+//! §3).
 //!
 //! Every law runs on lash-restate's engine over the Restate server double.
 
@@ -186,10 +187,10 @@ async fn sibling_drive_roots(
         .collect())
 }
 
-/// The engine driver's reconcile tick (ADR 0104 O2, review HIGH-2): a row
-/// committed whose drive ask was lost — here committed through the store
-/// alone so no ask was ever made — is driven by a tick without anything
-/// asking for it again.
+/// The engine driver's reconcile tick (ADR 0104 O2, ADR 0109 §3): a row
+/// committed whose immediate delivery was lost — here committed through the
+/// store alone, so its obligation is armed but nothing delivered it — is
+/// driven once the tick's relay delivers the obligation.
 async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture.core.session("send-drain-sweep").open().await?;

@@ -9,6 +9,7 @@ pub use super::await_event_cold::*;
 pub use super::cancelled_turn_withheld_input::*;
 pub use super::cell_binding_drift::*;
 pub use super::cell_orchestration_redrive::*;
+pub use super::command_drain_fence::*;
 pub use super::completion_routing::*;
 pub use super::config_command_replay::*;
 pub use super::direct_turn_acceptance::*;

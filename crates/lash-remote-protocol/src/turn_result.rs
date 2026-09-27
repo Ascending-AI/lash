@@ -240,6 +240,20 @@ pub enum RemoteTurnStatus {
         /// How many drives met the park's refusal.
         attempts: u32,
     },
+    /// The input was accepted, but its delivery to the engine stalled: no
+    /// root took it, and none will until an operator re-arms it. Durable and
+    /// not terminal.
+    Stalled {
+        /// Why it stalled: `attempts_exhausted`, `refused` or `undecodable`.
+        reason: String,
+        /// Delivery attempts made before it stalled.
+        attempts: u32,
+        /// The last delivery failure.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_error: Option<String>,
+        /// When it stalled, in milliseconds since the Unix epoch.
+        stalled_at_ms: u64,
+    },
 }
 
 /// What a sent input's root answered, for a transport: the four-way status,
@@ -288,7 +302,7 @@ impl RemoteSendOutcome {
 
     /// The status, root and report agree: a report's own status is the
     /// outcome's; Answered and Failed carry one; Parked carries none and names
-    /// its root; only an input no root took lacks a root.
+    /// its root; Stalled carries neither; only an input no root took lacks a root.
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         const TYPE: &str = "RemoteSendOutcome";
         require_non_empty(TYPE, "session_id", &self.session_id)?;
@@ -328,6 +342,12 @@ impl RemoteSendOutcome {
                     return Err(invalid("a parked outcome's root is its park's root"));
                 }
                 Ok(())
+            }
+            RemoteTurnStatus::Stalled { reason, .. } => {
+                if self.report.is_some() || self.root_id.is_some() {
+                    return Err(invalid("a stalled input has no root and no report"));
+                }
+                require_non_empty(TYPE, "status.reason", reason)
             }
             _ => Ok(()),
         }

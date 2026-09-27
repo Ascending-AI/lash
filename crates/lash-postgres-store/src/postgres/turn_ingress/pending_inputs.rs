@@ -9,6 +9,16 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only PostgreSQL issues.
     pub(crate) struct PendingInputPostgresStatements @ "pending_turn_input" {
+        /// At most `?2` ingress obligations due at `?1`, oldest due first,
+        /// each row locked for the caller's claim and skipped by every
+        /// concurrent claimant: two deployments' relays take disjoint pages
+        /// (ADR 0109 §1.7).
+        obligation_select_due_locking = "SELECT obligation_id FROM pending_turn_inputs
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
+
         /// Input `?2` of session `?1`, locked for the caller's transaction.
         select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
@@ -206,6 +216,10 @@ lash_store_sql::statements! {
 
         /// Give up claim `?2`/`?3` on session `?1`, restoring each row to the
         /// open spelling its own ingress carries (FIG-1573).
+        ///
+        /// A row handed back to the queue owes its session a drive again: a
+        /// delivered ingress obligation is due at once (ADR 0109 §3), and
+        /// its next claim asks under a fresh attempt.
         abandon_claim = "UPDATE pending_turn_inputs
              SET state = CASE
                      WHEN {{accepted_turn_input_state(state)}} THEN
@@ -221,7 +235,13 @@ lash_store_sql::statements! {
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
                  claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL
+                 claim_bound_receipt_input_id = NULL,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
              WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3";
 
         /// The batch form of [`abandon_claim`](Self::abandon_claim), over the
@@ -231,6 +251,10 @@ lash_store_sql::statements! {
         /// One statement, not a loop: a batch abandon is one caller giving up
         /// one set of rows. The arrays keep the text fixed however many claims
         /// there are; SQLite binds one JSON array instead.
+        ///
+        /// A row handed back to the queue owes its session a drive again: a
+        /// delivered ingress obligation is due at once (ADR 0109 §3), and
+        /// its next claim asks under a fresh attempt.
         abandon_claims = "UPDATE pending_turn_inputs
              SET state = CASE
                      WHEN {{accepted_turn_input_state(state)}} THEN
@@ -246,7 +270,13 @@ lash_store_sql::statements! {
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
                  claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL
+                 claim_bound_receipt_input_id = NULL,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
              FROM unnest(?1::TEXT[], ?2::TEXT[], ?3::TEXT[])
                   AS abandoned(session_id, claim_id, claim_token)
              WHERE pending_turn_inputs.session_id = abandoned.session_id

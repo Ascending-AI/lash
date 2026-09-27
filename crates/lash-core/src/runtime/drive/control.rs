@@ -244,7 +244,12 @@ impl ObligationRelay for ControlIntentRelay {
         self.policy
     }
 
-    async fn deliver(&self, id: &ObligationId, key: &ObligationKey) -> Result<(), DeliveryFailure> {
+    async fn deliver(
+        &self,
+        id: &ObligationId,
+        key: &ObligationKey,
+        _attempt: u32,
+    ) -> Result<(), DeliveryFailure> {
         let ObligationKey::ControlIntent { intent_id } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "the control-intent relay cannot deliver a {} obligation",

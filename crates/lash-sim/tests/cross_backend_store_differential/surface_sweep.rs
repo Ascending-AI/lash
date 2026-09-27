@@ -170,7 +170,6 @@ pub(super) enum SurfaceMethod {
         stale: bool,
     },
     ListControlIntents,
-    ListReconcilableSessions,
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
     ForgetUnknownAttachment,
@@ -277,7 +276,6 @@ impl SurfaceMethod {
                 fork: true,
             } => "surface:open_root_intent_fork",
             Self::ListControlIntents => "surface:list_control_intents",
-            Self::ListReconcilableSessions => "surface:list_reconcilable_sessions",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
@@ -841,7 +839,6 @@ pub(super) fn root_control_case(fork: bool) -> GeneratedCase {
         surface(SurfaceMethod::OpenRootIntent { fork, stale: false }),
         surface(SurfaceMethod::LoadIntent { known: true }),
         surface(SurfaceMethod::ListControlIntents),
-        surface(SurfaceMethod::ListReconcilableSessions),
         surface(SurfaceMethod::ListPendingTurnInputs),
         surface(SurfaceMethod::RootBinding),
         surface(SurfaceMethod::ClaimIntentApplication { known: true }),
@@ -1719,13 +1716,6 @@ impl BackendRunner {
                 "intents={}",
                 self.factory()
                     .list_control_intents(None, std::num::NonZeroUsize::MIN)
-                    .await?
-                    .len()
-            ),
-            SurfaceMethod::ListReconcilableSessions => format!(
-                "sessions={}",
-                self.factory()
-                    .list_reconcilable_sessions(None, std::num::NonZeroUsize::MIN)
                     .await?
                     .len()
             ),

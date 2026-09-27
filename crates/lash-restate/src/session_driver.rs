@@ -38,15 +38,18 @@
 //! and both handlers read it from the deployment's
 //! [`RestateSessionDriverSlot`], so a host wires nothing.
 //!
-//! **Scheduling (O2).** [`SessionWorkEngine::schedule_drive`] is a one-way
-//! send to `LashSession/{session}/drive` whose idempotency key is the drive
-//! request's id. Every schedule names its own request (the committed row it
-//! follows, or one reconcile sweep's ask), never the session or a running
-//! drive, so a schedule issued while a drive runs is never deduplicated
-//! away: it queues behind the running drive on the object, and its first
-//! admission is the re-check that admits whatever that drive left pending. A
-//! schedule lost with its process is healed by the reconcile sweep at the
-//! next boot or `drain_status`, or by the session's next schedule.
+//! **Scheduling (O2).** [`SessionWorkEngine::request_drive`] is a send to
+//! `LashSession/{session}/drive` whose idempotency key is the drive
+//! request's id, answered once Restate accepted it; `schedule_drive` is its
+//! fire-and-forget twin. Every ask names its own request (the admitted row
+//! and attempt its ingress obligation asks for, `ingress:{item}:{attempt}`,
+//! or a continuation), never the session or a running drive, so an ask
+//! issued while a drive runs is never deduplicated away: it queues behind
+//! the running drive on the object, and its first admission is the re-check
+//! that admits whatever that drive left pending. An ask lost with its
+//! process, or a drive the engine lost before it admitted the row, is the
+//! ingress relay's to ask again from the row's obligation (ADR 0109 §3);
+//! nothing scans the session catalog for undriven rows.
 //!
 //! **Generations.** Both handlers' requests carry
 //! [`LASH_SESSION_DRIVE_VERSION`], the generation of the commands their
@@ -315,8 +318,8 @@ impl RestateSessionWork {
     /// request id: a repeated send of one request attaches to its first
     /// invocation instead of driving twice. A transient send failure retries
     /// under the same idempotency key before the ask is given up to the
-    /// reconcile sweep. Resolves once Restate accepted the send, not once
-    /// the drive ran.
+    /// ingress relay. Resolves once Restate accepted the send, not once the
+    /// drive ran.
     pub async fn send_drive(
         &self,
         session: &SessionId,
@@ -475,14 +478,14 @@ impl SessionWorkEngine for RestateSessionWork {
         Arc::clone(&self.control)
     }
     fn schedule_drive(&self, session: &SessionId, request: DriveRequestId) {
-        // The ask is fire-and-forget by contract: the row it follows is
-        // already durable, and a send that never reached Restate is healed by
-        // the reconcile sweep or the session's next schedule.
+        // Fire-and-forget: a drive the engine itself continues, never one an
+        // admitted row owes (that one is `request_drive`'s, and the ingress
+        // relay asks again for it).
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             tracing::warn!(
                 session_id = session.as_str(),
                 request = request.as_str(),
-                "session drive not sent: scheduled outside a Tokio runtime; the reconcile sweep drives it"
+                "session drive not sent: scheduled outside a Tokio runtime"
             );
             return;
         };
@@ -494,7 +497,7 @@ impl SessionWorkEngine for RestateSessionWork {
                     session_id = session.as_str(),
                     request = request.as_str(),
                     error = %error,
-                    "session drive send failed; the reconcile sweep drives the session"
+                    "session drive send failed"
                 );
             }
         });
@@ -575,10 +578,8 @@ impl SessionWorkEngine for RestateSessionWork {
     /// A session has live engine work while any lash invocation scoped to it
     /// is not at a terminal status: a `LashSession` handler keyed by the
     /// session itself, or a `LashTurn`/handler workflow whose key carries
-    /// the session through [`turn_workflow_key`]. Its resumption re-decides
-    /// the session's open ingress, so the reconcile sweep leaves it alone.
-    /// An admin read that fails answers `false`: a re-ask the live owner
-    /// then absorbs is the cheaper failure than a lost one.
+    /// the session through [`turn_workflow_key`]. The two-phase delete waits
+    /// on it (ADR 0109 §4). An admin read that fails answers `false`.
     async fn session_work_in_flight(&self, session: &SessionId) -> bool {
         #[derive(serde::Deserialize)]
         struct Target {

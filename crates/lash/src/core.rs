@@ -166,6 +166,16 @@ impl LashCore {
         )
     }
 
+    /// The ingress relay an acceptance through this core delivers with
+    /// (ADR 0109 §3): the backend's ingress ledger asking `work` for drives.
+    pub(crate) fn ingress_relay(&self, work: &HeldWork) -> lash_core::drive::IngressRelay {
+        lash_core::drive::IngressRelay::over_backend(
+            &self.backend,
+            work.engine(),
+            Arc::clone(&self.env.core.clock),
+        )
+    }
+
     /// A [`LashCoreBuilder`] over `backend`, the one substrate every
     /// persistence port and the effect host of this core come from (ADR 0102).
     ///

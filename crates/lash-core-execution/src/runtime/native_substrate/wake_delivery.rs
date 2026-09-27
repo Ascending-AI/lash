@@ -27,10 +27,6 @@ fn retry_delay_ms(attempts: u64, work_cadence: &WorkCadencePolicy) -> u64 {
     initial_ms.saturating_mul(1_u64 << exponent).min(max_ms)
 }
 
-fn wake_drive_request(batch: &crate::BatchId, attempt: u64) -> crate::engine::DriveRequestId {
-    crate::engine::DriveRequestId::new(format!("wake-delivery:{batch}:attempt:{attempt}"))
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WakeDeliveryDriveReport {
     pub inspected: usize,
@@ -348,13 +344,31 @@ impl WakeDeliveryDriver {
             {
                 Ok(enqueue_outcome) => {
                     let enqueued = enqueue_outcome.batch();
-                    // Dispatch is best-effort and strictly post-commit. Do it
-                    // before settling the outbox claim so Applied, ClaimLost,
-                    // and terminal-mark failures all re-arm the durable row.
-                    queued_work.schedule_drive(
-                        &target_session_id,
-                        wake_drive_request(&enqueued.batch_id, delivery.attempts),
-                    );
+                    // The batch's admission armed its ingress obligation
+                    // (ADR 0109 §3); ask for its drive now, strictly after the
+                    // commit, under the first attempt's request, which the
+                    // relay's own first ask shares: the engine dedupes the
+                    // two. The drive's claim of the batch settles the
+                    // obligation; an ask that does not reach the engine is
+                    // the relay's to retry.
+                    if let Err(refusal) = queued_work
+                        .request_drive(
+                            &target_session_id,
+                            crate::engine::ingress_drive_request(
+                                enqueued.batch_id.as_str(),
+                                crate::engine::FIRST_INGRESS_ATTEMPT,
+                            ),
+                        )
+                        .await
+                    {
+                        tracing::debug!(
+                            delivery_id = %delivery.delivery_id,
+                            target_session_id = %target_session_id,
+                            batch_id = %enqueued.batch_id,
+                            %refusal,
+                            "process wake's drive ask was not accepted; the ingress relay retries it"
+                        );
+                    }
                     if enqueue_outcome.process_wake_was_absorbed() {
                         tracing::info!(
                             delivery_id = %delivery.delivery_id,
@@ -625,17 +639,7 @@ impl WakeDeliveryDriver {
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkCadencePolicy, retry_delay_ms, wake_drive_request};
-
-    #[test]
-    fn a_wake_redelivery_uses_a_new_drive_request() {
-        let batch = crate::BatchId::new("the-same-durable-batch");
-        let first = wake_drive_request(&batch, 1);
-        let repeated = wake_drive_request(&batch, 1);
-        let redelivered = wake_drive_request(&batch, 2);
-        assert_eq!(first, repeated, "one claim attempt is idempotent");
-        assert_ne!(first, redelivered, "a later claim must pass Restate dedupe");
-    }
+    use super::{WorkCadencePolicy, retry_delay_ms};
 
     #[test]
     fn retry_delay_is_bounded_for_every_attempt_count() {

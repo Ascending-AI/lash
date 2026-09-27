@@ -256,6 +256,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
             "queued_work_claim_fencing_token",
             write.next_claim_fencing_token,
         )?)
+        .bind(i64::try_from(now).unwrap_or(i64::MAX))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -1013,6 +1014,7 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
             write.next_claim_fencing_token,
         )?)
         .bind(redrive_of.map(lash_core_execution::TurnId::as_str))
+        .bind(i64::try_from(now).unwrap_or(i64::MAX))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?

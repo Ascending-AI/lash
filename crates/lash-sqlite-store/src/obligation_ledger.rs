@@ -3,7 +3,8 @@
 //!
 //! Ingress, intents, roots and the session catalog live in the durable core;
 //! parent-end plans and processes in the process registry file. Each ledger
-//! holds a connection to its own database. SQLite has one writer, so a due
+//! holds a connection to its own database. Ingress spans two tables, one
+//! ledger each, composed by [`crate::ingress_obligation`]. SQLite has one writer, so a due
 //! claim is one `BEGIN IMMEDIATE` transaction that reads the due page and
 //! claims each row with its compare-and-set; the recovery leader runs it
 //! (ADR 0109 §1.7).
@@ -20,7 +21,6 @@ use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
 use lash_store_sql::process::processes::ProcessObligationStatements;
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_ingress::SessionIngressObligationStatements;
 use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
 use rusqlite::types::Value;
@@ -30,8 +30,6 @@ use crate::conn::SqliteConnection;
 use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_error, stored_data_corrupt};
 
-static INGRESS: LazyLock<SessionIngressObligationStatements> =
-    LazyLock::new(|| SessionIngressObligationStatements::render(Schema::Main.dialect()));
 static INTENTS: LazyLock<ControlIntentObligationStatements> =
     LazyLock::new(|| ControlIntentObligationStatements::render(Schema::Main.dialect()));
 static ROOTS: LazyLock<SessionRootObligationStatements> =
@@ -43,10 +41,12 @@ static PLANS: LazyLock<ParentEndPlanObligationStatements> =
 static PROCESSES: LazyLock<ProcessObligationStatements> =
     LazyLock::new(|| ProcessObligationStatements::render(Schema::Main.dialect()));
 
-/// `kind`'s statements, rendered for the connection's own database.
+/// `kind`'s statements, rendered for the connection's own database. Ingress
+/// names its turn-input table here; its ledger composes that table with the
+/// queued-batch table (`crate::ingress_obligation`).
 pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
     match kind {
-        ObligationKind::Ingress => INGRESS.obligation_sql(),
+        ObligationKind::Ingress => crate::ingress_obligation::turn_input_sql(),
         ObligationKind::ControlIntent => INTENTS.obligation_sql(),
         ObligationKind::ScopeClose => ROOTS.obligation_sql(),
         ObligationKind::SessionDelete => META.obligation_sql(),
@@ -132,6 +132,7 @@ fn claimed(
 #[derive(Clone)]
 pub(crate) struct SqliteObligationLedger {
     kind: ObligationKind,
+    sql: ObligationSql<'static>,
     conn: SqliteConnection,
 }
 
@@ -139,24 +140,37 @@ impl SqliteObligationLedger {
     /// `kind`'s ledger on `conn`, which must be open on the database that
     /// holds `kind`'s table.
     pub(crate) fn new(kind: ObligationKind, conn: SqliteConnection) -> Self {
-        Self { kind, conn }
+        Self::over_table(kind, obligation_sql(kind), conn)
+    }
+
+    /// The ledger of one table of `kind`, through that table's statements.
+    pub(crate) fn over_table(
+        kind: ObligationKind,
+        sql: ObligationSql<'static>,
+        conn: SqliteConnection,
+    ) -> Self {
+        Self { kind, sql, conn }
     }
 
     fn sql(&self) -> ObligationSql<'static> {
-        obligation_sql(self.kind)
+        self.sql
     }
 }
 
 /// Arm `key`'s row as a fresh obligation due at `now_ms` inside a producer's
 /// own transaction: the helper a slice's producer calls on its transaction.
-/// `None` when the row is missing or already carries an obligation.
+/// An ingress row's id is derived from its item (`crate::ingress_obligation`);
+/// every other kind's is minted. `None` when the row is missing or already
+/// carries an obligation.
 pub(crate) fn arm_obligation_tx(
     conn: &rusqlite::Connection,
     key: &ObligationKey,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
-    let id = ObligationId::mint(key.kind());
-    arm_obligation_id_tx(conn, key, &id, now_ms).map(|armed| armed.map(|_| id))
+    if key.kind() == ObligationKind::Ingress {
+        return crate::ingress_obligation::arm_ingress_tx(conn, key, now_ms);
+    }
+    arm_obligation_id_tx(conn, key, &ObligationId::mint(key.kind()), now_ms)
 }
 
 /// [`arm_obligation_tx`] with the id the row's own transaction derived (ADR
@@ -169,14 +183,26 @@ pub(crate) fn arm_obligation_id_tx(
     id: &ObligationId,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
-    let kind = key.kind();
+    arm_table_tx(conn, obligation_sql(key.kind()), key, id.clone(), now_ms)
+}
+
+/// Arm `key`'s row in the table `sql` addresses as obligation `id`, due at
+/// `now_ms`, inside the caller's transaction. `None` when the row is missing
+/// or already carries an obligation.
+pub(crate) fn arm_table_tx(
+    conn: &rusqlite::Connection,
+    sql: ObligationSql<'static>,
+    key: &ObligationKey,
+    id: ObligationId,
+    now_ms: u64,
+) -> Result<Option<ObligationId>, StoreError> {
     let mut values = key_values(key);
     values.push(Value::Text(id.as_str().to_owned()));
     values.push(Value::Integer(sql_i64("obligation due instant", now_ms)?));
     let changed = conn
-        .execute(obligation_sql(kind).arm.sql(), params_from_iter(values))
+        .execute(sql.arm.sql(), params_from_iter(values))
         .map_err(sqlite_error)?;
-    Ok((changed == 1).then(|| id.clone()))
+    Ok((changed == 1).then_some(id))
 }
 
 #[async_trait::async_trait]

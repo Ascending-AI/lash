@@ -237,6 +237,10 @@ impl SessionWorkEngine for ResolvedQueuedWork {
         self.port.request_drive(session, request).await
     }
 
+    async fn session_work_in_flight(&self, session: &lash_core::SessionId) -> bool {
+        self.port.session_work_in_flight(session).await
+    }
+
     fn install_session_driver(
         &self,
         driver: Arc<dyn lash_core::SessionDriver>,
@@ -254,10 +258,6 @@ impl SessionWorkEngine for ResolvedQueuedWork {
         request: &lash_core::engine::DriveRequestId,
     ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
         self.port.await_drive(session, request).await
-    }
-
-    async fn session_work_in_flight(&self, session: &lash_core::SessionId) -> bool {
-        self.port.session_work_in_flight(session).await
     }
 }
 

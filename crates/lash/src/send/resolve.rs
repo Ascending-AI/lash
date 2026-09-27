@@ -11,7 +11,7 @@ use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWork
 use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::{InputId, TurnId};
 
-use super::{ParkedTurn, SendParts};
+use super::{ParkedTurn, SendParts, StalledDelivery};
 use crate::error::Result;
 
 /// How long one read waits for a committed turn's terminal publication.
@@ -28,6 +28,9 @@ pub(super) enum Resolution {
     Settled { root: TurnId, outcome: TurnOutcome },
     /// The root is parked (ADR 0104 O3): durable, and not terminal.
     Parked(ParkedTurn),
+    /// The input is open and its delivery to the engine stalled (ADR 0109
+    /// §3): no drive will take it until its obligation is re-armed.
+    Stalled(StalledDelivery),
 }
 
 fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
@@ -93,11 +96,31 @@ pub(super) async fn resolve_input(
     {
         return resolve_from_turn(parts, &application.turn_id).await;
     }
-    Ok(if open {
-        Resolution::Undecided { root: None }
-    } else {
-        Resolution::Withdrawn
+    if !open {
+        return Ok(Resolution::Withdrawn);
+    }
+    Ok(match stalled_delivery(parts, &receipt.input_id).await? {
+        Some(stalled) => Resolution::Stalled(stalled),
+        None => Resolution::Undecided { root: None },
     })
+}
+
+/// The open input's delivery, when its ingress obligation stalled. A store
+/// that keeps no obligations has none stalled.
+async fn stalled_delivery(parts: &SendParts, input: &InputId) -> Result<Option<StalledDelivery>> {
+    let stalled = match parts.ops.stalled_ingress(input.as_str()).await {
+        Ok(stalled) => stalled,
+        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => None,
+        Err(error) => return Err(store_error(error)),
+    };
+    Ok(stalled.map(|stalled| StalledDelivery {
+        session_id: parts.session_id.clone(),
+        input_id: input.clone(),
+        reason: stalled.reason,
+        attempts: stalled.attempts,
+        last_error: stalled.last_error,
+        stalled_at_ms: stalled.stalled_at_ms,
+    }))
 }
 
 /// Resolve a logical root.

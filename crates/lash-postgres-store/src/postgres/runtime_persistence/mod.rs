@@ -269,6 +269,9 @@ async fn enqueue_queued_work_with_outcome_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
+    // The admitted batch owes its session a drive (ADR 0109 §3), armed in
+    // the transaction that admits it.
+    crate::ingress_obligation::arm_queued_batch_tx(tx, &batch.session_id, &batch_id, now).await?;
     let queued = load_queued_batch(tx, &batch_id)
         .await?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
