@@ -59,6 +59,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-rolling-history-compaction/v2",
     "lash-standard-compaction/v1",
     "lash-rlm-execution-state-leaf/v2",
+    "lash-rlm-model-view/v1",
     "lash-rlm-stall-reply/v2",
     "lash-runtime-effect-envelope/v2",
     "lash-runtime-effect-envelope/v3",

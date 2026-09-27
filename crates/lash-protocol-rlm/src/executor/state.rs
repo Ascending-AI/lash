@@ -27,6 +27,7 @@ pub(super) struct RlmSnapshotRoot {
     globals: BTreeMap<String, PersistedValue>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
+    #[serde(default, skip_serializing_if = "ModelViews::is_empty")]
     model_views: ModelViews,
 }
 

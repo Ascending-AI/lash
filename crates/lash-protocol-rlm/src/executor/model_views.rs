@@ -11,6 +11,10 @@ use crate::projection::flow_to_json_value;
 pub(super) struct ModelViews(BTreeMap<String, String>);
 
 impl ModelViews {
+    pub(super) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     #[cfg(test)]
     pub(super) fn record(&mut self, output: &ToolCallOutput) {
         let Some((key, view)) = output_entry(output) else {

@@ -414,7 +414,7 @@ async fn structured_operations_are_the_same_with_and_without_a_view() {
         print({...r});
         print(JSON.stringify(r));
         print(entries);
-        print(map);
+        console.log(map);
         finish({json: JSON.stringify(r), entries, spread: {...r}, mapped: map.get('result')});
     "#;
     let mut replies = Vec::new();

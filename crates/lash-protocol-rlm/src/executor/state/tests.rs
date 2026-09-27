@@ -174,7 +174,13 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         ]),
         deferred_resolutions: deferred_resolutions.clone(),
         deferred_trigger_resolutions: deferred_trigger_resolutions.clone(),
-        model_views: ModelViews::default(),
+        model_views: {
+            let mut views = ModelViews::default();
+            views.record(
+                &lash_core::ToolCallOutput::success(json!({"id": 1})).with_model_view("one"),
+            );
+            views
+        },
     };
 
     assert_field_schema(
@@ -941,7 +947,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 #[test]
 fn version_27_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "87a776657273696f6e1ba6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "86a776657273696f6e1ba6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
         "0ea7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
         "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
         "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
@@ -955,7 +961,7 @@ fn version_27_root_encodes_to_golden_bytes() {
         "a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e",
         "6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e",
         "5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61",
-        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380ab6d6f64656c5f766965777380",
+        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380",
     );
 
     let mut resolutions = BTreeMap::new();

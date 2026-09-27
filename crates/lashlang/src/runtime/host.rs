@@ -464,6 +464,12 @@ pub trait ExecutionHost: Sync {
         op: AbilityOp,
     ) -> impl Future<Output = Result<AbilityResult, ExecutionHostError>> + Send;
 
+    /// Whether a single-argument console print should carry its original
+    /// value to the host alongside the usual rendered text.
+    fn capture_console_observation_value(&self) -> bool {
+        false
+    }
+
     /// The run's cancel checkpoint: the VM awaits it each time its
     /// executed-instruction count crosses a multiple of
     /// [`CANCEL_CHECKPOINT_INSTRUCTIONS`](crate::CANCEL_CHECKPOINT_INSTRUCTIONS),
@@ -616,6 +622,10 @@ impl<'host, H: ExecutionHost> ExecutionEnvironment<'host, H> {
 impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         self.host.perform(op).await
+    }
+
+    fn capture_console_observation_value(&self) -> bool {
+        self.host.capture_console_observation_value()
     }
 
     async fn cancel_checkpoint(&self, checkpoint: u64) {

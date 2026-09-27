@@ -325,10 +325,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 javascript_substrate::javascript_console_observation_text(&self.heap, arguments)?;
             // Rendering writes each output byte once.
             self.charge_intrinsic_work(text.len());
-            if let [value] = arguments {
+            if let [value] = arguments
+                && self.host.capture_console_observation_value()
+                && let Ok(original) = self.heap.export_for_instruction(value)
+            {
                 // This intrinsic feeds Print directly. Keep its original value
                 // alongside the usual console text for the host's view lookup.
-                let original = self.heap.export_for_instruction(value)?;
                 self.stack.push(Value::Tuple(
                     vec![
                         Value::String("__lash_console_observation_v1".into()),

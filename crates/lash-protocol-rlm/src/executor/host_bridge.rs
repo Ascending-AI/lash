@@ -1072,6 +1072,10 @@ async fn operation_payload(args: &[FlowValue]) -> Result<Value, ExecutionHostErr
 }
 
 impl ExecutionHost for HostBridge<'_> {
+    fn capture_console_observation_value(&self) -> bool {
+        true
+    }
+
     fn perform(
         &self,
         op: AbilityOp,
