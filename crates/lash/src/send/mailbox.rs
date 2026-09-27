@@ -11,6 +11,11 @@
 //! the same stores is the one its engine runs. The mailbox is bounded:
 //! the oldest entry goes first, and a handle whose entry is gone (or whose
 //! root ran in another process) rebuilds a thinner report from the store.
+//!
+//! A deposit wakes every waiting handle ([`deposited`]), so a handle whose
+//! root settled answers the moment its report lands rather than on its next
+//! poll: the root's commit is durable before its run returns the report, and
+//! a handle that saw the commit first waits for this wake (FIG-3843).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -29,6 +34,15 @@ type Entry = ((StoreBindingId, SessionId, InputId), SettledRoot);
 
 static SETTLED_ROOTS: LazyLock<Mutex<VecDeque<Entry>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
+
+/// Woken once per deposit, after its entries are in.
+static DEPOSITED: LazyLock<tokio::sync::Notify> = LazyLock::new(tokio::sync::Notify::new);
+
+/// The next deposit's wake. Enable it before looking in the mailbox, so a
+/// deposit between the look and the wait is not missed.
+pub(super) fn deposited() -> tokio::sync::futures::Notified<'static> {
+    DEPOSITED.notified()
+}
 
 /// Deposit `report`'s final turn for every input its claim drove, in the
 /// stores `binding` names.
@@ -49,16 +63,34 @@ pub(crate) fn deposit_settled_root(
         return;
     };
     let turn = Arc::new(turn);
-    let mut entries = SETTLED_ROOTS.lock_recover();
-    for input in driven_inputs {
-        if entries.len() >= CAPACITY {
-            entries.pop_front();
+    {
+        let mut entries = SETTLED_ROOTS.lock_recover();
+        for input in driven_inputs {
+            if entries.len() >= CAPACITY {
+                entries.pop_front();
+            }
+            entries.push_back((
+                (binding.clone(), session.clone(), input),
+                (root.clone(), Arc::clone(&turn)),
+            ));
         }
-        entries.push_back((
-            (binding.clone(), session.clone(), input),
-            (root.clone(), Arc::clone(&turn)),
-        ));
     }
+    DEPOSITED.notify_waiters();
+}
+
+/// Whether this process holds `input`'s entry in the stores `binding`
+/// names, without taking it.
+pub(super) fn holds_settled_root(
+    binding: &StoreBindingId,
+    session: &SessionId,
+    input: &InputId,
+) -> bool {
+    SETTLED_ROOTS
+        .lock_recover()
+        .iter()
+        .any(|((entry_binding, entry_session, entry_input), _)| {
+            entry_binding == binding && entry_session == session && entry_input == input
+        })
 }
 
 /// Take `input`'s entry in the stores `binding` names, if this process

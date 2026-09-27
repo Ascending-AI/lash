@@ -3,7 +3,8 @@
 //! A follower subscribes to the session's live replay from its cursor, adopts
 //! the activity of the root that applies its subject, and resolves the
 //! subject from the store on every wake: the engine's drive barrier, a
-//! commit or queue change on the observation, and a bounded poll. It never
+//! commit or queue change on the observation, a settled root's report landing
+//! in this process's mailbox, and a bounded poll. It never
 //! answers from events: a follower whose replay window is gone still answers
 //! from the store.
 
@@ -392,6 +393,11 @@ pub(super) async fn follow(
     let mut resolve_now = true;
     let mut last_pass = false;
     loop {
+        // Armed before this pass looks in the mailbox: a report deposited
+        // after the look still wakes the wait below.
+        let deposited = mailbox::deposited();
+        tokio::pin!(deposited);
+        deposited.as_mut().enable();
         if resolve_now {
             // A root this process ran to its commit deposited its final turn
             // for every input it drove: the report as it ran, and the
@@ -605,6 +611,18 @@ pub(super) async fn follow(
                         refused = Some(error);
                     }
                 }
+            }
+            () = &mut deposited => {
+                // A root this process ran deposited its report: resolve
+                // again only when it may be this follower's.
+                resolve_now = match subject {
+                    Subject::Input(receipt) => mailbox::holds_settled_root(
+                        ctx.parts.work.store_binding(),
+                        &ctx.parts.session_id,
+                        &receipt.input_id,
+                    ),
+                    Subject::Root(_) => settled_at.is_some(),
+                };
             }
             () = &mut sleep => {
                 poll = (poll * 2).min(POLL_CEILING);
