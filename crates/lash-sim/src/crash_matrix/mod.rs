@@ -436,10 +436,11 @@ pub const MATRIX: &[CaseSpec] = &[
         "a session close whose engine half fails retryably forever stalls typed at the attempt ceiling instead of retrying every tick",
     ),
     // --- Scope close (S-8) -------------------------------------------------
-    // A host that dies inside the close's immediate delivery leaves the
-    // root's scope-close obligation claimed (ADR 0109 §3): the replayed close
-    // step cannot take a live claim, so the relay retakes it once the claim
-    // lapses, and those two cells answer to §1.8's lapsed-claim bound.
+    // The after-commit cut normally leaves a due row, but the live SDK can
+    // start the local close attempt while its BeforeRun frame is being cut.
+    // If that attempt claims before the host dies, the cell reads its row and
+    // uses §1.8's lapsed-claim bound; a due row keeps the shorter bound. The
+    // later cuts always leave a claimed root row.
     today(
         Seam::ScopeClose,
         CrashPoint::AfterStateCommit,

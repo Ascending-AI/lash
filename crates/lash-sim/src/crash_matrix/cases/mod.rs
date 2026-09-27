@@ -230,6 +230,10 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
             return;
         }
     };
+    Box::pin(recover_staged(spec, seed, report, staged)).await;
+}
+
+async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, staged: Staged) {
     let Staged {
         world,
         notes,
@@ -259,7 +263,29 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
         world.finish().await;
         return;
     };
-    let bound = spec.bound.limit();
+    let detection_bound =
+        if spec.seam == Seam::ScopeClose && spec.point == super::CrashPoint::AfterStateCommit {
+            match scope::after_state_commit_obligation(&world, seed).await {
+                Ok(state) => {
+                    report
+                        .notes
+                        .push(format!("scope_close_at_restart={state:?}"));
+                    if state == lash_core::store::ObligationState::Claimed {
+                        super::DetectionBound::LapsedClaim
+                    } else {
+                        spec.bound
+                    }
+                }
+                Err(error) => {
+                    report.violations.push(error);
+                    world.finish().await;
+                    return;
+                }
+            }
+        } else {
+            spec.bound
+        };
+    let bound = detection_bound.limit();
     if spec.bound == super::DetectionBound::AttemptCeiling {
         // Hundreds of ticks, each awaiting its own relay pass: the wait for
         // the engine to settle only lets host work the pass handed off land,
@@ -283,7 +309,7 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
             if after > bound {
                 report.violations.push(format!(
                     "recovered after {after:?} of sim time, past the §1.8 bound ({}) of {bound:?}",
-                    spec.bound.label()
+                    detection_bound.label()
                 ));
             }
             break;
@@ -355,4 +381,49 @@ pub async fn double_drive_control(seed: u64) -> Result<Vec<String>, String> {
     let violations = invariants::check(&world, &expected).await;
     world.finish().await;
     Ok(violations)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_claimed_after_commit_scope_close_uses_its_lapse_bound() {
+        let seed = 0x2d5f_311b_c328_b88c;
+        let spec = super::super::case(Seam::ScopeClose, super::super::CrashPoint::AfterStateCommit)
+            .expect("registered scope-close cell");
+        let staged = scope::stage_scope_close_claimed(seed)
+            .await
+            .expect("stage a claimed scope close");
+        let mut report = CaseReport {
+            seed,
+            test_name: spec.test_name(),
+            crashed: false,
+            detected_after: None,
+            violations: Vec::new(),
+            notes: Vec::new(),
+            ticks: 0,
+        };
+        Box::pin(tokio::time::timeout(
+            CASE_WALL_LIMIT,
+            recover_staged(spec, seed, &mut report, staged),
+        ))
+        .await
+        .expect("the claimed scope close finished within the wall limit");
+        assert!(report.crashed, "{report:#?}");
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note == "scope_close_at_restart=Claimed"),
+            "{report:#?}"
+        );
+        assert!(
+            report
+                .detected_after
+                .is_some_and(|after| after > spec.bound.limit()),
+            "the abandoned claim must outlive the due-row bound: {report:#?}"
+        );
+        assert!(report.passed(), "{report:#?}");
+    }
 }

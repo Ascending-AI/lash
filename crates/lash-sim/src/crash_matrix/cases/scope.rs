@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use lash_core::engine::ScopeCloseSink as _;
+use lash_core::store::{ObligationKind, ObligationState, scope_close_obligation_id};
 use lash_core::{ProcessId, ScopeId, SessionId, TurnId};
 use lash_restate_test::{CrashPoint as EngineCut, CrashRule, TURN_DRIVER_SERVICE};
 
@@ -80,6 +81,19 @@ async fn lose_root_invocation(world: &CrashWorld, root: &str) -> Result<(), Stri
 }
 
 pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<Staged, String> {
+    stage_scope_close_with_claim(point, seed, false).await
+}
+
+#[cfg(test)]
+pub(super) async fn stage_scope_close_claimed(seed: u64) -> Result<Staged, String> {
+    stage_scope_close_with_claim(CrashPoint::AfterStateCommit, seed, true).await
+}
+
+async fn stage_scope_close_with_claim(
+    point: CrashPoint,
+    seed: u64,
+    claim_before_restart: bool,
+) -> Result<Staged, String> {
     let world = CrashWorld::new(seed, standard_core(), false).await?;
     world.restart().await?;
     let session = session_name(Seam::ScopeClose, seed);
@@ -118,7 +132,44 @@ pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<St
                     .within_attempts(1),
             );
             send(&world, &session, root).await?;
-            crash_and_restart(&world).await?
+            if claim_before_restart {
+                let tripped = world.trip().wait(super::TRIP_WAIT).await;
+                if let Some(tripped) = tripped {
+                    world.kill().await;
+                    let id = scope_close_obligation_id(&session, &TurnId::from(root));
+                    let ledger = world
+                        .backend()
+                        .obligation_ledger(ObligationKind::ScopeClose);
+                    let state = ledger
+                        .state(&id)
+                        .await
+                        .map_err(|error| format!("read scope-close obligation `{id}`: {error}"))?;
+                    match state {
+                        Some(ObligationState::Claimed) => {}
+                        Some(ObligationState::Due) => {
+                            let claimed = ledger.claim(&id, world.now_ms(), 60_000).await.map_err(
+                                |error| format!("claim scope-close obligation `{id}`: {error}"),
+                            )?;
+                            if claimed.is_none() {
+                                return Err(format!(
+                                    "scope-close obligation `{id}` lost its due claim"
+                                ));
+                            }
+                        }
+                        other => {
+                            return Err(format!(
+                                "scope-close obligation `{id}` was {other:?} after the crash"
+                            ));
+                        }
+                    }
+                    world.restart().await?;
+                    Some(tripped.at_ms)
+                } else {
+                    None
+                }
+            } else {
+                crash_and_restart(&world).await?
+            }
         }
         CrashPoint::DuringEngineDelivery => {
             world.faults().crash_once(HostSite::DeliverCancelBefore);
@@ -168,6 +219,25 @@ pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<St
         expected,
         origin_ms,
     })
+}
+
+/// The row the after-commit crash left to recovery. On a live engine the
+/// `BeforeRun` frame can race the SDK's local close attempt: it may claim the
+/// row before the deployment dies even though the frame never reached the
+/// journal. The cell must judge the actual row under the matching §1.8 bound.
+pub(super) async fn after_state_commit_obligation(
+    world: &CrashWorld,
+    seed: u64,
+) -> Result<ObligationState, String> {
+    let session = session_name(Seam::ScopeClose, seed);
+    let id = scope_close_obligation_id(&session, &TurnId::from("in-0"));
+    world
+        .backend()
+        .obligation_ledger(ObligationKind::ScopeClose)
+        .state(&id)
+        .await
+        .map_err(|error| format!("read scope-close obligation `{id}` after the crash: {error}"))?
+        .ok_or_else(|| format!("the terminal did not arm scope-close obligation `{id}`"))
 }
 
 /// The scope-close sink a producer closes a host-owned scope through: the
