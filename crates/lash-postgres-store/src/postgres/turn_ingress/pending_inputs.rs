@@ -101,7 +101,6 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
-               AND claim_bound_turn_id IS NULL
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
@@ -127,7 +126,6 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
-               AND claim_bound_turn_id IS NULL
                AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                AND ingress_json::jsonb ->> 'turn_id' = ?4
                AND COALESCE(ingress_json::jsonb ->> 'min_boundary', 'after_work')
@@ -149,7 +147,6 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
-               AND claim_bound_turn_id IS NULL
                AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                AND ingress_json::jsonb ->> 'turn_id' = ?4
                AND COALESCE(ingress_json::jsonb ->> 'min_boundary', 'after_work')
@@ -158,41 +155,15 @@ lash_store_sql::statements! {
              LIMIT ?3
              FOR UPDATE SKIP LOCKED";
 
-        /// Session `?1`'s open rows bound to the aborted turn `?2`, which
-        /// that turn's redrive re-takes (FIG-3589). Locked for the caller's
-        /// transaction.
-        select_turn_bound = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, claim_id,
-                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, run_spec_hash
-             FROM pending_turn_inputs
-             WHERE session_id = ?1
-               AND claim_bound_turn_id = ?2
-               AND {{deferred_next_turn_turn_input_state(state)}}
-             ORDER BY enqueue_seq ASC
-             FOR UPDATE";
-
-        /// Lock, in queue order, cancel targets `?2` of session `?1` together
-        /// with every row of a bound claim one of them carries (FIG-3589).
+        /// Lock, in queue order, cancel targets `?2` of session `?1`.
         ///
-        /// A cancel of a bound receipt row rewrites the claim's other rows, and
-        /// every other writer of those rows (the redrive's commit, a
-        /// journal-less redrive's re-take) locks them in queue order. Taking the
-        /// whole set in that order first is what keeps a concurrent cancel and
-        /// redrive from deadlocking.
+        /// A cancel may write several rows, and every other multi-row writer
+        /// of them locks in queue order. Taking the whole set in that order
+        /// first is what keeps concurrent writers from deadlocking.
         lock_cancel_targets_in_queue_order = "SELECT enqueue_seq
              FROM pending_turn_inputs
              WHERE session_id = ?1
-               AND (
-                    input_id = ANY(?2::TEXT[])
-                    OR (claim_id, claim_token) IN (
-                        SELECT claim_id, claim_token
-                        FROM pending_turn_inputs
-                        WHERE session_id = ?1
-                          AND input_id = ANY(?2::TEXT[])
-                          AND claim_bound_turn_id IS NOT NULL
-                    )
-               )
+               AND input_id = ANY(?2::TEXT[])
              ORDER BY enqueue_seq ASC
              FOR UPDATE";
 
@@ -201,16 +172,7 @@ lash_store_sql::statements! {
         lock_cancel_suffix_in_queue_order = "SELECT enqueue_seq
              FROM pending_turn_inputs
              WHERE session_id = ?1
-               AND (
-                    enqueue_seq >= ?2
-                    OR (claim_id, claim_token) IN (
-                        SELECT claim_id, claim_token
-                        FROM pending_turn_inputs
-                        WHERE session_id = ?1
-                          AND enqueue_seq >= ?2
-                          AND claim_bound_turn_id IS NOT NULL
-                    )
-               )
+               AND enqueue_seq >= ?2
              ORDER BY enqueue_seq ASC
              FOR UPDATE";
 
@@ -234,8 +196,6 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
@@ -269,8 +229,6 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'

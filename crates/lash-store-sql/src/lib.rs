@@ -178,7 +178,6 @@ pub const TABLES: &[&str] = &[
     session_roots::control_intents::TABLE,
     session_roots::root_inputs::TABLE,
     session_roots::roots::TABLE,
-    session_ingress::TABLE,
     session_ingress::sequence::TABLE,
 ];
 

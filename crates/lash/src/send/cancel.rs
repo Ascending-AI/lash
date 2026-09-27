@@ -68,8 +68,7 @@ async fn cancel_input(
         // the root's end: a root that switched frames runs on in its
         // follow-on turns, so its root answers whether it settled.
         PendingTurnInputCancelOutcome::AlreadyCompleted(_)
-        | PendingTurnInputCancelOutcome::AlreadyClaimed { .. }
-        | PendingTurnInputCancelOutcome::TurnBound { .. } => {
+        | PendingTurnInputCancelOutcome::AlreadyClaimed { .. } => {
             let root = root_of_input(parts, input).await?;
             cancel_root(parts, &root, request_id, request).await
         }

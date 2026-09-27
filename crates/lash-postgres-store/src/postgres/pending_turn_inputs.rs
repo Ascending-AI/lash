@@ -127,22 +127,12 @@ pub(crate) fn pending_turn_input_read_from_row(
         .get::<Option<i64>, _>("live_lease_expires_at_ms")
         .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
         .transpose()?;
-    let binding = row
-        .get::<Option<String>, _>("claim_bound_turn_id")
-        .zip(row.get::<Option<String>, _>("claim_bound_receipt_input_id"));
     let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-    Ok(match (binding, lease_expires_at_ms) {
-        (Some((turn_id, receipt_input_id)), _) => {
-            lash_core_execution::PendingTurnInputRead::turn_bound(
-                input,
-                turn_id.into(),
-                receipt_input_id.into(),
-            )
-        }
-        (None, Some(lease_expires_at_ms)) => {
+    Ok(match lease_expires_at_ms {
+        Some(lease_expires_at_ms) => {
             lash_core_execution::PendingTurnInputRead::held(input, lease_expires_at_ms)
         }
-        (None, None) => lash_core_execution::PendingTurnInputRead::pending(input),
+        None => lash_core_execution::PendingTurnInputRead::pending(input),
     })
 }
 
@@ -224,7 +214,7 @@ fn pending_turn_input_claim_diagnostics_from_row(
         })
 }
 
-/// Which rows a cancel locks in queue order before it writes any (FIG-3589).
+/// Which rows a cancel locks in queue order before it writes any.
 pub(crate) enum CancelLockScope<'a> {
     /// The resolved explicit targets.
     Targets(&'a std::collections::BTreeSet<lash_core_execution::InputId>),
@@ -232,10 +222,9 @@ pub(crate) enum CancelLockScope<'a> {
     Suffix(u64),
 }
 
-/// Lock every row a cancel may write, targets plus the other rows of any bound
-/// claim among them, in queue order: the order the redrive's commit and a
-/// journal-less redrive's re-take lock the same rows in, so a concurrent cancel
-/// and redrive cannot deadlock (FIG-3589).
+/// Lock every row a cancel may write in queue order, the order every other
+/// multi-row writer locks the same rows in, so concurrent writers cannot
+/// deadlock.
 pub(crate) async fn lock_cancel_rows_in_queue_order(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
@@ -262,36 +251,11 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
     Ok(())
 }
 
-/// The binding input `input_id` of `session_id` carries, if any (FIG-3589).
-async fn turn_input_binding_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-    input_id: &str,
-) -> Result<Option<(lash_core_execution::TurnId, lash_core_execution::InputId)>, StoreError> {
-    let (turn_id, receipt): (Option<String>, Option<String>) = sqlx::query_as(
-        crate::turn_ingress::turn_ingress_sql()
-            .pending_inputs
-            .binding_facts
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .bind(input_id)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    Ok(turn_id
-        .zip(receipt)
-        .map(|(turn_id, receipt)| (turn_id.into(), receipt.into())))
-}
-
-/// Cancel one locked row. `covered` is every input the same cancel operation
-/// targets, which decides whether a row bound to an aborted turn may go
-/// (FIG-3589).
+/// Cancel one locked row.
 pub(crate) async fn cancel_pending_turn_input_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: PendingTurnInputRow,
     now_epoch_ms: u64,
-    covered: &std::collections::BTreeSet<lash_core_execution::InputId>,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
     let mut input = pending_turn_input_from_row(row.clone())?;
     match input.state.kind() {
@@ -304,29 +268,6 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
         lash_core_execution::runtime::TurnInputStateKind::PendingActive
         | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
         | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
-            let binding = if row.claim_token.is_some() {
-                turn_input_binding_tx(tx, &row.session_id, &row.input_id).await?
-            } else {
-                None
-            };
-            let bound = lash_core_execution::store_backend_support::bound_turn_input_cancel(
-                &input.input_id,
-                binding,
-                covered,
-            );
-            if let lash_core_execution::store_backend_support::BoundTurnInputCancel::Refused {
-                turn_id,
-                receipt_input_id,
-            } = bound
-            {
-                return Ok(
-                    lash_core_execution::PendingTurnInputCancelOutcome::TurnBound {
-                        input,
-                        turn_id,
-                        receipt_input_id,
-                    },
-                );
-            }
             // A claim is live only while the session-execution-lease generation it
             // pins still holds the session lease (ADR 0029).
             let live_claim = row.claim_token.is_some()
@@ -377,26 +318,6 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-            // Cancelling the receipt's input leaves the aborted turn's redrive
-            // nothing to settle, so the rest of its drive goes back to the
-            // queue rather than stay bound (FIG-3589). The rows were locked in
-            // queue order before this write.
-            if bound == lash_core_execution::store_backend_support::BoundTurnInputCancel::Receipt
-                && let (Some(claim_id), Some(claim_token)) = (&row.claim_id, &row.claim_token)
-            {
-                sqlx::query(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .pending_inputs
-                        .release_bound_claim
-                        .sql(),
-                )
-                .bind(row.session_id.as_str())
-                .bind(claim_id)
-                .bind(claim_token)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            }
             input.state = lash_core_execution::TurnInputState::Cancelled(input.state.ingress());
             Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
         }

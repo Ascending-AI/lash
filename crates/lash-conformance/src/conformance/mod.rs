@@ -46,7 +46,6 @@ mod cell_orchestration_redrive;
 pub mod cold_process_turn_parent;
 mod command_drain_fence;
 mod completion_routing;
-mod config_command_replay;
 mod direct_turn_acceptance;
 mod drain_end;
 mod drive_admission;
@@ -176,8 +175,7 @@ pub use session_execution_lease_renewal::*;
 pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
 pub use session_ingress::{
-    SESSION_INGRESS_SESSION_ID, SessionIngressConformance, SessionIngressHandles,
-    session_ingress_session_request,
+    SESSION_INGRESS_SESSION_ID, SessionIngressHandles, session_ingress_session_request,
 };
 pub use session_store_factory::*;
 pub use session_store_factory_failure_evidence::*;

@@ -157,8 +157,6 @@ table lash_parent_end_plans
   unique (obligation_id)
   primary-key (parent_kind, parent_id)
 table lash_pending_turn_inputs
-  column claim_bound_receipt_input_id text nullable
-  column claim_bound_turn_id text nullable
   column claim_fencing_token bigint not-null default
   column claim_id text nullable
   column claim_owner_id text nullable
@@ -1128,35 +1126,6 @@ table lash_session_execution_leases
   column lease_token text nullable
   column session_id text not-null
   primary-key (session_id)
-table lash_session_ingress
-  column authority_json text nullable
-  column claim_admission_id text nullable
-  column claim_drive_epoch bigint nullable
-  column claim_fencing_token bigint not-null default
-  column claim_id text nullable
-  column claim_token text nullable
-  column claim_turn_id text nullable
-  column delivery_min_boundary text nullable
-  column delivery_scope text not-null
-  column delivery_turn_id text nullable
-  column enqueue_seq bigint not-null
-  column enqueued_at_ms bigint not-null
-  column item_id text not-null
-  column kind text not-null
-  column lane text not-null
-  column merge_key text nullable
-  column payload_json text not-null
-  column session_id text not-null
-  column source_key text nullable
-  column state text not-null
-  column submission_digest text not-null
-  column terminal_at_ms bigint nullable
-  column terminal_cause_json text nullable
-  column wake_process_id text nullable
-  column wake_sequence bigint nullable
-  unique (item_id)
-  unique (session_id, source_key)
-  primary-key (session_id, enqueue_seq)
 table lash_session_ingress_sequence
   column enqueue_seq bigint not-null
   column session_id text not-null

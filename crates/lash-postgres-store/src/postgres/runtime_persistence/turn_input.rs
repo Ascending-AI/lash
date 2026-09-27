@@ -699,7 +699,7 @@ impl TurnInputStore for PostgresSessionStore {
         let targets = targets.to_vec();
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         // Lease row first, then the input rows in queue order: the order every
-        // claim and commit takes them in (FIG-3589).
+        // claim and commit takes them in.
         load_session_execution_lease_tx(&mut tx, session_id).await?;
         let mut covered = std::collections::BTreeSet::new();
         for target in &targets {
@@ -717,9 +717,7 @@ impl TurnInputStore for PostgresSessionStore {
                 match load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &target, true)
                     .await?
                 {
-                    Some(row) => {
-                        cancel_pending_turn_input_row_tx(&mut tx, row, now, &covered).await?
-                    }
+                    Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row, now).await?,
                     None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
                 };
             results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
@@ -766,7 +764,7 @@ impl TurnInputStore for PostgresSessionStore {
         let anchor = anchor.clone();
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         // Lease row first, then the input rows in queue order: the order every
-        // claim and commit takes them in (FIG-3589).
+        // claim and commit takes them in.
         load_session_execution_lease_tx(&mut tx, session_id).await?;
         let Some(anchor_row) =
             load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &anchor, false).await?
@@ -796,13 +794,9 @@ impl TurnInputStore for PostgresSessionStore {
         .into_iter()
         .map(pending_turn_input_row)
         .collect::<Result<Vec<_>, StoreError>>()?;
-        let covered = rows
-            .iter()
-            .map(|row| lash_core_execution::InputId::from(row.input_id.clone()))
-            .collect::<std::collections::BTreeSet<_>>();
         let mut outcomes = Vec::with_capacity(rows.len());
         for row in rows {
-            outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now, &covered).await?);
+            outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now).await?);
         }
         let released = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
@@ -898,83 +892,6 @@ impl TurnInputStore for PostgresSessionStore {
         .await
         .map_err(store_sqlx_error)?;
         Ok(())
-    }
-
-    async fn bind_turn_input_claim(
-        &self,
-        claim: &lash_core_execution::TurnInputClaim,
-        turn_id: &lash_core_execution::TurnId,
-        receipt_input_id: &lash_core_execution::InputId,
-    ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .pending_inputs
-                .bind_claim
-                .sql(),
-        )
-        .bind(claim.session_id.as_str())
-        .bind(&claim.claim_id)
-        .bind(&claim.lease_token)
-        .bind(turn_id.as_str())
-        .bind(receipt_input_id.as_str())
-        .execute(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
-        Ok(())
-    }
-
-    async fn bind_turn_input_claim_of_receipt(
-        &self,
-        session_id: &SessionId,
-        receipt_input_id: &lash_core_execution::InputId,
-        generation: u64,
-        turn_id: &lash_core_execution::TurnId,
-    ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let sql = crate::turn_ingress::turn_ingress_sql();
-        let facts: Option<(Option<String>, Option<String>, i64, String)> =
-            sqlx::query_as(sql.pending_inputs_postgres.settlement_facts.sql())
-                .bind(session_id.as_str())
-                .bind(receipt_input_id.as_str())
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        if let Some((Some(claim_id), Some(claim_token), claim_generation, _)) = facts
-            && claim_generation == sql_session_lease_generation(generation)?
-        {
-            sqlx::query(sql.pending_inputs.bind_claim.sql())
-                .bind(session_id.as_str())
-                .bind(claim_id)
-                .bind(claim_token)
-                .bind(turn_id.as_str())
-                .bind(receipt_input_id.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(())
-    }
-
-    async fn reclaim_turn_bound_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &lash_core_execution::TurnId,
-    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
-        reclaim_turn_bound_inputs_postgres(
-            &self.pool,
-            #[cfg(any(test, feature = "testing"))]
-            self.lease_clock_for_testing.as_ref(),
-            session_id,
-            session_execution_lease,
-            owner,
-            turn_id,
-        )
-        .await
     }
 
     async fn abandon_turn_input_claims(

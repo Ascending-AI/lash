@@ -10,10 +10,8 @@
 //!   failed turn.
 //! * A live fault aborts with `Err`. The aborted direct turn's error carries
 //!   its acceptance receipt: the host withdraws the input by it, or redrives
-//!   the same turn id, which replays the journal and commits once. Until then
-//!   the input is bound to the aborted turn (FIG-3589): no later direct turn
-//!   folds it in, while a crashed turn's input is still reclaimed by the next
-//!   lease generation.
+//!   the same turn id, which replays the journal and commits once. A crashed
+//!   turn's input is reclaimed by the next lease generation.
 //! * Cancellation keeps settling `Stopped { Cancelled }`.
 
 use super::*;
@@ -511,10 +509,9 @@ async fn a_new_direct_turn_runs_after_the_aborted_turn_is_redriven() -> Result<(
     Ok(())
 }
 
-/// FIG-3589 keeps crash recovery: a direct turn whose worker dies mid-turn
-/// never reaches its abort path, so its claim is not bound. Once its lease
-/// generation lapses, the next generation reclaims the input under the ADR
-/// 0029 fence and answers it.
+/// Crash recovery: a direct turn whose worker dies mid-turn never reaches
+/// its abort path. Once its lease generation lapses, the next generation
+/// reclaims the input under the ADR 0029 fence and answers it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> Result<()> {
     const SESSION: &str = "direct-crash-reclaim";

@@ -75,13 +75,11 @@ pub(crate) fn pending_turn_input_row_from_sql(
     })
 }
 
-/// One `list_undelivered` row: the input, the expiry of the live lease its
-/// claim is pinned to, and the aborted turn its claim is bound to with the
-/// input that turn's receipt names (FIG-3589).
+/// One `list_undelivered` row: the input and the expiry of the live lease its
+/// claim is pinned to.
 pub(crate) struct PendingTurnInputReadRow {
     row: PendingTurnInputRow,
     lease_expires_at_ms: Option<u64>,
-    binding: Option<(String, String)>,
 }
 
 pub(crate) fn pending_turn_input_read_row_from_sql(
@@ -89,15 +87,12 @@ pub(crate) fn pending_turn_input_read_row_from_sql(
 ) -> rusqlite::Result<PendingTurnInputReadRow> {
     let input = pending_turn_input_row_from_sql(row)?;
     let lease_expires_at_ms = row
-        .get::<_, Option<i64>>(17)?
+        .get::<_, Option<i64>>(15)?
         .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
         .transpose()?;
-    let bound_turn_id: Option<String> = row.get(15)?;
-    let bound_receipt_input_id: Option<String> = row.get(16)?;
     Ok(PendingTurnInputReadRow {
         row: input,
         lease_expires_at_ms,
-        binding: bound_turn_id.zip(bound_receipt_input_id),
     })
 }
 
@@ -123,18 +118,11 @@ pub(crate) fn pending_turn_input_read_from_row(
     read: PendingTurnInputReadRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
     let input = pending_turn_input_from_row(read.row)?;
-    Ok(match (read.binding, read.lease_expires_at_ms) {
-        (Some((turn_id, receipt_input_id)), _) => {
-            lash_core_execution::PendingTurnInputRead::turn_bound(
-                input,
-                turn_id.into(),
-                receipt_input_id.into(),
-            )
-        }
-        (None, Some(lease_expires_at_ms)) => {
+    Ok(match read.lease_expires_at_ms {
+        Some(lease_expires_at_ms) => {
             lash_core_execution::PendingTurnInputRead::held(input, lease_expires_at_ms)
         }
-        (None, None) => lash_core_execution::PendingTurnInputRead::pending(input),
+        None => lash_core_execution::PendingTurnInputRead::pending(input),
     })
 }
 

@@ -291,8 +291,7 @@ pub async fn direct_turn_accepts_before_driving(
 /// The first driver's worker dies after its claim, leaving that claim pinned to
 /// a session-lease generation that no longer holds the lane. The successor
 /// claims it under ADR 0029's generation fence with no repair step, no TTL, and
-/// no knowledge that the input was ever direct. A driver that aborts with `Err`
-/// instead binds the claim to its turn, which no successor takes (FIG-3589).
+/// no knowledge that the input was ever direct.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1066,8 +1065,7 @@ impl Journal {
 /// A worker that dies after its drive and before its commit: its turn stops
 /// in the prepare phase and never returns, and [`crash_turn`] drops it there.
 /// No abort path runs, so the claim stays pinned to a lease generation that no
-/// longer holds the lane — the state a killed worker leaves behind — and is
-/// never bound to the turn (FIG-3589).
+/// longer holds the lane — the state a killed worker leaves behind.
 pub(super) fn crash_before_commit_plugin(
     died: Arc<tokio::sync::Notify>,
 ) -> Arc<dyn crate::facade_support::PluginFactory> {

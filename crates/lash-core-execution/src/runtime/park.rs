@@ -267,18 +267,13 @@ pub fn head_input(open: &[crate::PendingTurnInputRead]) -> Option<&crate::Pendin
 
 /// The root the head input `head` runs under, given the root its store
 /// binding names (`bound`): that root (the root whose claim took it, or the
-/// new root a fork bound it to, FIG-3600 S7), then the turn an aborted
-/// execution bound it to (FIG-3589), then [`input_root`].
+/// new root a fork bound it to, FIG-3600 S7), else [`input_root`].
 #[must_use]
 pub fn head_input_root(
     head: &crate::PendingTurnInputRead,
     bound: Option<crate::TurnId>,
 ) -> crate::TurnId {
-    match (bound, &head.status) {
-        (Some(root), _) => root,
-        (None, crate::PendingTurnInputReadStatus::TurnBound { turn_id, .. }) => turn_id.clone(),
-        (None, _) => input_root(&head.input),
-    }
+    bound.unwrap_or_else(|| input_root(&head.input))
 }
 
 /// The root of a drive that starts with `input`: the host's id for it (its

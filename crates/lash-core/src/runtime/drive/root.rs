@@ -601,9 +601,7 @@ impl RootInputClaimRunner {
     /// inputs that arrived meanwhile.
     ///
     /// A claim that would not reach the head takes nothing, and the head row
-    /// is read without mutating it: bound to this root means an earlier
-    /// execution of it aborted, and this redrive re-takes the set that
-    /// execution drove (FIG-3589); held means another driver has it; absent
+    /// is read without mutating it: held means another driver has it; absent
     /// means it was settled, cancelled, or pruned; pending after a missed
     /// claim means the claim raced, so the step asks to run again rather than
     /// record a refusal. Nothing here ever drops, withdraws, or re-admits a
@@ -646,16 +644,6 @@ impl RootInputClaimRunner {
             .find(|read| read.input.input_id == self.head)
             .map(|read| read.status.clone());
         Ok(probe(match status {
-            Some(crate::PendingTurnInputReadStatus::TurnBound { turn_id, .. })
-                if turn_id == self.root =>
-            {
-                match self.reclaim_bound_drive().await? {
-                    Some(claim) => self.admit_or_release(claim).await?,
-                    None => crate::AcceptedTurnInputDrive::Refused {
-                        refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim,
-                    },
-                }
-            }
             Some(crate::PendingTurnInputReadStatus::Pending) => {
                 return Ok(RootClaimProbe::HeadMissedByClaimRace);
             }
@@ -666,88 +654,5 @@ impl RootInputClaimRunner {
                 refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved,
             },
         }))
-    }
-
-    /// [`Self::admit`], handing the rows back when it fails: the failed
-    /// attempt is retried, and its retry must find them claimable rather than
-    /// held by a claim nothing will drive.
-    async fn admit_or_release(
-        &self,
-        claim: crate::TurnInputClaim,
-    ) -> Result<crate::AcceptedTurnInputDrive, crate::StoreError> {
-        match self.admit(claim.clone()).await {
-            Ok(drive) => Ok(drive),
-            Err(error) => {
-                if let Err(release) = self.store.abandon_turn_input_claim(&claim).await {
-                    tracing::warn!(
-                        %release,
-                        claim_id = %claim.claim_id,
-                        "failed to hand back a root claim whose admission failed; \
-                         the rows are claimable again once this lease generation ends"
-                    );
-                }
-                Err(error)
-            }
-        }
-    }
-
-    /// Record the head the root is admitted on and its turn index with the
-    /// claim, and have the store retain that head until the session's next
-    /// admission (FIG-3682).
-    async fn admit(
-        &self,
-        claim: crate::TurnInputClaim,
-    ) -> Result<crate::AcceptedTurnInputDrive, crate::StoreError> {
-        let base = crate::store::SessionHeadRef {
-            generation: self.store.read_session_state_version().await?,
-            ..self.base.clone()
-        };
-        self.store.retain_admission_base(&self.fence, &base).await?;
-        // The claimed inputs name the root that took them (FIG-3600 S7): a
-        // host resolves an input's outcome through its root.
-        let inputs = claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.clone())
-            .collect::<Vec<_>>();
-        self.store
-            .bind_root_inputs(&self.session_id, &self.root, &inputs)
-            .await?;
-        Ok(crate::AcceptedTurnInputDrive::Claimed {
-            claim: Box::new(claim),
-            base,
-            turn_index: self.turn_index as u64,
-            generation: self.generation.clone(),
-        })
-    }
-
-    /// Re-take the rows an earlier execution of this same root drove and then
-    /// aborted on (FIG-3589).
-    async fn reclaim_bound_drive(
-        &self,
-    ) -> Result<Option<crate::TurnInputClaim>, crate::StoreError> {
-        let Some(claim) = self
-            .store
-            .reclaim_turn_bound_inputs(&self.session_id, &self.fence, &self.owner, &self.root)
-            .await?
-        else {
-            return Ok(None);
-        };
-        if !claim.inputs.iter().any(|input| input.input_id == self.head) {
-            self.store.abandon_turn_input_claim(&claim).await?;
-            return Ok(None);
-        }
-        self.emit(
-            "turn_input.bound_drive_reclaimed",
-            serde_json::json!({
-                "claim_id": &claim.claim_id,
-                "input_ids": claim
-                    .inputs
-                    .iter()
-                    .map(|input| input.input_id.clone())
-                    .collect::<Vec<_>>(),
-            }),
-        );
-        Ok(Some(claim))
     }
 }

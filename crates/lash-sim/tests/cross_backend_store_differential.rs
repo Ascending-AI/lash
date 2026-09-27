@@ -114,7 +114,6 @@ enum CaseName {
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
     PendingFollowOnRaise,
-    TurnBoundClaimBindAndReclaim,
     RootClaimReplay,
     RefusedSurfaceOnDeletedSession,
     SessionCloseLedger,
@@ -170,9 +169,6 @@ impl CaseName {
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
             Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
-            Self::TurnBoundClaimBindAndReclaim => {
-                "turn_bound_claim_binds_defers_and_reclaims_across_generations"
-            }
             Self::RootClaimReplay => "root_claim_replays_exact_result_after_lease_handoff",
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
@@ -643,7 +639,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         session_lifecycle_cases::delete_then_attempt_admission_case(),
         surface_sweep::surface_sweep_case(),
         surface_sweep::pending_follow_on_raise_case(),
-        surface_sweep::turn_bound_claim_case(),
         surface_sweep::root_claim_replay_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         surface_sweep::session_close_ledger_case(),
@@ -2349,7 +2344,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 33);
+    assert_eq!(cases.len(), 32);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2379,7 +2374,6 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "delete_then_attempt_admission",
             "store_surface_sweep",
             "pending_follow_on_raise_and_clear",
-            "turn_bound_claim_binds_defers_and_reclaims_across_generations",
             "root_claim_replays_exact_result_after_lease_handoff",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "session_close_ledger_closes_roots_and_tracks_its_intent",

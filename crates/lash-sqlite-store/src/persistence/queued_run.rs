@@ -717,7 +717,6 @@ fn reclaim_run_members_conn(
                     owner,
                     lash_core_execution::TurnInputClaimMode::NextTurn,
                     inputs,
-                    None,
                 )?,
                 &fence.session_id,
             )?,

@@ -109,6 +109,18 @@ for tracing and rendered once, even though none of them names a table.
 # owners must be able to find it, which is what these entries are for.
 
 [[cross_family]]
+statement = "turn_ingress.delete_released_turn_park_returning"
+owner = "crates/lash-store-sql/src/turn_ingress.rs"
+touches = ["session_root_inputs"]
+reason = """
+A parked root's park is released only once the root holds no unsettled input,
+and the inputs a root holds are the ones the root family bound to it. Asking
+"which inputs does the parked root hold?" in a separate statement would let a
+binding or a settlement move between the read and the delete, so the ingress
+family owns the whole predicate and reads the root family's binding inside it.
+"""
+
+[[cross_family]]
 statement = "pending_turn_input.delete_withdrawn"
 owner = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
 touches = ["session_root_inputs"]
@@ -158,7 +170,6 @@ touches = [
     "queued_work_batches",
     "queued_work_items",
     "session_execution_leases",
-    "session_ingress",
     "session_ingress_sequence",
     "turn_cancel_closure_authorizations",
     "turn_cancel_requests",
@@ -323,19 +334,6 @@ owner = "crates/lash-postgres-store/src/postgres/attachments.rs"
 touches = ["graph_nodes"]
 reason = """
 PostgreSQL's copy of the same forget; see the SQLite entry.
-"""
-
-[[cross_family]]
-statement = "session_ingress.vacuum"
-owner = "crates/lash-store-sql/src/session_ingress.rs"
-touches = ["wake_redelivery_fences"]
-reason = """
-Vacuum removes a wake tombstone only at or below its process's redelivery
-floor (ADR 0101 §9): a tombstone above the floor is the only row that absorbs
-that wake's redelivery. The floor is the process family's row, and reading it
-in a separate statement would let a floor move between the read and the
-delete, so the ingress family owns the whole predicate and reads the fence
-inside it.
 """
 
 [families.artifact]
@@ -652,7 +650,7 @@ sqlite = ["crates/lash-sqlite-store/src/session_sql.rs"]
 postgres = ["crates/lash-postgres-store/src/postgres/session_sql.rs"]
 # Provisioning, not persistence.
 [families.session_ingress]
-tables = ["session_ingress", "session_ingress_sequence"]
+tables = ["session_ingress_sequence"]
 statement_prefixes = ["session_ingress"]
 shared = ["crates/lash-store-sql/src/session_ingress.rs"]
 sqlite = ["crates/lash-sqlite-store/src/session_ingress.rs"]
@@ -696,7 +694,6 @@ session_root_inputs = "crates/lash-store-sql/src/session_roots/root_inputs.rs"
 control_intents = "crates/lash-store-sql/src/session_roots/control_intents.rs"
 
 [families.session_ingress.table_modules]
-session_ingress = "crates/lash-store-sql/src/session_ingress.rs"
 session_ingress_sequence = "crates/lash-store-sql/src/session_ingress/sequence.rs"
 
 [families.turn_ingress]
@@ -3385,9 +3382,9 @@ backends = ["postgres"]
 kind = "operation exists on one backend only"
 reason = """
 PostgreSQL row locks can deadlock where SQLite's single writer cannot. A cancel
-of a bound receipt row rewrites the rest of its claim (FIG-3589), so it takes
-every row it may write in queue order first, the order the redrive's commit and
-re-take lock them in. SQLite already holds the database write lock.
+may write several rows, so it takes every row it may write in queue order
+first, the order every other multi-row writer locks them in. SQLite already
+holds the database write lock.
 """
 
 [[dialect_only]]
@@ -3395,12 +3392,6 @@ statement = "pending_turn_input.lock_cancel_suffix_in_queue_order"
 backends = ["postgres"]
 kind = "operation exists on one backend only"
 reason = "The suffix form of pending_turn_input.lock_cancel_targets_in_queue_order."
-
-[[dialect_only]]
-statement = "pending_turn_input.select_turn_bound"
-backends = ["sqlite", "postgres"]
-kind = "FOR UPDATE"
-reason = "Same lock fork as pending_turn_input.settlement_facts, over the rows an aborted turn's redrive re-takes (FIG-3589)."
 
 [[dialect_only]]
 statement = "pending_turn_input.claim_candidates_next_turn"
@@ -3940,16 +3931,6 @@ The statement leaves with SQLite's effect engine (FIG-3668).
 # ---------------------------------------------------------------------------
 # session_ingress family
 # ---------------------------------------------------------------------------
-
-[[dialect_only]]
-statement = "session_ingress.insert"
-backends = ["sqlite", "postgres"]
-kind = "RETURNING; parameter order"
-reason = """
-Both stores bind the shared session allocation explicitly. SQLite returns
-the stored enqueue sequence; PostgreSQL already retains that value for item-id
-construction. Their insert call sites bind the allocation in different slots.
-"""
 
 [[dialect_only]]
 statement = "session_head.clear_pending_follow_on"

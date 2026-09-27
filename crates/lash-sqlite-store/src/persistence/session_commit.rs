@@ -348,7 +348,7 @@ impl SessionCommitStore for Store {
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
-                    super::session_ingress::require_commit_fences_conn(tx, commit, now)?;
+                    super::drive_epoch::require_commit_fences_conn(tx, commit, now)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
                     planner.validate_session_binding(

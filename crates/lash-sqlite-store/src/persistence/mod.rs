@@ -207,16 +207,12 @@ mod queued_run_selection;
 mod queued_work;
 use queued_run::*;
 use queued_run_selection::*;
+mod drive_epoch;
 mod session_commit;
 mod session_execution_lease;
-mod session_ingress;
 mod turn_input;
 pub(crate) mod turn_park;
 pub(crate) mod turn_park_feed;
 
 use claim_support::*;
 pub(crate) use queued_run::pending_queued_root_conn;
-#[cfg(any(test, feature = "testing"))]
-pub(crate) use session_ingress::{
-    apply_session_ingress_settlement_conn, session_ingress_rows_conn,
-};

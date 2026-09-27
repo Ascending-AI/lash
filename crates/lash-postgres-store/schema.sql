@@ -456,8 +456,6 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     claim_token TEXT,
     claim_fencing_token BIGINT NOT NULL DEFAULT 0,
     claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
-    claim_bound_turn_id TEXT,
-    claim_bound_receipt_input_id TEXT,
     run_spec_hash TEXT,
     obligation_id TEXT,
     obligation_state TEXT,
@@ -471,7 +469,6 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
-    CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL) OR (claim_bound_turn_id IS NOT NULL AND claim_bound_receipt_input_id IS NOT NULL AND claim_token IS NOT NULL AND state = 'deferred_next_turn')),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -503,61 +500,14 @@ CREATE TABLE IF NOT EXISTS lash_session_run_specs (
     PRIMARY KEY (session_id, spec_hash)
 );
 
--- The one session ingress (ADR 0101): one row per admitted item, one
--- per-session order taken under the session history lock, two class-level
--- lanes. `delivery_*` is the submitted delivery, written once and never
--- rewritten; `submission_digest` likewise. A claim's columns are set exactly
--- on an `accepted` row, and a tombstone carries its closed cause and no claim.
+-- The session ingress's one per-session order (ADR 0101 §5, amended): both
+-- admission tables, `pending_turn_inputs` and `queued_work_batches`, draw
+-- their `enqueue_seq` from this counter under the session history lock.
 CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
     session_id TEXT NOT NULL PRIMARY KEY,
     enqueue_seq BIGINT NOT NULL,
     CONSTRAINT ck_session_ingress_sequence_positive CHECK (enqueue_seq > 0)
 );
-
-CREATE TABLE IF NOT EXISTS lash_session_ingress (
-    enqueue_seq BIGINT NOT NULL,
-    item_id TEXT NOT NULL UNIQUE,
-    session_id TEXT NOT NULL,
-    lane TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    source_key TEXT,
-    delivery_scope TEXT NOT NULL,
-    delivery_turn_id TEXT,
-    delivery_min_boundary TEXT,
-    submission_digest TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    authority_json TEXT,
-    merge_key TEXT,
-    wake_process_id TEXT,
-    wake_sequence BIGINT,
-    state TEXT NOT NULL,
-    terminal_cause_json TEXT,
-    enqueued_at_ms BIGINT NOT NULL,
-    terminal_at_ms BIGINT,
-    claim_id TEXT,
-    claim_token TEXT,
-    claim_admission_id TEXT,
-    claim_fencing_token BIGINT NOT NULL DEFAULT 0,
-    claim_drive_epoch BIGINT,
-    claim_turn_id TEXT,
-    CONSTRAINT ck_session_ingress_kind CHECK (kind IN ('input', 'process_wake', 'session_command')),
-    CONSTRAINT ck_session_ingress_lane CHECK ((kind = 'session_command' AND lane = 'command') OR (kind IN ('input', 'process_wake') AND lane = 'turn')),
-    CONSTRAINT ck_session_ingress_state CHECK (state IN ('open', 'accepted', 'completed', 'cancelled')),
-    CONSTRAINT ck_session_ingress_delivery CHECK ((delivery_scope = 'turn' AND delivery_turn_id IS NOT NULL AND delivery_min_boundary IN ('after_work', 'before_completion')) OR (delivery_scope IN ('any_boundary', 'next_turn') AND delivery_turn_id IS NULL AND delivery_min_boundary IS NULL)),
-    CONSTRAINT ck_session_ingress_kind_delivery CHECK (kind = 'input' OR (kind = 'process_wake' AND delivery_scope = 'any_boundary') OR (kind = 'session_command' AND delivery_scope = 'next_turn')),
-    CONSTRAINT ck_session_ingress_wake_source CHECK ((kind = 'process_wake' AND wake_process_id IS NOT NULL AND wake_sequence IS NOT NULL) OR (kind <> 'process_wake' AND wake_process_id IS NULL AND wake_sequence IS NULL)),
-    CONSTRAINT ck_session_ingress_claim CHECK ((state = 'accepted' AND claim_id IS NOT NULL AND claim_token IS NOT NULL AND claim_admission_id IS NOT NULL AND claim_drive_epoch IS NOT NULL) OR (state <> 'accepted' AND claim_id IS NULL AND claim_token IS NULL AND claim_admission_id IS NULL AND claim_drive_epoch IS NULL AND claim_turn_id IS NULL)),
-    CONSTRAINT ck_session_ingress_terminal CHECK ((state IN ('completed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL) OR (state IN ('open', 'accepted') AND terminal_cause_json IS NULL AND terminal_at_ms IS NULL)),
-    UNIQUE (session_id, source_key),
-    PRIMARY KEY (session_id, enqueue_seq)
-);
-
-CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_open
-    ON lash_session_ingress(session_id, lane, enqueue_seq) WHERE state IN ('open', 'accepted');
-CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_addressed
-    ON lash_session_ingress(session_id, delivery_turn_id, enqueue_seq) WHERE delivery_turn_id IS NOT NULL AND state IN ('open', 'accepted');
-CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_claim
-    ON lash_session_ingress(session_id, claim_id) WHERE claim_id IS NOT NULL;
 
 -- The logical-root family (FIG-3600 S7). `lash_session_roots` holds one row
 -- per (session, root) a drive admitted work under, with the exact result of

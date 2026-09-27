@@ -413,17 +413,11 @@ impl LashRuntime {
         if !matches!(own.status, crate::PendingTurnInputReadStatus::Pending) {
             return Ok(None);
         }
-        // A row bound to an aborted turn waits for that turn's redrive, not
-        // for the drain, so it is not ahead.
         let ahead = open
             .iter()
             .filter(|earlier| {
                 earlier.input.state == crate::TurnInputState::DeferredNextTurn
                     && earlier.input.enqueue_seq < own.input.enqueue_seq
-                    && !matches!(
-                        earlier.status,
-                        crate::PendingTurnInputReadStatus::TurnBound { .. }
-                    )
             })
             .count();
         Ok(Some(u64::try_from(ahead).unwrap_or(u64::MAX)))

@@ -57,22 +57,20 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// stale by a live run.
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The tables component 101 lacks: the cancellation affected-input child table
-/// component 102 installed (FIG-3263), the queued-run tables, the session
-/// ingress component 127 installs (FIG-3540), the park-feed clock and event
-/// tables component 128 installs (FIG-3659), the catalog identity component
-/// 132 installs (FIG-3667), and the fleet-format row component 136 installs
-/// (FIG-3796).
+/// component 102 installed (FIG-3263), the queued-run tables, the park-feed
+/// clock and event tables component 128 installs (FIG-3659), the catalog
+/// identity component 132 installs (FIG-3667), and the fleet-format row
+/// component 136 installs (FIG-3796).
 ///
 /// Generation pinning is historical: no open-time migration catalog remains,
 /// so these lists now describe a catalog old enough that the supported-range
 /// gate refuses it outright rather than a source an in-open migration arm
 /// would have accepted.
-const POST_FLOOR_TABLES: [&str; 8] = [
+const POST_FLOOR_TABLES: [&str; 7] = [
     "lash_catalog_identity",
     "lash_fleet_format",
     "lash_queued_run_members",
     "lash_queued_runs",
-    "lash_session_ingress",
     "lash_turn_cancel_affected_inputs",
     "lash_turn_park_clock",
     "lash_turn_park_events",
@@ -87,10 +85,8 @@ const POST_FLOOR_INDEXES: [&str; 0] = [];
 /// parent payload component 109 installed (FIG-3418), and the columns later
 /// components added to pre-floor tables, among them the session head's
 /// pending follow-on component 135 installs (FIG-3542).
-const POST_FLOOR_COLUMNS: [(&str, &str); 13] = [
+const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
     ("lash_pending_turn_inputs", "submitted_ingress_json"),
-    ("lash_pending_turn_inputs", "claim_bound_turn_id"),
-    ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
     ("lash_pending_turn_inputs", "submission_digest"),
     ("lash_trigger_mutation_receipts", "owner_kind"),
     ("lash_trigger_mutation_receipts", "owner_id"),

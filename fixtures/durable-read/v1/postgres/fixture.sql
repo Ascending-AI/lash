@@ -312,8 +312,6 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     claim_token text,
     claim_fencing_token bigint DEFAULT 0 NOT NULL,
     claim_session_lease_generation bigint DEFAULT 0 NOT NULL,
-    claim_bound_turn_id text,
-    claim_bound_receipt_input_id text,
     run_spec_hash text,
     obligation_id text,
     obligation_state text,
@@ -323,7 +321,6 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     obligation_stall_reason text,
     obligation_last_error text,
     obligation_settled_at_ms bigint,
-    CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((((claim_bound_turn_id IS NULL) AND (claim_bound_receipt_input_id IS NULL)) OR ((claim_bound_turn_id IS NOT NULL) AND (claim_bound_receipt_input_id IS NOT NULL) AND (claim_token IS NOT NULL) AND (state = 'deferred_next_turn'::text)))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((((claim_id IS NULL) AND (claim_owner_id IS NULL) AND (claim_owner_incarnation_id IS NULL) AND (claim_token IS NULL)) OR ((claim_id IS NOT NULL) AND (claim_owner_id IS NOT NULL) AND (claim_owner_incarnation_id IS NOT NULL) AND (claim_token IS NOT NULL)))),
     CONSTRAINT ck_pending_turn_inputs_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_pending_turn_inputs_state CHECK ((state = ANY (ARRAY['pending_active'::text, 'deferred_next_turn'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))),
@@ -678,47 +675,6 @@ CREATE TABLE lash_durable_read_fixture.lash_session_execution_leases (
     lease_term_ms bigint DEFAULT 0 NOT NULL,
     lease_expires_at_ms bigint DEFAULT 0 NOT NULL,
     CONSTRAINT ck_session_execution_leases_identity_all_or_none CHECK ((((lease_owner_id IS NULL) AND (lease_owner_incarnation_id IS NULL) AND (lease_executor_id IS NULL) AND (lease_token IS NULL)) OR ((lease_owner_id IS NOT NULL) AND (lease_owner_incarnation_id IS NOT NULL) AND (lease_executor_id IS NOT NULL) AND (lease_token IS NOT NULL))))
-);
-
-
---
--- Name: lash_session_ingress; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_session_ingress (
-    enqueue_seq bigint NOT NULL,
-    item_id text NOT NULL,
-    session_id text NOT NULL,
-    lane text NOT NULL,
-    kind text NOT NULL,
-    source_key text,
-    delivery_scope text NOT NULL,
-    delivery_turn_id text,
-    delivery_min_boundary text,
-    submission_digest text NOT NULL,
-    payload_json text NOT NULL,
-    authority_json text,
-    merge_key text,
-    wake_process_id text,
-    wake_sequence bigint,
-    state text NOT NULL,
-    terminal_cause_json text,
-    enqueued_at_ms bigint NOT NULL,
-    terminal_at_ms bigint,
-    claim_id text,
-    claim_token text,
-    claim_admission_id text,
-    claim_fencing_token bigint DEFAULT 0 NOT NULL,
-    claim_drive_epoch bigint,
-    claim_turn_id text,
-    CONSTRAINT ck_session_ingress_claim CHECK ((((state = 'accepted'::text) AND (claim_id IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_admission_id IS NOT NULL) AND (claim_drive_epoch IS NOT NULL)) OR ((state <> 'accepted'::text) AND (claim_id IS NULL) AND (claim_token IS NULL) AND (claim_admission_id IS NULL) AND (claim_drive_epoch IS NULL) AND (claim_turn_id IS NULL)))),
-    CONSTRAINT ck_session_ingress_delivery CHECK ((((delivery_scope = 'turn'::text) AND (delivery_turn_id IS NOT NULL) AND (delivery_min_boundary = ANY (ARRAY['after_work'::text, 'before_completion'::text]))) OR ((delivery_scope = ANY (ARRAY['any_boundary'::text, 'next_turn'::text])) AND (delivery_turn_id IS NULL) AND (delivery_min_boundary IS NULL)))),
-    CONSTRAINT ck_session_ingress_kind CHECK ((kind = ANY (ARRAY['input'::text, 'process_wake'::text, 'session_command'::text]))),
-    CONSTRAINT ck_session_ingress_kind_delivery CHECK (((kind = 'input'::text) OR ((kind = 'process_wake'::text) AND (delivery_scope = 'any_boundary'::text)) OR ((kind = 'session_command'::text) AND (delivery_scope = 'next_turn'::text)))),
-    CONSTRAINT ck_session_ingress_lane CHECK ((((kind = 'session_command'::text) AND (lane = 'command'::text)) OR ((kind = ANY (ARRAY['input'::text, 'process_wake'::text])) AND (lane = 'turn'::text)))),
-    CONSTRAINT ck_session_ingress_state CHECK ((state = ANY (ARRAY['open'::text, 'accepted'::text, 'completed'::text, 'cancelled'::text]))),
-    CONSTRAINT ck_session_ingress_terminal CHECK ((((state = ANY (ARRAY['completed'::text, 'cancelled'::text])) AND (terminal_cause_json IS NOT NULL) AND (terminal_at_ms IS NOT NULL)) OR ((state = ANY (ARRAY['open'::text, 'accepted'::text])) AND (terminal_cause_json IS NULL) AND (terminal_at_ms IS NULL)))),
-    CONSTRAINT ck_session_ingress_wake_source CHECK ((((kind = 'process_wake'::text) AND (wake_process_id IS NOT NULL) AND (wake_sequence IS NOT NULL)) OR ((kind <> 'process_wake'::text) AND (wake_process_id IS NULL) AND (wake_sequence IS NULL))))
 );
 
 
@@ -1248,14 +1204,14 @@ INSERT INTO lash_durable_read_fixture.lash_node_anchors VALUES ('n_03531bbc4371c
 -- Data for Name: lash_parent_end_plans; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL, 'parent_end:0c1a85db83d34ff5915193ca02bc0b71', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', 'process:34:p_00000000000070008000000000000003', '{"version":2,"scope":{"kind":"opener","scope":{"kind":"process","process_id":"p_00000000000070008000000000000003"}}}', 1700000000000, NULL, 'parent_end:e0e6374eb7cc469a853591694ff3a33c', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
 
 
 --
 -- Data for Name: lash_pending_turn_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (2, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', 1700000000000, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, 'ingress:durable-read-pending-input', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (2, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', 1700000000000, NULL, NULL, NULL, NULL, 0, 0, NULL, 'ingress:durable-read-pending-input', 'due', 0, 1700000000000, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1406,12 +1362,6 @@ INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgre
 --
 
 INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('durable-read-fixture', 'durable-read-session-owner', 'durable-read-session-incarnation', 'durable-read-retained-executor', 'durable-read-retained-session-lease', 2, 1700000000000, 100, 1700000000100);
-
-
---
--- Data for Name: lash_session_ingress; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
 
 
 --
@@ -1946,35 +1896,11 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_execution_leases
 
 
 --
--- Name: lash_session_ingress lash_session_ingress_item_id_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress
-    ADD CONSTRAINT lash_session_ingress_item_id_key UNIQUE (item_id);
-
-
---
--- Name: lash_session_ingress lash_session_ingress_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress
-    ADD CONSTRAINT lash_session_ingress_pkey PRIMARY KEY (session_id, enqueue_seq);
-
-
---
 -- Name: lash_session_ingress_sequence lash_session_ingress_sequence_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress_sequence
     ADD CONSTRAINT lash_session_ingress_sequence_pkey PRIMARY KEY (session_id);
-
-
---
--- Name: lash_session_ingress lash_session_ingress_session_id_source_key_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress
-    ADD CONSTRAINT lash_session_ingress_session_id_source_key_key UNIQUE (session_id, source_key);
 
 
 --
@@ -2548,27 +2474,6 @@ CREATE INDEX idx_lash_queued_work_claim ON lash_durable_read_fixture.lash_queued
 --
 
 CREATE INDEX idx_lash_queued_work_session_command_order ON lash_durable_read_fixture.lash_queued_work_batches USING btree (session_id, work_kind, enqueued_at_ms, enqueue_seq);
-
-
---
--- Name: idx_lash_session_ingress_addressed; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_session_ingress_addressed ON lash_durable_read_fixture.lash_session_ingress USING btree (session_id, delivery_turn_id, enqueue_seq) WHERE ((delivery_turn_id IS NOT NULL) AND (state = ANY (ARRAY['open'::text, 'accepted'::text])));
-
-
---
--- Name: idx_lash_session_ingress_claim; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_session_ingress_claim ON lash_durable_read_fixture.lash_session_ingress USING btree (session_id, claim_id) WHERE (claim_id IS NOT NULL);
-
-
---
--- Name: idx_lash_session_ingress_open; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_session_ingress_open ON lash_durable_read_fixture.lash_session_ingress USING btree (session_id, lane, enqueue_seq) WHERE (state = ANY (ARRAY['open'::text, 'accepted'::text]));
 
 
 --

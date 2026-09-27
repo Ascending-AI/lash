@@ -429,7 +429,6 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         "lash_queued_work_batches",
         "lash_pending_turn_inputs",
         "lash_session_run_specs",
-        "lash_session_ingress",
         "lash_session_ingress_sequence",
     ] {
         sqlx::query(&format!("DROP TABLE IF EXISTS {table}"))
@@ -443,7 +442,6 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         "lash_pending_turn_inputs",
         "lash_session_run_specs",
         "lash_session_ingress_sequence",
-        "lash_session_ingress",
     ] {
         sqlx::raw_sql(schema_table_ddl(table))
             .execute(&pool)
@@ -655,13 +653,10 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // refresh writes what admission would have: its ingress as submitted and
     // the digest of that submission.
     add_prior_fixture_submission_columns(&pool).await;
-    // Component 120 (FIG-3589) adds the nullable turn binding pair. The
-    // refusal fixture's pending input is unclaimed, so it is unbound.
-    add_prior_fixture_turn_binding_column(&pool).await;
     // Component 121 (FIG-3586) adds the parked-turn table.
     add_prior_fixture_turn_parks(&pool).await;
-    // Component 127 (FIG-3540) adds the session ingress, empty in the
-    // refusal fixture, and the drive epoch on the session metadata row.
+    // Component 127 (FIG-3540) added a session-ingress table, since retired
+    // (ADR 0101 amendment), and the drive epoch on the session metadata row.
     // ADR 0109 adds the obligation columns to every ledger; the refusal
     // fixture's ledgers predate them, so they gain the columns, empty.
     add_prior_fixture_obligation_columns(&pool).await;
@@ -678,10 +673,10 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("discard an earlier refresh's session ingress");
-    sqlx::raw_sql(schema_session_ingress_ddl())
+    sqlx::raw_sql(schema_session_roots_ddl())
         .execute(&pool)
         .await
-        .expect("create the session ingress from the authoritative DDL");
+        .expect("create the logical-root family from the authoritative DDL");
     sqlx::raw_sql(
         "ALTER TABLE lash_session_meta
              ADD COLUMN IF NOT EXISTS drive_epoch BIGINT NOT NULL DEFAULT 0,
@@ -877,26 +872,6 @@ async fn add_prior_fixture_obligation_columns(pool: &sqlx::PgPool) {
 /// The obligation columns' CHECK, as `schema.sql` states it on every ledger.
 const OBLIGATION_CHECK: &str = "(obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)";
 
-// Author-time refresh only: add the component-120 turn binding pair and its
-// CHECK.
-async fn add_prior_fixture_turn_binding_column(pool: &sqlx::PgPool) {
-    sqlx::raw_sql(
-        "ALTER TABLE lash_pending_turn_inputs
-             ADD COLUMN IF NOT EXISTS claim_bound_turn_id TEXT,
-             ADD COLUMN IF NOT EXISTS claim_bound_receipt_input_id TEXT,
-             DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_bound_claim_is_next_turn,
-             ADD CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn
-                 CHECK ((claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL)
-                        OR (claim_bound_turn_id IS NOT NULL
-                            AND claim_bound_receipt_input_id IS NOT NULL
-                            AND claim_token IS NOT NULL
-                            AND state = 'deferred_next_turn'));",
-    )
-    .execute(pool)
-    .await
-    .expect("add the component-120 turn binding to the refusal fixture catalog");
-}
-
 // Author-time refresh only: the component-121 parked-turn table.
 async fn add_prior_fixture_turn_parks(pool: &sqlx::PgPool) {
     sqlx::raw_sql(schema_table_ddl("lash_turn_parks"))
@@ -1055,21 +1030,20 @@ fn schema_table_ddl(table: &str) -> &'static str {
     &statement[..=end]
 }
 
-/// The ingress table plus its three class-level indexes: `schema_table_ddl`
-/// stops at the CREATE TABLE's semicolon, and worker opens no longer backfill
-/// missing objects (FIG-3797), so the refresh must install the indexes itself.
-/// The span also carries the logical-root family (component 140, FIG-3600),
-/// which `schema.sql` declares between the ingress and the attachment
-/// manifest; every statement in it is `IF NOT EXISTS`.
-fn schema_session_ingress_ddl() -> &'static str {
+/// The logical-root family (component 140, FIG-3600), which `schema.sql`
+/// declares between the ingress sequence and the attachment manifest:
+/// `schema_table_ddl` stops at a CREATE TABLE's semicolon, and worker opens no
+/// longer backfill missing objects (FIG-3797), so the refresh installs the
+/// family's indexes with it. Every statement in the span is `IF NOT EXISTS`.
+fn schema_session_roots_ddl() -> &'static str {
     let ddl = PostgresStorage::schema_ddl();
     let start = ddl
-        .find("CREATE TABLE IF NOT EXISTS lash_session_ingress (")
-        .expect("schema DDL must declare the session ingress");
+        .find("CREATE TABLE IF NOT EXISTS lash_session_roots (")
+        .expect("schema DDL must declare the logical-root family");
     let end = ddl[start..]
         .find("CREATE TABLE IF NOT EXISTS lash_attachment_manifest (")
         .map(|offset| start + offset)
-        .expect("session-ingress DDL must precede the attachment manifest");
+        .expect("logical-root DDL must precede the attachment manifest");
     &ddl[start..end]
 }
 

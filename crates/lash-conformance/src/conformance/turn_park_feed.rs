@@ -471,15 +471,19 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         "withdraw-owner",
     )
     .await;
-    let drive = withdraw_store
+    let _drive = withdraw_store
         .claim_next_turn_inputs(&withdraw_session, &lease.fence(), &lease.owner, 1)
         .await
         .expect("claim the drive")
         .expect("the input is claimable");
     withdraw_store
-        .bind_turn_input_claim(&drive, &TurnId::from("turn-3"), &input.input_id)
+        .bind_root_inputs(
+            &withdraw_session,
+            &TurnId::from("turn-3"),
+            std::slice::from_ref(&input.input_id),
+        )
         .await
-        .expect("bind the held input to the parked turn");
+        .expect("bind the held input to the parked root");
     withdraw_store
         .record_turn_park(&park_write(
             &withdraw_session,
@@ -526,7 +530,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         "suffix-owner",
     )
     .await;
-    let suffix_drive = suffix_store
+    let _suffix_drive = suffix_store
         .claim_next_turn_inputs(
             &suffix_session,
             &suffix_lease.fence(),
@@ -537,9 +541,13 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         .expect("claim the drive")
         .expect("the held input is claimable");
     suffix_store
-        .bind_turn_input_claim(&suffix_drive, &TurnId::from("turn-3s"), &held.input_id)
+        .bind_root_inputs(
+            &suffix_session,
+            &TurnId::from("turn-3s"),
+            std::slice::from_ref(&held.input_id),
+        )
         .await
-        .expect("bind the held input to the parked turn");
+        .expect("bind the held input to the parked root");
     suffix_store
         .record_turn_park(&park_write(
             &suffix_session,

@@ -7,7 +7,6 @@ mod attachment_owner_sql;
 mod process_lifecycle_sql;
 pub mod required_constraints;
 mod run_spec_admission;
-mod session_ingress;
 mod session_meta;
 mod turn_input_batch;
 mod turn_input_lifecycle_sql;
@@ -24,11 +23,6 @@ pub use process_lifecycle_sql::{
 pub use run_spec_admission::{
     RunSpecAdmission, check_running_root_run_spec, check_steering_run_spec,
     steering_run_spec_target,
-};
-pub use session_ingress::{
-    SessionIngressAdmission, SessionIngressAdmissionFacts, SessionIngressInsert,
-    SessionIngressRowColumns, SessionIngressStoredClaim, SessionIngressStoredRow,
-    decide_session_ingress_admission, encode_ingress_terminal_cause, sealed_drive_fence,
 };
 pub use session_meta::{
     CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
@@ -243,16 +237,31 @@ pub fn terminal_turn_input_states_sql() -> String {
 }
 
 pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
+
+/// The fence a backend's [`DriveEpochStore::seal_drive_epoch`] returns for
+/// the epoch its compare-and-set raised, or the one a retried seal of the
+/// same admission finds. It is the only constructor of a [`DriveFence`]
+/// outside `lash-core-store`, and only store backends call it.
+///
+/// [`DriveEpochStore::seal_drive_epoch`]: crate::store::DriveEpochStore::seal_drive_epoch
+/// [`DriveFence`]: crate::store::DriveFence
+#[must_use]
+pub fn sealed_drive_fence(
+    session_id: SessionId,
+    epoch: u64,
+    admission: crate::store::AdmissionId,
+) -> crate::store::DriveFence {
+    crate::store::DriveFence::sealed_by_store(session_id, epoch, admission)
+}
 /// One verdict function per fencing decision; see [`crate::store::fencing`].
 pub use crate::store::fencing::{
-    BoundTurnInputCancel, EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority,
-    EffectReplayLeaseFacts, EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT,
-    FENCING_TRACE_TARGET, FenceTimeAuthority, FencedWrite, HeadPublicationVerdict,
-    ProcessLeaseAuthority, ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts,
-    TurnInputSettlementFacts, WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts,
-    WorkRowClaimability, bound_turn_input_cancel, effect_replay_lease_verdict,
-    fenced_write_applied, head_publication_verdict, process_lease_verdict,
-    queued_work_batch_claimability, require_fenced_write_applied,
+    EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority, EffectReplayLeaseFacts,
+    EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
+    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, ProcessLeaseAuthority,
+    ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
+    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
+    effect_replay_lease_verdict, fenced_write_applied, head_publication_verdict,
+    process_lease_verdict, queued_work_batch_claimability, require_fenced_write_applied,
     require_releasable_session_execution_lease, require_renewable_session_execution_lease,
     require_settleable_queued_work, require_settleable_turn_input,
     require_single_writer_head_publication, turn_input_claimability,

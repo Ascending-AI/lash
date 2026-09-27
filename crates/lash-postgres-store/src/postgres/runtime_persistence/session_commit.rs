@@ -311,7 +311,7 @@ impl SessionCommitStore for PostgresSessionStore {
         // under: a successor's seal refuses it before anything is read or
         // written (ADR 0105 §2).
         if let Some(fence) = commit.drive_fence.as_ref() {
-            super::session_ingress::require_fence_tx(&mut tx, &commit.session_id, fence).await?;
+            super::drive_epoch::require_fence_tx(&mut tx, &commit.session_id, fence).await?;
         }
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this

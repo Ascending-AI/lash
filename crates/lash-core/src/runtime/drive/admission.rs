@@ -220,7 +220,7 @@ impl AdmitDriveRunner {
     /// session command was enqueued before it: commands are applied by the
     /// queued drain, in order. Then any other queued work. The root of an
     /// input is its host id (its source key) when it has one, else its input
-    /// id; an input bound to an aborted turn resumes that turn (FIG-3589).
+    /// id.
     async fn next_root(
         &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
@@ -286,8 +286,8 @@ impl AdmitDriveRunner {
             return Ok(None);
         };
         // A root the input is bound to drives it: the root whose claim took
-        // it, or the new root a fork bound it to (FIG-3600 S7). Then the turn
-        // an aborted execution bound it to (FIG-3589), then its host id.
+        // it, or the new root a fork bound it to (FIG-3600 S7). Then its host
+        // id.
         let bound = store
             .root_binding(session_id, &head.input.input_id)
             .await

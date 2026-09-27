@@ -220,8 +220,6 @@ macro_rules! runtime_persistence_tests {
             (a_steering_spec_must_match_a_queued_run_positions_shape, "run-spec-queued-steering"),
             (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
             (pending_turn_input_claims_reclaim_complete_and_fence, "root"),
-            (bound_turn_input_claim_is_excluded_until_its_turn_retakes_it, "turn-bound-claims"),
-            (bound_claim_skips_a_pending_queued_runs_inputs, "turn-bound-queued-run"),
             (turn_park_lives_while_its_turn_holds_work, "turn-parks"),
             (root_terminal_evidence_commits_in_the_head_transaction, "root-terminal-head"),
             (a_commit_sealed_under_a_superseded_admission_is_refused, "root-terminal-fence"),

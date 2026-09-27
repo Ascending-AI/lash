@@ -97,7 +97,8 @@ impl std::fmt::Display for ObligationKind {
 /// carrying that ledger's primary key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ObligationKey {
-    /// A `session_ingress` row.
+    /// An admission row: a `pending_turn_inputs` input (`ti:` id) or a
+    /// `queued_work_batches` batch (`qwb:` id).
     Ingress {
         session_id: SessionId,
         item_id: String,

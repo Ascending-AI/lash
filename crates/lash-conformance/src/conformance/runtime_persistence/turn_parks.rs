@@ -41,13 +41,13 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
         None
     );
 
-    // The aborted turn holds its drive claim, bound to it, and parks.
+    // The parked root holds its drive's input, bound to it, and parks.
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "parked"))
         .await
         .expect("enqueue the parked turn's input");
     let lease = claim_session_execution_lease_for_test(&store, &session_id, "parking-owner").await;
-    let drive = store
+    let _drive = store
         .claim_next_turn_inputs(
             &session_id,
             &lease.fence(),
@@ -58,9 +58,13 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
         .expect("claim the drive")
         .expect("the input is claimable");
     store
-        .bind_turn_input_claim(&drive, &parked_turn, &input.input_id)
+        .bind_root_inputs(
+            &session_id,
+            &parked_turn,
+            std::slice::from_ref(&input.input_id),
+        )
         .await
-        .expect("bind the drive claim to the aborted turn");
+        .expect("bind the drive's input to the parked root");
     let divergence = store
         .record_turn_park(&park(
             &session_id,

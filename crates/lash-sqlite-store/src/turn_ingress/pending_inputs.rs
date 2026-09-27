@@ -80,7 +80,6 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
-               AND claim_bound_turn_id IS NULL
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
@@ -107,7 +106,6 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
-               AND claim_bound_turn_id IS NULL
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?4
                AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work')
@@ -128,7 +126,6 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
-               AND claim_bound_turn_id IS NULL
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?4
                AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work')
@@ -136,18 +133,6 @@ lash_store_sql::statements! {
              ORDER BY enqueue_seq ASC
              LIMIT ?3";
 
-        /// Session `?1`'s open rows bound to the aborted turn `?2`, which
-        /// that turn's redrive re-takes (FIG-3589). Same lock fork as
-        /// [`settlement_facts`](Self::settlement_facts).
-        select_turn_bound = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, claim_id,
-                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, run_spec_hash
-             FROM pending_turn_inputs
-             WHERE session_id = ?1
-               AND claim_bound_turn_id = ?2
-               AND {{deferred_next_turn_turn_input_state(state)}}
-             ORDER BY enqueue_seq ASC";
 
         /// Give up claim `?2`/`?3` on session `?1`, restoring each row to the
         /// open spelling its own ingress carries (FIG-1573).
@@ -173,8 +158,6 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
@@ -211,8 +194,6 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL,
-                 claim_bound_receipt_input_id = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'

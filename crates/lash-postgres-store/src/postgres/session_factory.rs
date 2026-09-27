@@ -1140,11 +1140,6 @@ pub(crate) async fn delete_session_tx(
         turn_ingress.pending_inputs.delete_by_session.sql(),
         turn_ingress.run_specs.delete_session.sql(),
         crate::session_ingress::session_ingress_sql()
-            .shared
-            .delete_by_session
-            .sql(),
-        crate::session_ingress::session_ingress_sql()
-            .shared
             .delete_sequence
             .sql(),
         turn_ingress.cancel_requests.delete_by_session.sql(),

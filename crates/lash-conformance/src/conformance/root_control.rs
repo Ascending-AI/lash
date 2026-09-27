@@ -209,28 +209,49 @@ impl Fixture {
         let parts = DriveParts::new(prefix, name, host, stores, 8).await;
         let root = TurnId::from(format!("{name}-root"));
         let input = parts.enqueue("first", Some(root.as_str())).await;
-        parts
-            .store
-            .bind_root_inputs(&parts.session_id, &root, std::slice::from_ref(&input))
-            .await
-            .expect("bind held input");
         let lease = lash_core::testing::store_fixtures::claim_session_execution_lease_for_test(
             &parts.store,
             &parts.session_id,
             "parked-execution",
         )
         .await;
-        let claim = parts
-            .store
-            .claim_next_turn_inputs(&parts.session_id, &lease.fence(), &lease.owner, 1)
+        // The aborted execution's root claim: it binds the held input to the
+        // root and records the drive, on the head the runtime starts from,
+        // that a redrive of the root replays (FIG-3840).
+        let state = parts.initial_state();
+        // The runtime opens its initial frame before it admits anything.
+        let leaf = parts
+            .runtime()
             .await
-            .expect("claim")
-            .expect("held input");
-        parts
+            .export_state()
+            .session_graph
+            .leaf_node_id
+            .clone();
+        let drive = parts
             .store
-            .bind_turn_input_claim(&claim, &root, &input)
+            .claim_root_inputs(&lash_core::store::RootInputClaimRequest {
+                session_id: parts.session_id.clone(),
+                lease: lease.fence(),
+                owner: lease.owner.clone(),
+                root: root.clone(),
+                head: input.clone(),
+                max_inputs: 1,
+                base: lash_core::store::SessionHeadRef {
+                    generation: 0,
+                    revision: state.head_revision,
+                    leaf,
+                    checkpoint: state.checkpoint_ref.clone(),
+                },
+                turn_index: state.turn_index as u64 + 1,
+                generation: None,
+            })
             .await
-            .expect("aborted execution keeps its claim");
+            .expect("claim the root's input")
+            .expect("the root drive reaches its head");
+        assert!(matches!(
+            drive,
+            crate::AcceptedTurnInputDrive::Claimed { .. }
+        ));
         let park = parts
             .store
             .record_turn_park(&TurnParkWrite::refusal(
@@ -247,7 +268,7 @@ impl Fixture {
             .store
             .release_session_execution_lease(&lease.completion())
             .await
-            .expect("execution stopped while claim stays bound");
+            .expect("execution stopped while the park holds the root");
         assert!(matches!(
             parts
                 .store
@@ -255,7 +276,7 @@ impl Fixture {
                 .await
                 .expect("held inputs")[0]
                 .status,
-            crate::PendingTurnInputReadStatus::TurnBound { .. }
+            crate::PendingTurnInputReadStatus::Pending
         ));
         Self {
             parts,
@@ -1214,7 +1235,7 @@ pub async fn a_diverged_root_parks_once_holds_claims_blocks_admission_and_comple
         .expect("held");
     assert!(matches!(
         held[0].status,
-        crate::PendingTurnInputReadStatus::TurnBound { .. }
+        crate::PendingTurnInputReadStatus::Pending
     ));
     let again = f
         .parts

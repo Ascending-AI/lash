@@ -11,7 +11,6 @@ pub(crate) async fn allocate_ingress_sequence_tx(
     lock_session_history_mutation_tx(tx, session_id).await?;
     sqlx::query_scalar(
         crate::session_ingress::session_ingress_sql()
-            .shared
             .allocate_sequence
             .sql(),
     )
@@ -395,11 +394,11 @@ mod queued_work;
 pub(crate) use queued_run::pending_queued_root_tx;
 use queued_run::*;
 use queued_run_selection::*;
+mod drive_epoch;
 #[cfg(test)]
 mod refusal_probe_tests;
 mod session_commit;
 mod session_execution_lease;
-mod session_ingress;
 mod turn_input;
 pub(crate) mod turn_park;
 pub(crate) mod turn_park_feed;
