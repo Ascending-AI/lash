@@ -648,3 +648,65 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     assert_eq!(cleared.draining_since_ms, None);
     assert!(!cleared.drained());
 }
+
+/// FIG-3873 S4: a closing session keeps every draining generation undrained
+/// until its physical delete runs. Its close ended its roots, but each
+/// root's turn-control waits stay registered with the engine, on whichever
+/// build ran the root, until the delete revokes them: a generation retired
+/// before then would strand them.
+#[tokio::test]
+async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() {
+    let backend = memory_store_backend().await;
+    let factory = backend.session_store_factory();
+    let clock = backend.clock();
+    let core = explicit_ephemeral_facets(
+        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
+    )
+    .build(crate::testing::runtime_lease_owner())
+    .expect("build the core");
+    let retired = lash_core::engine::BuildGeneration::for_test("fig-3873-s4-retired");
+    assert!(core.drain_generation(&retired).await.expect("mark"));
+    let session = lash_core::SessionId::from("fig-3873-s4-closing");
+    factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: session.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create the session");
+    let open = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the drain beside an open session");
+    assert_eq!(open.closing_sessions, 0);
+    assert!(open.drained(), "{open:?}");
+
+    factory
+        .begin_session_close(&session, clock.timestamp_ms())
+        .await
+        .expect("close the session")
+        .expect("the session exists");
+    let closing = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the drain beside a closing session");
+    assert_eq!(closing.closing_sessions, 1);
+    assert!(!closing.drained(), "a closing session holds the drain");
+    let wire = serde_json::to_value(&closing).expect("serialize the status");
+    assert_eq!(wire["closing_sessions"], serde_json::json!(1));
+    assert_eq!(wire["drained"], serde_json::json!(false));
+
+    factory
+        .delete_session(&session)
+        .await
+        .expect("the physical delete");
+    let deleted = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the drain after the physical delete");
+    assert_eq!(deleted.closing_sessions, 0);
+    assert!(deleted.drained(), "{deleted:?}");
+}

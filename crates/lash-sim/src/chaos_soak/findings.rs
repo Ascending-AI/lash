@@ -81,6 +81,15 @@ pub const OPEN: &[Finding] = &[
         steps: 96,
         without: &["command"],
     },
+];
+
+/// The defects the soak found that `main` has fixed: each replay must pass.
+pub const FIXED: &[Finding] = &[
+    // FIG-3895: the generation drain read nothing of a closing session,
+    // whose roots' waits stay registered with the engine until the physical
+    // delete; and the soak's rolling deploy held the deployment it rolled
+    // onto across its whole drain, so one a crash replaced mid-drain kept
+    // the recovery lease and nothing retried the delete.
     Finding {
         id: "FIG-3873 S4",
         summary: "deleting a session whose root is running, when the host dies \
@@ -94,10 +103,6 @@ pub const OPEN: &[Finding] = &[
         steps: 68,
         without: &["command", "delete"],
     },
-];
-
-/// The defects the soak found that `main` has fixed: each replay must pass.
-pub const FIXED: &[Finding] = &[
     // FIG-3896: a recovery tick cancelled after the store granted its
     // deployment the lease left the lease to a holder nobody ran, so no
     // deployment claimed a due obligation again.

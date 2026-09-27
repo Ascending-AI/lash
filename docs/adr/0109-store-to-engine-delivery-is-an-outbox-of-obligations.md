@@ -215,7 +215,10 @@ effect (scope close does); the relay's settle then answers `ClaimLost`.
   `GenerationDrainStatus` (FIG-3799), the per-build-generation read an
   operator polls after `LashCore::drain_generation`, carries the same map
   and the same rule beside the generation's live processes, parked
-  processes and parked turns.
+  processes and parked turns. It also counts the closing sessions (§4),
+  which no drain outlives either: until a session's physical delete revokes
+  them, the turn-control waits of the roots its close ended stay registered
+  with the engine on whichever build ran them.
 - **Metrics.** Counter `lash.obligation.attempts{kind, outcome}` with
   outcome `delivered | retried | stalled | claim_lost`; gauge
   `lash.obligations.stalled{kind}` (written by `drain_status`); gauges

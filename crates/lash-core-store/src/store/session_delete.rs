@@ -12,7 +12,7 @@
 //! The ledger here answers the two reads the delete's relay makes that the
 //! kind-generic [`ObligationLedger`](super::ObligationLedger) cannot: which
 //! obligation a session's delete is, and how much of its cleanup is still
-//! owed.
+//! owed; and how many sessions are closing, which a drain waits on.
 
 use crate::SessionId;
 
@@ -72,4 +72,10 @@ pub trait SessionDeleteLedger: Send + Sync {
         &self,
         session_id: &SessionId,
     ) -> Result<SessionCleanup, StoreError>;
+
+    /// How many sessions are closing: their close committed and their
+    /// physical delete has not run. Until it runs, the engine still holds
+    /// what the close's roots registered with it — each root's turn-control
+    /// waits — for the physical delete to revoke.
+    async fn count_closing(&self) -> Result<u64, StoreError>;
 }

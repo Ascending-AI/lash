@@ -311,5 +311,9 @@ crate::statements! {
         /// Session `?1`'s `SessionDelete` obligation, if its row carries one.
         delete_obligation = "SELECT obligation_id, obligation_state FROM session_meta
              WHERE session_id = ?1 AND obligation_id IS NOT NULL";
+
+        /// How many sessions are closing: their close committed and their
+        /// physical delete, which removes the row, has not run.
+        count_closing = "SELECT COUNT(*) FROM session_meta WHERE closing_intent IS NOT NULL";
     }
 }

@@ -170,6 +170,7 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
     );
     let held = crate::store::generation_drain::GenerationDrainStatus::collect(
         drain.as_ref(),
+        fixture.stores.session_delete_ledger().as_ref(),
         |kind| fixture.stores.obligation_ledger(kind),
         &a,
         2,
@@ -186,6 +187,7 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
     qa.settle().await;
     let emptied = crate::store::generation_drain::GenerationDrainStatus::collect(
         drain.as_ref(),
+        fixture.stores.session_delete_ledger().as_ref(),
         |kind| fixture.stores.obligation_ledger(kind),
         &a,
         3,

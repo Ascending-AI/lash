@@ -97,7 +97,6 @@ regressions! {
     s2_crashed_queued_work_root_diverges_on_replay => "FIG-3873 S2";
     #[ignore = "FIG-3873 S3: a session deleted with a root in flight across a crash never finishes deleting"]
     s3_delete_with_an_orphaned_root_stays_due => "FIG-3873 S3";
-    #[ignore = "FIG-3873 S4: an interrupted delete of a running root's session leaks its cancel-gate wait on the old build"]
     s4_interrupted_delete_leaks_the_cancel_gate_wait => "FIG-3873 S4";
     s5_cancelled_root_scope_close_stays_claimed_after_a_kill => "FIG-3873 S5";
 }

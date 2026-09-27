@@ -122,4 +122,12 @@ impl SessionDeleteLedger for PostgresSessionDeleteLedger {
             parent_end: count(parent_end)?,
         })
     }
+
+    async fn count_closing(&self) -> Result<u64, StoreError> {
+        let closing: i64 = sqlx::query_scalar(META.count_closing.sql())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?;
+        count(closing)
+    }
 }

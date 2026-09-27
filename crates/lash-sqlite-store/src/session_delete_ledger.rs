@@ -147,4 +147,13 @@ impl SessionDeleteLedger for SqliteSessionDeleteLedger {
             parent_end: count(parent_end)?,
         })
     }
+
+    async fn count_closing(&self) -> Result<u64, StoreError> {
+        let closing: i64 = self
+            .core
+            .call(|conn| conn.query_row(META.count_closing.sql(), [], |row| row.get(0)))
+            .await
+            .map_err(sqlite_error)?;
+        count(closing)
+    }
 }

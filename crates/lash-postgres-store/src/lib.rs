@@ -1360,6 +1360,14 @@ impl PostgresStorage {
             self.pool.clone(),
         ))
     }
+
+    /// The two-phase session delete's ledger over this catalog (ADR 0109
+    /// §4): the closing sessions a generation drain status counts.
+    pub fn session_delete_ledger(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
+        Arc::new(crate::session_delete_ledger::PostgresSessionDeleteLedger::new(self.pool.clone()))
+    }
 }
 
 impl PostgresSessionStoreFactory {

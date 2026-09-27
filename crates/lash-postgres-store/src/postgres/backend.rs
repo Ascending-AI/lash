@@ -192,11 +192,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     fn session_delete_ledger(
         &self,
     ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
-        Arc::new(
-            crate::session_delete_ledger::PostgresSessionDeleteLedger::new(
-                self.inner.storage.pool().clone(),
-            ),
-        )
+        self.inner.storage.session_delete_ledger()
     }
 }
 

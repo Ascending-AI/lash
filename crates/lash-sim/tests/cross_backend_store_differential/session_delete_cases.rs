@@ -2,7 +2,8 @@
 //! backends: the close's acknowledgement arms the `SessionDelete` obligation
 //! on the session's catalog row, and the session-delete ledger counts exactly
 //! the session's undelivered cleanup — scope closes on its roots and
-//! parent-end plans of the scopes it owns — and nothing another session owes.
+//! parent-end plans of the scopes it owns — and nothing another session owes;
+//! and a closed session counts as closing until its physical delete.
 //!
 //! The Postgres database is shared with every other case and every earlier
 //! run, so each backend's sessions carry the run nonce; ids are compared by
@@ -57,11 +58,18 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         "delete before close -> {:?}",
         before.map(|o| o.state)
     ));
+    // The Postgres database is shared, so the closing count is read as a
+    // difference across this case's own close.
+    let closing_before = ledger.count_closing().await.expect("count closing");
     let intent = factory
         .begin_session_close(own, T0)
         .await
         .expect("begin the close")
         .expect("the session exists");
+    out.push(format!(
+        "a close counts its session closing -> {}",
+        ledger.count_closing().await.expect("count closing") - closing_before
+    ));
     let pending = ledger
         .delete_obligation(own)
         .await
@@ -119,6 +127,10 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     out.push(format!(
         "a repeated acknowledgement keeps the obligation -> {}",
         kept == armed
+    ));
+    out.push(format!(
+        "an acknowledged close keeps its session closing -> {}",
+        ledger.count_closing().await.expect("count closing") - closing_before
     ));
 
     let cleanup = |label: &'static str, cleanup: SessionCleanup| {

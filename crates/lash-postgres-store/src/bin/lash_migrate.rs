@@ -184,6 +184,7 @@ fn print_drain_status(status: &GenerationDrainStatus) {
     println!("parked processes: {}", status.parked_processes);
     println!("parked turns: {}", status.parked_turns);
     println!("in-flight turns: {}", status.in_flight_turns);
+    println!("closing sessions: {}", status.closing_sessions);
     let stalled = status
         .stalled_obligations
         .iter()
@@ -273,8 +274,10 @@ async fn run(command: Command, database_url: &str) -> anyhow::Result<()> {
         Command::DrainStatus { generation, json } => {
             let storage = open(database_url).await?;
             let drain = storage.generation_drain();
+            let session_delete = storage.session_delete_ledger();
             let status = GenerationDrainStatus::collect(
                 drain.as_ref(),
+                session_delete.as_ref(),
                 |kind| storage.obligation_ledger(kind),
                 &generation,
                 lash_core_execution::facade_support::SystemClock.timestamp_ms(),

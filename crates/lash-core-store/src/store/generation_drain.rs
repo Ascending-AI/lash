@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use super::session_delete::SessionDeleteLedger;
 use super::{ObligationKind, ObligationLedger, StoreError};
 use crate::ProcessId;
 use crate::build_generation::BuildGeneration;
@@ -95,7 +96,10 @@ pub trait GenerationDrainStore: Send + Sync {
 /// operator redrives it on a build of the generation, cancels it, or forks
 /// it. Stalled obligations are counted as in the deployment drain status:
 /// they are not per generation, but a drain is not finished while one waits
-/// for an operator.
+/// for an operator. Nor is it while a session is closing: its close ended its
+/// roots, but each root's turn-control waits stay registered with the
+/// engine, on whichever build ran the root, until the session's physical
+/// delete revokes them (ADR 0109 §4).
 ///
 /// The type lives beside the store port that answers it so the facade's
 /// `LashCore::generation_drain_status` and the operator binary compose the
@@ -117,6 +121,10 @@ pub struct GenerationDrainStatus {
     /// pending queued runs stamped `admitted_generation` (FIG-3795 S9,
     /// FIG-3884).
     pub in_flight_turns: u64,
+    /// Sessions closing: their close committed and their physical delete,
+    /// which revokes the waits their roots registered with the engine, has
+    /// not run. Not per generation, as stalled obligations are not.
+    pub closing_sessions: u64,
     /// Stalled store→engine delivery obligations per kind (ADR 0109 §1.5),
     /// every kind present, zero included.
     pub stalled_obligations: BTreeMap<ObligationKind, u64>,
@@ -125,14 +133,16 @@ pub struct GenerationDrainStatus {
 }
 
 impl GenerationDrainStatus {
-    /// Compose the status over `drain`'s reads and the stalled counts of the
-    /// ledgers `obligation_ledger` hands out, stamped `now_ms`.
+    /// Compose the status over `drain`'s reads, `session_delete`'s closing
+    /// sessions and the stalled counts of the ledgers `obligation_ledger`
+    /// hands out, stamped `now_ms`.
     ///
     /// Reporting is part of the read: the per-generation work gauges and
     /// each kind's stalled count record here, so polling this status is also
     /// the metrics refresh (FIG-3884).
     pub async fn collect(
         drain: &dyn GenerationDrainStore,
+        session_delete: &dyn SessionDeleteLedger,
         obligation_ledger: impl Fn(ObligationKind) -> Arc<dyn ObligationLedger>,
         generation: &BuildGeneration,
         now_ms: u64,
@@ -165,6 +175,7 @@ impl GenerationDrainStatus {
             "in_flight_turns",
             work.in_flight_turns,
         );
+        let closing_sessions = session_delete.count_closing().await?;
         let mut stalled_obligations = BTreeMap::new();
         for kind in ObligationKind::ALL {
             let count = obligation_ledger(kind).count_stalled().await?;
@@ -178,20 +189,22 @@ impl GenerationDrainStatus {
             parked_processes: work.parked_processes,
             parked_turns: work.parked_turns,
             in_flight_turns: work.in_flight_turns,
+            closing_sessions,
             stalled_obligations,
             checked_at: now_ms,
         })
     }
 
     /// True only when the generation is marked draining and it holds no live
-    /// process, no parked process or turn, no in-flight turn, and no
-    /// obligation is stalled.
+    /// process, no parked process or turn, no in-flight turn, no session is
+    /// closing, and no obligation is stalled.
     pub fn drained(&self) -> bool {
         self.draining_since_ms.is_some()
             && self.live_processes == 0
             && self.parked_processes == 0
             && self.parked_turns == 0
             && self.in_flight_turns == 0
+            && self.closing_sessions == 0
             && self.stalled_obligations.values().all(|count| *count == 0)
     }
 }
@@ -208,6 +221,7 @@ impl serde::Serialize for GenerationDrainStatus {
             parked_processes: u64,
             parked_turns: u64,
             in_flight_turns: u64,
+            closing_sessions: u64,
             stalled_obligations: &'a BTreeMap<ObligationKind, u64>,
             checked_at: u64,
             drained: bool,
@@ -219,6 +233,7 @@ impl serde::Serialize for GenerationDrainStatus {
             parked_processes: self.parked_processes,
             parked_turns: self.parked_turns,
             in_flight_turns: self.in_flight_turns,
+            closing_sessions: self.closing_sessions,
             stalled_obligations: &self.stalled_obligations,
             checked_at: self.checked_at,
             drained: self.drained(),

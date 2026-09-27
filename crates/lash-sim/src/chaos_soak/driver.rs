@@ -878,20 +878,29 @@ impl Driver {
         self.settle_crash().await?;
         self.world.restart().await?;
         self.live_since_wall_ms = wall_ms();
-        let core = self.world.core()?;
-        core.drain_generation(&old)
+        // No binding here holds a deployment's core across a tick: a
+        // deployment a crash replaces mid-drain must go with it, as a dead
+        // process does, or its recovery lease outlives it and the deployment
+        // that replaced it never leads.
+        self.world
+            .core()?
+            .drain_generation(&old)
             .await
             .map_err(|error| format!("mark `{old}` draining: {error}"))?;
         for tick in 0..=DRAIN_TICKS {
             self.world.quiesce().await;
             self.settle_crash().await?;
-            let core = self.world.core()?;
-            let status = core
+            let status = self
+                .world
+                .core()?
                 .generation_drain_status(&old)
                 .await
                 .map_err(|error| format!("read `{old}`'s drain status: {error}"))?;
             let pinned = pinned_open(&self.world, &old_deployment);
-            let holds = status.live_processes + status.parked_processes + status.parked_turns;
+            let holds = status.live_processes
+                + status.parked_processes
+                + status.parked_turns
+                + status.closing_sessions;
             if holds == 0 && pinned.is_empty() {
                 self.world
                     .double()?
@@ -910,10 +919,11 @@ impl Driver {
             }
             if tick == DRAIN_TICKS {
                 return Err(format!(
-                    "generation `{old}` never drained within {DRAIN_TICKS} ticks: it holds {} live process(es), {} parked process(es), {} parked turn(s), stalled {:?}; open invocations pinned to its build: {pinned:?}",
+                    "generation `{old}` never drained within {DRAIN_TICKS} ticks: it holds {} live process(es), {} parked process(es), {} parked turn(s), {} closing session(s), stalled {:?}; open invocations pinned to its build: {pinned:?}",
                     status.live_processes,
                     status.parked_processes,
                     status.parked_turns,
+                    status.closing_sessions,
                     status.stalled_obligations
                 ));
             }
