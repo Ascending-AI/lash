@@ -690,7 +690,6 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
         crate::support::memory_store_set().await.process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     );
     let completed = execution

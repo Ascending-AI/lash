@@ -48,9 +48,9 @@ use lash::provider::{
     ProviderRateLimiter,
 };
 use lash::runtime::{
-    ApplyConfigPatch, OutputState, ProtocolTurnExtensionHandle, RuntimeControlConfig,
-    RuntimeDurabilityConfig, RuntimeNamedPhase, RuntimePromptConfig, RuntimeProviderConfig,
-    RuntimeTracingConfig, RuntimeTurnPhaseProbeSlot,
+    ApplyConfigPatch, OutputState, RuntimeControlConfig, RuntimeDurabilityConfig,
+    RuntimeNamedPhase, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+    RuntimeTurnPhaseProbeSlot,
 };
 use lash::tools::{
     CompactToolContract, OrchestratingToolDef, PreparedToolBatch, PreparedToolBatchCall,

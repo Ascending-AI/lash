@@ -146,8 +146,6 @@ impl RuntimeErrorCode {
             Self::PluginPrepareTurn => Terminal,
             // context preparation over the same inputs fails the same way.
             Self::ContextPrepareTurn => Terminal,
-            // the protocol refused the turn extension it was given.
-            Self::ProtocolTurnExtension => Terminal,
             // the protocol refused the request before the model call; the same request is refused again.
             Self::ProtocolBeforeLlmCall => Terminal,
             // the facade's turn task died without reporting.
@@ -158,10 +156,6 @@ impl RuntimeErrorCode {
             Self::HistoricalAgentFrameSwitchUnsupported => Terminal,
             // two authors named different switches; the identical turn conflicts identically.
             Self::AgentFrameSwitchAuthorConflict => Terminal,
-            // a durable effect was handed live protocol state it cannot journal.
-            Self::DurableEffectLiveProtocolExtension => Terminal,
-            // a durable effect was handed live plugin input it cannot journal.
-            Self::DurableEffectLivePluginInput => Terminal,
             // the host does not support await-event cancellation.
             Self::AwaitEventCancelUnsupported => Terminal,
             // signing the same key fails the same way.

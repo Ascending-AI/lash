@@ -297,7 +297,6 @@ fn probe_context_with<'run>(
         process_env_store,
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     );
     context = context.with_tool_child_host(host);

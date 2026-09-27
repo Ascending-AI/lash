@@ -159,11 +159,7 @@ impl SendTarget {
 /// Everything a send shapes its root with is durable data on its
 /// [`RunSpec`](lash_core::RunSpec).
 fn refuse_live_turn_context(input: &TurnInput) -> Result<()> {
-    let what = if input.protocol_extension.is_some() {
-        Some("a live protocol turn extension")
-    } else if input.turn_context.has_live_plugin_inputs() {
-        Some("a live plugin turn input")
-    } else if !input.turn_context.prompt_layer().is_empty() {
+    let what = if !input.turn_context.prompt_layer().is_empty() {
         Some("a live per-turn prompt; set it with `SendBuilder::prompt_layer`")
     } else {
         None

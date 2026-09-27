@@ -717,10 +717,10 @@ impl LashRuntime {
 
     /// Seal `admitted`, then run its root.
     ///
-    /// `live` carries the per-turn state of an in-process caller whose
-    /// accepted input the root may drive (a protocol extension, live plugin
-    /// inputs): it cannot cross the durable boundary, so it is re-attached
-    /// when the root's claim drives that input.
+    /// `live` carries the live `TurnContext` of an in-process caller whose
+    /// accepted input the root may drive (a child session turn's process
+    /// correlation and lineage): it cannot cross the durable boundary, so it
+    /// is re-attached when the root's claim drives that input.
     pub(crate) async fn run_admitted_root_step(
         &mut self,
         controller: &ScopedEffectController<'_>,

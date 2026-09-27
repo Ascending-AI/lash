@@ -611,7 +611,6 @@ impl<'run> BuiltTestExecutionContext<'run> {
             self.process_env_store,
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             self.turn_context,
         )
         .with_execution_env_spec(self.execution_env_spec);

@@ -141,10 +141,6 @@ fn drain_area_witnesses() {
             let _ = protocol_iteration;
         }
     });
-    // W0036: lash::TurnInput::protocol_extension [field]
-    field_witness(|value: &lash::TurnInput| {
-        let _ = &value.protocol_extension;
-    });
     // W0039: lash::direct::DirectCompletion [struct]
     type_witness::<lash::direct::DirectCompletion>();
     // W0040: lash::direct::DirectCompletion::llm_call [field]
@@ -874,25 +870,11 @@ fn drain_area_witnesses() {
     });
     // W0220: lash::runtime::RuntimeEffectOutcome::into_language_runtime_value [function]
     let _ = lash::runtime::RuntimeEffectOutcome::into_language_runtime_value;
-    // W0221: lash::runtime::RuntimeErrorCode::DurableEffectLiveProtocolExtension [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::DurableEffectLiveProtocolExtension
-        )
-    });
     // W0222: lash::runtime::RuntimeErrorCode::ProtocolBeforeLlmCall [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
             lash::runtime::RuntimeErrorCode::ProtocolBeforeLlmCall
-        )
-    });
-    // W0223: lash::runtime::RuntimeErrorCode::ProtocolTurnExtension [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::ProtocolTurnExtension
         )
     });
     // W0225: lash::runtime::SessionPolicy::generation [field]
@@ -1050,18 +1032,6 @@ fn drain_area_witnesses() {
     fn meth_0270<T: lash_core::ProtocolSessionExtension>(_: &T) {
         let _ = T::as_any;
     }
-    // W0271: lash::plugins::ProtocolTurnExtension [trait]
-    fn trait_witness_0271<T: lash::plugins::ProtocolTurnExtension>() {}
-    // W0272: lash::plugins::ProtocolTurnExtension::as_any [function]
-    fn meth_0272<T: lash::plugins::ProtocolTurnExtension>(_: &T) {
-        let _ = T::as_any;
-    }
-    // W0273: lash::runtime::ProtocolTurnExtensionHandle [struct]
-    type_witness::<lash::runtime::ProtocolTurnExtensionHandle>();
-    // W0274: lash::runtime::ProtocolTurnExtensionHandle::as_any [function]
-    let _ = lash::runtime::ProtocolTurnExtensionHandle::as_any;
-    // W0275: lash::runtime::ProtocolTurnExtensionHandle::new [function]
-    let _ = lash::runtime::ProtocolTurnExtensionHandle::new(NoopTurnExt);
     // W0276: lash::plugins::ProtocolTurnOptionsError [enum]
     type_witness::<lash::plugins::ProtocolTurnOptionsError>();
     // W0277: lash::plugins::ProtocolTurnOptionsError::Decode [variant]
@@ -1573,10 +1543,6 @@ fn drain_area_witnesses() {
     fn meth_0409<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
         let _ = T::apply_session_extension;
     }
-    // W0410: lash::plugins::ProtocolSessionPlugin::validate_turn_extension [function]
-    fn meth_0410<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
-        let _ = T::validate_turn_extension;
-    }
     // W0411: lash::plugins::ProtocolSessionPlugin::configure_runtime_on_materialize [function]
     fn meth_0411<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
         let _ = T::configure_runtime_on_materialize;
@@ -1588,13 +1554,6 @@ fn drain_area_witnesses() {
 }
 struct NoopSessionExt;
 impl lash_core::ProtocolSessionExtension for NoopSessionExt {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-struct NoopTurnExt;
-impl lash::plugins::ProtocolTurnExtension for NoopTurnExt {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

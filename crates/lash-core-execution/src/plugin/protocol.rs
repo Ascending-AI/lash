@@ -57,13 +57,6 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         ))
     }
 
-    async fn validate_turn_extension(
-        &self,
-        _extension: &crate::ProtocolTurnExtensionHandle,
-    ) -> Result<(), crate::SessionError> {
-        Ok(())
-    }
-
     /// Fires on every session materialization — root/builder open (including
     /// resume) and child create — so a protocol plugin can apply and default
     /// its per-session options at open time (apply-at-open semantics).

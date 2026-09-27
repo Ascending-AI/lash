@@ -153,35 +153,6 @@ fn a_per_turn_prompt_layer_is_refused_at_the_remote_boundary() {
 }
 
 #[test]
-fn turn_input_rejects_non_remote_safe_fields() {
-    struct DummyTurnExtension;
-
-    impl lash_core::ProtocolTurnExtension for DummyTurnExtension {
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
-
-    let mut input = lash_core::TurnInput::text("extension");
-    input.protocol_extension = Some(lash_core::ProtocolTurnExtensionHandle::new(
-        DummyTurnExtension,
-    ));
-    assert!(matches!(
-        RemoteTurnInput::try_from(input),
-        Err(RemoteProtocolError::NonRemoteSafeTurnInput(message))
-            if message.contains("protocol turn")
-    ));
-
-    let mut input = lash_core::TurnInput::text("live");
-    input.turn_context.insert_plugin_input("demo", 1_u32);
-    assert!(matches!(
-        RemoteTurnInput::try_from(input),
-        Err(RemoteProtocolError::NonRemoteSafeTurnInput(message))
-            if message.contains("live plugin")
-    ));
-}
-
-#[test]
 fn provider_file_media_type_round_trips_between_core_and_remote() {
     for media_type in [
         None,

@@ -430,18 +430,14 @@ host-installed wiring as the tool implementation behind it, and is not
 recorded. The same holds for the registries, the session services, the event
 sender and the clock.
 
-**4. Turn context is never recorded, and the fence already exists.**
-`TurnContext` holds a live `LiveTurnInputs` and an optional live
-`ProviderHandle` and has no `Serialize`. It is not carried. On the tiers where a
-group child is recovered this costs nothing, because live plugin inputs are
-already refused at turn admission: `ensure_durable_effect_input`
-(`crates/lash-core/src/runtime/turn_loop.rs`) rejects them with
-`DurableEffectLivePluginInput` on the durable admission paths
-(`runtime/session_api.rs`, `runtime/turn_loop/prepare.rs`), and process runners
-construct their tool dispatch with `TurnContext::default()`. The sole
-tool-facing reader is `ToolContext::plugin_input`. So the request records no
-turn-context payload and needs no new refusal: this is a restatement of an
-existing fence, not a behaviour change.
+**4. Turn context is never recorded.** `TurnContext` holds a turn's prompt
+layer and its live runtime correlation, and has no `Serialize`. It is not
+carried, and this costs nothing: a tool reads nothing from it. A send refuses a
+live per-turn prompt, the runtime correlation is the runtime's own, and process
+runners construct their tool dispatch with `TurnContext::default()`. The live
+plugin inputs a tool once read through `ToolContext::plugin_input` are deleted
+(ADR 0101 A6, FIG-3837). So the request records no turn-context payload and
+needs no refusal.
 
 *Status.* Capture, ownership and the separate grant hold. **Implemented**
 (FIG-3408, FIG-3396, FIG-3397): retained accepted membership, the

@@ -780,7 +780,6 @@ impl Session {
         process_engines: crate::ProcessEngineRegistry,
         observer: Arc<dyn crate::engine::ObservationSink>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
-        protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
         turn_context: crate::TurnContext,
         execution_env_spec: crate::ProcessExecutionEnvSpec,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
@@ -821,7 +820,6 @@ impl Session {
             Arc::clone(&self.services.process_env_store),
             Arc::clone(&self.services.attachment_store),
             chronological_projection,
-            protocol_extension,
             turn_context,
         ))
         .map(|context| {

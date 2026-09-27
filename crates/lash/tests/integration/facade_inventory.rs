@@ -50,7 +50,6 @@ use lash::direct::LlmOutputPart as _;
 use lash::direct::LlmTerminalReason as _;
 use lash::direct::LlmUsage as _;
 use lash::durability::BoundaryReason as _;
-use lash::durability::ensure_durable_effect_input as _;
 use lash::observe::InMemoryLiveReplayStore as _;
 use lash::persistence::CheckpointKind as _;
 use lash::persistence::DurabilityTier as _;

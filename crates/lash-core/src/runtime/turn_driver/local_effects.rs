@@ -181,7 +181,6 @@ pub(super) fn turn_effect_executor(
         failure_evidence: Vec::new(),
         session_services: Arc::clone(&driver.session_services),
         protocol_turn_options: driver.protocol_turn_options.clone(),
-        protocol_extension: driver.protocol_extension.clone(),
         turn_context: driver.turn_context.clone(),
         turn_causes: driver.turn_causes.clone(),
         pending_queue_claims: driver.pending_queue_claims.clone(),

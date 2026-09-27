@@ -84,26 +84,16 @@
 //! child accumulates in them rides its *settlement*, which is FIG-3411's (§6,
 //! §13), not its request.
 //!
-//! # Turn context is never recorded, and on durable tiers cannot be set
+//! # Turn context is never recorded
 //!
-//! `TurnContext` is `#[derive(Clone)]` with no `Serialize`, and it holds a
-//! live `LiveTurnInputs` (`HashMap<&'static str, Arc<dyn Any + Send + Sync>>`)
-//! and an optional live `ProviderHandle`. ADR 0099 §3 already forbids carrying
-//! it: "`RuntimeExecutionContext` is never serialized and there is no second
-//! environment store … Semantic completion facts travel; live channels do not."
-//!
-//! The reason this costs nothing on the tiers a group child recovers on is that
-//! the fence already exists upstream. `ensure_durable_effect_input`
-//! (`crates/lash-core/src/runtime/turn_loop.rs`) refuses a turn carrying live
-//! plugin inputs with [`RuntimeErrorCode::DurableEffectLivePluginInput`] before
-//! it is ever admitted, and it runs on the durable admission paths
-//! (`runtime/session_api.rs`, `runtime/turn_loop/prepare.rs`). Process runners
-//! independently construct their tool dispatch with `TurnContext::default()`
-//! (`session_manager/process_runners/{mod,runner}.rs`). So on every tier where
-//! a group child is recovered from a journal, the only turn-context state a
-//! tool can read — `ToolContext::plugin_input` is the sole tool-facing reader —
-//! is already empty by construction. Recording "no turn context" would be
-//! recording a fact that has no other representable value.
+//! `TurnContext` is `#[derive(Clone)]` with no `Serialize`: it holds a turn's
+//! prompt layer and its live runtime correlation (a child session turn's
+//! process correlation and lineage). ADR 0099 §3 already forbids carrying it:
+//! "`RuntimeExecutionContext` is never serialized and there is no second
+//! environment store … Semantic completion facts travel; live channels do
+//! not." A tool reads nothing from it: a send refuses a live per-turn prompt,
+//! and the runtime correlation is the runtime's own. Recording "no turn
+//! context" would be recording a fact that has no other representable value.
 
 use serde::{Deserialize, Serialize};
 

@@ -112,7 +112,6 @@ fn runtime_execution_for_intent_law(
         Arc::clone(&world.env_store),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     )
     .with_cancellation_token(cancellation)

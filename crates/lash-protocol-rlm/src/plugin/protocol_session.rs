@@ -112,13 +112,6 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
         self.runtime_state.apply_session_extension(extension).await
     }
 
-    async fn validate_turn_extension(
-        &self,
-        extension: &lash_core::ProtocolTurnExtensionHandle,
-    ) -> Result<(), SessionError> {
-        self.runtime_state.validate_turn_extension(extension).await
-    }
-
     async fn bound_variables_prompt(
         &self,
         _ctx: ProtocolSessionContext<'_>,

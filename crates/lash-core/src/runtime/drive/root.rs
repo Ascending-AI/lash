@@ -218,7 +218,6 @@ impl LashRuntime {
                 .iter()
                 .any(|input| input.input_id == **input_id)
         }) {
-            driven.protocol_extension = live.protocol_extension.clone();
             driven.turn_context = live.turn_context.clone();
         }
         driven.trace_turn_id = Some(root.clone());

@@ -61,7 +61,6 @@ pub struct RuntimeExecutionContext<'run> {
     fleet_format: crate::FleetFormat,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     chronological_projection: Arc<crate::ChronologicalProjection>,
-    protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
     turn_context: crate::TurnContext,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     process_execution: Option<RuntimeProcessExecution>,
@@ -471,7 +470,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
         attachment_store: Arc<crate::SessionAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
-        protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
         turn_context: crate::TurnContext,
     ) -> Self {
         Self {
@@ -480,7 +478,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             process_env_store,
             attachment_store,
             chronological_projection,
-            protocol_extension,
             turn_context,
             live_tool_catalog: None,
             fleet_format: crate::FleetFormat::current(),
@@ -523,7 +520,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             fleet_format: self.fleet_format,
             attachment_store: Arc::clone(&self.attachment_store),
             chronological_projection: Arc::clone(&self.chronological_projection),
-            protocol_extension: self.protocol_extension.clone(),
             turn_context: self.turn_context.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             process_execution: self.process_execution.clone(),

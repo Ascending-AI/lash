@@ -378,7 +378,6 @@ pub mod facade_support {
     pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::effect_replay_driver;
-    pub use crate::runtime::ensure_durable_effect_input;
     pub use crate::runtime::process_child_session_id;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
@@ -746,13 +745,12 @@ pub use runtime::{
     ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
     ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
     ProjectionWatermark, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
-    ProtocolTurnExtension, ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy,
-    QueuedDrainRequest, QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority,
-    QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind, RankedGroupSettlement,
-    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange,
-    RegistryScopeClose, Resolution, ResolveOutcome, ResolvedRun, RunDefinition, RunDefinitions,
-    RunOverrides, RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution,
+    QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
+    QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
+    RankedGroupSettlement, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
+    RefusedWriteRange, RegistryScopeClose, Resolution, ResolveOutcome, ResolvedRun, RunDefinition,
+    RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,

@@ -395,20 +395,6 @@ impl LashRuntime {
     }
 }
 
-pub fn ensure_durable_effect_input(input: &TurnInput) -> Result<(), RuntimeError> {
-    if input.protocol_extension.is_some() {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::DurableEffectLiveProtocolExtension,
-            "durable effect hosts do not support live protocol_extension inputs; encode replayable data in protocol_turn_options or persisted plugin state",
-        ));
-    }
-    input
-        .turn_context
-        .live_plugin_inputs()
-        .durable_effect_rejection()?;
-    Ok(())
-}
-
 async fn emit_turn_activity_to_sink(events: &dyn TurnActivitySink, activity: TurnActivity) {
     if !events.is_noop() {
         events.emit(activity).await;

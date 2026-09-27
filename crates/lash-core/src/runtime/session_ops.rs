@@ -491,21 +491,6 @@ impl LashRuntime {
         protocol_session.apply_session_extension(extension).await
     }
 
-    pub async fn validate_protocol_turn_extension(
-        &mut self,
-        extension: &crate::ProtocolTurnExtensionHandle,
-    ) -> Result<(), SessionError> {
-        self.reload_invalidated_resident_session_state_for_session()
-            .await?;
-        let Some(session) = self.session.as_ref() else {
-            return Err(SessionError::Protocol(
-                "runtime session is not available".to_string(),
-            ));
-        };
-        let protocol_session = Arc::clone(session.plugins().protocol_session());
-        protocol_session.validate_turn_extension(extension).await
-    }
-
     /// Explicitly snapshot protocol-local execution state, including leaf bodies, if any.
     ///
     /// This reads the executor's complete live state and stages nothing. A turn's

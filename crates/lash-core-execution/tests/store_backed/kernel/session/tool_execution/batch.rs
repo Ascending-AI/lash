@@ -127,7 +127,6 @@ mod tests {
             process_env_store,
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         );
         context = context.with_tool_child_host(effect_host);
@@ -625,7 +624,6 @@ mod tests {
             Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         )
     }

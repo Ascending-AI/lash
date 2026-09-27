@@ -1427,13 +1427,6 @@ impl ToolPrepareContext {
         &self.turn_context
     }
 
-    pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
-    where
-        T: 'static,
-    {
-        self.turn_context.plugin_input::<T>(plugin_id)
-    }
-
     /// Snapshots the current session for protocol and tool implementors preparing an authorized
     /// call; failures preserve the plugin error contract.
     pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {

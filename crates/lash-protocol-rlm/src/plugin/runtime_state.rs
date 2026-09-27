@@ -109,28 +109,6 @@ impl RlmRuntimeState {
         Ok(())
     }
 
-    pub(crate) async fn validate_turn_extension(
-        &self,
-        extension: &lash_core::ProtocolTurnExtensionHandle,
-    ) -> Result<(), SessionError> {
-        let extension = extension
-            .as_any()
-            .downcast_ref::<RlmProjectionExtension>()
-            .ok_or_else(|| {
-                SessionError::Protocol(
-                    "RLM protocol received an unsupported turn extension".to_string(),
-                )
-            })?;
-        reject_reserved_projected_binding_names(&extension.bindings)?;
-        self.session_projected_bindings
-            .lock()
-            .await
-            .clone()
-            .merge(extension.bindings.clone())
-            .map(|_| ())
-            .map_err(|err| SessionError::Protocol(err.to_string()))
-    }
-
     /// Rebuild execution state and projected bindings from the restore view.
     ///
     /// Every restore replaces what this state holds (FIG-2521): the execution

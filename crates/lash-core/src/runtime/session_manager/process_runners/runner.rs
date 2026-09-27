@@ -176,7 +176,6 @@ impl RuntimeSessionServices {
                 Arc::clone(&services.current.host.core.durability.process_env_store),
                 Arc::clone(&services.current.host.core.durability.attachment_store),
                 Arc::new(crate::ChronologicalProjection::default()),
-                None,
                 crate::TurnContext::default(),
             )
             .with_execution_env_spec(current_execution_env_spec(&services.current))

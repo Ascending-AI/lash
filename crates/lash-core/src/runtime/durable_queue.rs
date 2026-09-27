@@ -440,7 +440,6 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
 ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
     let mut drafts = Vec::with_capacity(inputs.len());
     for (input, source_key) in inputs {
-        super::turn_loop::ensure_durable_effect_input(&input)?;
         let mut draft =
             crate::PendingTurnInputDraft::new(session_id.clone(), ingress.clone(), input)
                 .with_run_spec(run_spec.clone());

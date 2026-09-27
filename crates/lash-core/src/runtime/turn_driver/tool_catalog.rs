@@ -259,11 +259,6 @@ impl RuntimeTurnDriver<'_> {
         for contribution in plugin_prompt_contributions {
             prompt.add_contribution(contribution);
         }
-        if let Some(extension) = &self.protocol_extension {
-            for contribution in extension.prompt_contributions() {
-                prompt.add_contribution(contribution);
-            }
-        }
         Ok(PreparedExecutionEnvironment {
             tool_catalog,
             tool_definitions,

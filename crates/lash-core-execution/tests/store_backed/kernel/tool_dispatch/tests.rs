@@ -1647,7 +1647,6 @@ async fn retry_ladder_survives_a_later_pending_completion() {
         crate::support::memory_store_set().await.process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     );
     let completed = execution

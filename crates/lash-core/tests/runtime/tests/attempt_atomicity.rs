@@ -1838,7 +1838,6 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
             fixtures.backend_handle.process_env_store(),
             Arc::new(lash_core::facade_support::SessionAttachmentStore::unavailable()),
             Arc::new(lash_core::facade_support::ChronologicalProjection::default()),
-            None,
             lash_core::TurnContext::default(),
         );
 

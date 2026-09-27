@@ -508,7 +508,6 @@ async fn fig790_process_await_context(
         backend.process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     )
 }

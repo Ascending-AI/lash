@@ -68,7 +68,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 manager.process_engines().clone(),
                 observer,
                 chronological_projection,
-                self.protocol_extension.clone(),
                 self.turn_context.clone(),
                 execution_env_spec,
                 self.checkpoint_messages.clone(),

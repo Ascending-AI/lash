@@ -1181,7 +1181,7 @@ async fn fixture(
     });
 
     let mut turn_context_b = TurnContext::default();
-    turn_context_b.insert_plugin_input("differential", "b-turn-context");
+    turn_context_b.mark_selected_queued_work_drain();
 
     let a = OpenerDeployment {
         plugin_factories: test_code_protocol_factories(),

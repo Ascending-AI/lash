@@ -70,7 +70,6 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
                     text: "hello".to_string(),
                 }],
                 trace_turn_id: None,
-                protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
             lash_core::facade_support::TurnOptions::new(
@@ -1137,7 +1136,6 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
                     text: "use the tool".to_string(),
                 }],
                 trace_turn_id: None,
-                protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
             lash_core::facade_support::TurnOptions::new(
@@ -1235,7 +1233,6 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
                     text: "run code".to_string(),
                 }],
                 trace_turn_id: None,
-                protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
             lash_core::facade_support::TurnOptions::new(
@@ -1306,7 +1303,6 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
                     text: "run code".to_string(),
                 }],
                 trace_turn_id: None,
-                protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),

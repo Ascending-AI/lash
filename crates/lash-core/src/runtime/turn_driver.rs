@@ -47,7 +47,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) session_services: Arc<RuntimeSessionServices>,
     pub(super) protocol_turn_options: crate::ProtocolTurnOptions,
-    pub(super) protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
     pub(super) turn_context: crate::TurnContext,
     pub(super) turn_causes: Vec<crate::TurnCause>,
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,

@@ -111,7 +111,6 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
         Arc::new(crate::SessionAttachmentStore::unavailable()),
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     );
 
@@ -178,7 +177,6 @@ fn test_execution_context_with_env_store(
         env_store,
         Arc::new(crate::SessionAttachmentStore::unavailable()),
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     )
 }

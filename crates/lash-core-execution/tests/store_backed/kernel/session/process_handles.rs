@@ -171,7 +171,6 @@ mod tests {
             backend.process_env_store(),
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         );
         assert!(
@@ -356,7 +355,6 @@ mod tests {
             env_store,
             Arc::new(crate::SessionAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         )
         .with_execution_env_spec(crate::ProcessExecutionEnvSpec::new(
@@ -529,7 +527,6 @@ mod tests {
             backend.process_env_store(),
             Arc::new(crate::SessionAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         );
 
@@ -636,7 +633,6 @@ mod tests {
             backend.process_env_store(),
             Arc::new(crate::SessionAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         );
 
@@ -791,7 +787,6 @@ mod tests {
             backend.process_env_store(),
             Arc::new(crate::SessionAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         );
         let handle = lash_sansio::handle::handle_record_json(
@@ -1155,7 +1150,6 @@ mod tests {
             backend.process_env_store(),
             Arc::new(crate::SessionAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
-            None,
             crate::TurnContext::default(),
         );
         let realized_handle = RuntimeExecutionContext::process_handle_json(&started.id.clone());

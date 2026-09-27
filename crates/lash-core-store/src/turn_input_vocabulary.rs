@@ -8,11 +8,8 @@ pub use crate::run_spec::{
     BindingId, CapabilityRef, ContractRef, DefinitionRef, ResolvedRun, RunDefinition,
     RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash, SlotId,
 };
-use crate::{
-    CheckpointKind, PluginMessage, RuntimeError, RuntimeErrorCode, SessionId, TurnCause, TurnId,
-};
+use crate::{CheckpointKind, PluginMessage, SessionId, TurnCause, TurnId};
 use std::any::Any;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -1054,7 +1051,6 @@ pub fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
     TurnInput {
         items: input_items,
         trace_turn_id,
-        protocol_extension: None,
         turn_context: crate::TurnContext::default(),
     }
 }
@@ -1166,8 +1162,6 @@ pub struct TurnInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_turn_id: Option<TurnId>,
     #[serde(skip)]
-    pub protocol_extension: Option<ProtocolTurnExtensionHandle>,
-    #[serde(skip)]
     pub turn_context: TurnContext,
 }
 impl TurnInput {
@@ -1184,7 +1178,6 @@ impl TurnInput {
         Self {
             items: items.into_iter().collect(),
             trace_turn_id: None,
-            protocol_extension: None,
             turn_context: TurnContext::default(),
         }
     }
@@ -1192,56 +1185,6 @@ impl TurnInput {
     pub fn with_attachment(mut self, source: crate::AttachmentSource) -> Self {
         self.items.push(InputItem::attachment(source));
         self
-    }
-}
-/// Per-turn, in-process side channel of typed plugin inputs.
-///
-/// This is an `Any`-keyed map of live Rust values handed to plugins for a
-/// single turn. It is deliberately **not** serializable: the values never
-/// survive a process boundary, so durable effect-host runs explicitly reject a
-/// turn that carries any live inputs with
-/// [`RuntimeErrorCode::DurableEffectLivePluginInput`]. Durable callers must
-/// instead encode replayable data in the send's run spec or persisted plugin
-/// state.
-#[derive(Clone, Default)]
-pub struct LiveTurnInputs {
-    inputs: HashMap<&'static str, Arc<dyn Any + Send + Sync>>,
-}
-impl LiveTurnInputs {
-    fn insert<T>(&mut self, plugin_id: &'static str, input: T)
-    where
-        T: Send + Sync + 'static,
-    {
-        self.inputs.insert(plugin_id, Arc::new(input));
-    }
-
-    fn get<T>(&self, plugin_id: &'static str) -> Option<&T>
-    where
-        T: 'static,
-    {
-        self.inputs
-            .get(plugin_id)
-            .and_then(|input| input.downcast_ref::<T>())
-    }
-
-    fn contains(&self, plugin_id: &'static str) -> bool {
-        self.inputs.contains_key(plugin_id)
-    }
-
-    pub fn plugin_ids(&self) -> Vec<&'static str> {
-        self.inputs.keys().copied().collect()
-    }
-
-    /// Returns an error when live per-turn inputs would make a durable effect
-    /// host replay depend on process-local values.
-    pub fn durable_effect_rejection(&self) -> Result<(), RuntimeError> {
-        if self.inputs.is_empty() {
-            return Ok(());
-        }
-        Err(RuntimeError::new(
-            RuntimeErrorCode::DurableEffectLivePluginInput,
-            "durable effect hosts do not support live TurnContext plugin inputs; encode replayable data in the send's run spec or persisted plugin state",
-        ))
     }
 }
 /// How a running turn treats durable queued work.
@@ -1258,7 +1201,6 @@ enum QueuedWorkDrainMode {
 }
 #[derive(Clone)]
 pub struct TurnContext {
-    plugin_inputs: LiveTurnInputs,
     prompt: crate::PromptLayer,
     runtime_correlation: Option<Arc<dyn Any + Send + Sync>>,
     queued_work_drain: QueuedWorkDrainMode,
@@ -1266,7 +1208,6 @@ pub struct TurnContext {
 impl Default for TurnContext {
     fn default() -> Self {
         Self {
-            plugin_inputs: LiveTurnInputs::default(),
             prompt: crate::PromptLayer::default(),
             runtime_correlation: None,
             queued_work_drain: QueuedWorkDrainMode::Automatic,
@@ -1276,13 +1217,6 @@ impl Default for TurnContext {
 impl TurnContext {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn insert_plugin_input<T>(&mut self, plugin_id: &'static str, input: T)
-    where
-        T: Send + Sync + 'static,
-    {
-        self.plugin_inputs.insert(plugin_id, input);
     }
 
     pub fn mark_selected_queued_work_drain(&mut self) {
@@ -1298,31 +1232,6 @@ impl TurnContext {
             QueuedWorkDrainMode::Automatic => default_limit,
             QueuedWorkDrainMode::Selected => 0,
         }
-    }
-
-    pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
-    where
-        T: 'static,
-    {
-        self.plugin_inputs.get(plugin_id)
-    }
-
-    /// Lets protocol implementors detect type-erased live plugin inputs that cannot cross a durable
-    /// serialization boundary.
-    pub fn has_live_plugin_inputs(&self) -> bool {
-        !self.plugin_inputs.inputs.is_empty()
-    }
-
-    /// Lists only type-erased live plugin inputs for protocol implementors that must reject
-    /// non-persistable turn extensions before a durable boundary.
-    pub fn live_plugin_input_ids(&self) -> Vec<&'static str> {
-        self.plugin_inputs.plugin_ids()
-    }
-
-    /// Live plugin inputs for this turn. The durable boundary inspects this to
-    /// reject turns carrying non-serializable live state.
-    pub fn live_plugin_inputs(&self) -> &LiveTurnInputs {
-        &self.plugin_inputs
     }
 
     pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
@@ -1362,10 +1271,6 @@ impl TurnContext {
     }
 }
 impl facade_ops::TurnContextFacadeOps for TurnContext {
-    fn has_plugin_input(&self, plugin_id: &'static str) -> bool {
-        self.plugin_inputs.contains(plugin_id)
-    }
-
     fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
         self.prompt.template = Some(template);
     }
@@ -1389,40 +1294,8 @@ impl facade_ops::TurnContextFacadeOps for TurnContext {
 impl fmt::Debug for TurnContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TurnContext")
-            .field("plugin_inputs", &self.plugin_inputs.plugin_ids())
             .field("has_prompt_layer", &(!self.prompt.is_empty()))
             .finish()
-    }
-}
-#[derive(Clone)]
-pub struct ProtocolTurnExtensionHandle(Arc<dyn ProtocolTurnExtension>);
-impl ProtocolTurnExtensionHandle {
-    /// Type-erases and shares a turn extension for protocol implementors while retaining its
-    /// downcast and prompt-contribution behavior.
-    pub fn new(extension: impl ProtocolTurnExtension + 'static) -> Self {
-        Self(Arc::new(extension))
-    }
-
-    /// Exposes the erased extension for protocol implementors that must downcast back to their
-    /// concrete turn-extension type.
-    pub fn as_any(&self) -> &dyn Any {
-        self.0.as_any()
-    }
-
-    pub fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
-        self.0.prompt_contributions()
-    }
-}
-impl fmt::Debug for ProtocolTurnExtensionHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ProtocolTurnExtensionHandle(..)")
-    }
-}
-pub trait ProtocolTurnExtension: Send + Sync {
-    fn as_any(&self) -> &dyn Any;
-
-    fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
-        Vec::new()
     }
 }
 
@@ -1443,8 +1316,6 @@ pub mod facade_ops {
     /// This is not integrator surface, carries no stability promise, and exists
     /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
     pub trait TurnContextFacadeOps {
-        fn has_plugin_input(&self, plugin_id: &'static str) -> bool;
-
         fn set_prompt_template(&mut self, template: crate::PromptTemplate);
 
         fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution);
@@ -1503,11 +1374,11 @@ turn_input_wire!(TurnInputStateKind, pub, as_str, from_wire_str {
 impl TurnInput {
     /// The part of this input a durable acceptance row can carry.
     ///
-    /// `protocol_extension` and live `TurnContext` plugin inputs are
-    /// process-local handles that no store can hold, so the acceptance commit
-    /// records everything else and the caller driving the turn keeps the live
-    /// state (ADR 0069). A worker that later recovers the row drives exactly
-    /// this projection.
+    /// The live `TurnContext` (a child turn's process correlation and
+    /// lineage) is process-local state that no store can hold, so the
+    /// acceptance commit records everything else and the caller driving the
+    /// turn keeps the live state (ADR 0069). A worker that later recovers the
+    /// row drives exactly this projection.
     ///
     /// `trace_turn_id` is dropped for the same reason: it labels one drive
     /// attempt, not the input. A recovered row is driven under the recovering
@@ -1521,7 +1392,6 @@ impl TurnInput {
         Self {
             items: self.items.clone(),
             trace_turn_id: None,
-            protocol_extension: None,
             turn_context: crate::TurnContext::default(),
         }
     }

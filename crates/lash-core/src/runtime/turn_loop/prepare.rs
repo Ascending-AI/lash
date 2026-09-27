@@ -126,25 +126,6 @@ impl LashRuntime {
                 input.trace_turn_id = input_trace_turn_id;
             }
         }
-        if self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .is_some()
-        {
-            ensure_durable_effect_input(&input)?;
-        }
-        if let Some(extension) = &input.protocol_extension
-            && let Some(session) = self.session.as_ref()
-        {
-            let protocol_session = std::sync::Arc::clone(session.plugins().protocol_session());
-            protocol_session
-                .validate_turn_extension(extension)
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(RuntimeErrorCode::ProtocolTurnExtension, err.to_string())
-                })?;
-        }
         let previous_prompt_usage = self.state.last_prompt_usage.clone();
         let normalized = match self.normalize_input_items(&input.items).await {
             Ok(items) => items,
@@ -466,7 +447,6 @@ impl LashRuntime {
                     messages,
                     previous_prompt_usage,
                     protocol_turn_options,
-                    protocol_extension: input.protocol_extension.clone(),
                     turn_context: input.turn_context.clone(),
                     initial_turn_causes,
                     trace_turn_id,

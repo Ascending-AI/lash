@@ -161,7 +161,6 @@ pub enum RuntimeErrorCode {
     PluginCheckpoint,
     PluginPrepareTurn,
     ContextPrepareTurn,
-    ProtocolTurnExtension,
     ProtocolBeforeLlmCall,
     TurnStreamJoin,
     EmptyAgentFrameRun,
@@ -175,8 +174,6 @@ pub enum RuntimeErrorCode {
     /// commit is refused before any durable write. The identical turn fails
     /// identically until one of the two authors stops switching.
     AgentFrameSwitchAuthorConflict,
-    DurableEffectLiveProtocolExtension,
-    DurableEffectLivePluginInput,
     AwaitEventCancelUnsupported,
     AwaitEventKeySign,
     AwaitEventUnknownOrRevoked,
@@ -622,7 +619,6 @@ impl RuntimeErrorCode {
             Self::PluginCheckpoint => "plugin_checkpoint",
             Self::PluginPrepareTurn => "plugin_prepare_turn",
             Self::ContextPrepareTurn => "context_prepare_turn",
-            Self::ProtocolTurnExtension => "protocol_turn_extension",
             Self::ProtocolBeforeLlmCall => "protocol_before_llm_call",
             Self::TurnStreamJoin => "turn_stream_join",
             Self::EmptyAgentFrameRun => "empty_agent_frame_run",
@@ -630,8 +626,6 @@ impl RuntimeErrorCode {
                 "historical_agent_frame_switch_unsupported"
             }
             Self::AgentFrameSwitchAuthorConflict => "agent_frame_switch_author_conflict",
-            Self::DurableEffectLiveProtocolExtension => "durable_effect_live_protocol_extension",
-            Self::DurableEffectLivePluginInput => "durable_effect_live_plugin_input",
             Self::AwaitEventCancelUnsupported => "await_event_cancel_unsupported",
             Self::AwaitEventKeySign => "await_event_key_sign",
             Self::AwaitEventUnknownOrRevoked => "await_event_unknown_or_revoked",
@@ -891,14 +885,11 @@ impl RuntimeErrorCode {
         Self::PluginCheckpoint,
         Self::PluginPrepareTurn,
         Self::ContextPrepareTurn,
-        Self::ProtocolTurnExtension,
         Self::ProtocolBeforeLlmCall,
         Self::TurnStreamJoin,
         Self::EmptyAgentFrameRun,
         Self::HistoricalAgentFrameSwitchUnsupported,
         Self::AgentFrameSwitchAuthorConflict,
-        Self::DurableEffectLiveProtocolExtension,
-        Self::DurableEffectLivePluginInput,
         Self::AwaitEventCancelUnsupported,
         Self::AwaitEventKeySign,
         Self::AwaitEventUnknownOrRevoked,
@@ -1094,7 +1085,6 @@ impl RuntimeErrorCode {
             "plugin_checkpoint" => Self::PluginCheckpoint,
             "plugin_prepare_turn" => Self::PluginPrepareTurn,
             "context_prepare_turn" => Self::ContextPrepareTurn,
-            "protocol_turn_extension" => Self::ProtocolTurnExtension,
             "protocol_before_llm_call" => Self::ProtocolBeforeLlmCall,
             "turn_stream_join" => Self::TurnStreamJoin,
             "empty_agent_frame_run" => Self::EmptyAgentFrameRun,
@@ -1102,8 +1092,6 @@ impl RuntimeErrorCode {
                 Self::HistoricalAgentFrameSwitchUnsupported
             }
             "agent_frame_switch_author_conflict" => Self::AgentFrameSwitchAuthorConflict,
-            "durable_effect_live_protocol_extension" => Self::DurableEffectLiveProtocolExtension,
-            "durable_effect_live_plugin_input" => Self::DurableEffectLivePluginInput,
             "await_event_cancel_unsupported" => Self::AwaitEventCancelUnsupported,
             "await_event_key_sign" => Self::AwaitEventKeySign,
             "await_event_unknown_or_revoked" => Self::AwaitEventUnknownOrRevoked,

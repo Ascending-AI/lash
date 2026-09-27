@@ -157,20 +157,8 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
         let lash_core::TurnInput {
             items,
             trace_turn_id,
-            protocol_extension,
             turn_context,
         } = value;
-        if protocol_extension.is_some() {
-            return Err(RemoteProtocolError::NonRemoteSafeTurnInput(
-                "live protocol turn extensions cannot cross a remote boundary".to_string(),
-            ));
-        }
-        if turn_context.has_live_plugin_inputs() {
-            return Err(RemoteProtocolError::NonRemoteSafeTurnInput(format!(
-                "live plugin turn inputs cannot cross a remote boundary: {:?}",
-                turn_context.live_plugin_input_ids()
-            )));
-        }
         // A per-turn prompt layer lives in the process-local turn context and
         // cannot survive durable acceptance; the replacement is the send's
         // run spec (FIG-3838).

@@ -506,7 +506,6 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
         crate::support::memory_store_set().await.process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
-        None,
         crate::TurnContext::default(),
     );
 

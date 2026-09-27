@@ -95,7 +95,6 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                     text: "hello".to_string(),
                 }],
                 trace_turn_id: None,
-                protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), scoped),

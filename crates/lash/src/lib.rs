@@ -549,8 +549,8 @@ pub mod plugins {
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
         PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
         ProcessEngineRunContext, ProcessInfraError, ProcessRunOutcome, ProcessSegmentKey,
-        ProtocolBuildInput, ProtocolDriverState, ProtocolTurnExtension, ProtocolTurnOptionsError,
-        SegmentHandover, SegmentStartMarker, SessionPluginSource, TurnDriverPreamble,
+        ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError, SegmentHandover,
+        SegmentStartMarker, SessionPluginSource, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
@@ -896,12 +896,6 @@ pub mod process {
 
 /// Durability configuration and backend contracts.
 pub mod durability {
-    /// Reject a [`TurnInput`](crate::TurnInput) that a durable
-    /// [`EffectHost`] cannot replay — live protocol extensions and live plugin
-    /// inputs have no journalled form. The embedded enqueue path applies this
-    /// itself; a host that accepts turn input at its own edge calls it there to
-    /// fail the request instead of the turn.
-    pub use lash_core::facade_support::ensure_durable_effect_input;
     pub use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
@@ -963,11 +957,11 @@ pub mod runtime {
     /// wall-clock default; tests open a backend on their own to make expiry
     /// deterministic.
     pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
-    /// Session and turn extension handles exposed to runtime integrators.
+    /// The session extension handle and turn options exposed to runtime integrators.
     pub use lash_core::{
-        ProtocolSessionExtensionHandle, ProtocolTurnExtensionHandle, ProtocolTurnOptions,
-        SessionPolicy, SessionSnapshot, facade_support::PersistentRuntimeServices,
-        facade_support::SessionHandle, facade_support::render_turn_causes_prompt,
+        ProtocolSessionExtensionHandle, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
+        facade_support::PersistentRuntimeServices, facade_support::SessionHandle,
+        facade_support::render_turn_causes_prompt,
     };
 }
 
