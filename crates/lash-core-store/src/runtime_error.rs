@@ -1638,10 +1638,18 @@ impl RuntimeEffectControllerError {
     /// load, that met a live fault — as safe to execute again: the claim is
     /// released unsealed instead of journaling the failure as the effect's
     /// outcome (FIG-3587, FIG-3683).
+    ///
+    /// The one fault it never marks is the session's own retirement
+    /// (FIG-3630): a deleted or closing session is a settled fact, not a
+    /// derivation a rerun could answer differently, so the step records it
+    /// and every replay decodes the same refusal instead of running the
+    /// failing body again forever.
     #[must_use]
     pub fn retryable_uncommitted_derivation(mut self) -> Self {
-        self.journal_disposition =
-            EffectErrorJournalDisposition::RetryUncommittedResponseDerivation;
+        if !self.is_session_retirement() {
+            self.journal_disposition =
+                EffectErrorJournalDisposition::RetryUncommittedResponseDerivation;
+        }
         self
     }
 

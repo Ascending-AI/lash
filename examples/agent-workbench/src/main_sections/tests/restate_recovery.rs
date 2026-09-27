@@ -1212,16 +1212,29 @@ finish(await handle);
     // every process living `Until` it (FIG-3822): by the time the delete
     // workflow reports success the child's cancel request is recorded, and
     // its Restate workflow has the delivery on its cancel promise.
-    harness
+    // The delete immediately prunes terminal process rows originated by the
+    // session (ADR 0017/0049): the record is either the row or its
+    // payload-free tombstone.
+    match harness
         .state
         .process_observer
         .clone()
         .process(&process_id.clone())
         .await
-        .expect("read process immediately after session revocation")
-        .expect("session revocation keeps its process record");
+    {
+        Ok(Some(_)) | Err(lash::plugins::PluginError::ProcessNoLongerRetained { .. }) => {}
+        other => panic!("session revocation keeps its process record: {other:?}"),
+    }
     let observed_after_delete =
         wait_for_cancel_request(&harness.state, &process_id.clone(), Duration::from_secs(20)).await;
+    // The tombstone carried the cancel when the row it was recorded on is
+    // already reclaimed; the requester stamp lives on the row alone.
+    if let Some(observed) = &observed_after_delete {
+        assert_parent_end_request(
+            observed,
+            &lash::process::ScopeId::session(deleted_session_id.clone()),
+        );
+    }
 
     let turn_failure = wait_for_workbench_turn_failed(&mut turn, Duration::from_secs(20)).await;
     // Re-baselined for FIG-2358: the revoked turn resumes while the delete
@@ -1242,22 +1255,13 @@ finish(await handle);
             .await_output(&process_id.clone()),
     )
     .await
-    .expect("parent-end cancel never reached the session-bound process")
-    .expect("attach cancelled process terminal");
+    .expect("parent-end cancel never reached the session-bound process");
+    // The delete immediately prunes terminal process rows originated by the
+    // session (ADR 0017/0049): the settled row may already be its
+    // payload-free tombstone, whose terminal label is the same evidence.
     assert!(
-        matches!(
-            &process_terminal,
-            lash::process::ProcessAwaitOutput::Settled { output }
-                if !output.is_success()
-                    && output.value_for_projection()["source"] == "cancellation"
-        ),
+        terminal_is_parent_end_cancelled(&process_terminal),
         "session delete did not cancel its Until-session process: {process_terminal:#?}"
-    );
-    // The registry keeps the first request, so the session end's delivery is
-    // exactly once: its requester is the ended session scope's storage id.
-    assert_parent_end_request(
-        &observed_after_delete,
-        &lash::process::ScopeId::session(deleted_session_id.clone()),
     );
     assert!(
         harness
@@ -1364,10 +1368,14 @@ finish("started lifecycle gates");
         let observed =
             wait_for_cancel_request(&harness.state, &process_id.clone(), Duration::from_secs(20))
                 .await;
-        assert_parent_end_request(
-            &observed,
-            &lash::process::ScopeId::session(deleted_session_id.clone()),
-        );
+        // The tombstone carried the cancel when the row it was recorded on
+        // is already reclaimed; the requester stamp lives on the row alone.
+        if let Some(observed) = &observed {
+            assert_parent_end_request(
+                observed,
+                &lash::process::ScopeId::session(deleted_session_id.clone()),
+            );
+        }
         let terminal = tokio::time::timeout(
             Duration::from_secs(30),
             harness
@@ -1377,15 +1385,12 @@ finish("started lifecycle gates");
                 .await_output(&process_id.clone()),
         )
         .await
-        .expect("parent-end cancel never reached the child")
-        .expect("await parent-end-cancelled child");
+        .expect("parent-end cancel never reached the child");
+        // The delete immediately prunes terminal process rows originated by
+        // the session (ADR 0017/0049): the settled row may already be its
+        // payload-free tombstone, whose terminal label is the same evidence.
         assert!(
-            matches!(
-                &terminal,
-                lash::process::ProcessAwaitOutput::Settled { output }
-                    if !output.is_success()
-                        && output.value_for_projection()["source"] == "cancellation"
-            ),
+            terminal_is_parent_end_cancelled(&terminal),
             "session delete did not cancel its Until-session child: {terminal:#?}"
         );
     }
@@ -1459,25 +1464,65 @@ async fn wait_for_named_running_processes(
     }
 }
 
+/// The cancellation evidence a session-bound process's terminal carries, in
+/// either surface the registry answers with once a delete has pruned the
+/// row: the settled outcome while it is still retained, or the tombstone's
+/// terminal label — from the await output, or refused on the require-id read
+/// ahead of it (ADR 0017/0049).
+fn terminal_is_parent_end_cancelled(
+    terminal: &Result<lash::process::ProcessAwaitOutput, lash::EmbedError>,
+) -> bool {
+    match terminal {
+        Ok(lash::process::ProcessAwaitOutput::Settled { output }) => {
+            !output.is_success() && output.value_for_projection()["source"] == "cancellation"
+        }
+        Ok(lash::process::ProcessAwaitOutput::NoLongerRetained { terminal_label, .. })
+        | Err(lash::EmbedError::Plugin(lash::plugins::PluginError::ProcessNoLongerRetained {
+            terminal_label,
+            ..
+        })) => terminal_label == "cancelled",
+        _ => false,
+    }
+}
+
 /// Poll the observed record until its first cancel request is recorded. The
 /// record is the durable fact a parent-end plan writes: the registry keeps the
-/// first request, so a second delivery never changes it.
+/// first request, so a second delivery never changes it. `None` means the
+/// read found the record's tombstone instead — a session delete prunes the
+/// terminal rows it originated at once (ADR 0017/0049), and a `cancelled`
+/// tombstone of a process still inside its own sleep is the same evidence
+/// that the parent end reached it; the requester stamp itself went with the
+/// row.
 async fn wait_for_cancel_request(
     state: &AppState,
     process_id: &ProcessId,
     timeout: Duration,
-) -> lash::process::ObservedProcess {
+) -> Option<lash::process::ObservedProcess> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        let observed = state
+        let read = state
             .process_observer
             .clone()
             .process(&process_id.clone())
-            .await
-            .expect("read process record")
-            .expect("record kept");
+            .await;
+        let observed = match read {
+            Ok(Some(observed)) => observed,
+            Ok(None) => panic!("process {process_id} was never registered"),
+            Err(lash::plugins::PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                assert_eq!(
+                    terminal_label, "cancelled",
+                    "process {process_id} tombstoned `{terminal_label}` at {pruned_at_ms}ms, \
+                     not by the session end's cancel"
+                );
+                return None;
+            }
+            Err(error) => panic!("read process record: {error}"),
+        };
         if observed.cancel_request.is_some() {
-            return observed;
+            return Some(observed);
         }
         assert!(
             tokio::time::Instant::now() < deadline,

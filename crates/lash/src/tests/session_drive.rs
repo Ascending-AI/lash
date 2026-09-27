@@ -297,6 +297,67 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick(engine: Engi
     Ok(())
 }
 
+/// The wedge a session delete left behind (FIG-3822): a drive asked for a
+/// session whose tombstone already committed used to run its admission body
+/// against the retired store forever — the body's `SessionDeleted` was
+/// stamped a live derivation fault, so an attempt never reached the journaled
+/// step an earlier attempt had recorded and the invocation never ended. The
+/// journaled step now records the session's settled answer — the recorded
+/// `Idle` its closing epoch admits, or the retirement refusal a drive that
+/// cannot open the retired store at all records — and the session holds no
+/// open engine work afterward.
+async fn a_drive_on_a_deleted_session_answers_its_retirement(engine: Engine) -> Result<()> {
+    let fixture = fixture(engine, 1).await?;
+    let session_id = lash_core::SessionId::from("send-retired");
+    drop(fixture.core.session("send-retired").open().await?);
+    // The physical half of a deletion: the tombstone every store read and
+    // store open of the session answers. The close's engine half is the
+    // release of the session's live executions, and the law's session has
+    // none to release.
+    fixture
+        .core
+        .store_factory
+        .delete_session(&session_id)
+        .await
+        .expect("delete the session");
+
+    let engine_port = fixture.core.substrate_slot.ports().await.queued;
+    let request = lash_core::engine::DriveRequestId::new("retired-drive");
+    engine_port.schedule_drive(&session_id, request.clone());
+    let answer = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        engine_port.await_drive(&session_id, &request),
+    )
+    .await
+    .expect("the retired session's drive is answered");
+    match answer {
+        Ok(outcome) => assert!(
+            matches!(outcome.stop, lash_core::engine::DriveStop::Idle),
+            "a retired session's drive idles on the close's recorded epoch: {outcome:?}"
+        ),
+        Err(abort) => assert!(
+            matches!(
+                abort,
+                lash_core::engine::DriveAbort::Refused(ref error)
+                    if error.code == lash_core::RuntimeErrorCode::SessionDeleted
+            ),
+            "a retired session's drive is refused with its retirement: {abort:?}"
+        ),
+    }
+
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            if !engine_port.session_work_in_flight(&session_id).await {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the deleted session holds no open engine work");
+    Ok(())
+}
+
 macro_rules! session_drive_laws {
     ($engine:ident, $engine_variant:expr) => {
         mod $engine {
@@ -317,6 +378,11 @@ macro_rules! session_drive_laws {
             async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<()> {
                 super::a_booted_core_drives_lost_work_on_its_first_reconcile_tick($engine_variant)
                     .await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_drive_on_a_deleted_session_answers_its_retirement() -> Result<()> {
+                super::a_drive_on_a_deleted_session_answers_its_retirement($engine_variant).await
             }
         }
     };

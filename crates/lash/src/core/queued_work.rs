@@ -118,8 +118,12 @@ impl NativeQueuedWorkRunHandle {
                 policy: policy.clone(),
             })
             .await
-            .map_err(|error| {
-                OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
+            .map_err(|error| match error {
+                error @ (lash_core::StoreError::SessionDeleted { .. }
+                | lash_core::StoreError::SessionClosing { .. }) => {
+                    OpenFailure::SessionRetired(session_retired_error(session_id, error))
+                }
+                error => OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())),
             })?;
         let state = match crate::session::load_state_from_store(
             session_id,
@@ -133,6 +137,14 @@ impl NativeQueuedWorkRunHandle {
             Ok(state) => state,
             Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
                 return Err(OpenFailure::Contended);
+            }
+            Err(crate::EmbedError::Store(
+                error @ (lash_core::StoreError::SessionDeleted { .. }
+                | lash_core::StoreError::SessionClosing { .. }),
+            )) => {
+                return Err(OpenFailure::SessionRetired(session_retired_error(
+                    session_id, error,
+                )));
             }
             Err(error) => {
                 return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
@@ -266,10 +278,31 @@ impl DriveRuntime {
     }
 }
 
+/// The runtime error a journaled step records for a session whose close or
+/// tombstone already committed: the typed retirement refusal every replay
+/// of it decodes (FIG-3630).
+fn session_retired_error(
+    session_id: &SessionId,
+    error: lash_core::StoreError,
+) -> lash_core::RuntimeError {
+    lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::SessionDeleted,
+        error.to_string(),
+    )
+    .with_cause(lash_core::RuntimeErrorCause::SessionDeleted {
+        session_id: session_id.clone(),
+    })
+}
+
 /// Why a session's runtime did not open for a drive.
 enum OpenFailure {
     /// Another writer holds the session; the drive is retried.
     Contended,
+    /// The session was deleted or is closing past admission: a journaled
+    /// step still has to be emitted for it so the invocation does not
+    /// diverge from a `run` command an earlier attempt journaled, and that
+    /// step's recorded body answers the retirement (ADR 0104 O1, FIG-3630).
+    SessionRetired(lash_core::RuntimeError),
     Terminal(lash_core::PluginError),
 }
 
@@ -280,6 +313,7 @@ impl OpenFailure {
                 lash_core::RuntimeErrorCode::StoreCommitContended,
                 "the session's runtime is contended; the drive is retried",
             )),
+            Self::SessionRetired(error) => lash_core::engine::DriveAbort::Refused(error),
             Self::Terminal(error) => {
                 lash_core::engine::DriveAbort::Refused(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::PluginSessionManager,
@@ -371,10 +405,25 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         request: &lash_core::engine::DriveRequest,
         ordinal: u32,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
-        let runtime = self
-            .open_runtime(&request.session)
-            .await
-            .map_err(OpenFailure::into_abort)?;
+        let runtime = match self.open_runtime(&request.session).await {
+            Ok(runtime) => runtime,
+            // A session that is already deleted — or closed past admission —
+            // still owes the journal the recorded step at this position: an
+            // attempt that stopped short of it would diverge from the `run`
+            // command an earlier attempt journaled, and the step's recorded
+            // body answers the same retirement every redrive replays
+            // (ADR 0104 O1, FIG-3630).
+            Err(OpenFailure::SessionRetired(_)) => {
+                return lash_core::drive::admit_drive_retired(
+                    &controller,
+                    request,
+                    ordinal,
+                    Arc::clone(&self.config.store_factory),
+                )
+                .await;
+            }
+            Err(failure) => return Err(failure.into_abort()),
+        };
         crate::turn::admit_drive_observed(runtime.handle(), &controller, request, ordinal).await
     }
 

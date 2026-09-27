@@ -299,6 +299,74 @@ pub async fn admit_drive(
     Box::pin(runtime.admit_drive_step(controller, request, ordinal)).await
 }
 
+/// Emit admission `ordinal`'s journaled `AdmitDrive` step through
+/// `controller`, which must serve the request's
+/// [`drive_admission_scope`](crate::engine::drive_admission_scope). `store`
+/// is the session's history store, or `None` when the session could not be
+/// opened at all — deleted, or closed past admission — in which case the
+/// step's recorded body is the retirement itself (FIG-3630).
+async fn emit_admission_step(
+    controller: &ScopedEffectController<'_>,
+    request: &DriveRequest,
+    ordinal: u32,
+    store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    stores: Arc<dyn crate::SessionStoreFactory>,
+) -> Result<AdmitVerdict, DriveAbort> {
+    let scope = drive_admission_scope(&request.session, &request.request);
+    let invocation = RuntimeEffectInvocation::new(
+        EffectAddress::new(
+            scope.scope().clone(),
+            drive_admission_replay_key(&request.request, ordinal),
+        )
+        .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+        RuntimeAttribution::for_session(request.session.clone()),
+        format!("drive-admission-{ordinal}"),
+    );
+    let admit_request = AdmitRequest {
+        session: request.session.clone(),
+        request: request.request.clone(),
+    };
+    controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation,
+                RuntimeEffectCommand::AdmitDrive {
+                    request: Box::new(admit_request.clone()),
+                },
+            ),
+            RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(admission::AdmitDriveRunner {
+                    store,
+                    stores,
+                    request: admit_request,
+                    ordinal,
+                }),
+                None,
+            ),
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_admit_drive)
+        .map_err(|error| controller_abort(None, error))
+}
+
+/// Admission `ordinal` of `request` for a session whose store could not be
+/// opened: its close or tombstone already committed. The journaled
+/// `AdmitDrive` step still has to be emitted — an attempt that stopped
+/// short of it diverges from the `run` command an earlier attempt journaled
+/// at this position (ADR 0104 O1) — and its recorded body answers the
+/// session's retirement, which every redrive of the invocation decodes.
+/// `controller` serves the request's
+/// [`drive_admission_scope`](crate::engine::drive_admission_scope).
+#[doc(hidden)]
+pub async fn admit_drive_retired(
+    controller: &ScopedEffectController<'_>,
+    request: &DriveRequest,
+    ordinal: u32,
+    stores: Arc<dyn crate::SessionStoreFactory>,
+) -> Result<AdmitVerdict, DriveAbort> {
+    emit_admission_step(controller, request, ordinal, None, stores).await
+}
+
 /// Run `admitted`'s root to its terminal through `controller`, which must
 /// serve [`drive_root_scope`](crate::engine::drive_root_scope) for the root:
 /// the recorded `SealDriveAdmission` step, then the root's turns (a frame
@@ -552,45 +620,24 @@ impl LashRuntime {
         // that same gate, so no unrecorded read precedes it here. The body
         // records the resident head as the admission's view of the session;
         // the root's recorded claim, taken under the lease on a head
-        // refreshed there, is the head the root runs on (FIG-3682).
+        // refreshed there, is the head the root runs on (FIG-3682). The
+        // session's own retirement is not refused here either: the journaled
+        // step below is the durable answer a redrive replays, and
+        // `admit_drive_retired` emits the same step when the engine could
+        // not open a store for the retired session at all (FIG-3630,
+        // ADR 0104 O1).
         let scope = drive_admission_scope(&request.session, &request.request);
         let host = Arc::clone(&self.host.core.control.effect_host);
         let admission_controller = step_controller(controller, host.as_ref(), scope.clone())
             .map_err(DriveAbort::Refused)?;
-        let invocation = RuntimeEffectInvocation::new(
-            EffectAddress::new(
-                scope.scope().clone(),
-                drive_admission_replay_key(&request.request, ordinal),
-            )
-            .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
-            RuntimeAttribution::for_session(request.session.clone()),
-            format!("drive-admission-{ordinal}"),
-        );
-        let admit_request = AdmitRequest {
-            session: request.session.clone(),
-            request: request.request.clone(),
-        };
-        admission_controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    invocation,
-                    RuntimeEffectCommand::AdmitDrive {
-                        request: Box::new(admit_request.clone()),
-                    },
-                ),
-                RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(admission::AdmitDriveRunner {
-                        store,
-                        stores: self.host.core.session_store_factory(),
-                        request: admit_request,
-                        ordinal,
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_admit_drive)
-            .map_err(|error| controller_abort(None, error))
+        emit_admission_step(
+            &admission_controller,
+            request,
+            ordinal,
+            Some(store),
+            self.host.core.session_store_factory(),
+        )
+        .await
     }
 
     /// Seal `admitted`, then run its root.

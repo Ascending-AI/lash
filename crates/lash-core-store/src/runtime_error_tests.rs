@@ -581,3 +581,43 @@ fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_exist
         assert_eq!(decoded.session_state_version_refusal(), None);
     }
 }
+
+/// A journaled step body whose store read hits the session's own retirement
+/// records the refusal instead of asking for another attempt: the
+/// retirement is the step's settled answer (FIG-3630), and retrying the
+/// derivation forever was the `LashSession/drive` wedge a session delete
+/// left behind (FIG-3822).
+#[test]
+fn session_retirement_never_takes_derivation_retry_authority() {
+    use crate::runtime_error::{EffectErrorJournalDisposition, RuntimeEffectControllerError};
+    for store_error in [
+        crate::StoreError::SessionDeleted {
+            session_id: SessionId::from("retired-admission"),
+        },
+        crate::StoreError::SessionClosing {
+            session_id: SessionId::from("retired-admission"),
+            intent: crate::store::ControlIntentId::from_sequence(7),
+        },
+    ] {
+        let fault = RuntimeEffectControllerError::from(
+            crate::runtime_error::runtime_error_from_store_commit(store_error),
+        )
+        .retryable_uncommitted_derivation();
+        assert!(fault.is_session_retirement());
+        assert_eq!(
+            fault.journal_disposition(crate::RuntimeEffectKind::AdmitDrive),
+            EffectErrorJournalDisposition::Terminal,
+            "a retired session's fault records; the step never runs again"
+        );
+    }
+    // A live store fault still takes the retry authority it always did.
+    let live = RuntimeEffectControllerError::from(
+        crate::runtime_error::runtime_error_from_store_commit(crate::StoreError::Contended),
+    )
+    .retryable_uncommitted_derivation();
+    assert_eq!(
+        live.journal_disposition(crate::RuntimeEffectKind::AdmitDrive),
+        EffectErrorJournalDisposition::RetryUncommittedResponseDerivation,
+        "a live fault is still the attempt's, never the step's outcome"
+    );
+}

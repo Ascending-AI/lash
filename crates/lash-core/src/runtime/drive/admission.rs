@@ -6,7 +6,9 @@
 //!
 //! A store that did not answer is the attempt's fault, never a verdict: the
 //! runners mark it with derivation retry authority, so an engine runs the
-//! step again instead of recording it.
+//! step again instead of recording it. The session's own retirement is the
+//! exception: it is a settled fact the step records like a verdict, never a
+//! derivation a rerun could answer differently (FIG-3630).
 
 use std::sync::Arc;
 
@@ -55,7 +57,10 @@ fn executor_mismatch(
 /// Everything it reads is live store state, which is why it runs only inside
 /// the recorded step: the verdict it returns is what every replay decodes.
 pub(in crate::runtime) struct AdmitDriveRunner {
-    pub(in crate::runtime) store: Arc<dyn crate::store::RuntimePersistence>,
+    /// The session's history store, or `None` when the engine could not open
+    /// it at all — the session's tombstone already committed — in which case
+    /// the step's recorded body is the retirement itself.
+    pub(in crate::runtime) store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     /// The deployment's control-intent ledger: a park names its redrive by
     /// intent id, and whether that redrive is settled lives here (D15).
     pub(in crate::runtime) stores: Arc<dyn crate::SessionStoreFactory>,
@@ -88,9 +93,21 @@ impl RuntimeEffectLocalRunner for AdmitDriveRunner {
 impl AdmitDriveRunner {
     async fn admit(self) -> Result<AdmitVerdict, RuntimeEffectControllerError> {
         let session_id = &self.request.session;
+        // An engine whose attempt opens no store — the session was deleted
+        // between an earlier attempt's journaled step and this redrive —
+        // still emits this step, and its recorded body is the retirement
+        // itself: a settled fact, not a fault a rerun could answer.
+        let Some(store) = self.store.clone() else {
+            return Err(store_fault(
+                "session store open",
+                StoreError::SessionDeleted {
+                    session_id: session_id.clone(),
+                },
+            ));
+        };
         // FIG-3619: the session-state generation gate. A generation this
         // build cannot run is refused before anything is admitted.
-        self.store
+        store
             .read_session_state_version()
             .await
             .map_err(|error| store_fault("session-state generation gate", error))?;
@@ -101,7 +118,7 @@ impl AdmitDriveRunner {
         // A closing session admits nothing (FIG-3600 S7): its close ended
         // every root and raised the epoch past every admission. A store with
         // no drive epoch holds no close; the admission below still needs one.
-        let stored_epoch = match self.store.drive_epoch(session_id).await {
+        let stored_epoch = match store.drive_epoch(session_id).await {
             Ok(epoch) if epoch.closing.is_some() || epoch.control_pending => {
                 return Ok(AdmitVerdict::Idle);
             }
@@ -115,7 +132,7 @@ impl AdmitDriveRunner {
 
         // A parked root blocks the session until it is resolved (FIG-3659).
         // A store with no park ledger holds no park.
-        let park = match self.store.load_turn_park(session_id).await {
+        let park = match store.load_turn_park(session_id).await {
             Ok(park) => park,
             Err(StoreError::UnsupportedStoreOperation { .. }) => None,
             Err(error) => return Err(store_fault("parked-root check", error)),
@@ -144,7 +161,7 @@ impl AdmitDriveRunner {
             None => false,
         };
 
-        let Some((root, work)) = self.next_root().await? else {
+        let Some((root, work)) = self.next_root(&store).await? else {
             return Ok(AdmitVerdict::Idle);
         };
         // The command lane drains first (ADR 0101 §4): queued work and an
@@ -167,8 +184,7 @@ impl AdmitDriveRunner {
         // evidence, never run again (ADR 0105 L-S6, FIG-3600 S7): acceptance
         // keeps such an input out, so this is the defensive answer.
         if matches!(work, AdmittedWork::Input { .. })
-            && let Some(terminal) = self
-                .store
+            && let Some(terminal) = store
                 .root_terminal(session_id, &root)
                 .await
                 .map_err(|error| store_fault("root terminal read", error))?
@@ -206,18 +222,17 @@ impl AdmitDriveRunner {
     /// id; an input bound to an aborted turn resumes that turn (FIG-3589).
     async fn next_root(
         &self,
+        store: &Arc<dyn crate::store::RuntimePersistence>,
     ) -> Result<Option<(TurnId, AdmittedWork)>, RuntimeEffectControllerError> {
         let session_id = &self.request.session;
-        if let Some(run) = self
-            .store
+        if let Some(run) = store
             .pending_queued_run(session_id)
             .await
             .map_err(|error| store_fault("unfinished queued run read", error))?
         {
             return Ok(Some((TurnId::from(run.scope.id()), AdmittedWork::Queued)));
         }
-        if let Some(owed) = self
-            .store
+        if let Some(owed) = store
             .load_pending_follow_on()
             .await
             .map_err(|error| store_fault("pending follow-on read", error))?
@@ -230,18 +245,16 @@ impl AdmitDriveRunner {
                 },
             )));
         }
-        let ordering = self
-            .store
+        let ordering = store
             .pending_session_work_ordering(session_id)
             .await
             .map_err(|error| store_fault("pending work ordering read", error))?;
         if !ordering.session_command_precedes_turn_input()
-            && let Some((root, head)) = self.next_input_root(session_id).await?
+            && let Some((root, head)) = self.next_input_root(store, session_id).await?
         {
             return Ok(Some((root, AdmittedWork::Input { head })));
         }
-        let queued = self
-            .store
+        let queued = store
             .list_pending_queued_work(session_id)
             .await
             .map_err(|error| store_fault("pending queued work read", error))?;
@@ -254,17 +267,17 @@ impl AdmitDriveRunner {
         // A command enqueued before every input was the only reason to skip
         // the input lane: with no queued work left, the input is next.
         Ok(self
-            .next_input_root(session_id)
+            .next_input_root(store, session_id)
             .await?
             .map(|(root, head)| (root, AdmittedWork::Input { head })))
     }
 
     async fn next_input_root(
         &self,
+        store: &Arc<dyn crate::store::RuntimePersistence>,
         session_id: &SessionId,
     ) -> Result<Option<(TurnId, crate::InputId)>, RuntimeEffectControllerError> {
-        let open = self
-            .store
+        let open = store
             .list_pending_turn_inputs(session_id)
             .await
             .map_err(|error| store_fault("pending turn input read", error))?;
@@ -278,8 +291,7 @@ impl AdmitDriveRunner {
         // A root the input is bound to drives it: the root whose claim took
         // it, or the new root a fork bound it to (FIG-3600 S7). Then the turn
         // an aborted execution bound it to (FIG-3589), then its host id.
-        let bound = self
-            .store
+        let bound = store
             .root_binding(session_id, &head.input.input_id)
             .await
             .map_err(|error| store_fault("input root binding read", error))?;

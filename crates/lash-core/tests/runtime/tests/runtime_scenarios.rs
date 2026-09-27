@@ -4,6 +4,8 @@ use super::*;
 mod cases;
 #[path = "runtime_scenarios/fault_matrix.rs"]
 mod fault_matrix;
+#[path = "runtime_scenarios/retired_drive.rs"]
+mod retired_drive;
 #[path = "runtime_scenarios/support.rs"]
 mod support;
 
