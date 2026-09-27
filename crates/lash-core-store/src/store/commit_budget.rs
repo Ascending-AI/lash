@@ -543,6 +543,7 @@ mod tests {
             frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
             task: "q".repeat(BYTE_LIMIT * 2),
             options: None,
+            resolved_run: None,
             chain_depth: 1,
             attempts: 0,
         });
@@ -691,6 +692,7 @@ mod tests {
             frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
             task: "follow-up".to_string(),
             options: None,
+            resolved_run: None,
             chain_depth: 1,
             attempts: 0,
         });

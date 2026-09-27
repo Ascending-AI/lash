@@ -116,6 +116,8 @@ macro_rules! turn_config_tests {
             (a_batch_shares_one_spec_that_each_root_resolves_once, "run-spec-batch"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_batch_keeps_its_turn_lane_place_behind_the_command_lane, "run-spec-batch-order"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_recovered_follow_on_inherits_its_roots_recorded_run, "run-spec-follow-on-inherit"));
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*

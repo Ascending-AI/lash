@@ -1294,6 +1294,7 @@ impl BackendRunner {
                             .expect("a pending follow-on owes the head's current frame"),
                         task: "fig-2841 follow-on task".to_string(),
                         options: None,
+                        resolved_run: None,
                         chain_depth: 1,
                         attempts: 0,
                     });

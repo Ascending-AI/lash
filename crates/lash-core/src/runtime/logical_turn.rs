@@ -319,6 +319,7 @@ pub(super) fn follow_on_after_turn(
         task.clone(),
         Some(state.effective_protocol_turn_options().clone()),
         chain_depth,
+        state.authority.resolved_run.as_deref().cloned(),
     )
     .map(Some)
     .map_err(super::runtime_error_from_store_commit)
@@ -532,16 +533,24 @@ impl LashRuntime {
             supplied_trace_turn_id
         };
         // A claim never mixes run specs, so the head input's spec is the
-        // root's; a root of wakes or a follow-on runs the default spec.
+        // root's; a root of wakes runs the default spec, and a follow-on the
+        // shape its parent root recorded on the pending fact (FIG-3877).
         let root_spec = claims
             .turn_inputs
             .first()
             .and_then(|claim| claim.inputs.first())
             .and_then(|input| input.run_spec.clone());
+        let inherited = self
+            .state
+            .pending_follow_on
+            .as_deref()
+            .filter(|owed| owed.is_turn(&turn_trace_turn_id))
+            .and_then(|owed| owed.resolved_run.as_deref().cloned());
         self.resolve_turn_config(
             &scoped_effect_controller,
             &turn_trace_turn_id,
             root_spec.as_ref(),
+            inherited,
         )
         .await?;
         let mut turns: Vec<AssembledTurn> = Vec::new();

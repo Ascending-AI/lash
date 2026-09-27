@@ -28,10 +28,21 @@ impl LashRuntime {
     /// Bring the resident session up to the durable head under `lease`: reload
     /// invalidated resident state, then the graph unless this lease already
     /// holds it current.
+    ///
+    /// Either adoption drops the running root's resident evidence (FIG-1875:
+    /// the head wins for every fact it carries) — but it also reverts the
+    /// root's recorded execution view, which the head does not carry. Whether
+    /// this refresh ran then changes what a later commit in the same root
+    /// writes, which breaks redrive determinism (FIG-3877): a replay that
+    /// skips the refresh hashes different commit content than the attempt
+    /// that ran it. Re-installing the captured record afterwards makes the
+    /// outcome identical either way; between roots the record is absent and
+    /// nothing is restored.
     pub(in crate::runtime) async fn refresh_resident_head_under_lease(
         &mut self,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<(), RuntimeError> {
+        let resolved_run = self.state.authority.resolved_run.clone();
         self.reload_invalidated_resident_session_state_under_lease(session_execution_lease)
             .await?;
         let lease_continuity =
@@ -43,6 +54,9 @@ impl LashRuntime {
             self.refresh_session_graph_from_store()
                 .await
                 .map_err(session_head_refresh_error)?;
+        }
+        if let Some(resolved) = resolved_run {
+            crate::runtime::state::adopt_resolved_run(&mut self.state, &resolved);
         }
         Ok(())
     }

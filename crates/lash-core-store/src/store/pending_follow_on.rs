@@ -40,6 +40,15 @@ pub struct PendingFollowOn {
     /// rides in every resident session state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<Box<crate::ProtocolTurnOptions>>,
+    /// The shape the logical run's root resolved under, recorded at the
+    /// switch so a recovered follow-on runs under it rather than resolving
+    /// the session's current defaults fresh (FIG-3877). `None` on facts
+    /// written before the field existed, or whose root resolved no record.
+    /// Not part of the fact's JSON schema: the column is self-describing and
+    /// a crash back to an older worker leaves the record ignorable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub resolved_run: Option<Box<crate::run_spec::ResolvedRun>>,
     /// Frame switches in this chain so far, carried across a crash so the
     /// chain bound does not restart at zero.
     pub chain_depth: u32,
@@ -49,13 +58,16 @@ pub struct PendingFollowOn {
 
 impl PendingFollowOn {
     /// The follow-on of the physical turn `current_turn_id` switching to
-    /// `frame_id` with `task`. `chain_depth` counts this switch.
+    /// `frame_id` with `task`. `chain_depth` counts this switch; `resolved`
+    /// is the shape the logical run's root resolved under, recorded so a
+    /// recovered follow-on inherits it (FIG-3877).
     pub fn after_switch(
         current_turn_id: &TurnId,
         frame_id: FrameNodeId,
         task: impl Into<String>,
         options: Option<crate::ProtocolTurnOptions>,
         chain_depth: u32,
+        resolved: Option<crate::run_spec::ResolvedRun>,
     ) -> Result<Self, StoreError> {
         let (root, index) = QueuedRunPosition::split_turn_id(current_turn_id);
         let next = StoreError::checked_monotonic_increment("follow_on_physical_index", index)?;
@@ -64,6 +76,7 @@ impl PendingFollowOn {
             frame_id,
             task: task.into(),
             options: options.map(Box::new),
+            resolved_run: resolved.map(Box::new),
             chain_depth,
             attempts: 0,
         })
@@ -305,6 +318,7 @@ mod tests {
             frame_id: FrameNodeId::new(frame).expect("frame"),
             task: "task".into(),
             options: None,
+            resolved_run: None,
             chain_depth: 1,
             attempts: 0,
         }
@@ -346,6 +360,7 @@ mod tests {
             "t",
             None,
             1,
+            None,
         )
         .expect("first");
         assert_eq!(first.follow_on_turn_id, TurnId::from("root:agent-frame:1"));
@@ -355,6 +370,7 @@ mod tests {
             "t",
             None,
             2,
+            None,
         )
         .expect("second");
         assert_eq!(second.follow_on_turn_id, TurnId::from("root:agent-frame:2"));

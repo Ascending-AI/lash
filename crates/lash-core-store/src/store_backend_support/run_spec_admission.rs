@@ -106,3 +106,26 @@ pub fn check_steering_run_spec(
         turn_id: turn_id.clone(),
     })
 }
+
+/// The steering verdict over `turn_id` when the running root resolved under
+/// spec hash `running` (`None` = the default spec), read in the admitting
+/// transaction for the root kinds whose starting input is not filed under
+/// the turn's id as a source key (FIG-3877): the follow-on the head owes,
+/// which runs under the shape its fact recorded at the switch, and the
+/// current position of a queued run, which resolves under the spec its
+/// member inputs carry. The turn is running, so a steering spec must equal
+/// the recorded shape — there is no delivered escape.
+pub fn check_running_root_run_spec(
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    admission: &RunSpecAdmission,
+    running: Option<&str>,
+) -> Result<(), StoreError> {
+    if admission.column() == running {
+        return Ok(());
+    }
+    Err(StoreError::PendingTurnInputRunSpecMismatch {
+        session_id: session_id.clone(),
+        turn_id: turn_id.clone(),
+    })
+}

@@ -665,6 +665,7 @@ pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimePe
         frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "oversized"),
         task: "q".repeat(BYTE_LIMIT * 2),
         options: None,
+        resolved_run: None,
         chain_depth: 1,
         attempts: 0,
     });
@@ -840,6 +841,7 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(
             .expect("the initial frame is current"),
         task: "follow-up".to_string(),
         options: None,
+        resolved_run: None,
         chain_depth: 1,
         attempts: 0,
     });

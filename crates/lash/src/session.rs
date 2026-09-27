@@ -192,6 +192,7 @@ impl SessionBuilder {
             work,
             Arc::clone(&self.core.env.core.control.effect_host),
             live_replay_store,
+            Arc::clone(&self.core.env.core.providers.provider_resolver),
         ))
     }
 
@@ -222,6 +223,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.env.core.control.effect_host),
             Arc::clone(&self.core.live_replay_store),
             resolved.catalog,
+            Arc::clone(&self.core.env.core.providers.provider_resolver),
         ))
     }
 
@@ -976,6 +978,7 @@ impl LashSession {
             self.binding.effect_host(),
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
+            self.binding.provider_resolver(),
         )
     }
 

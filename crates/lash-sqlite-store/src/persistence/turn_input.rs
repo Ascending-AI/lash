@@ -1265,14 +1265,17 @@ fn admit_run_spec_conn(
             )
             .optional()
             .map_err(sqlite_error)?;
-        support::check_steering_run_spec(
-            &draft.session_id,
-            turn_id,
-            &spec,
-            addressed
-                .as_ref()
-                .map(|(state, hash)| (state.as_str(), hash.as_deref())),
-        )?;
+        match addressed {
+            Some((state, hash)) => support::check_steering_run_spec(
+                &draft.session_id,
+                turn_id,
+                &spec,
+                Some((state.as_str(), hash.as_deref())),
+            )?,
+            // No input started `turn_id` under a source key: the addressed
+            // turn may still be a running root of another kind (FIG-3877).
+            None => check_unsourced_steering_run_spec_conn(tx, draft, turn_id, &spec)?,
+        }
     }
     if let Some((hash, canonical)) = spec.interned()
         && !interned.contains(hash)
@@ -1293,4 +1296,74 @@ fn admit_run_spec_conn(
         interned.insert(hash.to_string());
     }
     Ok(spec)
+}
+
+/// The steering verdict over the root kinds no `source_key`-filed input
+/// starts (FIG-3877), read inside the admission transaction:
+///
+/// * `turn_id` is the follow-on the head owes: it inherits the shape its
+///   fact recorded at the switch. A fact written before the field existed
+///   falls back to the spec of the input that started its parent root; a
+///   queued parent leaves the queued-run evidence to decide.
+/// * `turn_id` is the pending queued run's current position: the spec its
+///   member inputs are filed under, or the default spec for a position that
+///   owns no input.
+/// * Otherwise nothing running names `turn_id`: the steering input is a
+///   next-turn root under its own spec.
+fn check_unsourced_steering_run_spec_conn(
+    tx: &Connection,
+    draft: &lash_core_execution::PendingTurnInputDraft,
+    turn_id: &lash_core_execution::TurnId,
+    spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
+) -> Result<(), StoreError> {
+    use lash_core_execution::store_backend_support as support;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    // `Some(hash)` is the shape the running root resolved under (`None` =
+    // the default spec); `None` means the evidence did not decide.
+    let mut running: Option<Option<String>> = None;
+    if let Some(owed) =
+        pending_follow_on_conn(tx, &draft.session_id)?.filter(|owed| owed.is_turn(turn_id))
+    {
+        running = match &owed.resolved_run {
+            Some(resolved) => Some(resolved.spec.as_ref().map(|hash| hash.as_str().to_string())),
+            // A fact written before the shape was recorded: the parent
+            // root's own starting input names the shape instead.
+            None => tx
+                .query_row(
+                    sql.pending_inputs.select_run_spec_by_source_key.sql(),
+                    params![draft.session_id.as_str(), owed.root_turn_id().as_str()],
+                    |row| row.get::<_, Option<String>>(1),
+                )
+                .optional()
+                .map_err(sqlite_error)?,
+        };
+    }
+    if running.is_none()
+        && let Some(run) = load_run_conn(tx, &draft.session_id, None)?
+        && run.position.turn_id == *turn_id
+    {
+        // The spec the position resolved under: the first member input's,
+        // or the default spec while selection has not committed and for a
+        // position that owns no input.
+        let mut hash = None;
+        for member in run.members.iter().flatten() {
+            if let lash_core_execution::store::QueuedRunMember::Input(input_id) = member {
+                hash = tx
+                    .query_row(
+                        sql.pending_inputs.select_run_spec_by_input_id.sql(),
+                        params![draft.session_id.as_str(), input_id.as_str()],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?
+                    .flatten();
+                break;
+            }
+        }
+        running = Some(hash);
+    }
+    if let Some(hash) = running {
+        support::check_running_root_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
+    }
+    Ok(())
 }

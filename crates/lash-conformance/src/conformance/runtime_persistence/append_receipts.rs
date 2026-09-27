@@ -1059,6 +1059,7 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePe
         frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "atomic-frame"),
         task: "must roll back".to_string(),
         options: None,
+        resolved_run: None,
         chain_depth: 1,
         attempts: 0,
     });

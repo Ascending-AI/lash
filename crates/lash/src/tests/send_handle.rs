@@ -842,6 +842,45 @@ async fn a_batch_answers_one_handle_per_input_in_request_order(engine: Engine) -
     Ok(())
 }
 
+/// A send whose spec names a route this host cannot serve is refused before
+/// the input is accepted — the same verdict a config command meets at its
+/// drain (FIG-3877) — and nothing is enqueued.
+async fn a_send_under_an_unservable_route_is_refused_before_acceptance(
+    engine: Engine,
+) -> Result<()> {
+    let fixture = fixture(engine, 1).await?;
+    let session = fixture.core.session("send-bad-route").open().await?;
+    let error = session
+        .send(TurnInput::text("route me nowhere"))
+        .provider_id("no-such-provider")
+        .await
+        .map(|_handle| ())
+        .expect_err("a route no provider serves is refused at send");
+    assert!(
+        matches!(&error, EmbedError::Runtime(runtime)
+            if runtime.code == lash_core::RuntimeErrorCode::ProviderRouteUnknown),
+        "the refusal is the typed route refusal: {error:?}"
+    );
+    let store = fixture
+        .core
+        .store_factory
+        .open_existing_store_by_id(&lash_core::SessionId::from("send-bad-route"))
+        .await?
+        .expect("the opened session has a store");
+    assert!(
+        store
+            .list_pending_turn_inputs(&lash_core::SessionId::from("send-bad-route"))
+            .await?
+            .is_empty(),
+        "the refused send accepted nothing"
+    );
+    // The refusal changed nothing: the session's recorded route still serves.
+    session
+        .send(TurnInput::text("keep the recorded route"))
+        .await?;
+    Ok(())
+}
+
 macro_rules! send_handle_laws {
     ($engine:ident, $engine_variant:expr) => {
         mod $engine {
@@ -885,6 +924,14 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
                 super::an_unobserved_root_answers_with_a_reported_gap($engine_variant).await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_send_under_an_unservable_route_is_refused_before_acceptance() -> Result<()> {
+                super::a_send_under_an_unservable_route_is_refused_before_acceptance(
+                    $engine_variant,
+                )
+                .await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

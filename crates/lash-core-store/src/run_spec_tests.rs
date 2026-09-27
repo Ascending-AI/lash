@@ -76,10 +76,74 @@ fn a_canonical_spec_decodes_back_to_itself() {
             provider_id: Some("route".to_string()),
             ..RunOverrides::default()
         }),
+        capabilities: [(
+            SlotId::new("browser"),
+            CapabilityRef {
+                contract: ContractRef::new("browser", 2),
+                binding: BindingId::new("browser:main"),
+                args: serde_json::json!({ "headless": true }),
+            },
+        )]
+        .into_iter()
+        .collect(),
     };
     let decoded =
         RunSpec::from_canonical_json(&spec.canonical_json().expect("json")).expect("decode");
     assert_eq!(decoded, spec);
+}
+
+#[test]
+fn capabilities_are_durable_refs_recorded_on_the_resolution() {
+    let mut spec = RunSpec::default();
+    assert_eq!(
+        serde_json::to_value(&spec).expect("encode"),
+        serde_json::json!({}),
+        "an empty capability map serializes away with the default spec"
+    );
+    spec.capabilities.insert(
+        SlotId::new("search"),
+        CapabilityRef {
+            contract: ContractRef::new("search", 1),
+            binding: BindingId::new("search:team"),
+            args: serde_json::Value::Null,
+        },
+    );
+    assert!(
+        !spec.is_default(),
+        "a capability alone is a non-default spec"
+    );
+    assert!(spec.hash().expect("hash").is_some());
+    let resolved = spec.resolve(&snapshot(), None).expect("resolve");
+    assert_eq!(resolved.capabilities, spec.capabilities);
+    assert_eq!(
+        resolved.config(),
+        &snapshot(),
+        "capabilities alone leave the root's config unchanged"
+    );
+    // The spec's capability refs order canonically, so slot insertion order
+    // cannot name a different spec.
+    let mut reordered = RunSpec::default();
+    reordered.capabilities.insert(
+        SlotId::new("zzz"),
+        CapabilityRef {
+            contract: ContractRef::new("search", 1),
+            binding: BindingId::new("search:team"),
+            args: serde_json::Value::Null,
+        },
+    );
+    reordered.capabilities.insert(
+        SlotId::new("search"),
+        spec.capabilities[&SlotId::new("search")].clone(),
+    );
+    spec.capabilities.insert(
+        SlotId::new("zzz"),
+        reordered.capabilities[&SlotId::new("zzz")].clone(),
+    );
+    assert_eq!(
+        spec.hash().expect("hash"),
+        reordered.hash().expect("hash"),
+        "slot insertion order must not name a different spec"
+    );
 }
 
 #[test]
@@ -110,6 +174,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             ),
             ..RunOverrides::default()
         }),
+        ..RunSpec::default()
     };
     let definition = RunOverrides {
         provider_id: Some("definition-provider".to_string()),

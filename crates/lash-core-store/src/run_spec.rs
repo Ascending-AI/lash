@@ -58,6 +58,90 @@ impl std::fmt::Display for DefinitionRef {
     }
 }
 
+/// A slot a root's spec fills with a durable capability (D5): the name the
+/// definition or the root's tooling binds the capability under.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct SlotId(String);
+
+impl SlotId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SlotId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The binding a worker resolves a capability by: an exact id, never a live
+/// object.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct BindingId(String);
+
+impl BindingId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for BindingId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// An immutable capability contract a deployment's adapters serve, by exact
+/// name and revision.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct ContractRef {
+    pub name: String,
+    pub revision: u32,
+}
+
+impl ContractRef {
+    pub fn new(name: impl Into<String>, revision: u32) -> Self {
+        Self {
+            name: name.into(),
+            revision,
+        }
+    }
+}
+
+/// A durable capability a spec names in one of its slots: the contract it is
+/// bound under, the exact binding the worker resolves, and the binding's own
+/// data (D5). Everything here is serializable — a live object cannot ride a
+/// spec.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CapabilityRef {
+    pub contract: ContractRef,
+    pub binding: BindingId,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub args: serde_json::Value,
+}
+
+// `serde_json::Value` never holds NaN or an infinite number, so its
+// `PartialEq` is reflexive and `CapabilityRef` can be `Eq` — which
+// `ResolvedRun`'s `Eq` (carried on `PendingFollowOn`) requires.
+impl Eq for CapabilityRef {}
+
 /// One-shot overrides of the session config for the root that runs an
 /// input. Each field left `None` keeps the root's snapshot value.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -181,6 +265,11 @@ pub struct RunSpec {
     /// Boxed so a spec rides a send cheaply when it is the default.
     #[serde(default, skip_serializing_if = "RunOverrides::is_empty_boxed")]
     pub overrides: Box<RunOverrides>,
+    /// Durable capability refs, keyed by the slot they fill (D5). They are
+    /// recorded data: a worker binds them by exact id, and dynamic capability
+    /// calls arrive with their own journaled protocol.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
 }
 
 impl RunSpec {
@@ -189,7 +278,7 @@ impl RunSpec {
         Self {
             definition: Some(definition),
             context,
-            overrides: Box::default(),
+            ..Self::default()
         }
     }
 
@@ -204,7 +293,10 @@ impl RunSpec {
     /// Whether this is the empty default spec, which runs under the
     /// session config and is stored as no spec at all.
     pub fn is_default(&self) -> bool {
-        self.definition.is_none() && self.context.is_null() && self.overrides.is_empty()
+        self.definition.is_none()
+            && self.context.is_null()
+            && self.overrides.is_empty()
+            && self.capabilities.is_empty()
     }
 
     /// The canonical bytes of this spec: its serde form with object keys
@@ -264,6 +356,7 @@ impl RunSpec {
         Ok(ResolvedRun {
             spec: self.hash()?,
             resolved: (config != *snapshot).then(|| Box::new(config)),
+            capabilities: self.capabilities.clone(),
             base: snapshot.clone(),
         })
     }
@@ -302,7 +395,7 @@ impl std::fmt::Display for RunSpecHash {
 /// definition, or a fresh worker never changes the shape a recorded root runs
 /// under. Its config is the root's execution view only: commits keep writing
 /// the sticky session config.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedRun {
     /// The root's snapshot: the session config after the boundary's command
     /// drain, which the spec resolved against. Its revision is the config
@@ -315,6 +408,11 @@ pub struct ResolvedRun {
     /// `None` when it runs under the snapshot itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved: Option<Box<PersistedSessionConfig>>,
+    /// The capability refs the spec's slots named, recorded with the shape so
+    /// a replay — and a recovered follow-on, which carries this record —
+    /// binds the same refs (FIG-3877).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
 }
 
 impl ResolvedRun {
@@ -324,6 +422,7 @@ impl ResolvedRun {
             base,
             spec: None,
             resolved: None,
+            capabilities: std::collections::BTreeMap::new(),
         }
     }
 

@@ -99,6 +99,9 @@ pub struct DurableSession {
     work: HeldWork,
     effect_host: Arc<dyn EffectHost>,
     live_replay_store: Arc<dyn LiveReplayStore>,
+    /// The resolver a [`send`](Self::send) judges a spec's route against
+    /// before the input is accepted (FIG-3877).
+    provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
 }
 
 impl DurableSession {
@@ -108,6 +111,7 @@ impl DurableSession {
         work: HeldWork,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
+        provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(
@@ -122,6 +126,7 @@ impl DurableSession {
             work,
             effect_host,
             live_replay_store,
+            provider_resolver,
         }
     }
 
@@ -134,6 +139,7 @@ impl DurableSession {
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn SessionStoreFactory>,
+        provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(
@@ -148,6 +154,7 @@ impl DurableSession {
             work,
             effect_host,
             live_replay_store,
+            provider_resolver,
         }
     }
 
@@ -161,6 +168,7 @@ impl DurableSession {
             work: self.work.clone(),
             effect_host: Arc::clone(&self.effect_host),
             live_replay_store: Arc::clone(&self.live_replay_store),
+            provider_resolver: Arc::clone(&self.provider_resolver),
         })
     }
 

@@ -396,8 +396,8 @@ them, or its first answer of the day is context-free.
 So a room can be busy for an hour and cost nothing, and the answer when it comes
 has the hour in it. A host never runs a turn itself (FIG-3600): every Lash input
 starts a turn on the engine, which is why ambient traffic is folded by the host
-rather than sent. Once RunSpec (FIG-3838) lands, the folded block moves into the
-send's `RunSpec.context`.
+rather than sent. `RunSpec.context` is the folded block's home once a run
+definition reads it.
 
 The composed text is stored with the mention the first time it is bound, and the
 send's id is derived from the mention's `ts` (`mention:<channel>:<ts>`), and `ts`

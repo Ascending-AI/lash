@@ -56,7 +56,7 @@ fn definition_spec(name: &str) -> crate::RunSpec {
     crate::RunSpec {
         definition: Some(crate::DefinitionRef::new(name, 1)),
         context: serde_json::json!({ "law": name }),
-        overrides: Box::default(),
+        ..crate::RunSpec::default()
     }
 }
 
@@ -798,4 +798,243 @@ pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
         "the command applied before the first turn-lane claim; the batch ran on its own shape"
     );
     assert_eq!(head_config(&parts).await.model.id, COMMANDED_MODEL);
+}
+
+/// The tool whose call closes the first frame with a switch.
+const SWITCH_TOOL: &str = "run_spec_switch_probe";
+
+/// Panics as the first committed turn's delivery begins: the switch commit is
+/// durable and the root has not ended.
+struct PanicAfterSwitchCommit;
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAfterSwitchCommit {
+    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
+        if phase == lash_core::runtime::RuntimeTurnPhase::PostCommitDelivery {
+            panic!("injected crash after the switched turn's commit");
+        }
+    }
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+}
+
+struct SwitchTool {
+    executed: Arc<AtomicUsize>,
+}
+
+fn switch_tool() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        format!("tool:{SWITCH_TOOL}"),
+        SWITCH_TOOL,
+        "A tool whose call switches the turn to a follow-on agent frame.",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for SwitchTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![switch_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == SWITCH_TOOL).then(|| Arc::new(switch_tool().contract()))
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: non-empty frame material always derives"
+    )]
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        self.executed.fetch_add(1, Ordering::SeqCst);
+        crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::from_output(
+            crate::ToolCallOutput::success(serde_json::json!({"switched": true})).with_control(
+                crate::ToolControl::SwitchAgentFrame {
+                    frame_key: crate::FrameKey::from_caller_material("run-spec-follow-on")
+                        .expect("non-empty frame material derives"),
+                    initial_nodes: Vec::new(),
+                    task: Some("run-spec follow-on".to_string()),
+                },
+            ),
+        ))
+    }
+}
+
+/// The law's runtime plus the switch tool.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the law's runtime builds"
+)]
+async fn runtime_with_switch(
+    parts: &DriveParts,
+    tool: Arc<dyn crate::plugin::PluginFactory>,
+) -> crate::LashRuntime {
+    let state = parts.initial_state();
+    let policy = state.policy.clone();
+    Box::pin(
+        crate::LashRuntime::builder(parts.host.clone(), crate::testing::runtime_lease_owner())
+            .with_session_id(&parts.session_id)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_plugin_factories(
+                crate::testing::test_standard_protocol_factories()
+                    .into_iter()
+                    .chain([tool])
+                    .collect(),
+            )
+            .with_store(Arc::clone(&parts.store))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
+            .build(),
+    )
+    .await
+    .expect("build the follow-on conformance runtime")
+}
+
+/// A follow-on recovered after a crash runs under the shape its parent root
+/// recorded at the switch, not the spec resolved fresh against the session's
+/// current defaults (FIG-3877): the root's spec pins `PINNED_MODEL`, so the
+/// follow-on's model call must name `PINNED_MODEL` too.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "run-spec-follow-on", &effect_host, &stores, 8).await;
+    // The first frame asks the model for the switch tool; the follow-on
+    // frame answers with text. Every call records the model it named.
+    let models = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let models = Arc::clone(&models);
+            move |request| {
+                let index = calls.fetch_add(1, Ordering::SeqCst);
+                models
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(request.model.clone());
+                async move {
+                    let part = if index == 0 {
+                        crate::LlmOutputPart::ToolCall {
+                            call_id: "switch-call".into(),
+                            tool_name: SWITCH_TOOL.into(),
+                            input_json: "{}".into(),
+                            replay: None,
+                        }
+                    } else {
+                        crate::LlmOutputPart::Text {
+                            text: "answered in the follow-on frame".into(),
+                            response_meta: None,
+                        }
+                    };
+                    Ok(crate::LlmResponse {
+                        parts: vec![part],
+                        ..crate::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build();
+    parts.host.providers.provider_resolver =
+        Arc::new(crate::SingleProviderResolver::new(provider.into_handle()));
+    let executed = Arc::new(AtomicUsize::new(0));
+    let tool: Arc<dyn crate::plugin::PluginFactory> =
+        Arc::new(crate::plugin::StaticPluginFactory::new(
+            "conformance-run-spec-switch-probe",
+            crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool {
+                executed: Arc::clone(&executed),
+            })),
+        ));
+    enqueue(
+        &parts,
+        "switch frames, then answer",
+        "follow-on-root",
+        pinned_spec(),
+    )
+    .await;
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let attempt = |crash: bool, report: bool| -> crate::ConformanceTurnAttempt {
+        let parts = parts.clone();
+        let tool = Arc::clone(&tool);
+        let tx = tx.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let tool = Arc::clone(&tool);
+            let tx = tx.clone();
+            Box::pin(async move {
+                let mut runtime = runtime_with_switch(&parts, tool).await;
+                if crash {
+                    runtime.set_turn_phase_probe(Arc::new(PanicAfterSwitchCommit));
+                }
+                let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+                    tokio_util::sync::CancellationToken::new(),
+                    scope,
+                )))
+                .await;
+                if !report {
+                    panic!(
+                        "the crash probe did not fire after the switch commit: {:?}",
+                        drive.map(crate::facade_support::QueuedTurnDrain::ran)
+                    );
+                }
+                let end = crate::ConformanceTurnEnd::of(&drive);
+                let _ = tx.send(drive);
+                end
+            })
+        })
+    };
+    let scope = admit(crate::ExecutionScope::queue_drain(
+        &parts.session_id,
+        format!("{prefix}-run-spec-follow-on-drive"),
+    ));
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        runner.run_crashed_then_redriven_turn(scope, attempt(true, false), attempt(false, true)),
+    )
+    .await
+    .expect("the recovered follow-on ends (it diverged from the recorded shape)");
+    let drive = rx
+        .recv()
+        .await
+        .expect("the tier's runner ran the recovering drive")
+        .unwrap_or_else(|error| panic!("the recovered follow-on replays: {error:?}"));
+    let turn = drive.ran().expect("the recovery ran the root to its end");
+    assert!(
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "the root finishes in the follow-on frame: {:?}; errors: {:?}",
+        turn.outcome,
+        turn.errors
+    );
+    assert_eq!(
+        turn.assistant_output.safe_text, "answered in the follow-on frame",
+        "the follow-on frame answers"
+    );
+    assert_eq!(
+        recorded(&models),
+        vec![PINNED_MODEL, PINNED_MODEL],
+        "the recovered follow-on ran under the shape its parent root recorded, \
+         not the session's default model"
+    );
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        1,
+        "the switch tool ran once and its result is read back"
+    );
+    let committed = parts
+        .store
+        .load_session_head_meta()
+        .await
+        .expect("read the committed head")
+        .expect("the root committed");
+    assert!(
+        committed.pending_follow_on.is_none(),
+        "the completed follow-on cleared its fact"
+    );
 }

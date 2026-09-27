@@ -27,6 +27,7 @@ pub(crate) struct BoundSession {
     catalog: Arc<dyn SessionStoreFactory>,
     scope_close: Arc<dyn lash_core::engine::ScopeCloseSink>,
     clock: Arc<dyn lash_core::Clock>,
+    provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
     /// The core's tool-child context source (FIG-3712), held for as long as
     /// the session is: the backend's host holds it weakly, and a session
     /// whose core was dropped still has children to rebuild.
@@ -57,6 +58,7 @@ impl BoundSession {
             catalog,
             scope_close: Arc::clone(&env.core.control.scope_close),
             clock: Arc::clone(&env.core.clock),
+            provider_resolver: Arc::clone(&env.core.providers.provider_resolver),
             tool_child_context_source: None,
         }
     }
@@ -119,6 +121,12 @@ impl BoundSession {
 
     pub(crate) fn catalog(&self) -> Arc<dyn SessionStoreFactory> {
         Arc::clone(&self.catalog)
+    }
+
+    pub(crate) fn provider_resolver(
+        &self,
+    ) -> Arc<dyn lash_core::provider::RuntimeProviderResolver> {
+        Arc::clone(&self.provider_resolver)
     }
 
     pub(crate) fn administration(&self) -> lash_core::SessionAdministration {

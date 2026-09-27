@@ -1750,6 +1750,7 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             .expect("the initial frame is current"),
         task: "follow-on task".to_string(),
         options: None,
+        resolved_run: None,
         chain_depth: 1,
         attempts: 0,
     };

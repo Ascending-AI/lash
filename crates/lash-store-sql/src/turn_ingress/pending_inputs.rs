@@ -148,6 +148,12 @@ crate::statements! {
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
+        /// The run spec of input `?2` of session `?1`: one member of the
+        /// queued-run position a steering input addresses (FIG-3877).
+        select_run_spec_by_input_id = "SELECT run_spec_hash
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND input_id = ?2";
+
         /// Session `?1`'s undelivered inputs at `?2`, each with the aborted
         /// turn its claim is bound to, if any (FIG-3589), and the expiry of the
         /// session-execution lease its claim is pinned to, or NULL when no live

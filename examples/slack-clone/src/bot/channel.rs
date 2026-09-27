@@ -669,8 +669,8 @@ impl ChannelBot {
         // mention itself. The ledger binds the folded rows to this mention and
         // stores the composed text on first use, so a redelivery or a recovery
         // pass sends the same bytes under the same id and resolves to the
-        // admission Lash already holds. Once RunSpec (FIG-3838) lands, the
-        // folded block moves into the send's `RunSpec.context`.
+        // admission Lash already holds. `RunSpec.context` is the folded
+        // block's home once a run definition reads it.
         let send_text = self
             .ledger
             .bind_mention_send(

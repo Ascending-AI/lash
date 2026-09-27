@@ -53,12 +53,17 @@ impl LashRuntime {
     /// Resolve the shape `root`'s logical turn runs under, as one recorded
     /// step on `controller`, and adopt it as the execution view. `spec` is
     /// the interned spec the root's claimed inputs share, `None` for the
-    /// default spec.
+    /// default spec. `inherited` is the shape a recovered follow-on's parent
+    /// root recorded at the switch (FIG-3877): the first execution re-records
+    /// it under this admission's root verbatim, so the follow-on runs under
+    /// the shape its logical run resolved rather than the session's current
+    /// defaults.
     pub(in crate::runtime) async fn resolve_turn_config(
         &mut self,
         controller: &ScopedEffectController<'_>,
         root: &TurnId,
         spec: Option<&crate::RunSpecHash>,
+        inherited: Option<crate::ResolvedRun>,
     ) -> Result<(), RuntimeError> {
         let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(
@@ -90,6 +95,7 @@ impl LashRuntime {
             root: root.clone(),
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
             spec,
+            inherited,
         };
         let resolved = controller
             .execute_effect(
@@ -234,6 +240,9 @@ struct ResolveTurnConfigRunner {
     root: TurnId,
     snapshot: PersistedSessionConfig,
     spec: Option<RootSpec>,
+    /// The shape a recovered follow-on inherits from its parent root
+    /// (FIG-3877); present only on the follow-on's own admission.
+    inherited: Option<crate::ResolvedRun>,
 }
 
 /// A root's non-default spec, read and resolved only on the step's first
@@ -331,9 +340,12 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
                 ),
             ));
         }
-        let resolved = match self.spec {
-            None => crate::ResolvedRun::snapshot(self.snapshot),
-            Some(spec) => spec.resolve(&self.snapshot).await?,
+        let resolved = match (self.inherited, self.spec) {
+            // A recovered follow-on re-records the shape its parent root
+            // resolved, verbatim: it does not re-resolve.
+            (Some(inherited), _) => inherited,
+            (None, None) => crate::ResolvedRun::snapshot(self.snapshot),
+            (None, Some(spec)) => spec.resolve(&self.snapshot).await?,
         };
         Ok(RuntimeEffectOutcome::ResolveTurnConfig {
             resolved: Box::new(resolved),

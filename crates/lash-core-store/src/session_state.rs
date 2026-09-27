@@ -623,6 +623,13 @@ pub struct RuntimeSessionAuthority {
     /// run was admitted under. Cleared with `committed_config`.
     #[serde(skip)]
     pub root_snapshot: Option<Box<crate::PersistedSessionConfig>>,
+    /// The running root's recorded shape (FIG-3838), kept so a frame switch
+    /// can record it on the follow-on the commit owes (FIG-3877). Cleared
+    /// with `committed_config`: a durable-head adoption drops the running
+    /// root's resident evidence; the drive's mid-root refresh re-installs it
+    /// from this record so the root's commits stay replayable (FIG-3877).
+    #[serde(skip)]
+    pub resolved_run: Option<Box<crate::run_spec::ResolvedRun>>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1203,6 +1210,60 @@ impl RuntimeSessionState {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
+    /// Re-open a still-unpersisted initial frame under the state's current
+    /// assignment, so the frame the first commit carries is the frame a
+    /// replay opens.
+    ///
+    /// Runtime state builders materialize the initial frame eagerly under the
+    /// session's pre-resolution policy, while a replay rebuilds the turn's
+    /// admission base with an empty graph and materializes the frame lazily
+    /// under the resolved run's view (FIG-3682). When the resolved run is
+    /// adopted, the unpersisted frame is re-stamped under the resolved
+    /// assignment — the same value lazy materialization produces — so every
+    /// execution of the turn commits the same node (FIG-3877). A persisted
+    /// frame is an immutable historical snapshot and is never rewritten.
+    #[expect(
+        clippy::expect_used,
+        reason = "the initial frame material is a non-empty literal"
+    )]
+    pub fn open_unpersisted_initial_frame_under_current_assignment(&mut self) {
+        let frame_key = crate::FrameKey::from_caller_material("initial-frame")
+            .expect("the initial frame material is non-empty");
+        let frame_node_id = crate::NodeId::new(
+            crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str()).into_inner(),
+        );
+        if self.persisted_node_ids.contains(&frame_node_id) {
+            return;
+        }
+        let policy = self.policy.clone();
+        let settled = self.protocol_turn_options.clone();
+        let Some(position) = self.session_graph.nodes.iter().position(|node| {
+            node.node_id == frame_node_id
+                && matches!(
+                    &node.payload,
+                    crate::SessionNodePayload::FrameOpen {
+                        assignment,
+                        protocol_turn_options,
+                        ..
+                    } if assignment.policy != policy
+                        || *protocol_turn_options != settled
+                )
+        }) else {
+            return;
+        };
+        let record = std::sync::Arc::make_mut(&mut self.session_graph.data_mut().nodes[position]);
+        if let crate::SessionNodePayload::FrameOpen {
+            assignment,
+            protocol_turn_options,
+            ..
+        } = &mut record.payload
+        {
+            assignment.policy = policy;
+            *protocol_turn_options = settled;
+        }
+        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "the initial frame material is a non-empty literal"
@@ -1334,7 +1395,12 @@ pub fn adopt_resolved_run(
     resolved: &crate::run_spec::ResolvedRun,
 ) {
     adopt_root_execution_config(state, resolved.config());
+    // An eagerly materialized initial frame still carries the pre-resolution
+    // assignment; re-stamp it under the resolved view so the first commit
+    // opens the same frame a replay materializes (FIG-3877).
+    state.open_unpersisted_initial_frame_under_current_assignment();
     state.authority.root_snapshot = Some(Box::new(resolved.base.clone()));
+    state.authority.resolved_run = Some(Box::new(resolved.clone()));
 }
 
 /// Adopt the durable head config's carried fields onto resident state: the
@@ -1476,6 +1542,7 @@ pub fn adopt_durable_head(
     adopt_session_config(state, &head.config);
     state.authority.committed_config = None;
     state.authority.root_snapshot = None;
+    state.authority.resolved_run = None;
     state.policy.session_id = live_owned.session_id;
     state.policy.turn_budget = live_owned.turn_budget;
     // The config adopted the commanded head value before the checkpoint
