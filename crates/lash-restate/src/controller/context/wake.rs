@@ -215,7 +215,10 @@ where
             .as_mut()
             .poll(&mut Context::from_waker(&tracked.waker));
         // Every wake the tracker saw is the SDK's own: the closure's wakes were
-        // routed past it by construction.
+        // routed past it by construction, and the attempt's request body never
+        // self-wakes inside a poll - a real Restate body is fed by another
+        // task, and the test double's `AttemptBody` upholds the same contract
+        // by delivering a raced-in frame as `Ready` instead.
         let woke_during_poll = tracked.end_poll();
 
         if result.is_ready() || woke_during_poll {

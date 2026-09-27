@@ -106,16 +106,77 @@ impl Body for AttemptBody {
                 if !self.probe.is_starved() {
                     self.probe.set(true);
                     // Input fed between the empty read and the flag is not
-                    // starvation.
+                    // starvation: hand the frame up now rather than
+                    // self-waking for a repoll. A synchronous wake +
+                    // Pending is the SDK's terminal-trap shape, and an
+                    // observer above this stream (the run-future guard in
+                    // lash-restate) must be able to fuse on it without
+                    // stranding a live wait beside an unread frame.
                     if !self.receiver.is_empty() {
                         self.probe.set(false);
-                        cx.waker().wake_by_ref();
-                        return Poll::Pending;
+                        if let Poll::Ready(Some(bytes)) = self.receiver.poll_recv(cx) {
+                            return Poll::Ready(Some(Ok(Frame::data(bytes))));
+                        }
+                    } else {
+                        (self.on_starved)();
                     }
-                    (self.on_starved)();
                 }
                 Poll::Pending
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::{Wake, Waker};
+
+    struct CountingWake {
+        wakes: AtomicUsize,
+    }
+
+    impl Wake for CountingWake {
+        fn wake(self: Arc<Self>) {
+            self.wakes.fetch_add(1, Ordering::SeqCst);
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.wakes.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// A `Pending` poll never carries a synchronous wake: that pair is the
+    /// SDK's terminal-trap shape, and the run-future guard in lash-restate
+    /// fuses the whole wait on it. Input that races an empty read is handed
+    /// back as `Ready`, never self-woken.
+    #[test]
+    fn pending_poll_frame_never_wakes_synchronously() {
+        let (_tx, rx) = mpsc::unbounded_channel::<Bytes>();
+        let probe = Arc::new(InputProbe::default());
+        let starved = Arc::new(AtomicUsize::new(0));
+        let mut body = AttemptBody::new(rx, probe, {
+            let starved = Arc::clone(&starved);
+            Arc::new(move || {
+                starved.fetch_add(1, Ordering::SeqCst);
+            })
+        });
+        let mut body = Pin::new(&mut body);
+
+        let count = Arc::new(CountingWake {
+            wakes: AtomicUsize::new(0),
+        });
+        let waker = Waker::from(Arc::clone(&count));
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        assert_eq!(count.wakes.load(Ordering::SeqCst), 0);
+        assert_eq!(starved.load(Ordering::SeqCst), 1);
+
+        // Starved stays latched: a second empty poll neither wakes nor
+        // reports starvation again.
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        assert_eq!(count.wakes.load(Ordering::SeqCst), 0);
+        assert_eq!(starved.load(Ordering::SeqCst), 1);
     }
 }
