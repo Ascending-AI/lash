@@ -419,6 +419,53 @@ impl Turn {
         child
     }
 
+    /// The session's execution lane has read free: no drive attempt is live
+    /// to hold or re-take it, and any claim row is released or lapsed, so the
+    /// redeploy's `open` cannot be refused `Contended` by a claim whose owner
+    /// already settled.
+    ///
+    /// A suspended or parked `LashTurn` attempt's guard publishes its release
+    /// on a spawned best-effort task — the claim outlives the status change —
+    /// and under pool load `open` can win that race. The clock is manual: no
+    /// retry re-arms without an `advance` this wait never performs, so a free
+    /// lane observed with no live attempt stays free.
+    async fn lane_free(&self) {
+        let session = lash_core::SessionId::from(SESSION);
+        let store = lash_core::StoreSet::session_store_factory(self.backend.stores().as_ref())
+            .open_existing_store_by_id(&session)
+            .await
+            .expect("open the session's store")
+            .expect("the session has a store");
+        let freed = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let driving = self.backend.server().invocations().into_iter().any(|view| {
+                    (view.target.starts_with(TURN_DRIVER_SERVICE)
+                        || view.target.starts_with(SESSION_DRIVER_SERVICE))
+                        && matches!(view.status, "running" | "pending")
+                });
+                let lane = store
+                    .get_session_execution_lease(&session)
+                    .await
+                    .expect("read the session's execution lease");
+                let claimable = lane
+                    .lease
+                    .as_ref()
+                    .is_none_or(|lease| lease.expires_at_epoch_ms <= lane.observed_at_epoch_ms);
+                if !driving && claimable {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        freed.unwrap_or_else(|_| {
+            panic!(
+                "the session's execution lane stayed claimed: {:#?}",
+                self.backend.server().invocations()
+            )
+        });
+    }
+
     /// Replaces the deployment: the old one is dropped first, so exactly one
     /// deployment's context source is installed.
     ///
@@ -428,6 +475,7 @@ impl Turn {
     /// the build the redeploy replaced. Its retry runs on the new one.
     async fn redeploy(&self, drifted: bool) {
         drop(self.live.lock().unwrap().take());
+        self.lane_free().await;
         let next = deploy(&self.backend, &self.world, self.called, drifted).await;
         *self.live.lock().unwrap() = Some(next);
         for view in self.backend.server().invocations() {
