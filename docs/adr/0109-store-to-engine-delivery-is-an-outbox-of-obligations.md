@@ -71,8 +71,18 @@ LOCKED`. Claiming sets `claimed`, a fresh token, `attempts + 1` and
 ### 1.2 Kinds
 
 `ObligationKind` (lash-core-store): `Ingress`, `ControlIntent`, `ScopeClose`,
-`ParentEnd`, `SessionDelete`, `ProcessTerminal`, `ProcessWake`. Its label is
-the metric label and the drain-status key.
+`ParentEnd`, `SessionDelete`, `ProcessTerminal`. Its label (`ingress`,
+`control_intent`, `scope_close`, `parent_end`, `session_delete`,
+`process_terminal`) is the metric label and the drain-status key.
+
+`ObligationKey` names the row an obligation lives on, one variant per kind:
+`Ingress { session_id, item_id }`, `ControlIntent { intent_id }`,
+`ScopeClose { session_id, root }`, `ParentEnd { parent_kind, parent_id }`,
+`SessionDelete { session_id }`, `ProcessTerminal { process_id }`.
+
+`process_wake_deliveries` is the template and already has this shape under
+its own names (`pending`/`enqueuing`/`enqueued`/`discarded`, `attempts`,
+`next_attempt_at_ms`, `claim_token`, `discard_reason`); S8 does not rename it.
 
 ### 1.3 Store half: the ledger
 
@@ -84,11 +94,11 @@ pub struct ClaimToken(String);
 pub enum ObligationState { Due, Claimed, Delivered, Stalled }
 pub enum StallReason { AttemptsExhausted, Refused, Undecodable }
 
-pub struct ClaimedObligation<P> {
+pub struct ClaimedObligation {
     pub id: ObligationId,
     pub token: ClaimToken,
     pub attempts: u32,                     // after this claim
-    pub payload: Result<P, UndecodableObligation>,
+    pub key: Result<ObligationKey, UndecodableObligation>,
 }
 pub struct UndecodableObligation { pub detail: String }
 
@@ -106,15 +116,19 @@ pub struct StalledObligation {
 
 #[async_trait]
 pub trait ObligationLedger: Send + Sync {
-    type Payload: Send + Sync + 'static;
     fn kind(&self) -> ObligationKind;
-    /// Due rows, oldest due first; a row that fails to decode is returned
-    /// claimed with `payload: Err`, never failing the page.
+    /// Arm `key`'s row outside a producer transaction (the leader's repair
+    /// pass): only a row that owes nothing is armed. `None` if the row is
+    /// missing or already carries an obligation.
+    async fn arm(&self, key: &ObligationKey, now_ms: u64)
+        -> Result<Option<ObligationId>, StoreError>;
+    /// Due rows, oldest due first; a row whose key fails to decode is
+    /// returned claimed with `key: Err`, never failing the page.
     async fn claim_due(&self, now_ms: u64, claim_ttl_ms: u64, limit: NonZeroUsize)
-        -> Result<Vec<ClaimedObligation<Self::Payload>>, StoreError>;
+        -> Result<Vec<ClaimedObligation>, StoreError>;
     /// Claim one `due` row by id (immediate delivery). `None` if it is not due.
     async fn claim(&self, id: &ObligationId, now_ms: u64, claim_ttl_ms: u64)
-        -> Result<Option<ClaimedObligation<Self::Payload>>, StoreError>;
+        -> Result<Option<ClaimedObligation>, StoreError>;
     /// Settle a claim; `ClaimLost` when the token no longer matches.
     async fn settle(&self, id: &ObligationId, token: &ClaimToken,
         settlement: ObligationSettlement, now_ms: u64) -> Result<SettleOutcome, StoreError>;
@@ -126,18 +140,19 @@ pub trait ObligationLedger: Send + Sync {
 }
 ```
 
-Each store implements a ledger per kind over the generic statements the
-foundation provides (`lash_store_sql::obligation`), supplying only the table
-and the payload decode. The arming write (`obligation_state = 'due'`,
-`obligation_due_at_ms = now`, a minted id) is part of the producer's own
-transaction and is not on this trait.
+Each store answers `StoreSet::obligation_ledger(kind) -> Arc<dyn
+ObligationLedger>` over per-table statements in
+`lash_store_sql::obligation`. A slice decodes what the key names inside its
+`deliver`. A producer arms inside its own transaction with the same `arm`
+statement (`obligation_state = 'due'`, `obligation_due_at_ms = now`, a minted
+id), through the store's `arm_obligation` helper on that transaction.
 
 ### 1.4 Engine half: the relay
 
 In `lash_core::runtime::drive::relay`:
 
 ```rust
-pub enum DeliveryFailure { Retryable(String), Refused(String) }
+pub enum DeliveryFailure { Retryable(String), Refused(String), Undecodable(String) }
 
 pub struct RelayPolicy {
     pub base_backoff_ms: u64,              // 1_000
@@ -149,38 +164,34 @@ pub struct RelayPolicy {
 
 #[async_trait]
 pub trait ObligationRelay: Send + Sync {
-    type Payload: Send + Sync + 'static;
-    fn ledger(&self) -> &dyn ObligationLedger<Payload = Self::Payload>;
+    fn ledger(&self) -> &dyn ObligationLedger;   // its kind is the relay's kind
     fn policy(&self) -> RelayPolicy;
     /// Idempotent under a repeated id: the engine dedupes on a key derived
     /// from `id`.
-    async fn deliver(&self, id: &ObligationId, payload: &Self::Payload)
+    async fn deliver(&self, id: &ObligationId, key: &ObligationKey)
         -> Result<(), DeliveryFailure>;
 }
 
+pub enum RelayVerdict { Delivered, Retried { due_at_ms: u64 }, Stalled(StallReason),
+    ClaimLost, NotDue }
+pub struct RelayPass { pub claimed: usize, pub delivered: usize, pub retried: usize,
+    pub stalled: usize, pub claim_lost: usize }
+
 /// Immediate delivery of a producer's own commit: claim by id, deliver, settle.
-pub async fn deliver_now<R: ObligationRelay + ?Sized>(relay: &R, id: &ObligationId,
+pub async fn deliver_now(relay: &dyn ObligationRelay, id: &ObligationId,
     clock: &dyn Clock) -> Result<RelayVerdict, StoreError>;
 /// One bounded due-claim pass.
-pub async fn relay_due<R: ObligationRelay + ?Sized>(relay: &R, clock: &dyn Clock,
+pub async fn relay_due(relay: &dyn ObligationRelay, clock: &dyn Clock,
     limit: NonZeroUsize) -> Result<RelayPass, StoreError>;
-
-/// Object-safe view the reconcile tick holds; blanket-implemented.
-#[async_trait]
-pub trait DueRelay: Send + Sync {
-    fn kind(&self) -> ObligationKind;
-    async fn pass(&self, clock: &dyn Clock, limit: NonZeroUsize) -> Result<RelayPass, StoreError>;
-    async fn list_stalled(&self, after: Option<&ObligationId>, limit: NonZeroUsize)
-        -> Result<Vec<StalledObligation>, StoreError>;
-    async fn count_stalled(&self) -> Result<u64, StoreError>;
-    async fn rearm(&self, id: &ObligationId, clock: &dyn Clock) -> Result<bool, StoreError>;
-}
 ```
+
+The reconcile tick holds `&[Arc<dyn ObligationRelay>]`; a slice adds its
+relay to the facade's list.
 
 Settlement rule, applied by both entry points: `Ok` → `Delivered`;
 `Refused` → `Stall(refused)`; `Retryable` → `Stall(attempts_exhausted)` when
-`attempts >= ceiling`, else `Retry` at the backoff; an undecodable payload →
-`Stall(undecodable)` without calling `deliver`. `ClaimLost` is counted, not an
+`attempts >= ceiling`, else `Retry` at the backoff; `Undecodable`, or a key
+that does not decode, → `Stall(undecodable)`. `ClaimLost` is counted, not an
 error: another relay or the deliver's own transaction settled the row.
 A deliver may settle its row itself inside the transaction that performs the
 effect (scope close does); the relay's settle then answers `ClaimLost`.
@@ -191,11 +202,12 @@ effect (scope close does); the relay's settle then answers `ClaimLost`.
   outcome, carrying the `StalledObligation` fields. The ingress slice adds it.
 - **Drain status.** `DeploymentDrainStatus::stalled_obligations:
   BTreeMap<ObligationKind, u64>`. `drained()` is false while any is non-zero.
-- **Metrics.** Counter `lash_obligation_attempts_total{kind, outcome}` with
+- **Metrics.** Counter `lash.obligation.attempts{kind, outcome}` with
   outcome `delivered | retried | stalled | claim_lost`; gauge
-  `lash_obligations_stalled{kind}` (written by `drain_status`); gauge
-  `lash_recovery_leader{name}` (1 while this process leads) and
-  `lash_recovery_leader_term{name}`.
+  `lash.obligations.stalled{kind}` (written by `drain_status`); gauges
+  `lash.recovery_leader{name}` (1 while this process leads) and
+  `lash.recovery_leader.term{name}`. A Prometheus exporter renders them
+  `lash_obligation_attempts_total` and so on.
 - **Verbs.** `LashCore::stalled_obligations(kind, after, limit)` and
   `LashCore::rearm_obligation(kind, &ObligationId)`. Re-arm is explicit;
   nothing re-arms automatically.
@@ -262,10 +274,12 @@ pub trait RecoveryLeaderStore: Send + Sync {
 `StoreSet::recovery_leader() -> Arc<dyn RecoveryLeaderStore>` is required.
 
 In `lash_core::runtime::drive::leadership`, `RecoveryLease` runs acquire or
-renew on its own cadence and publishes a `Standing`:
+renew on its own cadence and publishes a `Standing`. The host sets
+`LashCoreBuilder::recovery_lease(RecoveryLeaseConfig { generation_rank,
+timings })`:
 
 ```rust
-pub struct LeaseTimings { ttl: 15 s, renew_every: 5 s, renew_timeout: 2.5 s,
+pub struct RecoveryLeaseTimings { ttl: 15 s, renew_every: 5 s, renew_timeout: 2.5 s,
     trust_margin: 2 s, follower_retry: 5 s, follower_jitter: 0..500 ms, min_tenure: 30 s }
 pub enum Standing { Leader { term: i64, trusted_until_ms: u64 }, Follower }
 pub struct RecoveryDuties { pub leader: bool, pub due_claims: bool }
@@ -275,6 +289,11 @@ impl RecoveryLease {
     pub async fn resign(&self);
 }
 ```
+
+The lease is named `recovery:{EffectHost::turn_control_binding_id()}`: the
+engine authority that owns the effect state, in the storage that holds the
+row. `ReconcileParts` carries `duties: RecoveryDuties` and `relays:
+&[Arc<dyn ObligationRelay>]`; the facade's driver fills both.
 
 `trusted_until = renew start + ttl − trust_margin` on the host clock; a leader
 whose trust lapsed is a follower until its next successful renew. Losing the
@@ -335,7 +354,6 @@ and is not a second ingress.
 | `ParentEnd` | `parent_end_plans` | the plan's record | every child's cancel delivered or refused | the parent-end slot and the native worker sweep |
 | `SessionDelete` | `session_meta` | the close intent's delivered settle | physical delete ran | caller-retried deletion |
 | `ProcessTerminal` | `processes` | the terminal transaction | the engine's terminal promise resolved | nothing (S-14 had no owner) |
-| `ProcessWake` | `process_wake_deliveries` | unchanged | unchanged | the wake table's private columns |
 
 At the ceiling an intent stalls and is written `Failed{retryable: false}`,
 which unwedges admission; re-arm reopens it. A parent-end plan records each
@@ -402,7 +420,7 @@ live engine drive.
    intents (incl. the child-cancel wedge and claim fencing); **S8-P**
    parent-end plans (incl. undecodable and head-of-line); **S8-S** scope close
    (incl. §6); **S8-D** two-phase delete; **S8-T** process terminal publication
-   (S-14 waiters, paused terminal segments) and `ProcessWake`.
+   (S-14 waiters, paused terminal segments).
 3. **S8-A** `available_at_ms` deletion, independent of S8-F.
 
 The obligation layer is engine-neutral kernel code, but S8 builds no

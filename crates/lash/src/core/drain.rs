@@ -35,18 +35,25 @@ pub struct DeploymentDrainStatus {
     /// redrive.
     pub retired_by_executable_generation:
         std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
+    /// Stalled store→engine delivery obligations per kind (ADR 0109 §1.5):
+    /// work the relay stopped retrying — refused, undecodable, or at its
+    /// attempt ceiling — until an operator re-arms it through
+    /// [`LashCore::rearm_obligation`](crate::LashCore::rearm_obligation).
+    /// Every kind is present, zero included.
+    pub stalled_obligations: std::collections::BTreeMap<lash_core::store::ObligationKind, u64>,
     /// Host-clock epoch milliseconds at which this read completed.
     pub checked_at: u64,
 }
 
 impl DeploymentDrainStatus {
-    /// True only when admission is closed and no non-terminal process rows
-    /// and no unsettled turns remain.
+    /// True only when admission is closed and no non-terminal process rows,
+    /// no unsettled turns and no stalled obligations remain.
     pub fn drained(&self) -> bool {
         !self.accepting_new_work
             && self.remaining_invocations == 0
             && self.in_flight_turns == 0
             && self.parked_turns == 0
+            && self.stalled_obligations.values().all(|count| *count == 0)
     }
 }
 
@@ -64,6 +71,8 @@ impl serde::Serialize for DeploymentDrainStatus {
             oldest_parked_since_ms: Option<u64>,
             retired_by_executable_generation:
                 &'a std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
+            stalled_obligations:
+                &'a std::collections::BTreeMap<lash_core::store::ObligationKind, u64>,
             checked_at: u64,
             drained: bool,
         }
@@ -75,6 +84,7 @@ impl serde::Serialize for DeploymentDrainStatus {
             parked_processes: self.parked_processes,
             oldest_parked_since_ms: self.oldest_parked_since_ms,
             retired_by_executable_generation: &self.retired_by_executable_generation,
+            stalled_obligations: &self.stalled_obligations,
             checked_at: self.checked_at,
             drained: self.drained(),
         }

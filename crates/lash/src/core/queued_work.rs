@@ -8,6 +8,8 @@ use lash_core::facade_support;
 use lash_sansio::SessionId;
 
 pub(crate) struct NativeQueuedWorkRunConfig {
+    /// The core's seat in the recovery leader election (ADR 0109 §1.6).
+    pub(super) recovery: Arc<super::recovery::RecoverySlot>,
     pub(super) residents: Arc<super::residents::ResidentSessions>,
     pub(super) session_execution_owner: lash_core::LeaseOwnerIdentity,
     pub(super) env: RuntimeEnvironment,
@@ -28,6 +30,7 @@ pub(crate) fn native_queued_work_handle_for_tests(
     store_factory: Arc<dyn SessionStoreFactory>,
 ) -> NativeQueuedWorkRunHandle {
     let handle = NativeQueuedWorkRunHandle::new(Arc::new(NativeQueuedWorkRunConfig {
+        recovery: Arc::clone(&core.recovery),
         residents: Arc::clone(&core.residents),
         session_execution_owner: core.session_execution_owner.clone(),
         env: core.env.clone(),
@@ -65,6 +68,11 @@ impl NativeQueuedWorkRunHandle {
             next_request: std::sync::atomic::AtomicU64::new(0),
             substrate_slot: std::sync::OnceLock::new(),
         }
+    }
+
+    /// The core's seat in the recovery leader election.
+    pub(crate) fn recovery(&self) -> Arc<super::recovery::RecoverySlot> {
+        Arc::clone(&self.config.recovery)
     }
 
     /// Bind the substrate slot that resolves this core's work ports. The
@@ -322,6 +330,10 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                     port: port.as_ref(),
                 },
             );
+        // Which recovery duties this deployment runs this tick (ADR 0109
+        // §1.7). The obligation slices register their relays here.
+        let duties = self.config.recovery.duties().await;
+        let relays: Vec<Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>> = Vec::new();
         let report = lash_core::runtime::drive::reconcile_once(
             &lash_core::runtime::drive::ReconcileParts {
                 sessions: self.config.store_factory.as_ref(),
@@ -329,6 +341,8 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                 scopes: self.config.env.core.control.scope_close.as_ref(),
                 processes,
                 clock: self.config.env.core.clock.as_ref(),
+                duties,
+                relays: &relays,
             },
             cursor,
             page,

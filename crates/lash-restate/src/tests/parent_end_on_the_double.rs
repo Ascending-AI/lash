@@ -747,6 +747,8 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
             port: wiring.port().as_ref(),
         }),
         clock: clock.as_ref(),
+        duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
+        relays: &[],
     };
     let first = lash_core::drive::reconcile_once(
         &parts,

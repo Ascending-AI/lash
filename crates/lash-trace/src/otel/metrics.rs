@@ -14,6 +14,9 @@ const POSTGRES_POOL_ACQUIRE_OUTCOME_ATTRIBUTE: &str = "lash.postgres.pool.acquir
 const RUNTIME_COMMIT_BUDGET_OUTCOME_ATTRIBUTE: &str = "lash.runtime_commit.budget.outcome";
 const PARKED_WORK_KIND_ATTRIBUTE: &str = "lash.parked_work.kind";
 const PARKED_WORK_REASON_ATTRIBUTE: &str = "lash.parked_work.reason";
+const OBLIGATION_KIND_ATTRIBUTE: &str = "lash.obligation.kind";
+const OBLIGATION_OUTCOME_ATTRIBUTE: &str = "lash.obligation.outcome";
+const RECOVERY_LEASE_ATTRIBUTE: &str = "lash.recovery_leader.name";
 
 /// Runtime-facing OpenTelemetry instruments for host-tunable operational limits.
 #[derive(Clone)]
@@ -438,5 +441,68 @@ mod tests {
                 ("lash.session_execution_lane.give_ups", "counter", ""),
             ]
         );
+    }
+}
+
+/// Store→engine delivery obligations and the recovery leader lease
+/// (ADR 0109 §1.5).
+#[derive(Clone)]
+pub struct ObligationMetrics {
+    attempts: Counter<u64>,
+    stalled: Gauge<u64>,
+    leading: Gauge<u64>,
+    term: Gauge<u64>,
+}
+
+impl ObligationMetrics {
+    pub fn from_global_provider() -> Self {
+        Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
+    }
+
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            attempts: meter
+                .u64_counter("lash.obligation.attempts")
+                .with_description(
+                    "Delivery attempts settled, by kind and outcome (delivered, retried, stalled, claim_lost)",
+                )
+                .build(),
+            stalled: meter
+                .u64_gauge("lash.obligations.stalled")
+                .with_description("Stalled obligations by kind; zero when none is stalled")
+                .build(),
+            leading: meter
+                .u64_gauge("lash.recovery_leader")
+                .with_description("1 while this process holds the recovery leader lease, else 0")
+                .build(),
+            term: meter
+                .u64_gauge("lash.recovery_leader.term")
+                .with_description("The recovery leader lease term this process last held")
+                .build(),
+        }
+    }
+
+    /// Count one settled delivery attempt.
+    pub fn record_attempt(&self, kind: &'static str, outcome: &'static str) {
+        self.attempts.add(
+            1,
+            &[
+                KeyValue::new(OBLIGATION_KIND_ATTRIBUTE, kind),
+                KeyValue::new(OBLIGATION_OUTCOME_ATTRIBUTE, outcome),
+            ],
+        );
+    }
+
+    /// Report one kind's stalled count, including zero.
+    pub fn record_stalled(&self, kind: &'static str, count: u64) {
+        self.stalled
+            .record(count, &[KeyValue::new(OBLIGATION_KIND_ATTRIBUTE, kind)]);
+    }
+
+    /// Report whether this process leads lease `name`, and its term.
+    pub fn record_leadership(&self, name: &str, leading: bool, term: u64) {
+        let attributes = [KeyValue::new(RECOVERY_LEASE_ATTRIBUTE, name.to_owned())];
+        self.leading.record(u64::from(leading), &attributes);
+        self.term.record(term, &attributes);
     }
 }

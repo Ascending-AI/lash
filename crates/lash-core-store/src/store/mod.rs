@@ -27,6 +27,7 @@ mod graph_commit;
 mod lease_timings;
 mod load;
 mod maintenance;
+pub mod obligation;
 mod park;
 pub mod pending_follow_on;
 mod preflight;
@@ -39,6 +40,7 @@ pub use queued_run::{
 mod control_intent;
 mod drive_fence;
 mod realization;
+pub mod recovery_leader;
 mod retention;
 mod root;
 pub mod runtime_commit;
@@ -129,6 +131,7 @@ pub use maintenance::{
     GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
     MaintenanceStop, MaintenanceSweep, SessionBlobReclaimReport, VacuumReport,
 };
+pub use obligation::*;
 pub use park::{
     EnginePark, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
     ParkId, ParkReason, ParkReasonCode, ParkSummary, ProcessPark, ProcessParkKey, ProcessParkQuery,
@@ -152,6 +155,7 @@ pub use queued_work::{
     TurnWorkClaimSelection,
 };
 pub use realization::commit_runtime_state_verified;
+pub use recovery_leader::*;
 pub use retention::{
     FACADE_PLUGIN_COMMAND_OPERATION_TAG, FACADE_PLUGIN_TASK_OPERATION_TAG, FacadePluginOperation,
     PLUGIN_OPERATION_STATE_RECEIPT_KEY, RetentionBound, RetentionReport,

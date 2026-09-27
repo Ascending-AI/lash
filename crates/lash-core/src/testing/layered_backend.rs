@@ -389,6 +389,17 @@ impl StoreSet for LayeredStoreSet {
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
         Arc::clone(&self.module_artifacts)
     }
+
+    fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
+        self.inner.recovery_leader()
+    }
+
+    fn obligation_ledger(
+        &self,
+        kind: crate::store::ObligationKind,
+    ) -> Arc<dyn crate::store::ObligationLedger> {
+        self.inner.obligation_ledger(kind)
+    }
 }
 
 #[cfg(test)]

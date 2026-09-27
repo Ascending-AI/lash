@@ -831,6 +831,24 @@ turn_park_events = "crates/lash-store-sql/src/turn_ingress/turn_park_events.rs"
 [families.turn_ingress.vocabulary_columns]
 pending_turn_inputs = ["state"]
 
+[families.recovery]
+tables = ["recovery_leader"]
+statement_prefixes = ["recovery_leader"]
+shared = ["crates/lash-store-sql/src/recovery_leader.rs"]
+# The family forks nothing: each backend renders the shared statements and
+# reads its own database clock through its connection module.
+sqlite = ["crates/lash-sqlite-store/src/recovery_leader.rs"]
+postgres = ["crates/lash-postgres-store/src/postgres/recovery_leader.rs"]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.recovery.table_modules]
+recovery_leader = "crates/lash-store-sql/src/recovery_leader.rs"
+
 [families.wait]
 tables = ["await_event_waits", "await_event_meta", "await_event_revoked_sessions"]
 statement_prefixes = [
@@ -4019,3 +4037,69 @@ statement = "session_meta.sessions"
 owner = "crates/lash-store-sql/src/session/meta.rs"
 touches = ["turn_parks"]
 reason = "The reconcile drive arm lists the sessions a drive could admit work for in one catalog read. A session an unresolved park holds admits nothing until a verb resolves the park, and the verb asks for the drive itself, so the listing leaves it out instead of asking it to drive every tick."
+
+[[dialect_only]]
+statement = "session_ingress.obligation_select_due_locking"
+backends = ["postgres"]
+kind = "row locking"
+reason = """
+Every PostgreSQL deployment claims due obligations, so the due page is read
+`FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
+§1.7). SQLite has one writer and only the recovery leader claims there; it
+reads the same page through the shared `session_ingress.obligation_select_due`.
+"""
+
+[[dialect_only]]
+statement = "control_intent.obligation_select_due_locking"
+backends = ["postgres"]
+kind = "row locking"
+reason = """
+Every PostgreSQL deployment claims due obligations, so the due page is read
+`FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
+§1.7). SQLite has one writer and only the recovery leader claims there; it
+reads the same page through the shared `control_intent.obligation_select_due`.
+"""
+
+[[dialect_only]]
+statement = "session_root.obligation_select_due_locking"
+backends = ["postgres"]
+kind = "row locking"
+reason = """
+Every PostgreSQL deployment claims due obligations, so the due page is read
+`FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
+§1.7). SQLite has one writer and only the recovery leader claims there; it
+reads the same page through the shared `session_root.obligation_select_due`.
+"""
+
+[[dialect_only]]
+statement = "session_meta.obligation_select_due_locking"
+backends = ["postgres"]
+kind = "row locking"
+reason = """
+Every PostgreSQL deployment claims due obligations, so the due page is read
+`FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
+§1.7). SQLite has one writer and only the recovery leader claims there; it
+reads the same page through the shared `session_meta.obligation_select_due`.
+"""
+
+[[dialect_only]]
+statement = "parent_end_plan.obligation_select_due_locking"
+backends = ["postgres"]
+kind = "row locking"
+reason = """
+Every PostgreSQL deployment claims due obligations, so the due page is read
+`FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
+§1.7). SQLite has one writer and only the recovery leader claims there; it
+reads the same page through the shared `parent_end_plan.obligation_select_due`.
+"""
+
+[[dialect_only]]
+statement = "process.obligation_select_due_locking"
+backends = ["postgres"]
+kind = "row locking"
+reason = """
+Every PostgreSQL deployment claims due obligations, so the due page is read
+`FOR UPDATE SKIP LOCKED` and concurrent relays take disjoint rows (ADR 0109
+§1.7). SQLite has one writer and only the recovery leader claims there; it
+reads the same page through the shared `process.obligation_select_due`.
+"""

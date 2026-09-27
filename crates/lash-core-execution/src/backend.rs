@@ -176,6 +176,19 @@ impl Backend {
         self.stores().module_artifacts()
     }
 
+    /// The recovery leader lease over the store set's storage.
+    pub fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
+        self.stores().recovery_leader()
+    }
+
+    /// The store set's obligation ledger of `kind`.
+    pub fn obligation_ledger(
+        &self,
+        kind: crate::store::ObligationKind,
+    ) -> Arc<dyn crate::store::ObligationLedger> {
+        self.stores().obligation_ledger(kind)
+    }
+
     /// See [`EffectEngine::process_work`].
     pub fn process_work(&self) -> Option<ProcessWorkWiring> {
         self.engine.process_work()
@@ -245,4 +258,13 @@ pub trait StoreSet: Send + Sync {
 
     /// The Lashlang module-artifact store.
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore>;
+
+    /// The recovery leader lease over this storage (ADR 0109 §1.6).
+    fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore>;
+
+    /// The obligation ledger of `kind` (ADR 0109 §1.3).
+    fn obligation_ledger(
+        &self,
+        kind: crate::store::ObligationKind,
+    ) -> Arc<dyn crate::store::ObligationLedger>;
 }

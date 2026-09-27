@@ -112,12 +112,19 @@ pub use lash_core::async_trait;
 /// SQLite or PostgreSQL store set, or `lash::sqlite::SqliteBackend` (file or
 /// memory) until FIG-3668 deletes the SQLite engine.
 pub use lash_core::engine::BuildGeneration;
+/// Store→engine delivery obligations (ADR 0109): what a stalled obligation
+/// reports, and how this deployment competes for the recovery leader lease.
+pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings};
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
     TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
 };
 pub use lash_core::runtime::ExternalCompletionError;
+pub use lash_core::store::{
+    ObligationId, ObligationKey, ObligationKind, StallReason, StalledObligation,
+    UndecodableObligation,
+};
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
@@ -354,6 +361,14 @@ pub mod persistence {
         TurnInputState, TurnInputStateKind, TurnWorkPayload,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
+    /// The store halves a storage integrator's [`StoreSet`](crate::StoreSet)
+    /// supplies: the obligation ledgers and the recovery leader lease
+    /// (ADR 0109 §1.3, §1.6).
+    pub use lash_core::store::{
+        ClaimToken, ClaimedObligation, HolderId, KeyColumn, KeyColumnType, LeaseAnswer, LeaseClaim,
+        LeaseName, LeaseRow, ObligationLedger, ObligationSettlement, ObligationState,
+        RecoveryLeaderStore, SettleOutcome,
+    };
     pub use lash_core::{
         AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     };

@@ -42,6 +42,7 @@ pub(crate) use lash_core_store::input_normalization as io;
 pub mod drive;
 mod durable_queue;
 mod lifecycle;
+pub mod recovery_lease;
 use claim_settlement::TurnClaimSettlement;
 #[cfg(feature = "testing")]
 pub mod logical_turn;

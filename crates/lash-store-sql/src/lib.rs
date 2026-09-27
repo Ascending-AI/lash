@@ -88,7 +88,9 @@ mod render;
 pub mod artifact;
 pub mod attachment;
 pub mod effect;
+pub mod obligation;
 pub mod process;
+pub mod recovery_leader;
 pub mod session;
 pub mod session_ingress;
 pub mod session_roots;
@@ -133,6 +135,7 @@ pub const TABLES: &[&str] = &[
     process::wake_allocation_floors::TABLE,
     process::wake_deliveries::TABLE,
     process::wake_redelivery_fences::TABLE,
+    recovery_leader::TABLE,
     trigger::deliveries::TABLE,
     trigger::mutation_receipts::TABLE,
     trigger::occurrences::TABLE,
@@ -254,6 +257,16 @@ pub fn all_statements() -> Vec<Statement> {
     );
     statements.extend_from_slice(turn_ingress::turn_parks::TurnParkStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::turn_park_events::TurnParkEventStatements::NEUTRAL);
+    statements.extend_from_slice(recovery_leader::RecoveryLeaderStatements::NEUTRAL);
+    statements.extend_from_slice(session_ingress::SessionIngressObligationStatements::NEUTRAL);
+    statements.extend_from_slice(
+        session_roots::control_intents::ControlIntentObligationStatements::NEUTRAL,
+    );
+    statements.extend_from_slice(session_roots::roots::SessionRootObligationStatements::NEUTRAL);
+    statements.extend_from_slice(session::meta::SessionMetaObligationStatements::NEUTRAL);
+    statements
+        .extend_from_slice(process::parent_end_plans::ParentEndPlanObligationStatements::NEUTRAL);
+    statements.extend_from_slice(process::processes::ProcessObligationStatements::NEUTRAL);
     statements
 }
 

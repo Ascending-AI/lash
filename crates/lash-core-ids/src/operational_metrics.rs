@@ -20,6 +20,13 @@ fn parked_work_metrics() -> &'static lash_trace::otel::ParkedWorkMetrics {
 }
 
 #[cfg(feature = "otel-trace")]
+fn obligation_metrics() -> &'static lash_trace::otel::ObligationMetrics {
+    static METRICS: std::sync::LazyLock<lash_trace::otel::ObligationMetrics> =
+        std::sync::LazyLock::new(lash_trace::otel::ObligationMetrics::from_global_provider);
+    &METRICS
+}
+
+#[cfg(feature = "otel-trace")]
 fn with_parked_work_metrics(record: impl Fn(&lash_trace::otel::ParkedWorkMetrics)) {
     record(parked_work_metrics());
 }
@@ -111,6 +118,38 @@ pub fn record_parked_work_oldest_age(kind: &'static str, age_ms: u64) {
     with_parked_work_metrics(|metrics| metrics.record_oldest_age(kind, age_ms));
     #[cfg(not(feature = "otel-trace"))]
     let _ = (kind, age_ms);
+}
+
+/// Count one settled obligation delivery attempt (ADR 0109 §1.5): `outcome`
+/// is `delivered`, `retried`, `stalled` or `claim_lost`.
+pub fn record_obligation_attempt(kind: &'static str, outcome: &'static str) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+    observe_test_metric("lash.obligation.attempts");
+    #[cfg(feature = "otel-trace")]
+    obligation_metrics().record_attempt(kind, outcome);
+    #[cfg(not(feature = "otel-trace"))]
+    let _ = (kind, outcome);
+}
+
+/// Report one obligation kind's stalled count, including zero so a re-armed
+/// kind drops back (ADR 0109 §1.5).
+pub fn record_obligations_stalled(kind: &'static str, count: u64) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+    observe_test_metric("lash.obligations.stalled");
+    #[cfg(feature = "otel-trace")]
+    obligation_metrics().record_stalled(kind, count);
+    #[cfg(not(feature = "otel-trace"))]
+    let _ = (kind, count);
+}
+
+/// Report whether this process leads recovery lease `name`, and its term.
+pub fn record_recovery_leadership(name: &str, leading: bool, term: u64) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+    observe_test_metric("lash.recovery_leader");
+    #[cfg(feature = "otel-trace")]
+    obligation_metrics().record_leadership(name, leading, term);
+    #[cfg(not(feature = "otel-trace"))]
+    let _ = (name, leading, term);
 }
 
 pub fn record_runtime_commit_budgeted_size(bytes: usize, outcome: &'static str) {

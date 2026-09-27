@@ -77,7 +77,7 @@ pub use drive::{
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 pub use reconcile::{
     DriveReconcileReport, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick,
-    ReconcileTicks, SlotPass,
+    ReconcileTicks, RecoveryLeaseConfig, RecoveryLeaseTimings, RelayPass, SlotPass,
 };
 
 #[cfg(test)]

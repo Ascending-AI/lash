@@ -117,3 +117,9 @@ pub(crate) const SELECT_PROCESS_REGISTRY_IS_ATTACHED: &str =
 /// Detach the process registry, so the fence binder can attach the one it
 /// was asked for in place of an attach it never recorded.
 pub(crate) const DETACH_PROCESS_REGISTRY: &str = "DETACH DATABASE process_registry";
+
+/// The database clock, in epoch milliseconds: what the recovery leader lease
+/// compares against (ADR 0109 §1.6), so hosts with skewed clocks agree on a
+/// lease's expiry.
+pub(crate) const SELECT_DATABASE_EPOCH_MS: &str =
+    "SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER)";

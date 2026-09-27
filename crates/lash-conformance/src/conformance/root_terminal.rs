@@ -417,6 +417,8 @@ async fn reconcile_scopes(
             scopes,
             processes: None,
             clock,
+            duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
+            relays: &[],
         },
         &lash_core::engine::ReconcileCursor::default(),
         std::num::NonZeroUsize::new(64).unwrap_or(std::num::NonZeroUsize::MIN),
