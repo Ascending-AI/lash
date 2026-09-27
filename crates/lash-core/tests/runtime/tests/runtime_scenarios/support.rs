@@ -1,4 +1,6 @@
 use super::*;
+
+const SEED: u64 = 0x5_5c01;
 pub(crate) use std::collections::HashMap;
 
 pub(crate) use helpers::RecordingStore;
@@ -128,6 +130,9 @@ impl RuntimeScenario {
 }
 
 struct RuntimeScenarioContext {
+    /// The Restate server double the scenario's store and turn-control
+    /// authority run on; held so its engine outlives every row.
+    double: lash_restate_test::RestateTestBackend,
     name: &'static str,
     session_id: SessionId,
     host_behavior: RuntimeHostBehavior,
@@ -152,7 +157,12 @@ impl RuntimeScenarioContext {
         session_id: SessionId,
         host_behavior: RuntimeHostBehavior,
     ) -> Self {
-        let backend = memory_backend().await;
+        let double = kernel_double(
+            SEED,
+            lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+        )
+        .await;
+        let backend = double.lash_backend();
         let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -160,17 +170,19 @@ impl RuntimeScenarioContext {
             ))
         };
         state.ensure_agent_frame_initialized();
-        let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+        let clock = double.test_clock();
         let effect_host = backend.effect_host();
         let turn_control = lash_core::TurnCancellationAuthority::new(
             effect_host.turn_control_binding_id(),
             effect_host,
         );
+        let store = double_unbound_recording_store(&double).await;
         Self {
+            double,
             name,
             session_id,
             host_behavior,
-            store: unbound_recording_store_with_clock(&backend, clock.clone()).await,
+            store,
             turn_control,
             clock,
             owner: None,

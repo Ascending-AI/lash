@@ -6,6 +6,8 @@
 use super::*;
 use lash_sansio::sync::MutexExt;
 
+const SEED: u64 = 0x5_a501;
+
 const UNSUPPORTED_BYTES: &[u8] = b"native workspace badge binary bytes";
 
 struct AttachmentResultTool {
@@ -128,9 +130,10 @@ fn request_text(request: &lash_core::llm::types::LlmRequest) -> String {
         .join("\n")
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn unsupported_committed_tool_attachment_degrades_and_session_remains_continuable() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = std::env::temp_dir().join(format!(
         "lash-attachment-degradation-{}-{}.jsonl",
         std::process::id(),
@@ -158,33 +161,41 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .build()
         .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("unsupported-attachment-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let artifact_turn = runtime
         .run_turn_assembled(
             TurnInput::text("fetch the workspace badge"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("unsupported-attachment-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("artifact turn assembles");
+    handler.close().await.expect("close the turn's handler");
     assert_eq!(artifact_turn.tool_calls.len(), 1);
     assert!(artifact_turn.tool_calls[0].output.is_success());
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("text-after-unsupported-attachment"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let text_turn = runtime
         .run_turn_assembled(
             TurnInput::text("answer this text-only follow-up"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("text-after-unsupported-attachment"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("text-only continuation assembles");
+    handler.close().await.expect("close the turn's handler");
     assert!(
         matches!(artifact_turn.outcome, TurnOutcome::Finished(_))
             && matches!(text_turn.outcome, TurnOutcome::Finished(_)),
@@ -233,9 +244,10 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
     let _ = std::fs::remove_file(trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn accepted_tool_attachment_round_trips_without_degradation() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     const IMAGE_BYTES: &[u8] = b"accepted-image-bytes";
     let requests = Arc::new(Mutex::new(Vec::new()));
     let provider = attachment_provider(Arc::clone(&requests));
@@ -252,18 +264,22 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
         .build()
         .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("accepted-attachment-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("fetch the accepted image"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("accepted-attachment-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("accepted attachment turn");
+    handler.close().await.expect("close the turn's handler");
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
 
     let requests = requests.lock_recover();
@@ -343,7 +359,8 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
 /// pins the gates themselves.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     const SESSION_ID: &str = "array-attachment-immediate-cancel";
     let (answering_tx, answering_rx) = tokio::sync::oneshot::channel::<()>();
     let answering_tx = Arc::new(Mutex::new(Some(answering_tx)));
@@ -386,7 +403,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
             }
         })
         .build();
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
@@ -402,19 +419,21 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
         .build()
         .await;
 
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::new(
+            runtime.export_persistence_state().turn_scope("array-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn_one = runtime
         .run_turn_assembled(
             TurnInput::text("return the array"),
             CancellationToken::new(),
-            host_admitted_scope(
-                &runtime.host.core,
-                lash_core::AdmittedScope::new(
-                    runtime.export_persistence_state().turn_scope("array-turn"),
-                ),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("array turn assembles");
+    handler.close().await.expect("close the turn's handler");
     assert!(
         matches!(turn_one.outcome, TurnOutcome::Finished(_)),
         "turn one: {:?} {:?}",
@@ -438,20 +457,27 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
     );
     let turn_id = "cancelled-turn";
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = host_admitted_scope(
-        &runtime.host.core,
-        lash_core::AdmittedScope::new(persisted_state.turn_scope(turn_id)),
-    );
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::new(
+            persisted_state.turn_scope(turn_id),
+        ))
+        .await
+        .expect("open the cancelled turn's handler");
     let turn_address =
         lash_core::facade_support::TurnAddress::new(&persisted_state.session_id, turn_id);
     let turn = lash_core::task::spawn(async move {
-        runtime
+        let assembled = runtime
             .run_turn_assembled(
                 TurnInput::text("turn two input"),
                 CancellationToken::new(),
-                turn_scope,
+                handler.scoped(),
             )
+            .await;
+        handler
+            .close()
             .await
+            .expect("close the cancelled turn's handler");
+        assembled
     });
     answering_rx
         .await

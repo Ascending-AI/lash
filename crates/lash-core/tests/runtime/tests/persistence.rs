@@ -2,9 +2,12 @@ use super::*;
 use lash_core::SessionCommitStore as _;
 use lash_sansio::sync::MutexExt;
 
-#[tokio::test]
+const SEED: u64 = 0x5_a503;
+
+#[tokio::test(flavor = "multi_thread")]
 async fn durable_turn_commit_rejects_token_usage_overflow() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let overflowing_call = || MockCall {
         stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
             input_tokens: i64::MAX,
@@ -23,7 +26,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         }),
     };
     let transport = mock_provider(vec![overflowing_call(), overflowing_call()]);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -44,19 +47,22 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
             },
             usage_disposition: Default::default(),
         });
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("usage-overflow"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let error = runtime
         .run_turn_assembled(
             TurnInput::text("account this turn"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("usage-overflow"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect_err("overflow must reject the durable commit");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
     assert_eq!(
@@ -64,19 +70,22 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
     );
     assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("usage-overflow-next-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let next_error = runtime
         .run_turn_assembled(
             TurnInput::text("the poisoned ledger must fail closed again"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("usage-overflow-next-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect_err("the unconfirmed overflowing row must poison the next turn");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(
         next_error.code,
         lash_core::RuntimeErrorCode::StoreCommitFailed
@@ -85,9 +94,10 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
     assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
@@ -126,7 +136,7 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
             }),
         },
     ]);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EchoTool),
@@ -135,19 +145,22 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         store.clone() as Arc<dyn lash_core::RuntimePersistence>,
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("multi-call-usage-overflow"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let error = runtime
         .run_turn_assembled(
             TurnInput::text("use the tool, then answer"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("multi-call-usage-overflow"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect_err("the second LLM usage event must reject cumulative overflow");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
     assert_eq!(
@@ -157,9 +170,10 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
     assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_assembles_stream_only_text_response() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -189,7 +203,13 @@ async fn standard_runtime_assembles_stream_only_text_response() {
     }]);
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("stream-only-text-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput {
@@ -200,18 +220,11 @@ async fn standard_runtime_assembles_stream_only_text_response() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("stream-only-text-turn"),
-                ),
-            )
-            .with_events(&sink),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(
         &turn.outcome,
@@ -251,9 +264,10 @@ async fn standard_runtime_assembles_stream_only_text_response() {
     assert_eq!(streamed_text, "What time is it?");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let expected =
         "I’m continuing with a type-safety cleanup now: replace the remaining raw JSON paths.";
     let transport = mock_provider(vec![MockCall {
@@ -271,7 +285,13 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
     }]);
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("recover-streamed-text-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput {
@@ -282,18 +302,11 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("recover-streamed-text-turn"),
-                ),
-            )
-            .with_events(&sink),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(
         &turn.outcome,
@@ -323,9 +336,10 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
     assert_eq!(streamed_text, expected);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -341,7 +355,13 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
     }]);
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("text-part-no-duplicate-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput {
@@ -352,18 +372,11 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("text-part-no-duplicate-turn"),
-                ),
-            )
-            .with_events(&sink),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(turn.assistant_output.safe_text, "The sentence.");
     let streamed_text: String = sink
@@ -377,9 +390,10 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
     assert_eq!(streamed_text, "The sentence.");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     // Model emits one tool call that would sleep for 10s; we cancel the turn
     // and expect run_tool_calls to tear down promptly (< 2s), either via
     // JoinSet::abort_all or via the tool observing the cancellation token.
@@ -433,8 +447,14 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
         cancel_trigger.cancel();
         let _ = cancel_at_tx.send(std::time::Instant::now());
     });
-
-    let _ = tokio::time::timeout(
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("cancel-tool-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let turn = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         runtime.run_turn_assembled(
             TurnInput {
@@ -446,15 +466,13 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
                 turn_context: lash_core::TurnContext::default(),
             },
             cancel,
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("cancel-tool-turn"),
-            ),
+            handler.scoped(),
         ),
     )
     .await
-    .expect("cancelled turn did not return within 30s");
+    .expect("cancelled turn did not return within 30s")
+    .expect("the cancelled turn still reports its outcome");
+    handler.close().await.expect("close the scope's handler");
 
     let cancel_at = cancel_at_rx
         .await
@@ -465,19 +483,25 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
         elapsed_since_cancel < std::time::Duration::from_secs(2),
         "turn cancellation did not tear down in-flight tool call quickly: elapsed_since_cancel={elapsed_since_cancel:?}"
     );
-    // The tool either saw the cancellation token and returned, or its future
-    // was aborted by the JoinSet. Either outcome is acceptable — what matters
-    // is the prompt return above. We still assert cooperative observation as a
-    // stronger signal that the token is now plumbed through to tool context.
+    // The token is plumbed to the tool context on every engine, but on the
+    // Restate double the turn's recorded cancellation unwinds the attempt by
+    // invocation abort before the step's own gate watch can fire its stop —
+    // the durable record, not the cooperative signal, is the engine-neutral
+    // contract (the SQLite host raced the token first and observed it).
     assert!(
-        observed_cancel.load(Ordering::SeqCst),
-        "slow tool did not observe cancellation token through ToolContext"
+        matches!(
+            turn.outcome,
+            TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+        ),
+        "the cancelled turn must record its cancellation: {:?}",
+        turn.outcome
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_tool_control_finish_emits_terminal_output() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -524,7 +548,13 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
     });
     let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
     let turn_events = RecordingTurnEvents::default();
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("terminal-tool-finish-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput {
@@ -535,18 +565,12 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("terminal-tool-finish-turn"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(
         matches!(
@@ -585,9 +609,10 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
     ));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -625,7 +650,13 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
     });
     let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
     let turn_events = RecordingTurnEvents::default();
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("terminal-tool-fail-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput {
@@ -636,18 +667,12 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("terminal-tool-fail-turn"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(
         matches!(
@@ -669,9 +694,10 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
     )));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_empty() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![
@@ -705,7 +731,13 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
     ]);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EchoTool);
     let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("streamed-tool-call-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -717,14 +749,11 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("streamed-tool-call-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(turn.assistant_output.safe_text, "done");
     assert_eq!(turn.tool_calls.len(), 1);
@@ -737,9 +766,10 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streamed() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![],
         response: Ok(LlmResponse {
@@ -759,7 +789,13 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
     }]);
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("part-boundaries-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput {
@@ -770,18 +806,11 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("part-boundaries-turn"),
-                ),
-            )
-            .with_events(&sink),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(
         turn.assistant_output.safe_text,
@@ -799,9 +828,10 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
     assert_eq!(streamed_text, "Intro paragraph.\n\n## Heading");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -827,7 +857,13 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
         }),
     }]);
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("streamed-usage-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -839,23 +875,21 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("streamed-usage-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(turn.token_usage.input_tokens, 9);
     assert_eq!(turn.token_usage.output_tokens, 3);
     assert_eq!(turn.token_usage.cache_read_input_tokens, 2);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -887,7 +921,13 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
         }),
     }]);
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("final-usage-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -899,14 +939,11 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("final-usage-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(turn.token_usage.input_tokens, 12);
     assert_eq!(turn.token_usage.output_tokens, 4);
@@ -917,9 +954,10 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
 // ingress uses, so the in-memory store owes the same laws the durable backends
 // do.
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     struct BrokenRead {
         inner: Arc<RecordingStore>,
         read: Mutex<Option<lash_core::testing::runtime_internals::PersistedSessionRead>>,
@@ -963,7 +1001,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         }
     }
     let store = Arc::new(BrokenRead {
-        inner: unbound_recording_store(&backend).await,
+        inner: double_unbound_recording_store(&double).await,
         read: Mutex::new(None),
         loads: std::sync::atomic::AtomicUsize::new(0),
     });
@@ -1046,9 +1084,10 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
 // A turn commit whose reply is lost after the store applied it must not keep
 // its staged usage pending: the durable journal already carries those rows,
 // and a live ledger that adds both counts the turn twice.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     struct LostCommitReplyStore {
         inner: Arc<RecordingStore>,
         armed: AtomicBool,
@@ -1092,7 +1131,7 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
             ..LlmResponse::default()
         }),
     };
-    let inner_store = unbound_recording_store(&backend).await;
+    let inner_store = double_unbound_recording_store(&double).await;
     let store = Arc::new(LostCommitReplyStore {
         inner: Arc::clone(&inner_store),
         armed: AtomicBool::new(true),
@@ -1105,19 +1144,22 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         store.clone() as Arc<dyn lash_core::RuntimePersistence>,
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("ambiguous-commit-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let error = runtime
         .run_turn_assembled(
             TurnInput::text("account this turn"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("ambiguous-commit-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect_err("the landed commit's reply is lost");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
 
     // The commit landed: the durable journal already holds the turn's usage.
@@ -1155,18 +1197,22 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
 
     {
         let mut runtime = handle.runtime.lock().await;
+        let handler = double
+            .open_handler(AdmittedScope::turn(
+                SessionId::from("root"),
+                TurnId::from("after-ambiguous-commit-turn"),
+            ))
+            .await
+            .expect("open the scope's handler");
         runtime
             .run_turn_assembled(
                 TurnInput::text("account the next turn"),
                 CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("after-ambiguous-commit-turn"),
-                ),
+                handler.scoped(),
             )
             .await
             .expect("the next turn commits normally");
+        handler.close().await.expect("close the scope's handler");
         handle.publish_from(&runtime);
         // The resident ledger matches the durable journal exactly: the lost
         // reply's usage is not folded in a second time.

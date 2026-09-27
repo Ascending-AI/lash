@@ -3,11 +3,13 @@
 
 use super::*;
 
+const SEED: u64 = 0x5_b100;
+
 /// Expire the session lane at each of the first `remaining` post-commit
 /// deliveries: a worker that dies right after a commit, before the follow-on
 /// that commit owes has run.
 struct ExpireLeaseAfterEachRetainedCommit {
-    clock: Arc<ManualClock>,
+    clock: Arc<lash_core::testing::TestClock>,
     remaining: std::sync::atomic::AtomicUsize,
 }
 
@@ -22,7 +24,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterEachRetainedC
                 .is_ok()
         {
             self.clock
-                .advance_ms(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
         }
     }
 
@@ -32,11 +34,12 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterEachRetainedC
 /// A direct turn whose frame switch commits, and whose lane then dies before
 /// the follow-on runs: the follow-on is left owed on the head (FIG-3542).
 struct OwedFollowOn {
+    double: lash_restate_test::RestateTestBackend,
     backend: lash_core::Backend,
-    runtime: LashRuntime,
+    runtime: Arc<tokio::sync::Mutex<LashRuntime>>,
     store: Arc<RecordingStore>,
     requests: Arc<std::sync::Mutex<Vec<lash_core::llm::types::LlmRequest>>>,
-    clock: Arc<ManualClock>,
+    clock: Arc<lash_core::testing::TestClock>,
 }
 
 async fn owed_follow_on(
@@ -63,7 +66,12 @@ async fn owed_follow_on_with(
     lapses: usize,
     batching: lash_core::QueuedWorkBatchingConfig,
 ) -> OwedFollowOn {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
+    let backend = double.lash_backend();
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let captured = Arc::clone(&requests);
     let replies = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from(
@@ -81,9 +89,8 @@ async fn owed_follow_on_with(
             async move { Ok(reply) }
         })
         .build();
-    let clock = Arc::new(ManualClock::new(1_000));
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
+    let clock = double.test_clock();
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
@@ -120,28 +127,30 @@ async fn owed_follow_on_with(
         clock: Arc::clone(&clock),
         remaining: std::sync::atomic::AtomicUsize::new(lapses),
     }));
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from(switch_turn).clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("switch frames"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from(switch_turn),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the committed switch returns with its follow-on owed");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(run.turns.len(), 1);
     assert!(matches!(
         run.turns[0].outcome,
         TurnOutcome::AgentFrameSwitch { .. }
     ));
     OwedFollowOn {
+        double,
         backend,
-        runtime,
+        runtime: Arc::new(tokio::sync::Mutex::new(runtime)),
         store,
         requests,
         clock,
@@ -181,25 +190,31 @@ async fn owed(store: &RecordingStore) -> Option<lash_core::store::PendingFollowO
 }
 
 async fn drain(owed: &mut OwedFollowOn, drain_id: &str) -> AssembledTurn {
-    owed.runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &owed.backend,
-                &SessionId::from("root"),
-                &TurnId::from(drain_id),
-            ),
+    let handler = owed
+        .double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            TurnId::from(drain_id),
         ))
+        .await
+        .expect("open the scope's handler");
+    let turn = owed
+        .runtime
+        .lock()
+        .await
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("the drain runs")
         .ran()
-        .expect("the drain answers a turn")
+        .expect("the drain answers a turn");
+    handler.close().await.expect("close the scope's handler");
+    turn
 }
 
 /// FIG-3542: a follow-on whose drive died after the switch commit is never a
 /// queue row. The next drain runs it first, in its frame, under its own turn
 /// id, exactly once; host input that arrived meanwhile waits behind it.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig3542_an_owed_follow_on_runs_first_on_the_next_drain_and_once() {
     const TASK: &str = "the switched frame's task";
     let mut owed_run = Box::pin(owed_follow_on(
@@ -288,7 +303,7 @@ pub(super) async fn fig3542_an_owed_follow_on_runs_first_on_the_next_drain_and_o
 
 /// ADR 0101 §3: the chain depth is part of the owed fact, so a recovered
 /// follow-on that switches again continues the chain instead of restarting it.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig3542_chain_depth_survives_recovery() {
     let mut owed_run = Box::pin(owed_follow_on(
         "fig3542-chain",
@@ -327,7 +342,7 @@ pub(super) async fn fig3542_chain_depth_survives_recovery() {
 /// ADR 0101 §3: a follow-on recovered past the host's bound commits as the
 /// failed turn `FollowOnRecoveryExhausted`, with its task as delivered input,
 /// and the head no longer owes it. Nothing resets the count.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig3542_an_exhausted_follow_on_commits_failed_and_clears_the_head() {
     const TASK: &str = "a task that crashes its worker";
     let mut owed_run = Box::pin(owed_follow_on(
@@ -417,27 +432,36 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicOnceAtPromptBuild {
     fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
-/// One drive of the session under `request`, run in process to its stop.
+/// One drive of the session under `request`, recovering the lane first.
 async fn drive(
     owed: &mut OwedFollowOn,
     request: &str,
 ) -> Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
-    let controller = backend_queued_scope(
-        &owed.backend,
-        &SessionId::from("root"),
-        &TurnId::from(request),
-    );
+    let handler = owed
+        .double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            TurnId::from(request),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let controller = handler.scoped();
+    let mut runtime = owed.runtime.lock().await;
     let request = lash_core::engine::DriveRequest {
         session: SessionId::from("root"),
         request: lash_core::engine::DriveRequestId::new(request),
-        build_generation: owed.runtime.host.core.backend().build_generation().clone(),
+        build_generation: runtime.host.core.backend().build_generation().clone(),
     };
-    Box::pin(lash_core::drive::drive_session(
-        &mut owed.runtime,
+    let outcome = Box::pin(lash_core::drive::drive_session(
+        &mut runtime,
         &controller,
         &request,
     ))
-    .await
+    .await;
+    drop(runtime);
+    drop(controller);
+    handler.close().await.expect("close the scope's handler");
+    outcome
 }
 
 /// FIG-3542, FIG-3600: the session drive recovers a follow-on the head owes
@@ -445,7 +469,7 @@ async fn drive(
 /// A direct turn that meets the owed follow-on runs nothing and answers the
 /// typed `QueuedRunPending` hold; the drive then answers its input after the
 /// follow-on, each once.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_the_input_behind_it()
  {
     const TASK: &str = "the switched frame's task";
@@ -465,19 +489,23 @@ pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_
         .expect("the switch owes its follow-on");
 
     let direct = TurnId::from("fig3542-drive-direct");
+    let handler = owed_run
+        .double
+        .open_handler(AdmittedScope::turn(SessionId::from("root"), direct.clone()))
+        .await
+        .expect("open the scope's handler");
     let held = owed_run
         .runtime
+        .lock()
+        .await
         .run_turn_assembled(
             TurnInput::text("direct input behind the follow-on"),
             CancellationToken::new(),
-            host_turn_scope(
-                &owed_run.runtime.host.core,
-                &SessionId::from("root"),
-                &direct,
-            ),
+            handler.scoped(),
         )
         .await
         .expect_err("a direct turn never recovers the follow-on");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(
         held.code,
         lash_core::RuntimeErrorCode::QueuedRunPending,
@@ -537,10 +565,10 @@ pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_
 /// redriven continues the recovery it raised for; it neither raises again
 /// nor spends the bound, so a follow-on the host allows one recovery still
 /// runs.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig3542_a_redriven_recovery_raises_the_recorded_count_once() {
     const TASK: &str = "a task whose first recovery crashes";
-    let mut owed_run = Box::pin(owed_follow_on_with(
+    let owed_run = Box::pin(owed_follow_on_with(
         "fig3542-recount",
         &[TASK],
         vec![switch_reply(0), text_reply("follow-on answer")],
@@ -554,35 +582,97 @@ pub(super) async fn fig3542_a_redriven_recovery_raises_the_recorded_count_once()
     assert_eq!(follow_on.attempts, 0);
 
     // The recovery's worker dies as its follow-on's prompt is built: after
-    // the raise, before any effect.
+    // the raise, before any effect. On the double a worker death is the
+    // handler's attempt failing retryably and the invocation replaying into
+    // the redrive — a fresh drive could never adopt another invocation's
+    // half-journaled turn, so `run_crashed_then_redriven` is the crash
+    // simulation.
     owed_run
         .runtime
-        .set_turn_phase_probe(Arc::new(PanicOnceAtPromptBuild::default()));
-    let crashed = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(drive(
-        &mut owed_run,
-        "fig3542-recount-drive",
-    )))
-    .await;
-    assert!(
-        crashed.is_err(),
-        "the recovery's worker crashes: {:?}",
-        crashed
-            .as_ref()
-            .map(|drive| drive.as_ref().map(|outcome| &outcome.ran))
-    );
-    assert_eq!(
-        owed(&owed_run.store).await.map(|owed| owed.attempts),
-        Some(1),
-        "the crashed recovery raised the count before its first effect"
-    );
-    // The crashed worker's lane lapses.
-    owed_run
-        .clock
-        .advance_ms(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
-
-    let outcome = drive(&mut owed_run, "fig3542-recount-drive")
+        .lock()
         .await
-        .expect("the redriven drive runs to its stop");
+        .set_turn_phase_probe(Arc::new(PanicOnceAtPromptBuild::default()));
+    let build_generation = owed_run
+        .runtime
+        .lock()
+        .await
+        .host
+        .core
+        .backend()
+        .build_generation()
+        .clone();
+    let driven: Arc<Mutex<Option<lash_core::engine::DriveOutcome>>> = Arc::new(Mutex::new(None));
+    let attempt_count = Arc::new(AtomicUsize::new(0));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let runtime = Arc::clone(&owed_run.runtime);
+        let driven = Arc::clone(&driven);
+        let attempt_count = Arc::clone(&attempt_count);
+        let store = Arc::clone(&owed_run.store);
+        let clock = Arc::clone(&owed_run.clock);
+        Arc::new(move |scoped| {
+            let runtime = Arc::clone(&runtime);
+            let driven = Arc::clone(&driven);
+            let attempt_count = Arc::clone(&attempt_count);
+            let store = Arc::clone(&store);
+            let clock = Arc::clone(&clock);
+            let build_generation = build_generation.clone();
+            Box::pin(async move {
+                if attempt_count.fetch_add(1, Ordering::SeqCst) == 1 {
+                    // The replayed attempt re-enters after the crash: the
+                    // raise it replays is the one its crash recorded, and
+                    // the crashed worker's lane has lapsed.
+                    assert_eq!(
+                        owed(&store).await.map(|owed| owed.attempts),
+                        Some(1),
+                        "the crashed recovery raised the count before its first effect"
+                    );
+                    clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+                }
+                let request = lash_core::engine::DriveRequest {
+                    session: SessionId::from("root"),
+                    request: lash_core::engine::DriveRequestId::new("fig3542-recount-drive"),
+                    build_generation,
+                };
+                let mut runtime = runtime.lock().await;
+                if let Ok(outcome) =
+                    lash_core::drive::drive_session(&mut runtime, &scoped, &request).await
+                {
+                    *driven.lock_recover() = Some(outcome);
+                }
+            })
+        })
+    };
+    // The crashed attempt's retry waits on a backoff timer and this double
+    // keeps manual time, so pump pending timers while the crash-and-redrive
+    // pair runs — the lane lapse the test wants is one of the timers fired.
+    let pump = {
+        let double = owed_run.double.clone();
+        lash_core::task::spawn(async move {
+            loop {
+                if double.server().fire_next_timer().is_none() {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
+        })
+    };
+    let redriven = owed_run
+        .double
+        .run_crashed_then_redriven(
+            AdmittedScope::queue_drain(
+                SessionId::from("root"),
+                TurnId::from("fig3542-recount-drive"),
+            ),
+            Arc::clone(&attempt),
+            attempt,
+        )
+        .await;
+    pump.abort();
+    redriven.expect("the crashed recovery's invocation redrives");
+
+    let outcome = driven
+        .lock_recover()
+        .take()
+        .expect("the redriven drive ran to its stop");
     assert!(
         matches!(
             outcome.ran.first(),
@@ -606,7 +696,7 @@ pub(super) async fn fig3542_a_redriven_recovery_raises_the_recorded_count_once()
 /// the one the follow-on's commit ends — so when a redrive under a restored
 /// build recovers the follow-on and commits it, that commit clears the park:
 /// the root is never left parked and terminal at once.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig3848_a_parked_root_owing_a_follow_on_is_cleared_when_the_follow_on_commits()
 {
     let mut owed_run = Box::pin(owed_follow_on(

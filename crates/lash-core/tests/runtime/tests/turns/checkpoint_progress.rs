@@ -1106,7 +1106,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
 }
 
 pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     store: Arc<RecordingStore>,
     controller: Arc<dyn lash_core::testing::EffectLayer>,
     turn_id: &TurnId,
@@ -1138,12 +1138,13 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
             }),
         },
     ]);
+    let backend = double.lash_backend();
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let mut runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
-        journal_replay_host(backend, Arc::clone(&controller)),
+        journal_replay_host(&backend, Arc::clone(&controller)),
         runtime_store,
     ))
     .await;
@@ -1162,11 +1163,15 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
     )
     .await;
     let input = TurnInput::text("opening input");
-    let scope = super::effect::layered_scope(
-        backend,
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn("root", turn_id))
+        .await
+        .expect("open the scope's handler");
+    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
         Arc::clone(&controller),
-        lash_core::AdmittedScope::turn("root", turn_id),
-    );
+    )
+    .expect("layer the handler's scope");
     // FIG-3157: the wake claimed at the terminal checkpoint drives a
     // follow-on physical turn, so the run holds two turns. The acceptance
     // belongs to the admitted turn, which is the run's first one; the run
@@ -1178,6 +1183,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         )
         .await
         .expect("commit the checkpoint-injected turn");
+    handler.close().await.expect("close the scope's handler");
     let acceptance = committed
         .acceptance
         .expect("the committed direct turn exposes its acceptance");
@@ -1185,31 +1191,34 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
 }
 
 pub(super) async fn redrive_checkpoint_injected_turn(
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     store: Arc<dyn lash_core::RuntimePersistence>,
     controller: Arc<dyn lash_core::testing::EffectLayer>,
     turn_id: &TurnId,
     input: TurnInput,
 ) -> Result<lash_core::facade_support::AssembledTurn, lash_core::RuntimeError> {
+    let backend = double.lash_backend();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        journal_replay_host(backend, Arc::clone(&controller)),
+        journal_replay_host(&backend, Arc::clone(&controller)),
         store,
     )
     .await;
-    let scope = super::effect::layered_scope(
-        backend,
-        controller,
-        lash_core::AdmittedScope::turn("root", turn_id),
-    );
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn("root", turn_id))
+        .await
+        .expect("open the scope's handler");
+    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
+        .expect("layer the handler's scope");
     // FIG-3157: the run holds the admitted turn plus the follow-on turn the
     // terminal-checkpoint claim drives. The acceptance identity belongs to
     // the admitted turn, so that is the one returned here.
     let run = runtime
         .stream_turn_with_agent_frames(input, TurnOptions::new(CancellationToken::new(), scope))
         .await?;
+    handler.close().await.expect("close the scope's handler");
     Ok(run
         .turns
         .into_iter()
@@ -1219,13 +1228,13 @@ pub(super) async fn redrive_checkpoint_injected_turn(
 
 #[tokio::test]
 pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit_identity() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 17, lash_restate_test::ServerConfig::default()).await;
     let turn_id = &TurnId::from("checkpoint-injected-redrive");
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let controller: Arc<dyn lash_core::testing::EffectLayer> =
         Arc::new(JournalReplayEffectController::default());
     let (input, first_acceptance) = commit_checkpoint_injected_turn_for_redrive(
-        &backend,
+        &double,
         Arc::clone(&store),
         Arc::clone(&controller),
         turn_id,
@@ -1254,7 +1263,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         inner: Arc::clone(&store),
     });
     let replayed = Box::pin(redrive_checkpoint_injected_turn(
-        &backend,
+        &double,
         replay_store,
         Arc::clone(&controller),
         turn_id,
@@ -1282,9 +1291,10 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
 
 #[tokio::test]
 pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driving() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 18, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let turn_id = &TurnId::from("accepted-input-foreign-claim");
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let controller: Arc<dyn lash_core::testing::EffectLayer> =
         Arc::new(JournalReplayEffectController::default());
     let foreign: Arc<dyn lash_core::RuntimePersistence> = Arc::new(ForeignClaimBeforeDriveStore {
@@ -1298,11 +1308,12 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
         foreign,
     )
     .await;
-    let scope = super::effect::layered_scope(
-        &backend,
-        controller,
-        lash_core::AdmittedScope::turn("root", turn_id),
-    );
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn("root", turn_id))
+        .await
+        .expect("open the scope's handler");
+    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
+        .expect("layer the handler's scope");
 
     let error = runtime
         .stream_turn_with_agent_frames(
@@ -1311,6 +1322,7 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
         )
         .await
         .expect_err("a live probe that finds the accepted row held elsewhere cedes");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(
         error.code,
@@ -1636,7 +1648,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
 
 #[tokio::test]
 pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 19, lash_restate_test::ServerConfig::default()).await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1649,7 +1661,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         }),
     }]);
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     let queued_input = enqueue_idle_turn_input(
         store.as_ref(),
         &SessionId::from("root"),
@@ -1708,21 +1720,22 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
             })
             .expect("wake batch");
 
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root"),
+            TurnId::from("selected-wake-drain"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let drained = runtime
         .stream_selected_queued_work(
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_queued_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("selected-wake-drain"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
             std::slice::from_ref(&wake_batch.batch_id),
         )
         .await
         .expect("selected wake drain succeeds")
         .expect("selected wake produces a turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(drained.assistant_output.safe_text, "selected wake response");
     let pending_inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(

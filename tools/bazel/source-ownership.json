@@ -86,7 +86,6 @@
         "tests/runtime/tests/kernel_door.rs",
         "tests/runtime/tests/language_runtime_value.rs",
         "tests/runtime/tests/projection.rs",
-        "tests/runtime/tests/replay_mismatch.rs",
         "tests/runtime/tests/replay_origin.rs",
         "tests/runtime/tests/session_freshness.rs",
         "tests/runtime/tests/session_lease_guard.rs",

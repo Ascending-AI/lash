@@ -28,6 +28,8 @@
 
 use super::*;
 
+const SEED: u64 = 0x5_c2;
+
 fn usage(input_tokens: i64, output_tokens: i64) -> LlmStreamEvent {
     LlmStreamEvent::Usage(LlmUsage {
         input_tokens,
@@ -87,9 +89,17 @@ async fn run_pinned_turn(
     cancel: CancellationToken,
     turn_id: &str,
 ) -> Pinned {
-    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(1_000));
-    let backend = memory_backend_with_clock(Arc::clone(&clock)).await;
-    let store = unbound_recording_store_with_clock(&backend, clock).await;
+    let double = kernel_double(
+        SEED,
+        lash_restate_test::ServerConfig {
+            time: lash_restate_test::TimeMode::Manual,
+            start_time_ms: 1_000,
+            ..lash_restate_test::ServerConfig::default()
+        },
+    )
+    .await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let session_id = format!("pin:{turn_id}");
     let mut runtime = crate::runtime_support::commit_pins::pinned_runtime(
         &session_id,
@@ -102,20 +112,23 @@ async fn run_pinned_turn(
     .await;
     let sessions = RecordingSink::default();
     let activities = RecordingTurnEvents::default();
-    let scope = host_turn_scope(
-        &runtime.host.core,
-        &SessionId::from(session_id.as_str()),
-        &TurnId::from(turn_id),
-    );
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id.as_str()),
+            TurnId::from(turn_id),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput::text("use the tool, then answer"),
-            TurnOptions::new(cancel, scope)
+            TurnOptions::new(cancel, handler.scoped())
                 .with_events(&sessions)
                 .with_turn_events(&activities),
         )
         .await
         .expect("the turn assembles");
+    handler.close().await.expect("close the scope's handler");
     assert!(
         matches!(sessions.snapshot().last(), Some(SessionStreamEvent::Done)),
         "the host stream ends with `Done`"
@@ -167,7 +180,7 @@ fn assert_pinned(scenario: &str, pinned: &Pinned, hashes: &[&str], assembled: &s
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_turn_commits_the_pinned_bytes() {
     let pinned = Box::pin(run_pinned_turn(
         vec![tool_call("pin-call-1", "alpha"), text_call("done", 11)],
@@ -224,7 +237,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn parallel_tool_turn_commits_the_pinned_bytes() {
     let parallel = MockCall {
         stream_events: vec![usage(9, 4)],
@@ -334,7 +347,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn provider_failure_turn_commits_the_pinned_bytes() {
     let pinned = Box::pin(run_pinned_turn(
         vec![MockCall {
@@ -374,7 +387,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cancelled_turn_commits_the_pinned_bytes() {
     let cancel = CancellationToken::new();
     cancel.cancel();
@@ -418,7 +431,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
 
 /// A cancel that lands while a tool is running: the tool itself requests it
 /// as it starts, then observes it, and the turn stops cancelled.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     let slow = MockCall {
         stream_events: vec![usage(6, 1)],
@@ -518,12 +531,20 @@ impl lash_core::ToolProvider for CancelOnStart {
 /// A host sink that blocks until released holds neither the commit nor the
 /// turn's decisions, and the turn announces itself finished only after the
 /// host has received its whole stream (the `TurnObserver` host contract).
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     const TURN_ID: &str = "commit-pin-parallel-tool-turn";
-    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(1_000));
-    let backend = memory_backend_with_clock(Arc::clone(&clock)).await;
-    let store = unbound_recording_store_with_clock(&backend, clock).await;
+    let double = kernel_double(
+        SEED + 1,
+        lash_restate_test::ServerConfig {
+            time: lash_restate_test::TimeMode::Manual,
+            start_time_ms: 1_000,
+            ..lash_restate_test::ServerConfig::default()
+        },
+    )
+    .await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let parallel = MockCall {
         stream_events: vec![usage(9, 4)],
         response: Ok(LlmResponse {
@@ -560,23 +581,29 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     );
     let address =
         lash_core::facade_support::TurnAddress::new(SessionId::from(session_id.as_str()), TURN_ID);
-    let scope = host_turn_scope(
-        &runtime.host.core,
-        &SessionId::from(session_id.as_str()),
-        &TurnId::from(TURN_ID),
-    );
     let host = GatedHost::default();
     let turn = lash_core::task::spawn({
         let host = host.clone();
+        let double = double.clone();
+        let session_id = session_id.clone();
         async move {
-            runtime
+            let handler = double
+                .open_handler(AdmittedScope::turn(
+                    SessionId::from(session_id.as_str()),
+                    TurnId::from(TURN_ID),
+                ))
+                .await
+                .expect("open the scope's handler");
+            let assembled = runtime
                 .stream_turn(
                     TurnInput::text("use the tool, then answer"),
-                    TurnOptions::new(CancellationToken::new(), scope)
+                    TurnOptions::new(CancellationToken::new(), handler.scoped())
                         .with_events(&host)
                         .with_turn_events(&host),
                 )
-                .await
+                .await;
+            handler.close().await.expect("close the scope's handler");
+            assembled
         }
     });
 

@@ -1,6 +1,8 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 
+const SEED: u64 = 0x5_e217;
+
 // Exercise the trait-default turn-control binding over a real journaling host:
 // this host forwards its ports to `0` but keeps the trait's own
 // `turn_control_binding`, so the binding comes from the default's journaled
@@ -77,9 +79,10 @@ impl lash_core::EffectHost for DefaultBindingHost {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn turn_control_default_binding_external_cancel_stops_local_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let started_tx = Arc::new(Mutex::new(Some(started_tx)));
     let transport = TestProvider::builder()
@@ -102,7 +105,7 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
     );
     config = config.with_effect_host(Arc::new(DefaultBindingHost(backend.effect_host())));
     let driver_store: Arc<dyn lash_core::RuntimePersistence> =
-        unbound_recording_store(&backend).await;
+        double_unbound_recording_store(&double).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -113,7 +116,6 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         "root",
         driver_store,
     );
-    let host_config = config.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -122,26 +124,23 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
     )
     .await;
     let address = lash_core::facade_support::TurnAddress::new("root", "external-local-cancel");
-    let scope = host_admitted_scope(
-        &host_config,
-        lash_core::AdmittedScope::new(
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::new(
             runtime
                 .export_persistence_state()
                 .turn_scope(&address.turn_id),
-        ),
-    );
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .run_turn_assembled(
-                TurnInput::text("wait for host cancellation"),
-                CancellationToken::new(),
-                scope,
-            )
-            .await
-    });
-    started_rx
+        ))
         .await
-        .expect("provider started after the turn gate was minted");
+        .expect("open the scope's handler");
+    let mut turn = Box::pin(runtime.run_turn_assembled(
+        TurnInput::text("wait for host cancellation"),
+        CancellationToken::new(),
+        handler.scoped(),
+    ));
+    tokio::select! {
+        outcome = turn.as_mut() => panic!("the turn must still be running: {outcome:?}"),
+        started = started_rx => started.expect("provider started after the turn gate was minted"),
+    }
     let receipt = driver
         .request_cancel(lash_core::facade_support::TurnCancelRequest::new(
             address,
@@ -154,24 +153,27 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         receipt.outcome,
         lash_core::facade_support::TurnCancelOutcome::Requested(_)
     ));
-    let result = turn.await.unwrap().unwrap();
+    let result = turn.await.unwrap();
+    handler.close().await.expect("close the scope's handler");
     assert!(
         matches!(result.outcome, lash_core::facade_support::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) if evidence.request_id == "host-request")
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     use lash_core::EffectHost as _;
     use lash_core::runtime::turn_control::ActiveTurnControl;
 
     let host = Arc::new(DefaultBindingHost(backend.effect_host()));
     let address = lash_core::facade_support::TurnAddress::new("active-session", "active-turn");
-    let scoped = backend_admitted_scope(
-        &backend,
-        lash_core::AdmittedScope::new(address.execution_scope()),
-    );
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::new(address.execution_scope()))
+        .await
+        .expect("open the scope's handler");
+    let scoped = handler.scoped();
     let binding = host.turn_control_binding(&scoped).await.unwrap();
     let resolver = binding.resolver();
     let active = ActiveTurnControl::new(resolver, address.clone())
@@ -189,7 +191,7 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
         "host rejected active gate: {result:?}"
     );
     let driver_store: Arc<dyn lash_core::RuntimePersistence> =
-        unbound_recording_store(&backend).await;
+        double_unbound_recording_store(&double).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("active-session"),
@@ -213,4 +215,6 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
         .unwrap()
         .unwrap();
     assert_eq!(evidence.request_id, "host-cancel");
+    drop(scoped);
+    handler.close().await.expect("close the scope's handler");
 }

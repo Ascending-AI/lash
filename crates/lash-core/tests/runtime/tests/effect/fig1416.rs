@@ -183,7 +183,7 @@ fn one_child_group() -> lash_core::RuntimeEffectGroup {
     .expect("a one-child group assembles")
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_controller_without_group_support_fails_closed_on_every_group_method() {
     let controller = GrouplessEffectController;
 
@@ -241,7 +241,7 @@ async fn a_controller_without_group_support_fails_closed_on_every_group_method()
 /// flag: whatever a controller answers, it answers with all three. A wrapper
 /// that forwards `open_effect_group` and leaves the other two refusing is the
 /// same bug the old relation existed to catch, and this law still catches it.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn the_three_group_methods_answer_as_one_surface() {
     /// Which of the three refused with the capability code.
     async fn refusals<C: RuntimeEffectController>(controller: &C) -> [(&'static str, bool); 3] {
@@ -341,7 +341,7 @@ async fn fresh_store_controller() -> lash_sqlite_store::SqliteRuntimeEffectContr
 /// resolver goes nowhere — a host that then routes children through a resolver
 /// its wiring code believes is registered. `OnceLock::set` is therefore the
 /// arbiter, and this pins that it is.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     const REGISTRARS: usize = 8;
 
@@ -393,7 +393,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
 /// and a caller that saw one code for both would have no way to tell a missing
 /// wiring from a missing runner. The first is a deployment-validation failure;
 /// the second names the child.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_child_this_host_cannot_route_is_a_shape_refusal_not_an_unsupported_host() {
     struct NoChildRuns;
 

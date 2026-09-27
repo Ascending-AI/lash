@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5_c0aa;
+
 /// A layer whose controllers own commit backpressure exactly when `ENGINE`,
 /// the way an engine-backed controller does, over a store-journaled host.
 struct JournaledCommitController<const ENGINE: bool>;
@@ -106,14 +108,51 @@ fn engine_commit_host(backend: &lash_core::Backend) -> Arc<dyn lash_core::Effect
 
 #[tokio::test]
 async fn durable_journaled_engine_commits_bypass_local_admission() {
-    let backend = memory_backend().await;
-    Box::pin(assert_commit_placement(
-        &backend,
-        &SessionId::from("engine-commit-placement"),
-        engine_commit_host(&backend),
-        0,
-    ))
-    .await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let session_id = SessionId::from("engine-commit-placement");
+    let store = double_unbound_recording_store(&double).await;
+    let transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: "committed".into(),
+                response_meta: None,
+            }],
+            ..LlmResponse::default()
+        }),
+    }]);
+    let host = EmbeddedRuntimeHost::new(
+        test_runtime_host_config(&backend).with_effect_host(engine_commit_host(&backend)),
+    );
+    let mut runtime = TestRuntime::new(&backend, transport)
+        .host(host)
+        .store(store.clone())
+        .with_session_id(&session_id)
+        .build()
+        .await;
+    let _ = lash_core::runtime::commit_admission::take_product_commit_admission_observations(
+        &session_id,
+    );
+    let handler = double
+        .open_handler(AdmittedScope::turn(&session_id, "placement-turn"))
+        .await
+        .expect("open the scope's handler");
+    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
+        Arc::new(JournaledCommitController::<true>),
+    )
+    .expect("layer the handler's scope");
+    runtime
+        .run_turn_assembled(TurnInput::text("commit"), CancellationToken::new(), scope)
+        .await
+        .expect("commit real turn");
+    handler.close().await.expect("close the scope's handler");
+    let observations =
+        lash_core::runtime::commit_admission::take_product_commit_admission_observations(
+            &session_id,
+        );
+    assert_eq!(observations.len(), 0, "turn commit coordinator entries");
 }
 
 #[tokio::test]

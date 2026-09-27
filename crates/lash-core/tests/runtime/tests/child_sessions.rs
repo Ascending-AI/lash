@@ -3,6 +3,8 @@ use lash_core::AttachmentStore as _;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 
+const SEED: u64 = 0x5_c401;
+
 struct AttachmentWritingTool;
 
 struct FirstTurnProcessTool;
@@ -110,9 +112,10 @@ fn attachment_writing_tool_definition() -> lash_core::ToolDefinition {
     )
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inherited_child_session_carries_parent_tool_state() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
             "memory_probe",
@@ -189,9 +192,10 @@ async fn inherited_child_session_carries_parent_tool_state() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn parent_fork_without_plugin_init_is_refused() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
         .build()
         .await;
@@ -218,9 +222,10 @@ async fn parent_fork_without_plugin_init_is_refused() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
             "memory_probe",
@@ -300,9 +305,10 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn durable_child_writes_to_its_own_attachment_namespace() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Part(LlmOutputPart::ToolCall {
@@ -326,7 +332,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         },
     ]);
     let child_factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
-    let root_store = unbound_recording_store(&backend).await;
+    let root_store = double_unbound_recording_store(&double).await;
     let bytes = backend.attachment_store();
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|_| Arc::new(child_factory.clone()))
@@ -385,18 +391,22 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     let mut child_runtime = reopen_session_runtime(&runtime, &child.session_id).await;
     set_runtime_provider(&mut child_runtime, transport.into_handle());
     let turn_id = "attachment-child-turn";
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            child.session_id.clone(),
+            TurnId::from(turn_id).clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     child_runtime
         .run_turn_assembled(
             TurnInput::text("write the attachment"),
             CancellationToken::new(),
-            host_turn_scope(
-                &child_runtime.host.core,
-                &child.session_id,
-                &TurnId::from(turn_id),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("child turn");
+    handler.close().await.expect("close the scope's handler");
 
     let id = lash_core::attachments::content_id(&[4, 2, 4, 2]);
     // The blob lives exactly once in the shared, flat backend...
@@ -432,9 +442,10 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn process_registered_during_first_durable_child_turn_remains_listable_after_commit() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Part(LlmOutputPart::ToolCall {
@@ -458,7 +469,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         },
     ]);
     let child_factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
-    let root_store = unbound_recording_store(&backend).await;
+    let root_store = double_unbound_recording_store(&double).await;
     let registry = backend.process_registry();
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|_| Arc::new(child_factory.clone()))
@@ -534,18 +545,22 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let mut child_runtime = reopen_session_runtime(&runtime, &child.session_id).await;
     set_runtime_provider(&mut child_runtime, transport.into_handle());
     let turn_id = "process-child-first-turn";
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            child.session_id.clone(),
+            TurnId::from(turn_id).clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     child_runtime
         .run_turn_assembled(
             TurnInput::text("register the process"),
             CancellationToken::new(),
-            host_turn_scope(
-                &child_runtime.host.core,
-                &child.session_id,
-                &TurnId::from(turn_id),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("first child turn");
+    handler.close().await.expect("close the scope's handler");
 
     let child_handle = RuntimeHandle::new(child_runtime);
     let handles = child_handle.observe().list_all_process_handles().await;
@@ -602,9 +617,10 @@ impl lash_core::plugin::SessionPlugin for MemoryProbePlugin {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebuild() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin_host = lash_core::testing::test_plugin_host(vec![Arc::new(MemoryProbeFactory)]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
     let runtime_host = test_host_config(&backend);
@@ -705,9 +721,10 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn child_usage_stays_on_the_child_sessions_own_ledger() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_openai_compatible_provider(vec![
         // The parent's own turn reports the parent's usage.
         MockCall {
@@ -774,21 +791,21 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
     ]);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
     let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("usage-parent-1").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let first_parent = runtime
         .stream_turn(
             TurnInput::text("run child"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("usage-parent-1"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("first parent turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         &first_parent.outcome,
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
@@ -819,34 +836,42 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
     let child_session_id = SessionId::from("subagent-child");
     let child_turn_id = TurnId::from("subagent-child-turn");
     let mut child_runtime = reopen_session_runtime(&runtime, &child_session_id).await;
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            child_session_id.clone(),
+            child_turn_id.clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let child_turn = child_runtime
         .run_turn_assembled(
             TurnInput::text("run the child turn"),
             CancellationToken::new(),
-            backend_turn_scope(&backend, &child_session_id, &child_turn_id),
+            handler.scoped(),
         )
         .await
         .expect("child turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         &child_turn.outcome,
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ));
     drop(child_runtime);
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("usage-parent-2").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let second_parent = runtime
         .stream_turn(
             TurnInput::text("finish up"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("usage-parent-2"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("second parent turn");
+    handler.close().await.expect("close the scope's handler");
 
     // Child usage is not folded into the parent's report: it holds only the
     // parent's own calls, and no source carries the child's tokens.
@@ -925,9 +950,10 @@ async fn durable_token_ledger(
         .token_ledger
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cached_only_child_usage_stays_on_the_child_ledger() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
@@ -966,21 +992,21 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
     ]);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
     let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("child-session-event-parent").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     runtime
         .stream_turn(
             TurnInput::text("run parent"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("child-session-event-parent"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("parent turn");
+    handler.close().await.expect("close the scope's handler");
 
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -1007,14 +1033,22 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
     let child_session_id = SessionId::from("subagent-child");
     let child_turn_id = TurnId::from("subagent-child-turn");
     let mut child_runtime = reopen_session_runtime(&runtime, &child_session_id).await;
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            child_session_id.clone(),
+            child_turn_id.clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     child_runtime
         .run_turn_assembled(
             TurnInput::text("run the child turn"),
             CancellationToken::new(),
-            backend_turn_scope(&backend, &child_session_id, &child_turn_id),
+            handler.scoped(),
         )
         .await
         .expect("child turn");
+    handler.close().await.expect("close the scope's handler");
     drop(child_runtime);
 
     let usage = runtime.usage_report();
@@ -1096,10 +1130,11 @@ fn session_input_tokens(runtime: &LashRuntime) -> i64 {
 /// does to the run that owns the child — must leave the ordinary session
 /// reusable: no turn registration outlives the future, so a later turn on the
 /// same child runs to completion and reports its own usage.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "FIG-3600 S5a: an in-process dropped turn future wedges the next turn on its session: the next drive redrives the dropped root first, and the native replay driver waits on the tool-group child the dropped attempt still holds; FIG-3823"]
 async fn dropped_child_turn_leaves_the_session_reusable() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         // Gated child turn: one provider round-trip reports usage, then the
         // tool call parks the turn.
@@ -1171,14 +1206,17 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
     let cancelled_child_session_id = SessionId::from("cancelled-child");
     let cancelled_child_turn_id = TurnId::from("cancelled-child-turn");
     let mut child = reopen_session_runtime(&runtime, &cancelled_child_session_id).await;
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            cancelled_child_session_id.clone(),
+            cancelled_child_turn_id.clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let mut turn = Box::pin(child.run_turn_assembled(
         TurnInput::text("park the child turn"),
         CancellationToken::new(),
-        host_turn_scope(
-            &child.host.core,
-            &cancelled_child_session_id,
-            &cancelled_child_turn_id,
-        ),
+        handler.scoped(),
     ));
     tokio::select! {
         _ = started_rx.recv() => {}
@@ -1187,6 +1225,7 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
 
     // The cancellation: the owning process drops the child-turn future.
     drop(turn);
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(
         session_input_tokens(&child),
@@ -1215,18 +1254,22 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
     let retry_child_session_id = SessionId::from("retry-child");
     let retry_child_turn_id = TurnId::from("cancelled-child-turn");
     let mut retry_child = reopen_session_runtime(&runtime, &retry_child_session_id).await;
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            retry_child_session_id.clone(),
+            retry_child_turn_id.clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let retried = retry_child
         .run_turn_assembled(
             TurnInput::text("park the child turn"),
             CancellationToken::new(),
-            host_turn_scope(
-                &retry_child.host.core,
-                &retry_child_session_id,
-                &retry_child_turn_id,
-            ),
+            handler.scoped(),
         )
         .await
         .expect("retried child turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         retried.outcome,
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
@@ -1243,18 +1286,22 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
     );
 
     let recovered_turn_id = TurnId::from("cancelled-child-turn-2");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            cancelled_child_session_id.clone(),
+            recovered_turn_id.clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let recovered = child
         .run_turn_assembled(
             TurnInput::text("park the child turn"),
             CancellationToken::new(),
-            host_turn_scope(
-                &child.host.core,
-                &cancelled_child_session_id,
-                &recovered_turn_id,
-            ),
+            handler.scoped(),
         )
         .await
         .expect("the dropped turn future leaves the child session reusable");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(
         recovered.assistant_output.safe_text,
         "cancelled child recovered"

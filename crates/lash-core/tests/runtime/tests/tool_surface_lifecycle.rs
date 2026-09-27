@@ -6,6 +6,8 @@ use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps
 use lash_core::plugin::{SessionAuthorityContext, StaticPluginFactory};
 use lash_sansio::sync::MutexExt;
 
+const SEED: u64 = 0x5_c402;
+
 #[derive(Clone, Debug)]
 struct DynamicToolSpec {
     id: &'static str,
@@ -222,12 +224,13 @@ fn plugin_catalog_names(runtime: &LashRuntime) -> Vec<String> {
         .collect()
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn parked_resume_keeps_the_store_bound_session_id() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(&backend, plugin_host);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     lash_core::SessionCommitStore::save_session_meta(
         store.as_ref(),
         lash_core::SessionMeta {
@@ -280,9 +283,10 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     ));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn park_resume_restores_tool_and_subagent_authority() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let visible = DynamicToolSpec::new(
         "tool:authority_visible",
         "authority_visible",
@@ -318,7 +322,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
             },
         )
         .expect("initial authority plugin session");
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("authority-worker", "authority-boot");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -366,9 +370,10 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     assert_eq!(resumed_subagent.max_depth, 4);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authority() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let hidden = DynamicToolSpec::new(
         "tool:persisted_broader",
         "persisted_broader",
@@ -387,7 +392,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
             },
         )
         .expect("narrower live-authority plugin session");
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("persisted-worker", "persisted-boot");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -426,9 +431,10 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_access_setter_changes_the_next_model_request_in_both_directions() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let tool = DynamicToolSpec::new(
         "tool:mutable-authority",
         "mutable_authority",
@@ -438,7 +444,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -477,34 +483,42 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     Box::pin(runtime.set_tool_access(narrowed))
         .await
         .expect("narrow persisted tool authority");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("mutable-authority-requests").clone(),
+            TurnId::from("narrowed-request").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     runtime
         .run_turn_assembled(
             TurnInput::text("observe the narrowed surface"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("mutable-authority-requests"),
-                &TurnId::from("narrowed-request"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("run with narrowed authority");
+    handler.close().await.expect("close the scope's handler");
 
     Box::pin(runtime.set_tool_access(lash_core::SessionToolAccess::ambient()))
         .await
         .expect("widen persisted tool authority");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("mutable-authority-requests").clone(),
+            TurnId::from("widened-request").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     runtime
         .run_turn_assembled(
             TurnInput::text("observe the widened surface"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("mutable-authority-requests"),
-                &TurnId::from("widened-request"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("run with widened authority");
+    handler.close().await.expect("close the scope's handler");
 
     let requests = requests.lock_recover();
     assert_eq!(requests.len(), 2);
@@ -520,9 +534,10 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let tool = DynamicToolSpec::new(
         "tool:live-discovery-authority",
         "live_discovery_authority",
@@ -536,7 +551,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("mutable-authority-discovery")),
-        Some(unbound_recording_store(&backend).await),
+        Some(double_unbound_recording_store(&double).await),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
@@ -572,9 +587,10 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn updated_tool_access_survives_park_and_resume() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let hidden = DynamicToolSpec::new(
         "tool:updated-authority-hidden",
         "updated_authority_hidden",
@@ -584,7 +600,7 @@ async fn updated_tool_access_survives_park_and_resume() {
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("updated-authority-worker", "boot");
     let mut runtime = LashRuntime::from_environment(
         &env,
@@ -616,12 +632,13 @@ async fn updated_tool_access_survives_park_and_resume() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(&backend, plugin_host);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -661,9 +678,32 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    double.install_process_worker(
+        lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
+                Vec::<Arc<dyn lash_core::facade_support::PluginFactory>>::new(),
+                lash_core::facade_support::RuntimeHostConfig::new(
+                    backend.clone(),
+                    lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                    lash_core::QueuedWorkBatchingConfig::new(1),
+                ),
+                lash_core_worker::WorkerProcessWork::External(
+                    backend
+                        .process_work()
+                        .expect("the Restate engine supplies process work")
+                        .clone(),
+                ),
+                Arc::new(lash_core::NoSessionWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(standard_test_policy()),
+        )
+        .expect("valid test worker config"),
+    );
     let allowed = Arc::new(std::sync::OnceLock::new());
     let session_id = "filter-session";
     let registry = backend.process_registry();
@@ -753,13 +793,14 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .runtime_session_services()
         .expect("runtime session services")
         .model_tool_process_service();
-    let scope = || {
-        lash_core::ProcessOpScope::new(backend_turn_scope(
-            &backend,
-            &SessionId::from(session_id),
-            &TurnId::from(uuid::Uuid::new_v4().to_string()),
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
-    };
+        .await
+        .expect("open the scope's handler");
+    let scope = || lash_core::ProcessOpScope::new(handler.scoped());
     let unknown_process_id = lash_core::ProcessId::fixture("host-unknown-process");
     let unknown_process = host_service
         .cancel(&SessionId::from(session_id), &unknown_process_id, scope())
@@ -940,11 +981,13 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         "host_cancel_bypassed_filter": true,
         "wake_enqueued_despite_filter": report.enqueued,
     }));
+    handler.close().await.expect("close the scope's handler");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = "pruned-model-handle-session";
     let registry = backend.process_registry();
     let env =
@@ -1007,13 +1050,14 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
         .runtime_session_services()
         .expect("runtime session services")
         .model_tool_process_service();
-    let scope = || {
-        lash_core::ProcessOpScope::new(backend_turn_scope(
-            &backend,
-            &SessionId::from(session_id),
-            &TurnId::from(uuid::Uuid::new_v4().to_string()),
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
-    };
+        .await
+        .expect("open the scope's handler");
+    let scope = || lash_core::ProcessOpScope::new(handler.scoped());
     service
         .validate_visible(
             &SessionId::from(session_id),
@@ -1068,11 +1112,13 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
             "cancel and signal must preserve the typed tombstone outcome, got {error}"
         );
     }
+    handler.close().await.expect("close the scope's handler");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn session_creation_applies_only_named_process_observers_with_typed_outcomes() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let parent_session_id = "observer-parent";
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
@@ -1103,6 +1149,13 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
             lash_core::ProcessStartOptions::new().with_initial_observer(parent_session_id),
         ),
     ] {
+        let handler = double
+            .open_handler(AdmittedScope::turn(
+                SessionId::from(parent_session_id).clone(),
+                TurnId::from(format!("{process_id}-turn")).clone(),
+            ))
+            .await
+            .expect("open the scope's handler");
         let record = process_service
             .start(
                 &SessionId::from(parent_session_id),
@@ -1119,14 +1172,11 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     process_id,
                 ))),
                 options,
-                lash_core::ProcessOpScope::new(backend_turn_scope(
-                    &backend,
-                    &SessionId::from(parent_session_id),
-                    &TurnId::from(format!("{process_id}-turn")),
-                )),
+                lash_core::ProcessOpScope::new(handler.scoped()),
             )
             .await
             .expect("start process with explicit observer options");
+        handler.close().await.expect("close the scope's handler");
         started.insert(process_id, record.id);
     }
     assert!(
@@ -1345,9 +1395,10 @@ fn text_response(text: &str) -> TestProvider {
     }])
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flapping() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let original = DynamicToolSpec::new(
         "tool:original",
         "original",
@@ -1362,7 +1413,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let store_dyn: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let owner = lash_core::LeaseOwnerIdentity::opaque("surface-test-worker", "surface-test-boot");
 
@@ -1420,18 +1471,22 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         &mut resumed,
         text_response("commit rebuilt surface").into_handle(),
     );
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("persisted-live-surface").clone(),
+            TurnId::from("surface-commit").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     resumed
         .run_turn_assembled(
             TurnInput::text("commit the rebuilt surface"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("persisted-live-surface"),
-                &TurnId::from("surface-commit"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("commit after live rebuild");
+    handler.close().await.expect("close the scope's handler");
 
     let persisted =
         lash_core::testing::runtime_internals::load_persisted_session_state(store.as_ref())
@@ -1464,9 +1519,10 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     assert_executes_by_id(&resumed_again, discovered.id).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_policy() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let curated = DynamicToolSpec::new(
         "tool:curated",
         "curated",
@@ -1592,7 +1648,7 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn broader_authority_fork_regains_parent_hidden_tool() {
     let hidden = DynamicToolSpec::new(
         "tool:broader_fork",
@@ -1645,9 +1701,10 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     assert!(surface.tools().resolve_manifest(hidden.name).is_some());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidden_tool() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let original = DynamicToolSpec::new(
         "tool:compose_original",
         "compose_original",
@@ -1705,18 +1762,22 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
     assert!(!catalog_names(&runtime).contains(&discovered.name.to_string()));
 
     surface.replace(vec![original, discovered.clone(), hidden.clone()]);
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("compose-child").clone(),
+            TurnId::from("compose-boundary").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("use the newly composed tool"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("compose-child"),
-                &TurnId::from("compose-boundary"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn through compose_session_catalog boundary");
+    handler.close().await.expect("close the scope's handler");
     assert!(
         matches!(
             turn.outcome,
@@ -1733,9 +1794,10 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
     assert_executes_by_id(&runtime, discovered.id).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let visible = DynamicToolSpec::new(
         "tool:cold_visible",
         "cold_visible",
@@ -1757,7 +1819,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     ]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let plugins = build_hidden_session(
         plugin_host.as_ref(),
         &SessionId::from("cold-hidden-child"),
@@ -1831,9 +1893,10 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     assert_executes_by_id(&rebuilt, discovered.id).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplicates() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let original = DynamicToolSpec::new(
         "tool:orphan-original",
         "orphaned_name",
@@ -1853,7 +1916,7 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("orphan-test-worker", "orphan-test-boot");
     let mut runtime = LashRuntime::from_environment(
         &env,
@@ -1938,9 +2001,10 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     assert_executes_by_id(&resumed, replacement.id).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let first = DynamicToolSpec::new("tool:apply-first", "apply_first", "first live tool");
     let second = DynamicToolSpec::new("tool:apply-second", "apply_second", "second live tool");
     let surface = Arc::new(DynamicToolSurface::new(vec![first.clone(), second.clone()]));
@@ -2086,15 +2150,8 @@ async fn payload_gated_engine_runtime(
     (registry, runtime)
 }
 
-fn payload_gated_scope(
-    backend: &lash_core::Backend,
-    session_id: &SessionId,
-) -> lash_core::ProcessOpScope<'static> {
-    lash_core::ProcessOpScope::new(backend_turn_scope(
-        backend,
-        session_id,
-        &TurnId::from(uuid::Uuid::new_v4().to_string()),
-    ))
+fn payload_gated_scope(handler: &lash_restate_test::OpenHandler) -> lash_core::ProcessOpScope<'_> {
+    lash_core::ProcessOpScope::new(handler.scoped())
 }
 
 fn payload_gated_request(
@@ -2153,9 +2210,10 @@ async fn no_rows_registered(registry: &Arc<dyn lash_core::ProcessRegistry>, labe
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_gate() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = "recorded-intent-engine-session";
     let (registry, runtime) = Box::pin(payload_gated_engine_runtime(
         &backend,
@@ -2175,25 +2233,40 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         )
     };
     let invalid_payload = json!({"program": "smuggled"});
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id).clone(),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
     // A leaf tool's recorded StartProcess declaration must be refused exactly
     // as the direct request-shaped start is, before anything is journaled.
     let direct_refusal = service
         .start_from_request(
             &SessionId::from(session_id),
             request("direct-invalid", invalid_payload.clone()),
-            payload_gated_scope(&backend, &SessionId::from(session_id)),
+            payload_gated_scope(&handler),
         )
         .await
         .expect_err("a direct start must not admit an unvalidated engine payload");
+    handler.close().await.expect("close the scope's handler");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id).clone(),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
     let recorded_refusal = service
         .start_from_recorded_intent(
             &SessionId::from(session_id),
             request("recorded-invalid", invalid_payload.clone()),
-            payload_gated_scope(&backend, &SessionId::from(session_id)),
+            payload_gated_scope(&handler),
         )
         .await
         .expect_err("a recorded-intent start must not admit an unvalidated engine payload");
+    handler.close().await.expect("close the scope's handler");
     for refusal in [&direct_refusal, &recorded_refusal] {
         assert!(
             matches!(refusal, lash_core::PluginError::Session(message)
@@ -2211,22 +2284,38 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     // A valid recorded-intent start carries the engine identity stamp a direct
     // start would.
     let valid_payload = json!({"program": "known"});
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id).clone(),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
     let direct = service
         .start_from_request(
             &SessionId::from(session_id),
             request("direct-valid", valid_payload.clone()),
-            payload_gated_scope(&backend, &SessionId::from(session_id)),
+            payload_gated_scope(&handler),
         )
         .await
         .expect("valid direct engine start");
+    handler.close().await.expect("close the scope's handler");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id).clone(),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
     let recorded = service
         .start_from_recorded_intent(
             &SessionId::from(session_id),
             request("recorded-valid", valid_payload.clone()),
-            payload_gated_scope(&backend, &SessionId::from(session_id)),
+            payload_gated_scope(&handler),
         )
         .await
         .expect("valid recorded-intent engine start");
+    handler.close().await.expect("close the scope's handler");
     let expected = admit_payload_gated_engine(PAYLOAD_GATED_ENGINE_KIND, &valid_payload, None)
         .expect("known payload");
     assert_eq!(
@@ -2240,9 +2329,10 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct_start() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 17, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = "recorded-intent-unregistered-kind-session";
     let (registry, runtime) = Box::pin(payload_gated_engine_runtime(
         &backend,
@@ -2261,30 +2351,39 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
             json!({"program": "known"}),
         )
     };
-    for (route, error) in [
-        (
-            "direct",
-            service
-                .start_from_request(
-                    &SessionId::from(session_id),
-                    request("direct-unregistered"),
-                    payload_gated_scope(&backend, &SessionId::from(session_id)),
-                )
-                .await
-                .expect_err("a direct start must not admit an unregistered engine kind"),
-        ),
-        (
-            "recorded",
-            service
-                .start_from_recorded_intent(
-                    &SessionId::from(session_id),
-                    request("recorded-unregistered"),
-                    payload_gated_scope(&backend, &SessionId::from(session_id)),
-                )
-                .await
-                .expect_err("a recorded-intent start must not admit an unregistered engine kind"),
-        ),
-    ] {
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let direct_error = service
+        .start_from_request(
+            &SessionId::from(session_id),
+            request("direct-unregistered"),
+            payload_gated_scope(&handler),
+        )
+        .await
+        .expect_err("a direct start must not admit an unregistered engine kind");
+    handler.close().await.expect("close the scope's handler");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let recorded_error = service
+        .start_from_recorded_intent(
+            &SessionId::from(session_id),
+            request("recorded-unregistered"),
+            payload_gated_scope(&handler),
+        )
+        .await
+        .expect_err("a recorded-intent start must not admit an unregistered engine kind");
+    handler.close().await.expect("close the scope's handler");
+    for (route, error) in [("direct", direct_error), ("recorded", recorded_error)] {
         assert!(
             matches!(&error, lash_core::PluginError::Session(message)
                 if message == "process engine `fig1488-never-registered` is not configured"),
@@ -2294,9 +2393,10 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
     no_rows_registered(&registry, &["direct-unregistered", "recorded-unregistered"]).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 18, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = "recorded-intent-no-env-session";
     let (registry, runtime) = Box::pin(payload_gated_engine_runtime(
         &backend,
@@ -2318,7 +2418,13 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         request.env_spec = None;
         request
     };
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id).clone(),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
     // The routes deliberately differ, because a recorded start may only be
     // validated against the env its own record carries. The direct route
     // captures the live session env before the gate, so dropping the request's
@@ -2332,23 +2438,32 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .start_from_request(
             &SessionId::from(session_id),
             no_env("direct-no-env"),
-            payload_gated_scope(&backend, &SessionId::from(session_id)),
+            payload_gated_scope(&handler),
         )
         .await
         .expect("a direct start captures the live session env for itself");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(
         started_row_identity(&registry, &direct_no_env.process_id).await,
         admit_payload_gated_engine(PAYLOAD_GATED_ENGINE_KIND, &valid_payload, None)
             .expect("known payload")
     );
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id).clone(),
+            TurnId::from(uuid::Uuid::new_v4().to_string()),
+        ))
+        .await
+        .expect("open the scope's handler");
     let recorded_no_env = service
         .start_from_recorded_intent(
             &SessionId::from(session_id),
             no_env("recorded-no-env"),
-            payload_gated_scope(&backend, &SessionId::from(session_id)),
+            payload_gated_scope(&handler),
         )
         .await
         .expect_err("a recorded start carries its own env or none at all");
+    handler.close().await.expect("close the scope's handler");
     assert!(
         matches!(&recorded_no_env, lash_core::PluginError::Session(message)
         if *message == format!(

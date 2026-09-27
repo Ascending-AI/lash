@@ -5,9 +5,12 @@
 
 use super::*;
 
-#[tokio::test]
+const SEED: u64 = 0x5_e279;
+
+#[tokio::test(flavor = "multi_thread")]
 async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default()
         .with_cancel_after_llm()
         .with_controller_owned_replay();
@@ -90,9 +93,10 @@ fn tool_attempt_count(recorder: &RecordingEffectController) -> usize {
         .count()
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_checkpoint() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default()
         .with_after_step_cancel()
         .with_controller_owned_replay();
@@ -163,9 +167,10 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_commands() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default()
         .with_after_step_cancel()
         .with_escalation_after_llm()
@@ -222,9 +227,10 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default()
         .with_after_step_cancel()
         .with_controller_owned_replay()
@@ -259,7 +265,7 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
     // shares the journal but none of the first owner's in-process state
     // (FIG-3397).
     let replaying = recorder.clone().without_canned_cancel();
-    let new_owner = reopened_backend(&backend).await;
+    let new_owner = double.lash_backend();
     let mut replayed_runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EchoTool),

@@ -5,7 +5,6 @@
 
 use lash_core::SessionId;
 use lash_core::TurnId;
-use lash_core::testing::runtime_helpers::host_turn_scope;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -38,46 +37,37 @@ fn test_runtime_owner() -> lash_core::LeaseOwnerIdentity {
 use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
 
-/// A fresh SQLite memory backend (ADR 0102).
-async fn memory_backend() -> lash_core::Backend {
-    Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a SQLite memory backend"),
-    )
-    .into()
+/// The Restate server double (FIG-3668): every scope opens through
+/// [`lash_restate_test::RestateTestBackend::open_handler`].
+async fn double(seed: u64) -> lash_restate_test::RestateTestBackend {
+    lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double")
 }
 
 static PANIC_MODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Records every effect outcome of a backend host's controller for one turn.
-struct RecordingEffectController {
-    inner: Arc<dyn RuntimeEffectController>,
+/// Records every effect outcome of the lent handler's controller for one
+/// turn.
+struct RecordingEffectController<'a> {
+    inner: ScopedEffectController<'a>,
     outcomes: std::sync::Mutex<Vec<RuntimeEffectOutcome>>,
 }
 
-/// A recorder over `backend`'s own controller for `turn_id` of `session_id`.
-fn recording_controller(
-    backend: &lash_core::Backend,
-    session_id: &str,
-    turn_id: &str,
-) -> Arc<RecordingEffectController> {
-    Arc::new(RecordingEffectController {
-        inner: lash_core::testing::runtime_helpers::backend_turn_scope(
-            backend,
-            &SessionId::from(session_id),
-            &TurnId::from(turn_id),
-        )
-        .owned_controller()
-        .expect("a static controller is shared"),
+/// A recorder over `handler`'s scope controller.
+fn recording_controller<'a>(
+    handler: &'a lash_restate_test::OpenHandler,
+) -> RecordingEffectController<'a> {
+    RecordingEffectController {
+        inner: handler.scoped(),
         outcomes: std::sync::Mutex::new(Vec::new()),
-    })
+    }
 }
 
 #[async_trait]
-impl AwaitEventResolver for RecordingEffectController {
+impl AwaitEventResolver for RecordingEffectController<'_> {
     fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
+        self.inner.controller().await_event_authority_binding_id()
     }
 
     async fn prepare_completion_key(
@@ -87,6 +77,7 @@ impl AwaitEventResolver for RecordingEffectController {
         may_defer: bool,
     ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
         self.inner
+            .controller()
             .prepare_completion_key(scope, wait, may_defer)
             .await
     }
@@ -96,7 +87,7 @@ impl AwaitEventResolver for RecordingEffectController {
         scope: &lash_core::ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
+        self.inner.controller().await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -104,14 +95,17 @@ impl AwaitEventResolver for RecordingEffectController {
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
+        self.inner
+            .controller()
+            .resolve_await_event(key, resolution)
+            .await
     }
 
     async fn peek_await_event(
         &self,
         key: &lash_core::AwaitEventKey,
     ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.inner.peek_await_event(key).await
+        self.inner.controller().peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -120,28 +114,40 @@ impl AwaitEventResolver for RecordingEffectController {
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
+        self.inner
+            .controller()
+            .await_await_event(key, cancel, deadline)
+            .await
     }
 
     async fn revoke_await_events_for_session(
         &self,
         session_id: &lash_core::SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
+        self.inner
+            .controller()
+            .revoke_await_events_for_session(session_id)
+            .await
     }
 
     async fn cancel_await_events_for_session(
         &self,
         session_id: &lash_core::SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
+        self.inner
+            .controller()
+            .cancel_await_events_for_session(session_id)
+            .await
     }
 
     async fn retire_await_events_for_scope(
         &self,
         scope: &lash_core::ExecutionScope,
     ) -> Result<(), lash_core::RuntimeError> {
-        self.inner.retire_await_events_for_scope(scope).await
+        self.inner
+            .controller()
+            .retire_await_events_for_scope(scope)
+            .await
     }
 
     async fn retire_await_events_for_scope_if_quiescent(
@@ -149,6 +155,7 @@ impl AwaitEventResolver for RecordingEffectController {
         scope: &lash_core::ExecutionScope,
     ) -> Result<bool, lash_core::RuntimeError> {
         self.inner
+            .controller()
             .retire_await_events_for_scope_if_quiescent(scope)
             .await
     }
@@ -157,24 +164,30 @@ impl AwaitEventResolver for RecordingEffectController {
         &self,
         scope: &lash_core::ExecutionScope,
     ) -> Result<(), lash_core::RuntimeError> {
-        self.inner.reinstate_await_event_scope(scope).await
+        self.inner
+            .controller()
+            .reinstate_await_event_scope(scope)
+            .await
     }
 
     async fn await_event_scope_is_retired(
         &self,
         scope: &lash_core::ExecutionScope,
     ) -> Result<bool, lash_core::RuntimeError> {
-        self.inner.await_event_scope_is_retired(scope).await
+        self.inner
+            .controller()
+            .await_event_scope_is_retired(scope)
+            .await
     }
 }
 
 #[async_trait]
-impl RuntimeEffectController for RecordingEffectController {
+impl RuntimeEffectController for RecordingEffectController<'_> {
     async fn read_recorded_journal(
         &self,
         range: &lash_core::RecordedKeyRange,
     ) -> Result<lash_core::RecordedJournal, RuntimeEffectControllerError> {
-        self.inner.read_recorded_journal(range).await
+        self.inner.controller().read_recorded_journal(range).await
     }
 
     async fn execute_effect(
@@ -182,7 +195,11 @@ impl RuntimeEffectController for RecordingEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let outcome = self.inner.execute_effect(envelope, local_executor).await?;
+        let outcome = self
+            .inner
+            .controller()
+            .execute_effect(envelope, local_executor)
+            .await?;
         self.outcomes.lock_recover().push(outcome.clone());
         Ok(outcome)
     }
@@ -191,14 +208,14 @@ impl RuntimeEffectController for RecordingEffectController {
         &self,
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
+        self.inner.controller().open_effect_group(group).await
     }
 
     fn register_group_executors(
         &self,
         executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
+        self.inner.controller().register_group_executors(executors)
     }
 
     async fn await_next_settlement(
@@ -206,7 +223,10 @@ impl RuntimeEffectController for RecordingEffectController {
         handle: &mut lash_core::EffectGroupHandle,
         cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
+        self.inner
+            .controller()
+            .await_next_settlement(handle, cancel)
+            .await
     }
     async fn read_group_settlement(
         &self,
@@ -216,7 +236,10 @@ impl RuntimeEffectController for RecordingEffectController {
         Option<lash_core::runtime::effect::RankedGroupSettlement>,
         lash_core::RuntimeEffectControllerError,
     > {
-        self.inner.read_group_settlement(group_key, rank).await
+        self.inner
+            .controller()
+            .read_group_settlement(group_key, rank)
+            .await
     }
 
     async fn close_effect_group(
@@ -224,7 +247,10 @@ impl RuntimeEffectController for RecordingEffectController {
         handle: lash_core::EffectGroupHandle,
         disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
+        self.inner
+            .controller()
+            .close_effect_group(handle, disposition)
+            .await
     }
     async fn commit_group_child_final(
         &self,
@@ -233,7 +259,10 @@ impl RuntimeEffectController for RecordingEffectController {
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
-        self.inner.commit_group_child_final(commit).await
+        self.inner
+            .controller()
+            .commit_group_child_final(commit)
+            .await
     }
 
     async fn await_group_child_drain_admission(
@@ -242,12 +271,13 @@ impl RuntimeEffectController for RecordingEffectController {
         commit_seq: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
+            .controller()
             .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }
 
-impl RecordingEffectController {
+impl RecordingEffectController<'_> {
     fn provider_panic_projection(&self) -> (Option<String>, String, String) {
         self.outcomes
             .lock_recover()
@@ -621,12 +651,12 @@ fn text_response(text: &str) -> LlmResponse {
     }
 }
 
-fn recording_turn_scope(
-    controller: Arc<RecordingEffectController>,
+fn recording_turn_scope<'a>(
+    controller: &'a RecordingEffectController<'a>,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> ScopedEffectController<'static> {
-    ScopedEffectController::shared(controller, AdmittedScope::turn(session_id, turn_id))
+) -> ScopedEffectController<'a> {
+    ScopedEffectController::borrowed(controller, AdmittedScope::turn(session_id, turn_id))
         .expect("recording turn scope")
 }
 
@@ -678,7 +708,8 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
 
 #[tokio::test]
 async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
-    let backend = memory_backend().await;
+    let double = double(1).await;
+    let backend = double.lash_backend();
     let _mode = PANIC_MODE.lock().await;
     lash_core::panic_containment::set_loud(false);
     let provider = ScriptedProvider::new(vec![
@@ -716,18 +747,25 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     .await
     .expect("runtime");
 
+    let first_handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("tool-panic-session"),
+            TurnId::from("tool-panic-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let first = runtime
         .run_turn_assembled(
             TurnInput::text("call the tool"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("tool-panic-session"),
-                &TurnId::from("tool-panic-turn"),
-            ),
+            first_handler.scoped(),
         )
         .await
         .expect("turn survives tool panic");
+    first_handler
+        .close()
+        .await
+        .expect("close the scope's handler");
     let ToolCallOutcome::Failure(failure) = &first.tool_calls[0].output.outcome else {
         panic!("tool panic must be recorded as a failure")
     };
@@ -737,24 +775,32 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     assert_eq!(failure.retry, ToolRetryStatus::Never);
     assert_eq!(first.assistant_output.safe_text, "turn recovered");
 
+    let next_handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("tool-panic-session"),
+            TurnId::from("after-tool-panic"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let next = runtime
         .run_turn_assembled(
             TurnInput::text("continue"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("tool-panic-session"),
-                &TurnId::from("after-tool-panic"),
-            ),
+            next_handler.scoped(),
         )
         .await
         .expect("next turn");
+    next_handler
+        .close()
+        .await
+        .expect("close the scope's handler");
     assert_eq!(next.assistant_output.safe_text, "next turn works");
 }
 
 #[tokio::test]
 async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_turn_succeeds() {
-    let backend = memory_backend().await;
+    let double = double(2).await;
+    let backend = double.lash_backend();
     let _mode = PANIC_MODE.lock().await;
     lash_core::panic_containment::set_loud(false);
     let provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicOnceProvider {
@@ -776,18 +822,25 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
     .await
     .expect("runtime");
 
+    let failed_handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("provider-panic-session"),
+            TurnId::from("provider-panic-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let failed = runtime
         .run_turn_assembled(
             TurnInput::text("panic provider"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("provider-panic-session"),
-                &TurnId::from("provider-panic-turn"),
-            ),
+            failed_handler.scoped(),
         )
         .await
         .expect("provider panic terminates the turn cleanly");
+    failed_handler
+        .close()
+        .await
+        .expect("close the scope's handler");
     assert!(matches!(
         failed.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError)
@@ -808,33 +861,44 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
 
     // A second turn can acquire the same session lane immediately: the first
     // turn's lease was released on its typed failure path.
+    let next_handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("provider-panic-session"),
+            TurnId::from("after-provider-panic"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let next = runtime
         .run_turn_assembled(
             TurnInput::text("continue"),
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("provider-panic-session"),
-                &TurnId::from("after-provider-panic"),
-            ),
+            next_handler.scoped(),
         )
         .await
         .expect("next turn");
+    next_handler
+        .close()
+        .await
+        .expect("close the scope's handler");
     assert_eq!(next.assistant_output.safe_text, "next turn works");
 }
 
 #[tokio::test]
 async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise() {
-    let backend = memory_backend().await;
+    let double = double(3).await;
+    let backend = double.lash_backend();
     use futures_util::FutureExt as _;
 
     let _mode = PANIC_MODE.lock().await;
 
-    let quiet_controller = recording_controller(
-        &backend,
-        "quiet-provider-record-session",
-        "quiet-provider-record-turn",
-    );
+    let quiet_handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("quiet-provider-record-session"),
+            TurnId::from("quiet-provider-record-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let quiet_controller = recording_controller(&quiet_handler);
     let quiet_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut quiet_host = lash_core::facade_support::RuntimeHostConfig::new(
         backend.clone(),
@@ -858,7 +922,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
             TurnInput::text("record provider panic quietly"),
             CancellationToken::new(),
             recording_turn_scope(
-                Arc::clone(&quiet_controller),
+                &quiet_controller,
                 &SessionId::from("quiet-provider-record-session"),
                 &TurnId::from("quiet-provider-record-turn"),
             ),
@@ -867,11 +931,14 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         .expect("quiet provider panic is typed");
     let quiet = quiet_controller.provider_panic_projection();
 
-    let loud_controller = recording_controller(
-        &backend,
-        "loud-provider-record-session",
-        "loud-provider-record-turn",
-    );
+    let loud_handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("loud-provider-record-session"),
+            TurnId::from("loud-provider-record-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let loud_controller = recording_controller(&loud_handler);
     let loud_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut loud_host = lash_core::facade_support::RuntimeHostConfig::new(
         backend.clone(),
@@ -894,7 +961,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         TurnInput::text("record provider panic loudly"),
         CancellationToken::new(),
         recording_turn_scope(
-            Arc::clone(&loud_controller),
+            &loud_controller,
             &SessionId::from("loud-provider-record-session"),
             &TurnId::from("loud-provider-record-turn"),
         ),
@@ -909,11 +976,22 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         quiet,
         "loudness changes propagation only after the identical typed effect is recorded"
     );
+    drop(quiet_controller);
+    drop(loud_controller);
+    quiet_handler
+        .close()
+        .await
+        .expect("close the scope's handler");
+    loud_handler
+        .close()
+        .await
+        .expect("close the scope's handler");
 }
 
 #[tokio::test]
 async fn provider_turn_panic_reaches_the_harness_when_loud() {
-    let backend = memory_backend().await;
+    let double = double(4).await;
+    let backend = double.lash_backend();
     use futures_util::FutureExt as _;
 
     let _mode = PANIC_MODE.lock().await;
@@ -935,17 +1013,24 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
     .await
     .expect("runtime");
 
+    let panic_handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("loud-provider-panic-session"),
+            TurnId::from("loud-provider-panic-turn"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let panic = std::panic::AssertUnwindSafe(runtime.run_turn_assembled(
         TurnInput::text("panic provider loudly"),
         CancellationToken::new(),
-        host_turn_scope(
-            &runtime.host.core,
-            &SessionId::from("loud-provider-panic-session"),
-            &TurnId::from("loud-provider-panic-turn"),
-        ),
+        panic_handler.scoped(),
     ))
     .catch_unwind()
     .await;
     lash_core::panic_containment::set_loud(false);
+    panic_handler
+        .close()
+        .await
+        .expect("close the scope's handler");
     assert!(panic.is_err(), "loud provider panic must reach the harness");
 }

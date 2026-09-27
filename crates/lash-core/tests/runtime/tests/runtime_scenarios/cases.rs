@@ -1,5 +1,7 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
+
+const SEED: u64 = 0x5_5c02;
 use proptest::prelude::*;
 use std::collections::BTreeSet;
 
@@ -549,7 +551,30 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
 
 #[tokio::test]
 async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    double.install_process_worker(
+        lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
+                Vec::<Arc<dyn lash_core::facade_support::PluginFactory>>::new(),
+                lash_core::facade_support::RuntimeHostConfig::new(
+                    backend.clone(),
+                    lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                    lash_core::QueuedWorkBatchingConfig::new(1),
+                ),
+                lash_core_worker::WorkerProcessWork::External(
+                    backend
+                        .process_work()
+                        .expect("the Restate engine supplies process work")
+                        .clone(),
+                ),
+                Arc::new(lash_core::NoSessionWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(lash_core::testing::standard_test_policy()),
+        )
+        .expect("valid test worker config"),
+    );
     let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let target = Arc::new(std::sync::OnceLock::new());
     let tool_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(RuntimeScenarioIntentProvider {
@@ -628,46 +653,43 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .set(registered.id.clone())
         .expect("the target is registered once");
 
-    let turn_scope = host_turn_scope(
-        &runtime.host.core,
-        &SessionId::from("root"),
-        &TurnId::from("runtime-scenario-intent-turn"),
-    );
-    let wake_controller = turn_scope
-        .owned_controller()
-        .expect("runtime scenario turn owns its controller");
-    let wake_key = wake_controller
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "runtime-scenario-intent-turn"))
+        .await
+        .expect("open the scope's handler");
+    let mint = handler.scoped();
+    let wake_key = mint
+        .controller()
         .await_event_key(
             &lash_core::ExecutionScope::process(registered.id.clone()),
             lash_core::AwaitEventWaitIdentity::process_signal(registered.id.clone(), "resume", 1),
         )
         .await
         .expect("mint runtime-tier process-signal wait");
-    let wake_wait = {
-        let wake_controller = Arc::clone(&wake_controller);
-        let wake_key = wake_key.clone();
-        lash_core::task::spawn(async move {
-            wake_controller
-                .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new(), None)
-                .await
-        })
-    };
-    tokio::task::yield_now().await;
     let turn = runtime
         .run_turn_assembled(
             lash_core::TurnInput::text("run intent scenario"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope,
+            handler.scoped(),
         )
         .await
         .expect("run opted-in provider intent turn");
+    let wake_result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        mint.controller().await_await_event(
+            &wake_key,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        ),
+    )
+    .await;
+    drop(mint);
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(turn.assistant_output.safe_text, "intent drain complete");
     assert_eq!(provider_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(
-        tokio::time::timeout(std::time::Duration::from_secs(1), wake_wait)
-            .await
+        wake_result
             .expect("SignalProcess intent must wake the parked runtime-tier wait")
-            .expect("runtime-tier wait task")
             .expect("runtime-tier wait resolution"),
         lash_core::Resolution::Ok(serde_json::json!({"kind": "signal"}))
     );

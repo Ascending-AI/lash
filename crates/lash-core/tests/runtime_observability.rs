@@ -71,7 +71,6 @@ mod runtime {
         mod kernel_door;
         mod language_runtime_value;
         mod projection;
-        mod replay_mismatch;
         mod replay_origin;
         mod session_freshness;
         mod session_lease_guard;

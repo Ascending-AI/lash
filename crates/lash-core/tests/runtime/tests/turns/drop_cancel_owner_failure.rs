@@ -1,6 +1,8 @@
 use super::*;
 use lash_core::store::{RuntimePersistenceDecorator, TurnInputStore as _};
 
+const SEED: u64 = 0x5_f460;
+
 struct FailCancelClosureAuthorizationStore {
     inner: Arc<RecordingStore>,
     calls: AtomicUsize,
@@ -46,11 +48,12 @@ impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelivery() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     const SESSION_ID: &str = "drop-cancel-owner-failure";
     const TURN_ID: &str = "turn-that-cannot-finish";
 
-    let inner_store = unbound_recording_store(&backend).await;
+    let inner_store = double_unbound_recording_store(&double).await;
     let store = Arc::new(FailCancelClosureAuthorizationStore::new(Arc::clone(
         &inner_store,
     )));
@@ -91,19 +94,29 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     }));
 
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = backend_admitted_scope(
-        &backend,
-        lash_core::AdmittedScope::new(persisted_state.turn_scope(TURN_ID)),
-    );
+    let admitted = lash_core::AdmittedScope::new(persisted_state.turn_scope(TURN_ID));
     let turn_address = lash_core::facade_support::TurnAddress::new(SESSION_ID, TURN_ID);
-    let mut turn = lash_core::task::spawn(async move {
-        runtime
-            .run_turn_assembled(
-                TurnInput::text("cancel before the owner loses its finish commit"),
-                CancellationToken::new(),
-                turn_scope,
-            )
-            .await
+    // The turn runs on its own task with its own handler: the
+    // `PauseAfterEffectLoop` probe parks the effect loop with a blocking
+    // spin, which must live on the spawned task's worker so the test's own
+    // select/timeout arms still get polled.
+    let mut turn = lash_core::task::spawn({
+        let double = double.clone();
+        async move {
+            let handler = double
+                .open_handler(admitted)
+                .await
+                .expect("open the scope's handler");
+            let assembled = runtime
+                .run_turn_assembled(
+                    TurnInput::text("cancel before the owner loses its finish commit"),
+                    CancellationToken::new(),
+                    handler.scoped(),
+                )
+                .await;
+            handler.close().await.expect("close the scope's handler");
+            assembled
+        }
     });
     provider_started_rx
         .await

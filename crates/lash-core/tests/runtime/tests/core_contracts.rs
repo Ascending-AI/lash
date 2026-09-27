@@ -37,7 +37,7 @@ impl RuntimeTurnPhaseProbe for RecordingPhaseProbe {
 
 #[tokio::test]
 async fn default_lease_timings_are_contractual_windows() {
-    let backend = memory_backend().await;
+    let backend = memory_store_backend().await;
     let timings = lash_core::facade_support::LeaseTimings::default();
     assert_eq!(timings.ttl_ms(), 30_000);
     assert_eq!(timings.renew_interval_ms(), 10_000);

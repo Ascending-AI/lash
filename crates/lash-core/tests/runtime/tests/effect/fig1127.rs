@@ -1,23 +1,26 @@
 use super::*;
 
-#[tokio::test]
+const SEED: u64 = 0x5_e286;
+
+#[tokio::test(flavor = "multi_thread")]
 async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_without_session_nodes() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     #[derive(Clone)]
-    struct ControllerOwnedTriggerEmitter {
+    struct ControllerOwnedTriggerEmitter<'h> {
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
-        native: Arc<dyn RuntimeEffectController>,
+        native: lash_core::ScopedEffectController<'h>,
     }
 
     #[async_trait::async_trait]
-    impl lash_core::AwaitEventResolver for ControllerOwnedTriggerEmitter {
+    impl<'h> lash_core::AwaitEventResolver for ControllerOwnedTriggerEmitter<'h> {
         fn await_event_authority_binding_id(&self) -> Option<String> {
-            self.native.await_event_authority_binding_id()
+            self.native.controller().await_event_authority_binding_id()
         }
     }
 
     #[async_trait::async_trait]
-    impl RuntimeEffectController for ControllerOwnedTriggerEmitter {
+    impl<'h> RuntimeEffectController for ControllerOwnedTriggerEmitter<'h> {
         async fn execute_effect(
             &self,
             envelope: RuntimeEffectEnvelope,
@@ -28,14 +31,17 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
                 "non-tool trigger emission issues only its reserved process start"
             );
             self.process_starts.fetch_add(1, Ordering::SeqCst);
-            self.native.execute_effect(envelope, local_executor).await
+            self.native
+                .controller()
+                .execute_effect(envelope, local_executor)
+                .await
         }
 
         async fn open_effect_group(
             &self,
             group: lash_core::RuntimeEffectGroup,
         ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-            self.native.open_effect_group(group).await
+            self.native.controller().open_effect_group(group).await
         }
 
         async fn await_next_settlement(
@@ -43,7 +49,10 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             handle: &mut lash_core::EffectGroupHandle,
             cancel: lash_core::TurnCancelWait,
         ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-            self.native.await_next_settlement(handle, cancel).await
+            self.native
+                .controller()
+                .await_next_settlement(handle, cancel)
+                .await
         }
         async fn read_group_settlement(
             &self,
@@ -53,7 +62,10 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             Option<lash_core::runtime::effect::RankedGroupSettlement>,
             lash_core::RuntimeEffectControllerError,
         > {
-            self.native.read_group_settlement(group_key, rank).await
+            self.native
+                .controller()
+                .read_group_settlement(group_key, rank)
+                .await
         }
 
         async fn close_effect_group(
@@ -61,7 +73,10 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             handle: lash_core::EffectGroupHandle,
             disposition: lash_core::LoserPolicy,
         ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            self.native.close_effect_group(handle, disposition).await
+            self.native
+                .controller()
+                .close_effect_group(handle, disposition)
+                .await
         }
 
         async fn commit_group_child_final(
@@ -71,7 +86,10 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
             lash_core::RuntimeEffectControllerError,
         > {
-            self.native.commit_group_child_final(commit).await
+            self.native
+                .controller()
+                .commit_group_child_final(commit)
+                .await
         }
 
         async fn await_group_child_drain_admission(
@@ -80,6 +98,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             commit_seq: u64,
         ) -> Result<(), lash_core::RuntimeEffectControllerError> {
             self.native
+                .controller()
                 .await_group_child_drain_admission(group_key, commit_seq)
                 .await
         }
@@ -88,7 +107,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             &self,
             executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
         ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            self.native.register_group_executors(executors)
+            self.native.controller().register_group_executors(executors)
         }
     }
 
@@ -135,14 +154,15 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         process_env_store,
         lash_core::testing::process_engine_fixture(),
     );
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::runtime_operation(
+            "fig1127-trigger-emission",
+        ))
+        .await
+        .expect("open the scope's handler");
     let controller = ControllerOwnedTriggerEmitter {
         process_starts: Arc::default(),
-        native: backend_admitted_scope(
-            &backend,
-            lash_core::AdmittedScope::runtime_operation("fig1127-trigger-emission"),
-        )
-        .owned_controller()
-        .expect("a static controller is shared"),
+        native: handler.scoped(),
     };
     let occurrence = || {
         lash_core::TriggerOccurrenceRequest::new(
@@ -193,4 +213,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         1,
         "the repeated occurrence owns one delivery and no session-node side channel"
     );
+    drop(scoped_controller);
+    drop(controller);
+    handler.close().await.expect("close the scope's handler");
 }

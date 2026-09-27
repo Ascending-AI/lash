@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5_e215;
+
 struct SettlementExecutor {
     calls: std::sync::atomic::AtomicUsize,
     first_started: AtomicBool,
@@ -114,17 +116,15 @@ fn protocol_factory(
     })
 }
 
-fn turn_scope(
-    backend: &lash_core::Backend,
+fn turn_scope<'h>(
+    handler: &'h lash_restate_test::OpenHandler,
     controller: &RecordingEffectController,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> lash_core::ScopedEffectController<'static> {
-    layered_scope(
-        backend,
+) -> lash_core::ScopedEffectController<'h> {
+    lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
         Arc::new(controller.clone()),
-        lash_core::AdmittedScope::turn(session_id, turn_id),
     )
+    .expect("layer the handler's scope")
 }
 
 #[derive(Debug)]
@@ -178,14 +178,15 @@ fn manual_clock_wall_clock_faces_agree() {
     assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let executor = Arc::new(SettlementExecutor::new(false));
     let controller = RecordingEffectController::default().with_local_code_execution();
     let host = host_with_effect_recorder(&backend, controller.clone());
     let driver_store: Arc<dyn lash_core::RuntimePersistence> =
-        unbound_recording_store(&backend).await;
+        double_unbound_recording_store(&double).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -204,21 +205,22 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
     )
     .await;
     let turn_id = "user-stop-mid-cell";
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .run_turn_assembled(
-                TurnInput::text("run the first cell"),
-                CancellationToken::new(),
-                turn_scope(
-                    &backend,
-                    &controller,
-                    &SessionId::from("root"),
-                    &TurnId::from(turn_id),
-                ),
-            )
-            .await
-    });
-    executor.wait_for_first_execution().await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from(turn_id),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let mut turn = Box::pin(runtime.run_turn_assembled(
+        TurnInput::text("run the first cell"),
+        CancellationToken::new(),
+        turn_scope(&handler, &controller),
+    ));
+    tokio::select! {
+        outcome = turn.as_mut() => panic!("the first cell must still be running: {outcome:?}"),
+        _ = executor.wait_for_first_execution() => {}
+    }
 
     let receipt = turn_driver
         .request_cancel(lash_core::facade_support::TurnCancelRequest::new(
@@ -233,7 +235,8 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
         lash_core::facade_support::TurnCancelOutcome::Requested(_)
     ));
 
-    let assembled = turn.await.expect("turn task").expect("cancelled turn");
+    let assembled = turn.await.expect("cancelled turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         assembled.outcome,
         TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
@@ -246,16 +249,17 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn response_handoff_abort_settles_before_the_next_cell() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let executor = Arc::new(SettlementExecutor::new(false));
     let controller = RecordingEffectController::default()
         .with_local_code_execution()
         .with_failing_exec_handoff_once();
     let host = host_with_effect_recorder(&backend, controller.clone());
     let driver_store: Arc<dyn lash_core::RuntimePersistence> =
-        unbound_recording_store(&backend).await;
+        double_unbound_recording_store(&double).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -274,24 +278,22 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
     )
     .await;
     let turn_id = "response-handoff-abort";
-    let controller_for_first = controller.clone();
-    let backend_for_turn = backend.clone();
-    let first = lash_core::task::spawn(async move {
-        let result = runtime
-            .run_turn_assembled(
-                TurnInput::text("abort the first cell handoff"),
-                CancellationToken::new(),
-                turn_scope(
-                    &backend_for_turn,
-                    &controller_for_first,
-                    &SessionId::from("root"),
-                    &TurnId::from(turn_id),
-                ),
-            )
-            .await;
-        (runtime, result)
-    });
-    executor.wait_for_first_execution().await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from(turn_id),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let mut first = Box::pin(runtime.run_turn_assembled(
+        TurnInput::text("abort the first cell handoff"),
+        CancellationToken::new(),
+        turn_scope(&handler, &controller),
+    ));
+    tokio::select! {
+        outcome = first.as_mut() => panic!("the first cell must still be running: {outcome:?}"),
+        _ = executor.wait_for_first_execution() => {}
+    }
     turn_driver
         .request_cancel(lash_core::facade_support::TurnCancelRequest::new(
             lash_core::facade_support::TurnAddress::new("root", turn_id),
@@ -300,27 +302,32 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         ))
         .await
         .expect("record cancellation before the failed handoff settles");
-    let (mut runtime, first_result) = first.await.expect("first turn task");
-    let first = first_result.expect("the cancellation path assembles its terminal");
+    let first = first
+        .await
+        .expect("the cancellation path assembles its terminal");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         first.outcome,
         TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
             if evidence.request_id == "handoff-abort-stop"
     ));
 
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("response-handoff-next-cell"),
+        ))
+        .await
+        .expect("open the scope's handler");
     let second = runtime
         .run_turn_assembled(
             TurnInput::text("run the next cell"),
             CancellationToken::new(),
-            turn_scope(
-                &backend,
-                &controller,
-                &SessionId::from("root"),
-                &TurnId::from("response-handoff-next-cell"),
-            ),
+            turn_scope(&handler, &controller),
         )
         .await
         .expect("the next cell executes after settlement");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(second.outcome, TurnOutcome::Finished(_)));
     assert_eq!(second.assistant_output.safe_text, "next cell executed");
     assert_eq!(

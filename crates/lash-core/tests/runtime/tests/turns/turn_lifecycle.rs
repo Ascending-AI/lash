@@ -418,7 +418,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn double_invalidation_preserves_first_decision_id() {
     let backend = memory_store_backend().await;
     let mut runtime = runtime_with_plugins_and_tools(
@@ -453,7 +453,7 @@ pub(super) async fn double_invalidation_preserves_first_decision_id() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
     let backend = memory_store_backend().await;
     let store = recording_unbound_store_on(&backend).await;
@@ -1043,7 +1043,7 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
     let backend = memory_backend().await;
     let executor = Arc::new(FailingCaptureExecutor {
@@ -1495,12 +1495,12 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
 }
 
 pub(super) struct ExpireLeaseAtPreparedTurn {
-    clock: Arc<ManualClock>,
+    clock: Arc<lash_core::testing::TestClock>,
     expired: AtomicBool,
 }
 
 impl ExpireLeaseAtPreparedTurn {
-    pub(super) fn new(clock: Arc<ManualClock>) -> Self {
+    pub(super) fn new(clock: Arc<lash_core::testing::TestClock>) -> Self {
         Self {
             clock,
             expired: AtomicBool::new(false),
@@ -1514,7 +1514,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtPreparedTurn {
             && !self.expired.swap(true, Ordering::SeqCst)
         {
             self.clock
-                .advance_ms(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
         }
     }
 
@@ -1522,12 +1522,12 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtPreparedTurn {
 }
 
 pub(super) struct ExpireLeaseAfterPromptBuild {
-    clock: Arc<ManualClock>,
+    clock: Arc<lash_core::testing::TestClock>,
     expired: AtomicBool,
 }
 
 impl ExpireLeaseAfterPromptBuild {
-    pub(super) fn new(clock: Arc<ManualClock>) -> Self {
+    pub(super) fn new(clock: Arc<lash_core::testing::TestClock>) -> Self {
         Self {
             clock,
             expired: AtomicBool::new(false),
@@ -1543,23 +1543,23 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterPromptBuild {
             && !self.expired.swap(true, Ordering::SeqCst)
         {
             self.clock
-                .advance_ms(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
         }
     }
 }
 
 pub(super) struct ExpireLeaseAfterRetainedCommit {
-    clock: Arc<ManualClock>,
+    clock: Arc<lash_core::testing::TestClock>,
     expired: AtomicBool,
 }
 
 pub(super) struct ExpireLeaseAtSecondTurnFinalizedHook {
-    clock: Arc<ManualClock>,
+    clock: Arc<lash_core::testing::TestClock>,
     finalized_hooks: AtomicUsize,
 }
 
 impl ExpireLeaseAtSecondTurnFinalizedHook {
-    pub(super) fn new(clock: Arc<ManualClock>) -> Self {
+    pub(super) fn new(clock: Arc<lash_core::testing::TestClock>) -> Self {
         Self {
             clock,
             finalized_hooks: AtomicUsize::new(0),
@@ -1577,7 +1577,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtSecondTurnFinali
             && self.finalized_hooks.fetch_add(1, Ordering::SeqCst) == 1
         {
             self.clock
-                .advance_ms(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
         }
     }
 }
@@ -1621,7 +1621,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PauseAfterEffectLoop {
 }
 
 impl ExpireLeaseAfterRetainedCommit {
-    pub(super) fn new(clock: Arc<ManualClock>) -> Self {
+    pub(super) fn new(clock: Arc<lash_core::testing::TestClock>) -> Self {
         Self {
             clock,
             expired: AtomicBool::new(false),
@@ -1635,7 +1635,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterRetainedCommi
             && !self.expired.swap(true, Ordering::SeqCst)
         {
             self.clock
-                .advance_ms(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
+                .advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
         }
     }
 
@@ -1672,24 +1672,6 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store_for_session(
         .with_session_id(session_id)
         .build()
         .await;
-    (runtime, store)
-}
-
-pub(super) async fn standard_runtime_with_transport_and_queue_store_clock(
-    backend: &lash_core::Backend,
-    transport: TestProvider,
-    clock: Arc<dyn lash_core::Clock>,
-) -> (LashRuntime, Arc<RecordingStore>) {
-    let store = unbound_recording_store_with_clock(backend, clock).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
-    let runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        transport,
-        test_host_config(backend),
-        runtime_store,
-    ))
-    .await;
     (runtime, store)
 }
 

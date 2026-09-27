@@ -25,8 +25,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_sansio::sync::MutexExt as _;
 
+use crate::runtime::tests::kernel_double;
 use lash_core::testing::attempt_sentinel::{AttemptAtomicitySentinel, NestedJournalLedger};
 
+const SEED: u64 = 0x5_aa01;
 const SESSION: &str = "atomic-tool-test-session";
 const TURN: &str = "attempt-atomicity-turn";
 const ATTEMPT_EFFECT_ID: &str = "attempt-atomicity-attempt";
@@ -37,40 +39,35 @@ const FOLLOW_ON_EFFECT_ID: &str = "attempt-atomicity-follow-on";
 
 /// A controller-owned tier stand-in over a backend's own controller for the
 /// matrix turn.
-struct ControllerOwnedTier {
-    inner: Arc<dyn lash_core::RuntimeEffectController>,
+struct ControllerOwnedTier<'a> {
+    inner: lash_core::ScopedEffectController<'a>,
 }
 
-/// `backend`'s own controller for the matrix turn.
+/// `handler`'s own controller for the matrix turn.
 fn matrix_turn_controller(
-    backend: &lash_core::Backend,
-) -> Arc<dyn lash_core::RuntimeEffectController> {
-    lash_core::testing::runtime_helpers::backend_admitted_scope(
-        backend,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .owned_controller()
-    .expect("a static controller is shared")
+    handler: &lash_restate_test::OpenHandler,
+) -> lash_core::ScopedEffectController<'_> {
+    handler.scoped()
 }
 
-impl ControllerOwnedTier {
-    fn ordinal_addressed(backend: &lash_core::Backend) -> Self {
+impl<'a> ControllerOwnedTier<'a> {
+    fn ordinal_addressed(handler: &'a lash_restate_test::OpenHandler) -> Self {
         Self {
-            inner: matrix_turn_controller(backend),
+            inner: matrix_turn_controller(handler),
         }
     }
 
-    fn key_addressed(backend: &lash_core::Backend) -> Self {
+    fn key_addressed(handler: &'a lash_restate_test::OpenHandler) -> Self {
         Self {
-            inner: matrix_turn_controller(backend),
+            inner: matrix_turn_controller(handler),
         }
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for ControllerOwnedTier {
+impl lash_core::AwaitEventResolver for ControllerOwnedTier<'_> {
     fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
+        self.inner.controller().await_event_authority_binding_id()
     }
 
     async fn prepare_completion_key(
@@ -92,7 +89,7 @@ impl lash_core::AwaitEventResolver for ControllerOwnedTier {
         scope: &lash_core::ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
+        self.inner.controller().await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -100,32 +97,38 @@ impl lash_core::AwaitEventResolver for ControllerOwnedTier {
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
+        self.inner
+            .controller()
+            .resolve_await_event(key, resolution)
+            .await
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for ControllerOwnedTier {
+impl lash_core::RuntimeEffectController for ControllerOwnedTier<'_> {
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        self.inner.execute_effect(envelope, local_executor).await
+        self.inner
+            .controller()
+            .execute_effect(envelope, local_executor)
+            .await
     }
 
     async fn open_effect_group(
         &self,
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
+        self.inner.controller().open_effect_group(group).await
     }
 
     fn register_group_executors(
         &self,
         executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
+        self.inner.controller().register_group_executors(executors)
     }
 
     async fn await_next_settlement(
@@ -133,7 +136,10 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
         handle: &mut lash_core::EffectGroupHandle,
         cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
+        self.inner
+            .controller()
+            .await_next_settlement(handle, cancel)
+            .await
     }
     async fn read_group_settlement(
         &self,
@@ -143,7 +149,10 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
         Option<lash_core::runtime::effect::RankedGroupSettlement>,
         lash_core::RuntimeEffectControllerError,
     > {
-        self.inner.read_group_settlement(group_key, rank).await
+        self.inner
+            .controller()
+            .read_group_settlement(group_key, rank)
+            .await
     }
 
     async fn close_effect_group(
@@ -151,7 +160,10 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
         handle: lash_core::EffectGroupHandle,
         disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
+        self.inner
+            .controller()
+            .close_effect_group(handle, disposition)
+            .await
     }
     async fn commit_group_child_final(
         &self,
@@ -160,7 +172,10 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
-        self.inner.commit_group_child_final(commit).await
+        self.inner
+            .controller()
+            .commit_group_child_final(commit)
+            .await
     }
 
     async fn await_group_child_drain_admission(
@@ -169,6 +184,7 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
         commit_seq: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
+            .controller()
             .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
@@ -177,7 +193,7 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
 struct Fixtures {
     /// The backend whose registry and process-exec-env store the matrix
     /// runs over; held so its in-memory databases outlive every row.
-    backend: lash_sqlite_store::SqliteBackend,
+    backend: lash_restate_test::RestateTestBackend,
     /// The same backend, as the handle a host config and a tier take.
     backend_handle: lash_core::Backend,
     host: Arc<lash_core::testing::MockSessionManager>,
@@ -210,8 +226,30 @@ fn direct_mock_call() -> super::helpers::MockCall {
 }
 
 async fn fixtures() -> Fixtures {
-    let backend = crate::runtime::tests::sqlite_memory_backend().await;
-    let backend_handle: lash_core::Backend = Arc::new(backend.clone()).into();
+    let backend = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend_handle: lash_core::Backend = backend.lash_backend();
+    backend.install_process_worker(
+        lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
+                Vec::<Arc<dyn lash_core::facade_support::PluginFactory>>::new(),
+                lash_core::facade_support::RuntimeHostConfig::new(
+                    backend_handle.clone(),
+                    lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                    lash_core::QueuedWorkBatchingConfig::new(1),
+                ),
+                lash_core_worker::WorkerProcessWork::External(
+                    backend_handle
+                        .process_work()
+                        .expect("the Restate engine supplies process work")
+                        .clone(),
+                ),
+                Arc::new(lash_core::NoSessionWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(lash_core::testing::standard_test_policy()),
+        )
+        .expect("valid test worker config"),
+    );
     let runtime = Box::pin(super::helpers::runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(lash_core::testing::EmptyToolProvider),
@@ -221,7 +259,7 @@ async fn fixtures() -> Fixtures {
         )),
     ))
     .await;
-    let registry = lash_core::Backend::from(backend.clone()).process_registry();
+    let registry = backend_handle.process_registry();
     let host = Arc::new(
         lash_core::testing::MockSessionManager::default()
             .with_process_registry(Arc::clone(&registry))
@@ -302,7 +340,7 @@ async fn fixtures() -> Fixtures {
         )
         .await
         .expect("start live matrix process");
-    let trigger_store = lash_core::Backend::from(backend.clone()).trigger_store();
+    let trigger_store = backend_handle.trigger_store();
     Fixtures {
         backend,
         backend_handle,
@@ -366,7 +404,7 @@ fn tool_context_with_provider<'run>(
         .expect("build attempt-atomicity plugin session");
     let processes = lash_core::testing::effect_backed_process_service(
         Arc::clone(&fixtures.registry),
-        lash_core::Backend::from(fixtures.backend.clone()).process_env_store(),
+        fixtures.backend_handle.process_env_store(),
     );
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
     let effect_controller = lash_core::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
@@ -519,51 +557,59 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
 async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     capability_inventory::assert_capability_inventory_complete();
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &sentinel,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped post-cutover sentinel controller");
-    let tool = tool_context(scoped, &fixtures);
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        lash_core::RuntimeEffectEnvelope::new(
-            attempt_invocation(),
-            lash_core::RuntimeEffectCommand::ToolAttempt {
-                call: prepared_tool_call(),
-                execution_grant: None,
-                attempt: 1,
-                max_attempts: 1,
-            },
-        ),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            let attempt = lash_core::AttemptContext::__for_testing(&tool, TURN);
-            capability_inventory::exercise_attempt_capabilities(&attempt).await;
-            Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
-                launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-                    record: Box::new(lash_core::ToolCallRecord {
-                        call_id: Some(CALL_ID.to_string()),
-                        tool: "attempt_atomicity".to_string(),
-                        args: serde_json::Value::Null,
-                        output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::ordinal_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let scoped = lash_core::ScopedEffectController::borrowed(
+            &sentinel,
+            lash_core::AdmittedScope::turn(SESSION, TURN),
+        )
+        .expect("scoped post-cutover sentinel controller");
+        let tool = tool_context(scoped, &fixtures);
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            lash_core::RuntimeEffectEnvelope::new(
+                attempt_invocation(),
+                lash_core::RuntimeEffectCommand::ToolAttempt {
+                    call: prepared_tool_call(),
+                    execution_grant: None,
+                    attempt: 1,
+                    max_attempts: 1,
+                },
+            ),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                let attempt = lash_core::AttemptContext::__for_testing(&tool, TURN);
+                capability_inventory::exercise_attempt_capabilities(&attempt).await;
+                Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
+                    launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+                        record: Box::new(lash_core::ToolCallRecord {
+                            call_id: Some(CALL_ID.to_string()),
+                            tool: "attempt_atomicity".to_string(),
+                            args: serde_json::Value::Null,
+                            output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+                        }),
+                        intents: lash_core::ToolIntents::default(),
                     }),
-                    intents: lash_core::ToolIntents::default(),
-                }),
-                triggers: Vec::new(),
-                capture: None,
-            })
-        }),
-    )
-    .await
-    .expect("sanctioned leaf attempt completes");
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "post-cutover leaf capabilities produce exactly zero controller crossings"
-    );
+                    triggers: Vec::new(),
+                    capture: None,
+                })
+            }),
+        )
+        .await
+        .expect("sanctioned leaf attempt completes");
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            Vec::<String>::new(),
+            "post-cutover leaf capabilities produce exactly zero controller crossings"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// A provider still runs its single `execute` body inside the recorded
@@ -573,92 +619,104 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
 #[tokio::test]
 async fn pure_execute_provider_routes_through_the_attempt_context_without_controller_crossing() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &sentinel,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped provider-routing sentinel controller");
-    let provider = Arc::new(PureLeafProbeProvider::new());
-    let tool = tool_context_with_provider(
-        scoped,
-        &fixtures,
-        Arc::clone(&provider) as Arc<dyn lash_core::ToolProvider>,
-        vec![PureLeafProbeProvider::definition()],
-        true,
-    );
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::ordinal_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let scoped = lash_core::ScopedEffectController::borrowed(
+            &sentinel,
+            lash_core::AdmittedScope::turn(SESSION, TURN),
+        )
+        .expect("scoped provider-routing sentinel controller");
+        let provider = Arc::new(PureLeafProbeProvider::new());
+        let tool = tool_context_with_provider(
+            scoped,
+            &fixtures,
+            Arc::clone(&provider) as Arc<dyn lash_core::ToolProvider>,
+            vec![PureLeafProbeProvider::definition()],
+            true,
+        );
 
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        lash_core::RuntimeEffectEnvelope::new(
-            attempt_invocation(),
-            lash_core::RuntimeEffectCommand::ToolAttempt {
-                call: prepared_tool_call(),
-                execution_grant: None,
-                attempt: 1,
-                max_attempts: 1,
-            },
-        ),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            let dispatch = Arc::clone(
-                tool.runtime_dispatch
-                    .as_ref()
-                    .expect("tool context carries runtime dispatch"),
-            );
-            let prepared = prepared_tool_call();
-            assert!(
-                lash_core::tool_dispatch::resolve_callable_manifest_by_id(
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            lash_core::RuntimeEffectEnvelope::new(
+                attempt_invocation(),
+                lash_core::RuntimeEffectCommand::ToolAttempt {
+                    call: prepared_tool_call(),
+                    execution_grant: None,
+                    attempt: 1,
+                    max_attempts: 1,
+                },
+            ),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                let dispatch = Arc::clone(
+                    tool.runtime_dispatch
+                        .as_ref()
+                        .expect("tool context carries runtime dispatch"),
+                );
+                let prepared = prepared_tool_call();
+                assert!(
+                    lash_core::tool_dispatch::resolve_callable_manifest_by_id(
+                        dispatch.as_ref(),
+                        &prepared.tool_id,
+                    )
+                    .is_some(),
+                    "the attempt is admitted through the production catalog authority"
+                );
+                let result = lash_core::tool_dispatch::execute_once(
                     dispatch.as_ref(),
-                    &prepared.tool_id,
+                    &prepared,
+                    tool,
+                    None,
                 )
-                .is_some(),
-                "the attempt is admitted through the production catalog authority"
-            );
-            let result =
-                lash_core::tool_dispatch::execute_once(dispatch.as_ref(), &prepared, tool, None)
-                    .await;
-            // Assert the provider's sentinel value at the test level, not just
-            // the Done shape. A recorded attempt body runs under
-            // `catch_unwind`, so an assertion that panics *inside* the provider
-            // becomes a `Done` failure output: without pinning the exact
-            // success payload here, every in-provider law above would be
-            // unenforced.
-            let lash_core::ToolAttemptOutcome::Done { result, .. } = result else {
-                panic!("pure-execute provider must complete, not park");
-            };
-            assert_eq!(
-                result.into_output().outcome,
-                lash_core::ToolCallOutcome::Success(lash_core::ToolValue::untrusted_json(
-                    serde_json::json!("pure execute ran")
-                )),
-                "an in-provider assertion panic surfaces here as a failure output"
-            );
-            Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
-                launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-                    record: Box::new(lash_core::ToolCallRecord {
-                        call_id: Some(CALL_ID.to_string()),
-                        tool: "attempt_atomicity".to_string(),
-                        args: serde_json::Value::Null,
-                        output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+                .await;
+                // Assert the provider's sentinel value at the test level, not just
+                // the Done shape. A recorded attempt body runs under
+                // `catch_unwind`, so an assertion that panics *inside* the provider
+                // becomes a `Done` failure output: without pinning the exact
+                // success payload here, every in-provider law above would be
+                // unenforced.
+                let lash_core::ToolAttemptOutcome::Done { result, .. } = result else {
+                    panic!("pure-execute provider must complete, not park");
+                };
+                assert_eq!(
+                    result.into_output().outcome,
+                    lash_core::ToolCallOutcome::Success(lash_core::ToolValue::untrusted_json(
+                        serde_json::json!("pure execute ran")
+                    )),
+                    "an in-provider assertion panic surfaces here as a failure output"
+                );
+                Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
+                    launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+                        record: Box::new(lash_core::ToolCallRecord {
+                            call_id: Some(CALL_ID.to_string()),
+                            tool: "attempt_atomicity".to_string(),
+                            args: serde_json::Value::Null,
+                            output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+                        }),
+                        intents: lash_core::ToolIntents::default(),
                     }),
-                    intents: lash_core::ToolIntents::default(),
-                }),
-                triggers: Vec::new(),
-                capture: None,
-            })
-        }),
-    )
-    .await
-    .expect("pure-execute provider completes through the attempt route");
+                    triggers: Vec::new(),
+                    capture: None,
+                })
+            }),
+        )
+        .await
+        .expect("pure-execute provider completes through the attempt route");
 
-    assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "the sealed attempt context has no controller-crossing route to offer"
-    );
+        assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            Vec::<String>::new(),
+            "the sealed attempt context has no controller-crossing route to offer"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// Red proof for the sentinel itself: a deliberately leaked test-only command
@@ -666,119 +724,127 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
 #[tokio::test]
 async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let command = lash_core::ProcessCommand::Cancel {
-        process_id: fixtures.live.clone(),
-        origin: lash_core::CancelOrigin::OperatorRequested,
-        requester: "test:outside-attempt".to_string(),
-        attribution: None,
-    };
-    let effect_id = command.effect_id();
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        lash_core::RuntimeEffectEnvelope::new(
-            lash_core::RuntimeEffectInvocation::new(
-                lash_core::EffectAddress::new(
-                    lash_core::ExecutionScope::turn(SESSION, TURN),
-                    effect_id.clone(),
-                )
-                .expect("valid process effect address"),
-                lash_core::RuntimeAttribution::for_session(SESSION),
-                effect_id.clone(),
-            ),
-            lash_core::RuntimeEffectCommand::process(command),
-        ),
-        lash_core::RuntimeEffectLocalExecutor::processes(
-            Arc::clone(&fixtures.registry),
-            Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
-                &fixtures.registry,
-            ))),
-        ),
-    )
-    .await
-    .expect("cancel outside an attempt");
-    assert!(
-        !ledger.tripped(),
-        "a command outside any recorded attempt is not a nested emission"
-    );
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "no crossings are recorded outside a recorded attempt"
-    );
-
-    let registry = Arc::clone(&fixtures.registry);
-    let nested_target = registry
-        .require_process_id(&fixtures.external)
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
         .await
-        .expect("resolve the nonterminal sentinel target");
-    let nested_sentinel = &sentinel;
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        lash_core::RuntimeEffectEnvelope::new(
-            attempt_invocation(),
-            lash_core::RuntimeEffectCommand::ToolAttempt {
-                call: prepared_tool_call(),
-                execution_grant: None,
-                attempt: 1,
-                max_attempts: 1,
-            },
-        ),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            let command = lash_core::ProcessCommand::Cancel {
-                process_id: nested_target,
-                origin: lash_core::CancelOrigin::OperatorRequested,
-                requester: "test:sentinel-leak".to_string(),
-                attribution: None,
-            };
-            let effect_id = command.effect_id();
-            lash_core::RuntimeEffectController::execute_effect(
-                nested_sentinel,
-                lash_core::RuntimeEffectEnvelope::new(
-                    lash_core::RuntimeEffectInvocation::new(
-                        lash_core::EffectAddress::new(
-                            lash_core::ExecutionScope::turn(SESSION, TURN),
-                            effect_id.clone(),
-                        )
-                        .expect("valid nested process effect address"),
-                        lash_core::RuntimeAttribution::for_session(SESSION),
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::ordinal_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let command = lash_core::ProcessCommand::Cancel {
+            process_id: fixtures.live.clone(),
+            origin: lash_core::CancelOrigin::OperatorRequested,
+            requester: "test:outside-attempt".to_string(),
+            attribution: None,
+        };
+        let effect_id = command.effect_id();
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            lash_core::RuntimeEffectEnvelope::new(
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(
+                        lash_core::ExecutionScope::turn(SESSION, TURN),
                         effect_id.clone(),
+                    )
+                    .expect("valid process effect address"),
+                    lash_core::RuntimeAttribution::for_session(SESSION),
+                    effect_id.clone(),
+                ),
+                lash_core::RuntimeEffectCommand::process(command),
+            ),
+            lash_core::RuntimeEffectLocalExecutor::processes(
+                Arc::clone(&fixtures.registry),
+                Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+                    &fixtures.registry,
+                ))),
+            ),
+        )
+        .await
+        .expect("cancel outside an attempt");
+        assert!(
+            !ledger.tripped(),
+            "a command outside any recorded attempt is not a nested emission"
+        );
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            Vec::<String>::new(),
+            "no crossings are recorded outside a recorded attempt"
+        );
+
+        let registry = Arc::clone(&fixtures.registry);
+        let nested_target = registry
+            .require_process_id(&fixtures.external)
+            .await
+            .expect("resolve the nonterminal sentinel target");
+        let nested_sentinel = &sentinel;
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            lash_core::RuntimeEffectEnvelope::new(
+                attempt_invocation(),
+                lash_core::RuntimeEffectCommand::ToolAttempt {
+                    call: prepared_tool_call(),
+                    execution_grant: None,
+                    attempt: 1,
+                    max_attempts: 1,
+                },
+            ),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                let command = lash_core::ProcessCommand::Cancel {
+                    process_id: nested_target,
+                    origin: lash_core::CancelOrigin::OperatorRequested,
+                    requester: "test:sentinel-leak".to_string(),
+                    attribution: None,
+                };
+                let effect_id = command.effect_id();
+                lash_core::RuntimeEffectController::execute_effect(
+                    nested_sentinel,
+                    lash_core::RuntimeEffectEnvelope::new(
+                        lash_core::RuntimeEffectInvocation::new(
+                            lash_core::EffectAddress::new(
+                                lash_core::ExecutionScope::turn(SESSION, TURN),
+                                effect_id.clone(),
+                            )
+                            .expect("valid nested process effect address"),
+                            lash_core::RuntimeAttribution::for_session(SESSION),
+                            effect_id.clone(),
+                        ),
+                        lash_core::RuntimeEffectCommand::process(command),
                     ),
-                    lash_core::RuntimeEffectCommand::process(command),
-                ),
-                lash_core::RuntimeEffectLocalExecutor::processes(
-                    Arc::clone(&registry),
-                    Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
-                ),
-            )
-            .await?;
-            Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
-                launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-                    record: Box::new(lash_core::ToolCallRecord {
-                        call_id: Some(CALL_ID.to_string()),
-                        tool: "attempt_atomicity".to_string(),
-                        args: serde_json::Value::Null,
-                        output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+                    lash_core::RuntimeEffectLocalExecutor::processes(
+                        Arc::clone(&registry),
+                        Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+                    ),
+                )
+                .await?;
+                Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
+                    launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+                        record: Box::new(lash_core::ToolCallRecord {
+                            call_id: Some(CALL_ID.to_string()),
+                            tool: "attempt_atomicity".to_string(),
+                            args: serde_json::Value::Null,
+                            output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+                        }),
+                        intents: lash_core::ToolIntents::default(),
                     }),
-                    intents: lash_core::ToolIntents::default(),
-                }),
-                triggers: Vec::new(),
-                capture: None,
-            })
-        }),
-    )
-    .await
-    .expect("test-only nested leak executes");
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        vec![format!(
-            "execute_effect:process:process:cancel:{}",
-            fixtures.external
-        )],
-        "the literal test-only leak proves the sentinel fails red when a command escapes"
-    );
+                    triggers: Vec::new(),
+                    capture: None,
+                })
+            }),
+        )
+        .await
+        .expect("test-only nested leak executes");
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            vec![format!(
+                "execute_effect:process:process:cancel:{}",
+                fixtures.external
+            )],
+            "the literal test-only leak proves the sentinel fails red when a command escapes"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// Each admitted v2 declaration realizes exactly one controller command, and
@@ -786,93 +852,101 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
 #[tokio::test]
 async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::key_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &sentinel,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped intent sentinel controller");
-    let tool = tool_context(scoped, &fixtures);
-    let mut dispatch = tool
-        .runtime_dispatch
-        .as_ref()
-        .map(|context| context.as_ref().clone())
-        .expect("runtime dispatch context");
-    dispatch.parent_invocation = Some(lash_core::RuntimeInvocation::effect(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::turn(SESSION, TURN),
-            "intent-drain",
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::key_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let scoped = lash_core::ScopedEffectController::borrowed(
+            &sentinel,
+            lash_core::AdmittedScope::turn(SESSION, TURN),
         )
-        .expect("valid intent-drain address"),
-        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
-        "intent-drain",
-    ));
+        .expect("scoped intent sentinel controller");
+        let tool = tool_context(scoped, &fixtures);
+        let mut dispatch = tool
+            .runtime_dispatch
+            .as_ref()
+            .map(|context| context.as_ref().clone())
+            .expect("runtime dispatch context");
+        dispatch.parent_invocation = Some(lash_core::RuntimeInvocation::effect(
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn(SESSION, TURN),
+                "intent-drain",
+            )
+            .expect("valid intent-drain address"),
+            lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
+            "intent-drain",
+        ));
 
-    let intents = lash_core::ToolIntents::v3(vec![
-        lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-            session_id: SessionId::from(SESSION.to_string()),
-            declaration: lash_core::ProcessStartDeclaration::external(
-                lash_core::ProcessOriginator::host_scoped("intent-test"),
-                serde_json::json!({"step": "start"}),
-                lash_core::Lifetime::Detached,
-            ),
-        })),
-        lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-            session_id: SessionId::from(SESSION.to_string()),
-            process_id: fixtures.live.clone(),
-            signal_name: "resume".to_string(),
-            payload: serde_json::json!({"step": "signal"}),
-        }),
-        lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-            session_id: SessionId::from(SESSION.to_string()),
-            process_id: fixtures.live.clone(),
-            event_type: "attempt.atomicity.note".to_string(),
-            payload: serde_json::json!({"step": "event"}),
-        }),
-        lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-            session_id: SessionId::from(SESSION.to_string()),
-            process_id: fixtures.live.clone(),
-        }),
-    ]);
-    let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
-        &dispatch,
-        Some(CALL_ID),
-        &intents,
-        None,
-    )
-    .await
-    .expect("execute intent batch");
-    assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
-    let literal_ids = [
-        "tool-intent:v2:blake3:06404a7267c11e95e26c0911398d8e4881ae846fd7e962be54aec5aefa88ab74",
-        "tool-intent:v2:blake3:f6a0238ac5cd935c4e90ba7aea76793abbea968361e0d5df0fec1a576615d291",
-        "tool-intent:v2:blake3:4d9e09cb0742c6bd58ba1fc01b712b4b74bb762edad0e708fb18a19db960f888",
-        "tool-intent:v2:blake3:e93de6b5ba860968e4ab3c339cfe2f77f49aa384c4e6ede22853541e103e1ac4",
-    ];
-    let actual_ids = outcomes
-        .iter()
-        .map(|outcome| match outcome {
-            lash_core::ToolIntentExecutionOutcome::Executed { identity, .. } => {
-                identity.replay_key.as_str()
-            }
-            lash_core::ToolIntentExecutionOutcome::Refused { refusal, .. } => {
-                panic!("fixture intent was refused: {refusal:?}")
-            }
-            lash_core::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => {
-                panic!("fixture batch was refused: {refusal:?}")
-            }
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(actual_ids, literal_ids);
-    for literal_id in literal_ids {
-        assert_eq!(
-            ledger.crossings_for_intent(literal_id).len(),
-            1,
-            "intent {literal_id} must issue exactly one command"
-        );
+        let intents = lash_core::ToolIntents::v3(vec![
+            lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+                session_id: SessionId::from(SESSION.to_string()),
+                declaration: lash_core::ProcessStartDeclaration::external(
+                    lash_core::ProcessOriginator::host_scoped("intent-test"),
+                    serde_json::json!({"step": "start"}),
+                    lash_core::Lifetime::Detached,
+                ),
+            })),
+            lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
+                session_id: SessionId::from(SESSION.to_string()),
+                process_id: fixtures.live.clone(),
+                signal_name: "resume".to_string(),
+                payload: serde_json::json!({"step": "signal"}),
+            }),
+            lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
+                session_id: SessionId::from(SESSION.to_string()),
+                process_id: fixtures.live.clone(),
+                event_type: "attempt.atomicity.note".to_string(),
+                payload: serde_json::json!({"step": "event"}),
+            }),
+            lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
+                session_id: SessionId::from(SESSION.to_string()),
+                process_id: fixtures.live.clone(),
+            }),
+        ]);
+        let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
+            &dispatch,
+            Some(CALL_ID),
+            &intents,
+            None,
+        )
+        .await
+        .expect("execute intent batch");
+        assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
+        let literal_ids = [
+            "tool-intent:v2:blake3:06404a7267c11e95e26c0911398d8e4881ae846fd7e962be54aec5aefa88ab74",
+            "tool-intent:v2:blake3:f6a0238ac5cd935c4e90ba7aea76793abbea968361e0d5df0fec1a576615d291",
+            "tool-intent:v2:blake3:4d9e09cb0742c6bd58ba1fc01b712b4b74bb762edad0e708fb18a19db960f888",
+            "tool-intent:v2:blake3:e93de6b5ba860968e4ab3c339cfe2f77f49aa384c4e6ede22853541e103e1ac4",
+        ];
+        let actual_ids = outcomes
+            .iter()
+            .map(|outcome| match outcome {
+                lash_core::ToolIntentExecutionOutcome::Executed { identity, .. } => {
+                    identity.replay_key.as_str()
+                }
+                lash_core::ToolIntentExecutionOutcome::Refused { refusal, .. } => {
+                    panic!("fixture intent was refused: {refusal:?}")
+                }
+                lash_core::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => {
+                    panic!("fixture batch was refused: {refusal:?}")
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual_ids, literal_ids);
+        for literal_id in literal_ids {
+            assert_eq!(
+                ledger.crossings_for_intent(literal_id).len(),
+                1,
+                "intent {literal_id} must issue exactly one command"
+            );
+        }
     }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// Literal overflow law: admission refuses the complete recorded batch and no
@@ -880,245 +954,275 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
 #[tokio::test]
 async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_commands() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::key_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &sentinel,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped overflow sentinel controller");
-    let tool = tool_context(scoped, &fixtures);
-    let dispatch = tool
-        .runtime_dispatch
-        .as_ref()
-        .map(|context| context.as_ref().clone())
-        .expect("runtime dispatch context");
-    let intents = lash_core::ToolIntents::v3(
-        (0..=lash_core::TOOL_INTENT_MAX_COUNT)
-            .map(|index| {
-                lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                    session_id: SessionId::from(SESSION.to_string()),
-                    process_id: fixtures.live.clone(),
-                    signal_name: "resume".to_string(),
-                    payload: serde_json::json!({"index": index}),
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::key_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let scoped = lash_core::ScopedEffectController::borrowed(
+            &sentinel,
+            lash_core::AdmittedScope::turn(SESSION, TURN),
+        )
+        .expect("scoped overflow sentinel controller");
+        let tool = tool_context(scoped, &fixtures);
+        let dispatch = tool
+            .runtime_dispatch
+            .as_ref()
+            .map(|context| context.as_ref().clone())
+            .expect("runtime dispatch context");
+        let intents = lash_core::ToolIntents::v3(
+            (0..=lash_core::TOOL_INTENT_MAX_COUNT)
+                .map(|index| {
+                    lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
+                        session_id: SessionId::from(SESSION.to_string()),
+                        process_id: fixtures.live.clone(),
+                        signal_name: "resume".to_string(),
+                        payload: serde_json::json!({"index": index}),
+                    })
                 })
-            })
-            .collect(),
-    );
-    let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
-        &dispatch,
-        Some(CALL_ID),
-        &intents,
-        None,
-    )
-    .await
-    .expect("refuse over-budget intent batch");
-    assert_eq!(outcomes.len(), 33, "every declaration gets a refusal");
-    assert!(outcomes.iter().all(|outcome| matches!(
-        outcome,
-        lash_core::ToolIntentExecutionOutcome::Refused {
-            refusal: lash_core::ToolIntentRefusalReason::CountBudgetExceeded {
-                actual: 33,
-                maximum: 32,
-            },
-            ..
-        }
-    )));
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "the drain is outside the attempt body"
-    );
-    for outcome in outcomes {
-        let identity = match outcome {
-            lash_core::ToolIntentExecutionOutcome::Refused {
-                identity: Some(identity),
-                ..
-            } => identity,
-            other => panic!("expected identity-bearing refusal, got {other:?}"),
-        };
-        assert_eq!(
-            ledger.crossings_for_intent(&identity.replay_key),
-            Vec::<String>::new(),
-            "over-budget admission issues zero commands"
+                .collect(),
         );
+        let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
+            &dispatch,
+            Some(CALL_ID),
+            &intents,
+            None,
+        )
+        .await
+        .expect("refuse over-budget intent batch");
+        assert_eq!(outcomes.len(), 33, "every declaration gets a refusal");
+        assert!(outcomes.iter().all(|outcome| matches!(
+            outcome,
+            lash_core::ToolIntentExecutionOutcome::Refused {
+                refusal: lash_core::ToolIntentRefusalReason::CountBudgetExceeded {
+                    actual: 33,
+                    maximum: 32,
+                },
+                ..
+            }
+        )));
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            Vec::<String>::new(),
+            "the drain is outside the attempt body"
+        );
+        for outcome in outcomes {
+            let identity = match outcome {
+                lash_core::ToolIntentExecutionOutcome::Refused {
+                    identity: Some(identity),
+                    ..
+                } => identity,
+                other => panic!("expected identity-bearing refusal, got {other:?}"),
+            };
+            assert_eq!(
+                ledger.crossings_for_intent(&identity.replay_key),
+                Vec::<String>::new(),
+                "over-budget admission issues zero commands"
+            );
+        }
     }
+    handler.close().await.expect("close the scope's handler");
 }
 
 #[tokio::test]
 async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overcounts() {
-    let fixtures_backend = crate::runtime::tests::memory_backend().await;
-    let tier = ControllerOwnedTier::key_addressed(&fixtures_backend);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let identity =
-        lash_core::derive_tool_intent_identity(&SessionId::from(SESSION), TURN, Some(CALL_ID), 9)
-            .expect("literal intent identity");
-    let registry = fixtures_backend.process_registry();
-    let registered = registry
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let fixtures_backend = double.lash_backend();
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::key_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let identity = lash_core::derive_tool_intent_identity(
+            &SessionId::from(SESSION),
+            TURN,
+            Some(CALL_ID),
+            9,
+        )
+        .expect("literal intent identity");
+        let registry = fixtures_backend.process_registry();
+        let registered = registry
+            .register_process(
+                lash_core::ProcessRegistration::new(
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash_core::RecoveryContract::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::Lifetime::Detached,
+                )
+                .with_extra_event_types([lash_core::ProcessEventType {
+                    name: "structural.note".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                }]),
             )
-            .with_extra_event_types([lash_core::ProcessEventType {
-                name: "structural.note".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
-            }]),
+            .await
+            .expect("register structural attribution target");
+        let command = lash_core::ProcessCommand::EmitEvent {
+            process_id: registered.id.clone(),
+            request: lash_core::ProcessEventAppendRequest::new(
+                "structural.note",
+                serde_json::json!({"law": "overcount"}),
+            )
+            .with_replay_key("structural-attribution-event"),
+        };
+        let attributed = lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn(SESSION, TURN),
+                "plain-unprefixed-key",
+            )
+            .expect("valid structurally attributed address"),
+            lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
+            "structurally-attributed-command",
+        )
+        .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        ));
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            lash_core::RuntimeEffectEnvelope::new(
+                attributed,
+                lash_core::RuntimeEffectCommand::process(command.clone()),
+            ),
+            lash_core::RuntimeEffectLocalExecutor::processes(
+                registry.clone(),
+                Arc::new(lash_core::NativeProcessWork::for_registry(registry.clone())),
+            ),
         )
         .await
-        .expect("register structural attribution target");
-    let command = lash_core::ProcessCommand::EmitEvent {
-        process_id: registered.id.clone(),
-        request: lash_core::ProcessEventAppendRequest::new(
-            "structural.note",
-            serde_json::json!({"law": "overcount"}),
-        )
-        .with_replay_key("structural-attribution-event"),
-    };
-    let attributed = lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::turn(SESSION, TURN),
-            "plain-unprefixed-key",
-        )
-        .expect("valid structurally attributed address"),
-        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
-        "structurally-attributed-command",
-    )
-    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
-        identity.clone(),
-    ));
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        lash_core::RuntimeEffectEnvelope::new(
-            attributed,
-            lash_core::RuntimeEffectCommand::process(command.clone()),
-        ),
-        lash_core::RuntimeEffectLocalExecutor::processes(
-            registry.clone(),
-            Arc::new(lash_core::NativeProcessWork::for_registry(registry.clone())),
-        ),
-    )
-    .await
-    .expect("unprefixed command executes");
-    assert_eq!(
-        ledger.crossings_for_intent(&identity.replay_key),
-        vec!["execute_effect:process:structurally-attributed-command".to_string()]
-    );
+        .expect("unprefixed command executes");
+        assert_eq!(
+            ledger.crossings_for_intent(&identity.replay_key),
+            vec!["execute_effect:process:structurally-attributed-command".to_string()]
+        );
 
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        lash_core::RuntimeEffectEnvelope::new(
-            lash_core::RuntimeEffectInvocation::new(
-                lash_core::EffectAddress::new(
-                    lash_core::ExecutionScope::turn(SESSION, TURN),
-                    "another-plain-key",
-                )
-                .expect("valid missing-attribution test address"),
-                lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
-                "missing-attribution-command",
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            lash_core::RuntimeEffectEnvelope::new(
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(
+                        lash_core::ExecutionScope::turn(SESSION, TURN),
+                        "another-plain-key",
+                    )
+                    .expect("valid missing-attribution test address"),
+                    lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
+                    "missing-attribution-command",
+                ),
+                lash_core::RuntimeEffectCommand::process(command),
             ),
-            lash_core::RuntimeEffectCommand::process(command),
-        ),
-        lash_core::RuntimeEffectLocalExecutor::processes(
-            registry.clone(),
-            Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
-        ),
-    )
-    .await
-    .expect("unattributed command executes");
-    assert_eq!(
-        ledger.crossings_for_intent(&identity.replay_key),
-        vec![
-            "execute_effect:process:structurally-attributed-command".to_string(),
-            "execute_effect:process:missing-attribution-command".to_string(),
-        ],
-        "missing structural metadata fails the one-command law by over-counting"
-    );
+            lash_core::RuntimeEffectLocalExecutor::processes(
+                registry.clone(),
+                Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+            ),
+        )
+        .await
+        .expect("unattributed command executes");
+        assert_eq!(
+            ledger.crossings_for_intent(&identity.replay_key),
+            vec![
+                "execute_effect:process:structurally-attributed-command".to_string(),
+                "execute_effect:process:missing-attribution-command".to_string(),
+            ],
+            "missing structural metadata fails the one-command law by over-counting"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 #[tokio::test]
 async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identical_bytes() {
     let fixtures = fixtures().await;
     let controller = super::effect::RecordingEffectController::default().with_replay_by_key();
-    let scoped = super::effect::layered_scope(
-        &fixtures.backend_handle,
-        Arc::new(controller.clone()),
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    );
-    let tool = tool_context(scoped, &fixtures);
-    let dispatch = tool
-        .runtime_dispatch
-        .as_ref()
-        .map(|context| context.as_ref().clone())
-        .expect("runtime dispatch context");
-    let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
-        lash_core::SignalProcessIntent {
-            session_id: SessionId::from(SESSION.to_string()),
-            process_id: fixtures.live.clone(),
-            signal_name: "resume".to_string(),
-            payload: serde_json::json!({"recorded": "payload"}),
-        },
-    )]);
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let scoped = lash_core::testing::LayeredEffectHost::layer_scoped(
+            handler.scoped(),
+            Arc::new(controller.clone()),
+        )
+        .expect("layer the handler's scope");
+        let tool = tool_context(scoped, &fixtures);
+        let dispatch = tool
+            .runtime_dispatch
+            .as_ref()
+            .map(|context| context.as_ref().clone())
+            .expect("runtime dispatch context");
+        let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
+            lash_core::SignalProcessIntent {
+                session_id: SessionId::from(SESSION.to_string()),
+                process_id: fixtures.live.clone(),
+                signal_name: "resume".to_string(),
+                payload: serde_json::json!({"recorded": "payload"}),
+            },
+        )]);
 
-    let first = lash_core::tool_dispatch::execute_final_tool_intents(
-        &dispatch,
-        Some(CALL_ID),
-        &intents,
-        None,
-    )
-    .await
-    .expect("execute first intent drain");
-    let first_bytes = serde_json::to_vec(&first).expect("serialize first intent outcome");
-    assert!(
-        matches!(
-            first.as_slice(),
-            [lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::SignalProcess,
-                ..
-            }]
-        ),
-        "expected recorded signal execution, got {first:?}"
-    );
-    let command_frames = controller.envelopes();
-    assert_eq!(command_frames.len(), 1, "one command frame on first drain");
-
-    fixtures
-        .registry
-        .complete_process(
-            &fixtures.live,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::json!("terminal after first drain"),
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key("live-mutation-law"),
+        let first = lash_core::tool_dispatch::execute_final_tool_intents(
+            &dispatch,
+            Some(CALL_ID),
+            &intents,
+            None,
         )
         .await
-        .expect("mutate live target to terminal");
+        .expect("execute first intent drain");
+        let first_bytes = serde_json::to_vec(&first).expect("serialize first intent outcome");
+        assert!(
+            matches!(
+                first.as_slice(),
+                [lash_core::ToolIntentExecutionOutcome::Executed {
+                    kind: lash_core::ToolIntentKind::SignalProcess,
+                    ..
+                }]
+            ),
+            "expected recorded signal execution, got {first:?}"
+        );
+        let command_frames = controller.envelopes();
+        assert_eq!(command_frames.len(), 1, "one command frame on first drain");
 
-    let redriven = lash_core::tool_dispatch::execute_final_tool_intents(
-        &dispatch,
-        Some(CALL_ID),
-        &intents,
-        None,
-    )
-    .await
-    .expect("redrive intent drain");
-    assert_eq!(
-        serde_json::to_vec(&redriven).expect("serialize redriven intent outcome"),
-        first_bytes,
-        "the recorded command outcome is byte-identical after live mutation"
-    );
-    let redriven_frames = controller.envelopes();
-    assert_eq!(
-        redriven_frames, command_frames,
-        "redrive reuses the recorded command frame instead of taking a live-state branch"
-    );
+        fixtures
+            .registry
+            .complete_process(
+                &fixtures.live,
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(serde_json::json!(
+                        "terminal after first drain"
+                    )),
+                ),
+                lash_core::ProcessCompletionAuthority::workflow_key("live-mutation-law"),
+            )
+            .await
+            .expect("mutate live target to terminal");
+
+        let redriven = lash_core::tool_dispatch::execute_final_tool_intents(
+            &dispatch,
+            Some(CALL_ID),
+            &intents,
+            None,
+        )
+        .await
+        .expect("redrive intent drain");
+        assert_eq!(
+            serde_json::to_vec(&redriven).expect("serialize redriven intent outcome"),
+            first_bytes,
+            "the recorded command outcome is byte-identical after live mutation"
+        );
+        let redriven_frames = controller.envelopes();
+        assert_eq!(
+            redriven_frames, command_frames,
+            "redrive reuses the recorded command frame instead of taking a live-state branch"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// One recorded journal entry: the ordinal identity a redrive compares against,
@@ -1135,17 +1239,17 @@ struct JournalEntry {
 /// wedge reachable: a recorded entry replays *without* re-entering its body,
 /// and a command that meets a different recorded entry at its ordinal is
 /// refused the way an ordinal-addressed engine refuses it (Restate `RT0016`).
-struct OrdinalJournaledTier {
-    inner: Arc<dyn lash_core::RuntimeEffectController>,
+struct OrdinalJournaledTier<'a> {
+    inner: lash_core::ScopedEffectController<'a>,
     journal: std::sync::Mutex<Vec<JournalEntry>>,
     replaying: std::sync::atomic::AtomicBool,
     cursor: AtomicUsize,
 }
 
-impl OrdinalJournaledTier {
-    fn recording(backend: &lash_core::Backend) -> Self {
+impl<'a> OrdinalJournaledTier<'a> {
+    fn recording(handler: &'a lash_restate_test::OpenHandler) -> Self {
         Self {
-            inner: matrix_turn_controller(backend),
+            inner: matrix_turn_controller(handler),
             journal: std::sync::Mutex::new(Vec::new()),
             replaying: std::sync::atomic::AtomicBool::new(false),
             cursor: AtomicUsize::new(0),
@@ -1175,9 +1279,9 @@ impl OrdinalJournaledTier {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for OrdinalJournaledTier {
+impl lash_core::AwaitEventResolver for OrdinalJournaledTier<'_> {
     fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
+        self.inner.controller().await_event_authority_binding_id()
     }
 
     async fn await_event_key(
@@ -1185,7 +1289,7 @@ impl lash_core::AwaitEventResolver for OrdinalJournaledTier {
         scope: &lash_core::ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
+        self.inner.controller().await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -1193,12 +1297,15 @@ impl lash_core::AwaitEventResolver for OrdinalJournaledTier {
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
+        self.inner
+            .controller()
+            .resolve_await_event(key, resolution)
+            .await
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
+impl lash_core::RuntimeEffectController for OrdinalJournaledTier<'_> {
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -1241,7 +1348,11 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
             });
             journal.len() - 1
         };
-        let outcome = self.inner.execute_effect(envelope, local_executor).await?;
+        let outcome = self
+            .inner
+            .controller()
+            .execute_effect(envelope, local_executor)
+            .await?;
         self.journal.lock_recover()[ordinal].outcome = Some(outcome.clone());
         Ok(outcome)
     }
@@ -1250,14 +1361,14 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
         &self,
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
+        self.inner.controller().open_effect_group(group).await
     }
 
     fn register_group_executors(
         &self,
         executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
+        self.inner.controller().register_group_executors(executors)
     }
 
     async fn await_next_settlement(
@@ -1265,7 +1376,10 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
         handle: &mut lash_core::EffectGroupHandle,
         cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
+        self.inner
+            .controller()
+            .await_next_settlement(handle, cancel)
+            .await
     }
     async fn read_group_settlement(
         &self,
@@ -1275,7 +1389,10 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
         Option<lash_core::runtime::effect::RankedGroupSettlement>,
         lash_core::RuntimeEffectControllerError,
     > {
-        self.inner.read_group_settlement(group_key, rank).await
+        self.inner
+            .controller()
+            .read_group_settlement(group_key, rank)
+            .await
     }
 
     async fn close_effect_group(
@@ -1283,7 +1400,10 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
         handle: lash_core::EffectGroupHandle,
         disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
+        self.inner
+            .controller()
+            .close_effect_group(handle, disposition)
+            .await
     }
     async fn commit_group_child_final(
         &self,
@@ -1292,7 +1412,10 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
-        self.inner.commit_group_child_final(commit).await
+        self.inner
+            .controller()
+            .commit_group_child_final(commit)
+            .await
     }
 
     async fn await_group_child_drain_admission(
@@ -1301,6 +1424,7 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
         commit_seq: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
+            .controller()
             .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
@@ -1354,116 +1478,124 @@ fn attempt_done_outcome() -> lash_core::RuntimeEffectOutcome {
 #[tokio::test]
 async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_mismatch() {
     let fixtures = fixtures().await;
-    let tier = OrdinalJournaledTier::recording(&fixtures.backend_handle);
-    let bodies_entered = Arc::new(AtomicUsize::new(0));
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = OrdinalJournaledTier::recording(&handler);
+        let bodies_entered = Arc::new(AtomicUsize::new(0));
 
-    let first_incarnation_bodies = Arc::clone(&bodies_entered);
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &tier,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped ordinal-journaled controller");
-    let tool = tool_context(scoped, &fixtures);
-    lash_core::RuntimeEffectController::execute_effect(
-        &tier,
-        attempt_effect_envelope(),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            first_incarnation_bodies.fetch_add(1, Ordering::SeqCst);
-            let attempt = lash_core::AttemptContext::__for_testing(&tool, TURN);
-            assert_eq!(
-                attempt
-                    .direct_completions()
-                    .complete(
-                        lash_core::facade_support::DirectRequest::text(
-                            DIRECT_MODEL,
-                            "redrive direct completion"
-                        ),
-                        "attempt-atomicity",
-                    )
-                    .await
-                    .expect("attempt-context direct completion")
-                    .text,
-                DIRECT_TEXT
-            );
-            Ok(attempt_done_outcome())
-        }),
-    )
-    .await
-    .expect("first incarnation records the attempt");
-    // The command the handler issues once the attempt settles. On redrive it
-    // must meet the attempt's successor ordinal, not an entry the body left
-    // behind.
-    lash_core::RuntimeEffectController::execute_effect(
-        &tier,
-        lash_core::RuntimeEffectEnvelope::new(
-            follow_on_invocation(),
-            lash_core::RuntimeEffectCommand::Sleep {
-                spec: lash_core::SleepSpec::For { duration_ms: 0 },
-            },
-        ),
-        lash_core::RuntimeEffectLocalExecutor::testing(|_envelope| async {
-            Ok(lash_core::RuntimeEffectOutcome::Sleep)
-        }),
-    )
-    .await
-    .expect("first incarnation records the follow-on command");
-    assert_eq!(bodies_entered.load(Ordering::SeqCst), 1);
+        let first_incarnation_bodies = Arc::clone(&bodies_entered);
+        let scoped = lash_core::ScopedEffectController::borrowed(
+            &tier,
+            lash_core::AdmittedScope::turn(SESSION, TURN),
+        )
+        .expect("scoped ordinal-journaled controller");
+        let tool = tool_context(scoped, &fixtures);
+        lash_core::RuntimeEffectController::execute_effect(
+            &tier,
+            attempt_effect_envelope(),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                first_incarnation_bodies.fetch_add(1, Ordering::SeqCst);
+                let attempt = lash_core::AttemptContext::__for_testing(&tool, TURN);
+                assert_eq!(
+                    attempt
+                        .direct_completions()
+                        .complete(
+                            lash_core::facade_support::DirectRequest::text(
+                                DIRECT_MODEL,
+                                "redrive direct completion"
+                            ),
+                            "attempt-atomicity",
+                        )
+                        .await
+                        .expect("attempt-context direct completion")
+                        .text,
+                    DIRECT_TEXT
+                );
+                Ok(attempt_done_outcome())
+            }),
+        )
+        .await
+        .expect("first incarnation records the attempt");
+        // The command the handler issues once the attempt settles. On redrive it
+        // must meet the attempt's successor ordinal, not an entry the body left
+        // behind.
+        lash_core::RuntimeEffectController::execute_effect(
+            &tier,
+            lash_core::RuntimeEffectEnvelope::new(
+                follow_on_invocation(),
+                lash_core::RuntimeEffectCommand::Sleep {
+                    spec: lash_core::SleepSpec::For { duration_ms: 0 },
+                },
+            ),
+            lash_core::RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                Ok(lash_core::RuntimeEffectOutcome::Sleep)
+            }),
+        )
+        .await
+        .expect("first incarnation records the follow-on command");
+        assert_eq!(bodies_entered.load(Ordering::SeqCst), 1);
 
-    tier.start_redrive();
-    let redriven_bodies = Arc::clone(&bodies_entered);
-    let redriven_scoped = lash_core::ScopedEffectController::borrowed(
-        &tier,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped redrive controller");
-    let redriven_tool = tool_context(redriven_scoped, &fixtures);
-    let replayed = lash_core::RuntimeEffectController::execute_effect(
-        &tier,
-        attempt_effect_envelope(),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            redriven_bodies.fetch_add(1, Ordering::SeqCst);
-            let _attempt = lash_core::AttemptContext::__for_testing(&redriven_tool, TURN);
-            Ok(attempt_done_outcome())
-        }),
-    )
-    .await
-    .expect("redrive replays the recorded attempt");
-    assert!(matches!(
-        replayed,
-        lash_core::RuntimeEffectOutcome::ToolAttempt { .. }
-    ));
-    assert_eq!(
-        bodies_entered.load(Ordering::SeqCst),
-        1,
-        "the recorded attempt replays without re-entering its body"
-    );
+        tier.start_redrive();
+        let redriven_bodies = Arc::clone(&bodies_entered);
+        let redriven_scoped = lash_core::ScopedEffectController::borrowed(
+            &tier,
+            lash_core::AdmittedScope::turn(SESSION, TURN),
+        )
+        .expect("scoped redrive controller");
+        let redriven_tool = tool_context(redriven_scoped, &fixtures);
+        let replayed = lash_core::RuntimeEffectController::execute_effect(
+            &tier,
+            attempt_effect_envelope(),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                redriven_bodies.fetch_add(1, Ordering::SeqCst);
+                let _attempt = lash_core::AttemptContext::__for_testing(&redriven_tool, TURN);
+                Ok(attempt_done_outcome())
+            }),
+        )
+        .await
+        .expect("redrive replays the recorded attempt");
+        assert!(matches!(
+            replayed,
+            lash_core::RuntimeEffectOutcome::ToolAttempt { .. }
+        ));
+        assert_eq!(
+            bodies_entered.load(Ordering::SeqCst),
+            1,
+            "the recorded attempt replays without re-entering its body"
+        );
 
-    let follow_on = lash_core::RuntimeEffectController::execute_effect(
-        &tier,
-        lash_core::RuntimeEffectEnvelope::new(
-            follow_on_invocation(),
-            lash_core::RuntimeEffectCommand::Sleep {
-                spec: lash_core::SleepSpec::For { duration_ms: 0 },
-            },
-        ),
-        lash_core::RuntimeEffectLocalExecutor::testing(|_envelope| async {
-            Ok(lash_core::RuntimeEffectOutcome::Sleep)
-        }),
-    )
-    .await;
-    assert!(
-        follow_on.is_ok(),
-        "the invocation must complete after redrive instead of wedging: {:?}",
-        follow_on.err().map(|error| error.to_string())
-    );
-    assert_eq!(
-        tier.journal_identities(),
-        vec![
-            format!("tool_attempt:{ATTEMPT_EFFECT_ID}"),
-            format!("sleep:{FOLLOW_ON_EFFECT_ID}"),
-        ],
-        "a recorded attempt owns exactly one entry; a direct completion from its body adds none"
-    );
+        let follow_on = lash_core::RuntimeEffectController::execute_effect(
+            &tier,
+            lash_core::RuntimeEffectEnvelope::new(
+                follow_on_invocation(),
+                lash_core::RuntimeEffectCommand::Sleep {
+                    spec: lash_core::SleepSpec::For { duration_ms: 0 },
+                },
+            ),
+            lash_core::RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                Ok(lash_core::RuntimeEffectOutcome::Sleep)
+            }),
+        )
+        .await;
+        assert!(
+            follow_on.is_ok(),
+            "the invocation must complete after redrive instead of wedging: {:?}",
+            follow_on.err().map(|error| error.to_string())
+        );
+        assert_eq!(
+            tier.journal_identities(),
+            vec![
+                format!("tool_attempt:{ATTEMPT_EFFECT_ID}"),
+                format!("sleep:{FOLLOW_ON_EFFECT_ID}"),
+            ],
+            "a recorded attempt owns exactly one entry; a direct completion from its body adds none"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 fn direct_llm_request(request_id: &str) -> lash_core::LlmRequest {
@@ -1498,47 +1630,55 @@ fn direct_llm_request(request_id: &str) -> lash_core::LlmRequest {
 #[tokio::test]
 async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &sentinel,
-        lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped direct-llm sentinel controller");
-    let direct_completions = fixtures
-        .runtime
-        .runtime_session_services()
-        .expect("attempt-atomicity session manager")
-        .direct_completion_client(
-            lash_core::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
-            Some(TurnId::from(TURN.to_string())),
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::ordinal_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let scoped = lash_core::ScopedEffectController::borrowed(
+            &sentinel,
+            lash_core::AdmittedScope::turn(SESSION, TURN),
         )
-        .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation());
+        .expect("scoped direct-llm sentinel controller");
+        let direct_completions = fixtures
+            .runtime
+            .runtime_session_services()
+            .expect("attempt-atomicity session manager")
+            .direct_completion_client(
+                lash_core::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
+                Some(TurnId::from(TURN.to_string())),
+            )
+            .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation());
 
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        attempt_effect_envelope(),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            let completion = direct_completions
-                .direct_llm_completion(
-                    direct_llm_request("attempt-atomicity:direct-llm"),
-                    "attempt-atomicity",
-                )
-                .await
-                .expect("attempt-scoped direct llm completion");
-            assert_eq!(completion.response.full_text(), DIRECT_TEXT);
-            Ok(attempt_done_outcome())
-        }),
-    )
-    .await
-    .expect("attempt completes with a local direct llm completion");
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            attempt_effect_envelope(),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                let completion = direct_completions
+                    .direct_llm_completion(
+                        direct_llm_request("attempt-atomicity:direct-llm"),
+                        "attempt-atomicity",
+                    )
+                    .await
+                    .expect("attempt-scoped direct llm completion");
+                assert_eq!(completion.response.full_text(), DIRECT_TEXT);
+                Ok(attempt_done_outcome())
+            }),
+        )
+        .await
+        .expect("attempt completes with a local direct llm completion");
 
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "an attempt-scoped client journals no direct entry from inside the attempt"
-    );
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            Vec::<String>::new(),
+            "an attempt-scoped client journals no direct entry from inside the attempt"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// A provider that reaches for the *raw* direct-completion client the attempt
@@ -1611,51 +1751,58 @@ fn raw_client_probe<'run>(
 }
 
 async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
-    let fixtures_backend = crate::runtime::tests::memory_backend().await;
-    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures_backend);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let provider = Arc::new(RawClientDirectProvider::default());
-    let tool = raw_client_probe(&sentinel, fixtures, &provider);
-    let direct_completions = tool
-        .runtime_dispatch
-        .as_ref()
-        .expect("raw-client probe carries runtime dispatch")
-        .direct_completions
-        .clone();
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::ordinal_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let provider = Arc::new(RawClientDirectProvider::default());
+        let tool = raw_client_probe(&sentinel, fixtures, &provider);
+        let direct_completions = tool
+            .runtime_dispatch
+            .as_ref()
+            .expect("raw-client probe carries runtime dispatch")
+            .direct_completions
+            .clone();
 
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        attempt_effect_envelope(),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            let completion = direct_completions
-                .direct_completion(
-                    lash_core::facade_support::DirectRequest::text(
-                        DIRECT_MODEL,
-                        "unbound client precondition",
-                    ),
-                    "attempt-atomicity",
-                )
-                .await
-                .expect("unbound direct-client precondition completes");
-            assert_eq!(completion.text, DIRECT_TEXT);
-            Ok(attempt_done_outcome())
-        }),
-    )
-    .await
-    .expect("unbound direct-client precondition attempt completes");
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            attempt_effect_envelope(),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                let completion = direct_completions
+                    .direct_completion(
+                        lash_core::facade_support::DirectRequest::text(
+                            DIRECT_MODEL,
+                            "unbound client precondition",
+                        ),
+                        "attempt-atomicity",
+                    )
+                    .await
+                    .expect("unbound direct-client precondition completes");
+                assert_eq!(completion.text, DIRECT_TEXT);
+                Ok(attempt_done_outcome())
+            }),
+        )
+        .await
+        .expect("unbound direct-client precondition attempt completes");
 
-    assert_eq!(ledger.attempt_bodies_opened(), 1);
-    let crossings = ledger.crossings_inside_attempt();
-    assert_eq!(
-        crossings.len(),
-        1,
-        "the raw-client fixture must enter production with exactly one observable unbound crossing"
-    );
-    assert!(
-        crossings[0].starts_with("execute_effect:direct:"),
-        "the raw-client fixture must start unbound to a ToolAttempt: {crossings:?}"
-    );
+        assert_eq!(ledger.attempt_bodies_opened(), 1);
+        let crossings = ledger.crossings_inside_attempt();
+        assert_eq!(
+            crossings.len(),
+            1,
+            "the raw-client fixture must enter production with exactly one observable unbound crossing"
+        );
+        assert!(
+            crossings[0].starts_with("execute_effect:direct:"),
+            "the raw-client fixture must start unbound to a ToolAttempt: {crossings:?}"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// The execution-context attempt path (`RuntimeExecutionContext::
@@ -1665,57 +1812,65 @@ async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
 async fn execution_context_attempt_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
     assert_raw_client_probe_starts_unbound(&fixtures).await;
-    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let provider = Arc::new(RawClientDirectProvider::default());
-    let tool = raw_client_probe(&sentinel, &fixtures, &provider);
-    let dispatch = Arc::clone(
-        tool.runtime_dispatch
-            .as_ref()
-            .expect("tool context carries runtime dispatch"),
-    );
-    let execution_context = lash_core::RuntimeExecutionContext::new(
-        SessionId::from(SESSION.to_string()),
-        dispatch,
-        fixtures.backend_handle.process_env_store(),
-        Arc::new(lash_core::facade_support::SessionAttachmentStore::unavailable()),
-        Arc::new(lash_core::facade_support::ChronologicalProjection::default()),
-        None,
-        lash_core::TurnContext::default(),
-    );
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::ordinal_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let provider = Arc::new(RawClientDirectProvider::default());
+        let tool = raw_client_probe(&sentinel, &fixtures, &provider);
+        let dispatch = Arc::clone(
+            tool.runtime_dispatch
+                .as_ref()
+                .expect("tool context carries runtime dispatch"),
+        );
+        let execution_context = lash_core::RuntimeExecutionContext::new(
+            SessionId::from(SESSION.to_string()),
+            dispatch,
+            fixtures.backend_handle.process_env_store(),
+            Arc::new(lash_core::facade_support::SessionAttachmentStore::unavailable()),
+            Arc::new(lash_core::facade_support::ChronologicalProjection::default()),
+            None,
+            lash_core::TurnContext::default(),
+        );
 
-    lash_core::RuntimeEffectController::execute_effect(
-        &sentinel,
-        attempt_effect_envelope(),
-        lash_core::RuntimeEffectLocalExecutor::testing(move |envelope| async move {
-            let outcome = execution_context
-                .execute_prepared_tool_attempt_effect(
-                    prepared_tool_call(),
-                    None,
-                    1,
-                    1,
-                    envelope.invocation.into_runtime_invocation(),
-                    None,
-                    None,
-                )
-                .await?;
-            Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
-                launch: Box::new(outcome.launch),
-                triggers: outcome.triggers,
-                capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
-            })
-        }),
-    )
-    .await
-    .expect("execution-context attempt completes");
+        lash_core::RuntimeEffectController::execute_effect(
+            &sentinel,
+            attempt_effect_envelope(),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |envelope| async move {
+                let outcome = execution_context
+                    .execute_prepared_tool_attempt_effect(
+                        prepared_tool_call(),
+                        None,
+                        1,
+                        1,
+                        envelope.invocation.into_runtime_invocation(),
+                        None,
+                        None,
+                    )
+                    .await?;
+                Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
+                    launch: Box::new(outcome.launch),
+                    triggers: outcome.triggers,
+                    capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
+                })
+            }),
+        )
+        .await
+        .expect("execution-context attempt completes");
 
-    assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "the attempt dispatch must bind its direct client, whatever entry point the leaf uses"
-    );
+        assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            Vec::<String>::new(),
+            "the attempt dispatch must bind its direct client, whatever entry point the leaf uses"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 /// The prepared-attempt local runner (`RuntimeEffectLocalExecutor::
@@ -1726,36 +1881,44 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
 async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
     assert_raw_client_probe_starts_unbound(&fixtures).await;
-    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let provider = Arc::new(RawClientDirectProvider::default());
-    let tool = raw_client_probe(&sentinel, &fixtures, &provider);
-    let dispatch = Arc::clone(
-        tool.runtime_dispatch
-            .as_ref()
-            .expect("tool context carries runtime dispatch"),
-    );
+    let handler = fixtures
+        .backend
+        .open_handler(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .await
+        .expect("open the scope's handler");
+    {
+        let tier = ControllerOwnedTier::ordinal_addressed(&handler);
+        let ledger = NestedJournalLedger::new();
+        let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+        let provider = Arc::new(RawClientDirectProvider::default());
+        let tool = raw_client_probe(&sentinel, &fixtures, &provider);
+        let dispatch = Arc::clone(
+            tool.runtime_dispatch
+                .as_ref()
+                .expect("tool context carries runtime dispatch"),
+        );
 
-    let launch =
-        lash_core::tool_dispatch::coordinate_prepared_tool_call_launch_with_execution_context(
-            dispatch.as_ref(),
-            prepared_tool_call(),
-            None,
-            tool,
-        )
-        .await;
+        let launch =
+            lash_core::tool_dispatch::coordinate_prepared_tool_call_launch_with_execution_context(
+                dispatch.as_ref(),
+                prepared_tool_call(),
+                None,
+                tool,
+            )
+            .await;
 
-    assert!(matches!(
-        launch,
-        lash_core::tool_dispatch::ToolCallLaunch::Done(_)
-    ));
-    assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "the prepared-attempt runner must bind its direct client before entering the leaf"
-    );
+        assert!(matches!(
+            launch,
+            lash_core::tool_dispatch::ToolCallLaunch::Done(_)
+        ));
+        assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            ledger.crossings_inside_attempt(),
+            Vec::<String>::new(),
+            "the prepared-attempt runner must bind its direct client before entering the leaf"
+        );
+    }
+    handler.close().await.expect("close the scope's handler");
 }
 
 #[path = "attempt_atomicity/capability_inventory.rs"]

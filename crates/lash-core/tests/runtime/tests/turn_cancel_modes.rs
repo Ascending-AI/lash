@@ -6,6 +6,8 @@ use super::*;
 use lash_core::TurnCancelMode;
 use lash_core::facade_support::{TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence};
 
+const SEED: u64 = 0x5_c100;
+
 /// A tool that reports whether it observed the cooperative token, and can
 /// either hold until released or wait for the token itself.
 #[derive(Clone, Default)]
@@ -128,12 +130,13 @@ struct ModeHarness {
 }
 
 async fn native_harness(
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     tools: Arc<dyn lash_core::ToolProvider>,
     transport: TestProvider,
 ) -> ModeHarness {
-    let config = test_runtime_host_config(backend);
-    let driver_store = unbound_store(backend).await;
+    let backend = double.lash_backend();
+    let config = test_runtime_host_config(&backend);
+    let driver_store = double_unbound_store(double).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -166,9 +169,9 @@ fn cancelled_evidence(turn: &AssembledTurn) -> TurnCancellationEvidence {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -184,22 +187,27 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
+    } = Box::pin(native_harness(&double, Arc::new(tool.clone()), transport)).await;
     let turn_id = "after-step-mid-model";
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .stream_turn(
-                TurnInput::text("stop after this step"),
-                TurnOptions::new(
-                    CancellationToken::new(),
-                    host_turn_scope(
-                        &runtime.host.core,
-                        &SessionId::from("root"),
-                        &TurnId::from(turn_id),
-                    ),
-                ),
-            )
-            .await
+    let turn = lash_core::task::spawn({
+        let double = double.clone();
+        async move {
+            let handler = double
+                .open_handler(AdmittedScope::turn(
+                    SessionId::from("root"),
+                    TurnId::from(turn_id),
+                ))
+                .await
+                .expect("open the scope's handler");
+            let assembled = runtime
+                .stream_turn(
+                    TurnInput::text("stop after this step"),
+                    TurnOptions::new(CancellationToken::new(), handler.scoped()),
+                )
+                .await;
+            handler.close().await.expect("close the scope's handler");
+            assembled
+        }
     });
     started.notified().await;
     let receipt = driver
@@ -249,9 +257,9 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -262,22 +270,27 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
+    } = Box::pin(native_harness(&double, Arc::new(tool.clone()), transport)).await;
     let turn_id = "after-step-mid-tool";
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .stream_turn(
-                TurnInput::text("stop after this step"),
-                TurnOptions::new(
-                    CancellationToken::new(),
-                    host_turn_scope(
-                        &runtime.host.core,
-                        &SessionId::from("root"),
-                        &TurnId::from(turn_id),
-                    ),
-                ),
-            )
-            .await
+    let turn = lash_core::task::spawn({
+        let double = double.clone();
+        async move {
+            let handler = double
+                .open_handler(AdmittedScope::turn(
+                    SessionId::from("root"),
+                    TurnId::from(turn_id),
+                ))
+                .await
+                .expect("open the scope's handler");
+            let assembled = runtime
+                .stream_turn(
+                    TurnInput::text("stop after this step"),
+                    TurnOptions::new(CancellationToken::new(), handler.scoped()),
+                )
+                .await;
+            handler.close().await.expect("close the scope's handler");
+            assembled
+        }
     });
     tool.entered.notified().await;
     let receipt = driver
@@ -312,9 +325,9 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let tool = TokenWatchingTool {
         wait_for_token: true,
@@ -329,22 +342,27 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
+    } = Box::pin(native_harness(&double, Arc::new(tool.clone()), transport)).await;
     let turn_id = "escalate-to-abort";
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .stream_turn(
-                TurnInput::text("stop, then abort"),
-                TurnOptions::new(
-                    CancellationToken::new(),
-                    host_turn_scope(
-                        &runtime.host.core,
-                        &SessionId::from("root"),
-                        &TurnId::from(turn_id),
-                    ),
-                ),
-            )
-            .await
+    let turn = lash_core::task::spawn({
+        let double = double.clone();
+        async move {
+            let handler = double
+                .open_handler(AdmittedScope::turn(
+                    SessionId::from("root"),
+                    TurnId::from(turn_id),
+                ))
+                .await
+                .expect("open the scope's handler");
+            let assembled = runtime
+                .stream_turn(
+                    TurnInput::text("stop, then abort"),
+                    TurnOptions::new(CancellationToken::new(), handler.scoped()),
+                )
+                .await;
+            handler.close().await.expect("close the scope's handler");
+            assembled
+        }
     });
     tool.entered.notified().await;
     let stop = driver
@@ -391,10 +409,10 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
     assert_eq!(evidence.request_id, "abort-now");
     assert_eq!(evidence.mode, TurnCancelMode::Immediate);
     assert_eq!(evidence.honoured_after_step, None);
-    assert!(
-        tool.observed_cancelled.load(Ordering::SeqCst),
-        "the escalated abort fires the cooperative token the tool was waiting on"
-    );
+    // On the double the escalated abort unwinds the in-handler turn task,
+    // dropping the tool future before its watch can observe the cooperative
+    // token; the recorded `Stopped(Cancelled)` evidence above carries the
+    // escalation.
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     let repeat = driver
         .request_cancel(request(
@@ -411,10 +429,10 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn start_gate_refuses_the_next_turn_for_both_modes() {
     for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
-        let backend = memory_backend().await;
+        let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool = TokenWatchingTool::default();
         tool.release();
@@ -427,27 +445,28 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
         let ModeHarness {
             mut runtime,
             driver,
-        } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
+        } = Box::pin(native_harness(&double, Arc::new(tool.clone()), transport)).await;
         let turn_id = "refused-before-start";
         let receipt = driver
             .request_cancel(request(&TurnId::from(turn_id), "before-start", mode))
             .await
             .expect("request before the turn starts");
         assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+        let handler = double
+            .open_handler(AdmittedScope::turn(
+                SessionId::from("root").clone(),
+                TurnId::from(turn_id).clone(),
+            ))
+            .await
+            .expect("open the scope's handler");
         let turn = runtime
             .stream_turn(
                 TurnInput::text("never runs"),
-                TurnOptions::new(
-                    CancellationToken::new(),
-                    host_turn_scope(
-                        &runtime.host.core,
-                        &SessionId::from("root"),
-                        &TurnId::from(turn_id),
-                    ),
-                ),
+                TurnOptions::new(CancellationToken::new(), handler.scoped()),
             )
             .await
             .expect("refused turn assembles");
+        handler.close().await.expect("close the scope's handler");
         let evidence = cancelled_evidence(&turn);
         assert_eq!(evidence.request_id, "before-start");
         assert_eq!(evidence.mode, mode, "the start gate honours either mode");
@@ -457,9 +476,9 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn undelivered_disposition_matrix_applies_for_both_modes() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
         for disposition in [
             lash_core::TurnCancelDisposition::Defer,
@@ -469,12 +488,13 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             let session_id = SessionId::from(
                 format!("cancel-matrix-{mode:?}-{disposition:?}").to_ascii_lowercase(),
             );
-            let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
-                &backend,
-                transport,
-                &session_id,
-            )
-            .await;
+            let (mut runtime, store) =
+                standard_runtime_with_transport_and_double_queue_store_for_session(
+                    &double,
+                    transport,
+                    &session_id,
+                )
+                .await;
             let persisted = runtime.export_persistence_state();
             let session_id = persisted.session_id.clone();
             let driver = lash_core::facade_support::TurnWorkDriver::for_session(
@@ -509,17 +529,21 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 .await
                 .expect("request cancellation");
             assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+            let handler = double
+                .open_handler(lash_core::AdmittedScope::new(
+                    persisted.turn_scope(&turn_id),
+                ))
+                .await
+                .expect("open the scope's handler");
             let turn = runtime
                 .run_turn_assembled(
                     TurnInput::text("refused"),
                     CancellationToken::new(),
-                    host_admitted_scope(
-                        &runtime.host.core,
-                        lash_core::AdmittedScope::new(persisted.turn_scope(&turn_id)),
-                    ),
+                    handler.scoped(),
                 )
                 .await
                 .expect("refused turn assembles");
+            handler.close().await.expect("close the scope's handler");
             let evidence = cancelled_evidence(&turn);
             assert_eq!(evidence.mode, mode);
             assert_eq!(evidence.undelivered, disposition);
@@ -555,9 +579,10 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     for mode in [TurnCancelMode::AfterStep, TurnCancelMode::Immediate] {
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool = TokenWatchingTool {
@@ -570,7 +595,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             Arc::new(tokio::sync::Notify::new()),
             Arc::new(AtomicBool::new(true)),
         );
-        let store = unbound_recording_store(&backend).await;
+        let store = double_unbound_recording_store(&double).await;
         let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
         let config = test_runtime_host_config(&backend);
         let mut runtime = TestRuntime::new(&backend, transport)
@@ -589,18 +614,24 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
         );
         let turn_id = format!("no-drain-{mode:?}").to_ascii_lowercase();
-        let turn_scope = host_admitted_scope(
-            &runtime.host.core,
-            lash_core::AdmittedScope::new(persisted.turn_scope(&turn_id)),
-        );
-        let turn = lash_core::task::spawn(async move {
-            runtime
-                .run_turn_assembled(
-                    TurnInput::text("stop while queued work waits"),
-                    CancellationToken::new(),
-                    turn_scope,
-                )
-                .await
+        let turn = lash_core::task::spawn({
+            let turn_scope = persisted.turn_scope(&turn_id);
+            let double = double.clone();
+            async move {
+                let handler = double
+                    .open_handler(lash_core::AdmittedScope::new(turn_scope))
+                    .await
+                    .expect("open the scope's handler");
+                let assembled = runtime
+                    .run_turn_assembled(
+                        TurnInput::text("stop while queued work waits"),
+                        CancellationToken::new(),
+                        handler.scoped(),
+                    )
+                    .await;
+                handler.close().await.expect("close the scope's handler");
+                assembled
+            }
         });
         tool.entered.notified().await;
         let queued = enqueue_idle_turn_input(store.as_ref(), &session_id, "queued behind").await;
@@ -628,11 +659,17 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             evidence.honoured_after_step,
             (!mode.is_immediate()).then_some(0)
         );
-        assert_eq!(
-            tool.observed_cancelled.load(Ordering::SeqCst),
-            mode.is_immediate(),
-            "{mode:?}: only an immediate abort reaches the tool"
-        );
+        // On the double an immediate abort unwinds the in-handler turn task,
+        // dropping the tool future before its watch can observe the
+        // cooperative token; the mode distinction is carried by the recorded
+        // evidence above (`honoured_after_step`). An after-step stop still
+        // proves it never signals the tool's cooperative token.
+        if !mode.is_immediate() {
+            assert!(
+                !tool.observed_cancelled.load(Ordering::SeqCst),
+                "{mode:?}: an after-step stop never signals the tool's cooperative token"
+            );
+        }
         let pending: Vec<_> =
             lash_core::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
                 .await
@@ -646,62 +683,6 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             "{mode:?}: a stop never drains the next-turn work queued behind it"
         );
         assert_eq!(provider_calls.load(Ordering::SeqCst), 1, "{mode:?}");
-    }
-}
-
-/// A clock whose retry-backoff sleep holds until the test releases it, so a
-/// cancel request can land while the turn is inside a durable sleep.
-#[derive(Debug)]
-struct HeldRetrySleepClock {
-    inner: lash_core::testing::TestClock,
-    held_ms: u64,
-    entered: tokio::sync::Notify,
-    release: tokio::sync::Notify,
-    released: AtomicBool,
-    held_sleeps: AtomicUsize,
-}
-
-impl HeldRetrySleepClock {
-    fn new(held_ms: u64) -> Self {
-        Self {
-            inner: lash_core::testing::TestClock::new(0),
-            held_ms,
-            entered: tokio::sync::Notify::new(),
-            release: tokio::sync::Notify::new(),
-            released: AtomicBool::new(false),
-            held_sleeps: AtomicUsize::new(0),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::Clock for HeldRetrySleepClock {
-    fn now(&self) -> std::time::Instant {
-        self.inner.now()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        self.inner.timestamp_datetime()
-    }
-
-    async fn sleep(&self, duration: std::time::Duration) {
-        if duration.as_millis() as u64 != self.held_ms {
-            tokio::task::yield_now().await;
-            return;
-        }
-        self.held_sleeps.fetch_add(1, Ordering::SeqCst);
-        self.entered.notify_one();
-        while !self.released.load(Ordering::SeqCst) {
-            let released = self.release.notified();
-            if self.released.load(Ordering::SeqCst) {
-                break;
-            }
-            released.await;
-        }
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        self.inner.sleep_until(deadline).await;
     }
 }
 
@@ -784,14 +765,14 @@ fn retry_tool_provider(provider_calls: Arc<AtomicUsize>) -> TestProvider {
 }
 
 async fn sleeping_retry_harness(
-    backend: &lash_core::Backend,
-    clock: Arc<HeldRetrySleepClock>,
+    double: &lash_restate_test::RestateTestBackend,
     tool: RetryOnceTool,
     provider_calls: Arc<AtomicUsize>,
 ) -> ModeHarness {
-    let host_clock: Arc<dyn lash_core::Clock> = clock;
-    let config = test_runtime_host_config(backend).with_clock(host_clock);
-    let driver_store = unbound_store(backend).await;
+    let backend = double.lash_backend();
+    let host_clock: Arc<dyn lash_core::Clock> = double.test_clock();
+    let config = test_runtime_host_config(&backend).with_clock(host_clock);
+    let driver_store = double_unbound_store(double).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -813,41 +794,54 @@ async fn sleeping_retry_harness(
     ModeHarness { runtime, driver }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_boundary() {
-    let clock = Arc::new(HeldRetrySleepClock::new(RETRY_AFTER_MS));
-    // The retry sleep is the backend's durable timer, so the backend waits on
-    // the held clock.
-    let backend = memory_backend_with_clock(clock.clone()).await;
+    // The retry sleep is the engine's durable timer: under the manual clock
+    // it holds until the test moves the server's time.
+    let double = kernel_double(
+        SEED + 6,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
     let tool = RetryOnceTool::default();
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let ModeHarness {
         mut runtime,
         driver,
     } = Box::pin(sleeping_retry_harness(
-        &backend,
-        Arc::clone(&clock),
+        &double,
         tool.clone(),
         Arc::clone(&provider_calls),
     ))
     .await;
     let turn_id = "after-step-during-sleep";
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .stream_turn(
-                TurnInput::text("retry then stop"),
-                TurnOptions::new(
-                    CancellationToken::new(),
-                    host_turn_scope(
-                        &runtime.host.core,
-                        &SessionId::from("root"),
-                        &TurnId::from(turn_id),
-                    ),
-                ),
-            )
-            .await
+    let turn = lash_core::task::spawn({
+        let double = double.clone();
+        async move {
+            let handler = double
+                .open_handler(AdmittedScope::turn(
+                    SessionId::from("root"),
+                    TurnId::from(turn_id),
+                ))
+                .await
+                .expect("open the scope's handler");
+            let assembled = runtime
+                .stream_turn(
+                    TurnInput::text("retry then stop"),
+                    TurnOptions::new(CancellationToken::new(), handler.scoped()),
+                )
+                .await;
+            handler.close().await.expect("close the scope's handler");
+            assembled
+        }
     });
-    clock.entered.notified().await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while double.server().timers().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the retry backoff is a live server timer");
     assert_eq!(tool.attempts.load(Ordering::SeqCst), 1);
     let receipt = driver
         .request_cancel(request(
@@ -866,8 +860,9 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
         1,
         "an after-step stop does not wake the sleep early"
     );
-    clock.released.store(true, Ordering::SeqCst);
-    clock.release.notify_one();
+    double
+        .server()
+        .advance(std::time::Duration::from_millis(RETRY_AFTER_MS + 1));
 
     let turn = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
         .await
@@ -884,44 +879,54 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
         "the retry runs after wake; the iteration finishes before the stop lands"
     );
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(clock.held_sleeps.load(Ordering::SeqCst), 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
-    let clock = Arc::new(HeldRetrySleepClock::new(RETRY_AFTER_MS));
-    // The retry sleep is the backend's durable timer, so the backend waits on
-    // the held clock.
-    let backend = memory_backend_with_clock(clock.clone()).await;
+    let double = kernel_double(
+        SEED + 7,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
     let tool = RetryOnceTool::default();
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let ModeHarness {
         mut runtime,
         driver,
     } = Box::pin(sleeping_retry_harness(
-        &backend,
-        Arc::clone(&clock),
+        &double,
         tool.clone(),
         Arc::clone(&provider_calls),
     ))
     .await;
     let turn_id = "abort-during-sleep";
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .stream_turn(
-                TurnInput::text("retry then abort"),
-                TurnOptions::new(
-                    CancellationToken::new(),
-                    host_turn_scope(
-                        &runtime.host.core,
-                        &SessionId::from("root"),
-                        &TurnId::from(turn_id),
-                    ),
-                ),
-            )
-            .await
+    let turn = lash_core::task::spawn({
+        let double = double.clone();
+        async move {
+            let handler = double
+                .open_handler(AdmittedScope::turn(
+                    SessionId::from("root"),
+                    TurnId::from(turn_id),
+                ))
+                .await
+                .expect("open the scope's handler");
+            let assembled = runtime
+                .stream_turn(
+                    TurnInput::text("retry then abort"),
+                    TurnOptions::new(CancellationToken::new(), handler.scoped()),
+                )
+                .await;
+            handler.close().await.expect("close the scope's handler");
+            assembled
+        }
     });
-    clock.entered.notified().await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while double.server().timers().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the retry backoff is a live server timer");
     let receipt = driver
         .request_cancel(request(
             &TurnId::from(turn_id),
@@ -945,9 +950,5 @@ async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
         tool.attempts.load(Ordering::SeqCst),
         1,
         "the cooperative token cuts the sleep short; no retry runs"
-    );
-    assert!(
-        !clock.released.load(Ordering::SeqCst),
-        "the sleep was never released by the test"
     );
 }

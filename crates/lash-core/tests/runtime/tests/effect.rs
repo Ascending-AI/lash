@@ -29,9 +29,12 @@ pub(super) use recording_authority::{
 };
 use source_lint_support::unique_trace_path;
 
-#[tokio::test]
+const SEED: u64 = 0x5_e100;
+
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
@@ -95,9 +98,10 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
     }));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
@@ -153,9 +157,10 @@ async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
     assert!(!checkpoint_envelope.contains("\"events\""));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn controller_rejection_fails_turn_explicitly() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let controller = Arc::new(RejectingEffectController::default());
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
@@ -167,19 +172,20 @@ async fn controller_rejection_fails_turn_explicitly() {
         )),
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "rejecting-controller"))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("hello"),
             CancellationToken::new(),
-            layered_scope(
-                &backend,
-                controller,
-                AdmittedScope::turn("root", "rejecting-controller"),
-            ),
+            lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
+                .expect("layer the handler's scope"),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(
         turn.outcome,
@@ -194,9 +200,10 @@ async fn controller_rejection_fails_turn_explicitly() {
     }));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn wrong_controller_outcome_fails_turn_explicitly() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let controller = Arc::new(WrongOutcomeEffectController);
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
@@ -208,19 +215,20 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
         )),
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "wrong-outcome-controller"))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("hello"),
             CancellationToken::new(),
-            layered_scope(
-                &backend,
-                controller,
-                AdmittedScope::turn("root", "wrong-outcome-controller"),
-            ),
+            lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
+                .expect("layer the handler's scope"),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(
         turn.outcome,
@@ -233,9 +241,10 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
     }));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     assert!(
         layered_effect_host(&backend, Arc::new(recorder.clone()))
@@ -279,9 +288,10 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     }));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     struct DirectTool;
 
     fn direct_tool_definition() -> lash_core::ToolDefinition {
@@ -693,9 +703,10 @@ fn nested_trigger_batch_orchestrating_tool() -> lash_core::facade_support::Orche
 /// enclosing leaf's settlement carries them. Without the restore the
 /// occurrence is dropped before the outer boundary sees it, and the turn's
 /// recorded effects lose an emission that really happened.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_batch_child_trigger_reaches_the_enclosing_group_settlement() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let controller = CapturingRuntimeReplayController::calling("trigger_batch_tool");
     let mut config = runtime_host_config_with_effect_layer(&backend, Arc::new(controller.clone()));
     config.providers.provider_resolver =
@@ -747,22 +758,26 @@ async fn tool_batch_child_trigger_reaches_the_enclosing_group_settlement() {
         EmbeddedRuntimeHost::new(config),
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "trigger-batch-tool"))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput::text("emit trigger through a nested batch"),
             TurnOptions::new(
                 CancellationToken::new(),
-                layered_scope(
-                    &backend,
+                lash_core::testing::LayeredEffectHost::layer_scoped(
+                    handler.scoped(),
                     Arc::new(controller.clone()),
-                    AdmittedScope::turn("root", "trigger-batch-tool"),
-                ),
+                )
+                .expect("layer the handler's scope"),
             )
             .with_events(&NoopEventSink),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let tool_outcomes = controller.tool_outcomes();
@@ -800,10 +815,11 @@ async fn tool_batch_child_trigger_reaches_the_enclosing_group_settlement() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appending_session_node()
 {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let controller = CapturingRuntimeReplayController::default();
     let mut config = runtime_host_config_with_effect_layer(&backend, Arc::new(controller.clone()));
     config.providers.provider_resolver =
@@ -858,22 +874,26 @@ async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appen
         EmbeddedRuntimeHost::new(config),
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "trigger-tool"))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput::text("emit trigger from tool"),
             TurnOptions::new(
                 CancellationToken::new(),
-                layered_scope(
-                    &backend,
+                lash_core::testing::LayeredEffectHost::layer_scoped(
+                    handler.scoped(),
                     Arc::new(controller.clone()),
-                    AdmittedScope::turn("root", "trigger-tool"),
-                ),
+                )
+                .expect("layer the handler's scope"),
             )
             .with_events(&NoopEventSink),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let tool_outcomes = controller.tool_outcomes();
@@ -933,9 +953,10 @@ async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appen
     assert!(trigger_nodes.is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     struct RetryOnceTool {
         attempts: Arc<std::sync::atomic::AtomicUsize>,
     }
@@ -1053,9 +1074,10 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local_tools() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let transport = mock_provider(vec![
         MockCall {
@@ -1158,9 +1180,10 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn exec_and_execution_environment_effects_cross_controller_once() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let policy = SessionPolicy {
         provider_id: "mock".to_string(),
@@ -1218,9 +1241,10 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     assert_eq!(recorder.count_kind(RuntimeEffectKind::ExecCode), 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn start_exec_without_code_executor_stops_as_runtime_error() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let policy = SessionPolicy {
         provider_id: "mock".to_string(),
         model: lash_core::ModelSpec::builder("mock-model")
@@ -1255,7 +1279,13 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
     )
     .await
     .expect("runtime");
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("exec-without-executor").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1267,14 +1297,11 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("exec-without-executor"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(
         turn.outcome,
@@ -1287,9 +1314,10 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
     }));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let trace_path = unique_trace_path("direct-completion");
     let transport = mock_provider(vec![MockCall {
@@ -1371,11 +1399,12 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     assert_eq!(ledger[0].usage.input_tokens, 7);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_commit() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1442,9 +1471,10 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     assert_eq!(ledger[0].usage.input_tokens, 7);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let response = || MockCall {
         stream_events: Vec::new(),
@@ -1510,9 +1540,10 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
     assert_ne!(replay_keys[0], replay_keys[1]);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let gate = Arc::new((
         tokio::sync::Notify::new(),
         tokio::sync::Notify::new(),
@@ -1593,9 +1624,10 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
         .expect("guard released after completion");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn direct_effect_restores_required_streaming_for_provider_execution() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let saw_stream_events = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&saw_stream_events);
     let transport = TestProvider::builder()
@@ -1625,18 +1657,14 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
     .await;
 
     let manager = runtime.runtime_session_services().expect("session manager");
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::runtime_operation(
+            "test-runtime-effect-controller",
+        ))
+        .await
+        .expect("open the scope's handler");
     let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(
-            backend
-                .effect_host()
-                .scoped_static(lash_core::AdmittedScope::runtime_operation(
-                    "test-runtime-effect-controller",
-                ))
-                .expect("admit the direct-completion scope")
-                .expect("the backend host lends a static controller")
-                .owned_controller()
-                .expect("a static controller is shared"),
-        ),
+        RuntimeEffectControllerHandle::borrowed(handler.scoped()),
         None,
     );
     let completion = direct
@@ -1647,6 +1675,8 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
         .await
         .expect("direct completion");
 
+    drop(direct);
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(completion.text, "direct answer");
     assert!(saw_stream_events.load(Ordering::SeqCst));
 }
@@ -1654,9 +1684,10 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
 #[path = "effect_direct_llm.rs"]
 mod direct_llm;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 17, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
@@ -1783,9 +1814,10 @@ fn nested_echo_orchestrating_tool() -> lash_core::facade_support::OrchestratingT
     unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn an_in_turn_orchestrating_tools_nested_call_emits_one_started_completed_pair() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 18, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let controller = CapturingRuntimeReplayController::calling("nested_echo_tool");
     let mut config = runtime_host_config_with_effect_layer(&backend, Arc::new(controller.clone()));
     config.providers.provider_resolver =
@@ -1805,22 +1837,27 @@ async fn an_in_turn_orchestrating_tools_nested_call_emits_one_started_completed_
     .await;
 
     let activities = RecordingTurnEvents::default();
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "nested-echo-turn"))
+        .await
+        .expect("open the scope's handler");
     let turn = runtime
         .stream_turn(
             TurnInput::text("call the nested echo"),
             TurnOptions::new(
                 CancellationToken::new(),
-                layered_scope(
-                    &backend,
+                lash_core::testing::LayeredEffectHost::layer_scoped(
+                    handler.scoped(),
                     Arc::new(controller.clone()),
-                    AdmittedScope::turn("root", "nested-echo-turn"),
-                ),
+                )
+                .expect("layer the handler's scope"),
             )
             .with_events(&NoopEventSink)
             .with_turn_events(&activities),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let nested = |f: &dyn Fn(&TurnEvent) -> bool| {

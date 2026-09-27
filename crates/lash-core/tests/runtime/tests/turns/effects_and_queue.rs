@@ -1,8 +1,11 @@
 use super::*;
 
-#[tokio::test]
+const SEED: u64 = 0x5_a300;
+
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     // A tiny TTL keeps the test sub-second: the session execution lease renews
     // every `renew_interval` and keeps its generation live, so the queued-work
     // claim pinned to that generation survives the stalled provider call by
@@ -35,7 +38,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         })
         .build();
 
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
         backend.clone(),
@@ -95,7 +98,13 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         ),
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("long-turn-queued-work-claim").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     // Correct behavior: the turn's claim stays live under its session-lease
     // generation and commits, so the wake is completed exactly once. The second
     // checkpoint re-runs `claim_ready_queued_work` under the same live
@@ -105,16 +114,13 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         runtime.run_turn_assembled(
             TurnInput::text("long running user turn"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("long-turn-queued-work-claim"),
-            ),
+            handler.scoped(),
         ),
     )
     .await
     .expect("stalled turn should finish")
     .expect("stalled turn must commit without losing its queued-work claim");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(turn.assistant_output.safe_text, "stalled turn response");
     assert!(
@@ -128,16 +134,16 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         "wake `{}` should be completed exactly once by the committing turn",
         wake.wake_id
     );
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("after-long-turn-queued-work-claim").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     assert!(
         runtime
-            .stream_next_queued_work(TurnOptions::new(
-                CancellationToken::new(),
-                backend_queued_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("after-long-turn-queued-work-claim")
-                ),
-            ))
+            .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped(),))
             .await
             .expect("post-turn queue check should succeed")
             .ran()
@@ -145,6 +151,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         "the committed wake `{}` must not replay after the turn",
         wake.wake_id
     );
+    handler.close().await.expect("close the scope's handler");
 }
 
 // Boundary: command ordering tests stay in `turns.rs` when they assert public
@@ -152,10 +159,11 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
 // provider execution, and the API distinction between "ran a turn" and
 // command-only `None`. Runtime Scenarios own the store-level command-before
 // turn-work gate and command-only drain invariants.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let captured_store = Arc::clone(&store);
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
@@ -235,20 +243,20 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         "first queued turn",
     )
     .await;
-
-    let first_result = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("queued-frame-chain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("queued-frame-chain").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let first_result = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("queued frame chain succeeds")
         .ran()
         .expect("queued frame chain returns its terminal turn");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(
         first_result.assistant_output.safe_text,
@@ -288,20 +296,20 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         .as_deref()
         .expect("follow-on frame is active");
     assert_eq!(requests_after_follow[1].scope.agent_frame_id, follow_frame);
-
-    let second_result = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("second-queued-after-frame-chain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("second-queued-after-frame-chain").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let second_result = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("second queued turn succeeds")
         .ran()
         .expect("second queued turn runs after the frame chain");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(
         second_result.assistant_output.safe_text,
@@ -321,12 +329,13 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
     assert!(request_contains_text(&requests[2], "second queued turn"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_handoff() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     const SESSION_ID: &str = "mid-chain-cancellation";
 
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let captured_store = Arc::clone(&store);
     let cancel = CancellationToken::new();
     let cancel_after_switch = cancel.clone();
@@ -372,20 +381,20 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         "start cancellable switch",
     )
     .await;
-
-    let terminal = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            cancel,
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from(SESSION_ID),
-                &TurnId::from("mid-chain-cancel"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from(SESSION_ID).clone(),
+            TurnId::from("mid-chain-cancel").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let terminal = runtime
+        .stream_next_queued_work(TurnOptions::new(cancel, handler.scoped()))
         .await
         .expect("cancelled chain assembles")
         .ran()
         .expect("cancelled terminal turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
@@ -410,9 +419,9 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
     #[derive(Debug)]
     struct DenyClaimedAttachments;
 
@@ -430,7 +439,8 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     }
 
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, mock_provider(Vec::new())).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
+            .await;
     runtime.host.core.attachment_source_policy = Arc::new(DenyClaimedAttachments);
     let inbound = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
         store.as_ref(),
@@ -447,20 +457,20 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     )
     .await
     .expect("enqueue invalid input");
-
-    let terminal = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("invalid-claimed-input"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("invalid-claimed-input").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let terminal = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("invalid input assembles")
         .ran()
         .expect("invalid terminal turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::InvalidInput)
@@ -478,9 +488,10 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
@@ -503,7 +514,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
             }))
         }),
     });
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
@@ -515,20 +526,20 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
     .await;
     let inbound =
         enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "abort this input").await;
-
-    let terminal = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("claimed-plugin-abort"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("claimed-plugin-abort").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let terminal = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("plugin abort assembles")
         .ran()
         .expect("plugin abort terminal turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::PluginAbort)
@@ -546,11 +557,12 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     const TURN_ID: &str = "attachment-owner-stream-turn";
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
@@ -560,30 +572,31 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
         runtime_store,
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from(TURN_ID).clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     runtime
         .stream_turn(
             TurnInput::text("store an attachment"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from(TURN_ID),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("stream turn succeeds");
+    handler.close().await.expect("close the scope's handler");
 
     assert_turn_owned_attachment(store.as_ref(), &TurnId::from(TURN_ID));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     const TURN_ID: &str = "attachment-owner-prepared-turn";
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
@@ -604,7 +617,13 @@ pub(super) async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
         .into(),
         origin: None,
     }]);
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from(TURN_ID).clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     runtime
         .stream_prepared_turn(
             messages,
@@ -617,24 +636,22 @@ pub(super) async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from(TURN_ID),
-            ),
+            handler.scoped(),
             CancellationToken::new(),
             None,
             None,
         )
         .await
         .expect("prepared stream turn succeeds");
+    handler.close().await.expect("close the scope's handler");
 
     assert_turn_owned_attachment(store.as_ref(), &TurnId::from(TURN_ID));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn stream_prepared_turn_follows_agent_frame_switch() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
     let transport = TestProvider::builder()
@@ -692,7 +709,13 @@ pub(super) async fn stream_prepared_turn_follows_agent_frame_switch() {
         .into(),
         origin: None,
     }]);
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("prepared-chain").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let terminal = runtime
         .stream_prepared_turn(
             messages,
@@ -705,17 +728,14 @@ pub(super) async fn stream_prepared_turn_follows_agent_frame_switch() {
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("prepared-chain"),
-            ),
+            handler.scoped(),
             CancellationToken::new(),
             None,
             None,
         )
         .await
         .expect("prepared logical turn succeeds");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(
         terminal.assistant_output.safe_text,
         "prepared follow-on complete"
@@ -819,9 +839,14 @@ pub(super) async fn process_scoped_agent_frame_follow_on_uses_distinct_cancel_pe
     ));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED + 9,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
+    let backend = double.lash_backend();
     let call_index = Arc::new(AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
     let transport = TestProvider::builder()
@@ -854,9 +879,8 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
             }
         })
         .build();
-    let clock = Arc::new(ManualClock::new(1_000));
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
+    let clock = double.test_clock();
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store;
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
@@ -888,21 +912,21 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAtSecondTurnFinalizedHook::new(
         Arc::clone(&clock),
     )));
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("finalized-lapsed-borrow").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("start finalized borrowed append probe"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("finalized-lapsed-borrow"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the final current-head commit survives the observer's borrowed-lane failure");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(run.turns.len(), 2);
     let issue = run.turns[1]
@@ -928,9 +952,10 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
     assert_eq!(call_index.load(Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -947,7 +972,7 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
             })
         })
         .build();
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let retained = Arc::new(std::sync::Mutex::new(None));
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -975,18 +1000,18 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
         "stash the graph service",
     )
     .await;
-
-    let output = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("retained-service"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("retained-service").clone(),
         ))
         .await
+        .expect("open the scope's handler");
+    let output = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .await
         .expect_err("post-commit delivery failure leaves the handoff pending");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(output.code, lash_core::RuntimeErrorCode::QueuedRunPending);
 
     let graph = retained
@@ -1033,9 +1058,14 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
     ));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED + 11,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
+    let backend = double.lash_backend();
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
     let transport = TestProvider::builder()
@@ -1068,9 +1098,8 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
             }
         })
         .build();
-    let clock = Arc::new(ManualClock::new(1_000));
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
+    let clock = double.test_clock();
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
@@ -1111,18 +1140,18 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
         "start lapsed queued handoff",
     )
     .await;
-
-    let error = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("queued-lapsed-handoff"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("queued-lapsed-handoff").clone(),
         ))
         .await
+        .expect("open the scope's handler");
+    let error = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .await
         .expect_err("committed continuation remains recoverable after lane loss");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(error.code, lash_core::RuntimeErrorCode::QueuedRunPending);
     let admitted = store
         .pending_queued_run(&SessionId::from("root"))
@@ -1174,18 +1203,19 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
         final_lease.is_none(),
         "settling the loud durable failure must clear the expired owner row"
     );
-    let resumed = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("queued-lapsed-handoff"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("queued-lapsed-handoff").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let resumed = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("host resumes committed continuation")
         .expect("continuation runs");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(resumed.state.turn_index, 2);
     assert_eq!(call_index.load(Ordering::SeqCst), 2);
     assert!(
@@ -1197,9 +1227,14 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED + 12,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
+    let backend = double.lash_backend();
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
     let transport = TestProvider::builder()
@@ -1232,9 +1267,8 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
             }
         })
         .build();
-    let clock = Arc::new(ManualClock::new(1_000));
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
+    let clock = double.test_clock();
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
@@ -1271,21 +1305,21 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
         &clock,
     ))));
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("inprocess-lapsed-handoff").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("start lapsed in-process handoff"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("inprocess-lapsed-handoff"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the committed switch is returned with a loud follow-on failure");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(run.turns.len(), 1);
     assert!(matches!(
@@ -1342,9 +1376,10 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
     let transport = TestProvider::builder()
@@ -1385,7 +1420,7 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
             }
         })
         .build();
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
@@ -1402,21 +1437,21 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         runtime_store,
     )
     .await;
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("resident-chain").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("start retained lease chain"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("resident-chain"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("retained lease chain succeeds");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(run.turns.len(), 2);
     // ADR 0069: one acceptance admitted this run, and it admitted exactly the
     // physical turn it was accepted for. The follow-on frames of the same run
@@ -1439,6 +1474,13 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         1,
         "the first physical turn must establish durable head freshness exactly once"
     );
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("reacquired-turn").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     for node in &run.turns[0].state.session_graph.nodes {
         assert!(
             run.turns[1]
@@ -1454,17 +1496,11 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
     runtime
         .stream_turn(
             TurnInput::text("turn after lease release"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("reacquired-turn"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn after lease reacquisition succeeds");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(
         store.load_session_count(),
         0,
@@ -1477,9 +1513,14 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED + 14,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
+    let backend = double.lash_backend();
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
     let transport = TestProvider::builder()
@@ -1514,9 +1555,8 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
             }
         })
         .build();
-    let clock = Arc::new(ManualClock::new(1_000));
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
+    let clock = double.test_clock();
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
@@ -1546,21 +1586,21 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
         &clock,
     ))));
-
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("lost-retained-lease").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let frame_run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("lose the retained lease"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("lost-retained-lease"),
-                ),
-            ),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the committed frame must survive the follow-on lease loss");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(frame_run.turns.len(), 1);
     assert!(matches!(
         frame_run.turns[0].outcome,
@@ -1598,17 +1638,21 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
         request: lash_core::engine::DriveRequestId::new("drive-after-lease-loss"),
         build_generation: runtime.host.core.backend().build_generation().clone(),
     };
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("drive-after-lease-loss").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let drive = Box::pin(lash_core::drive::drive_session(
         &mut runtime,
-        &backend_queued_scope(
-            &backend,
-            &SessionId::from("root"),
-            &TurnId::from("drive-after-lease-loss"),
-        ),
+        &handler.scoped(),
         &request,
     ))
     .await
     .expect("the drive after lease loss and reacquisition runs");
+    handler.close().await.expect("close the scope's handler");
     assert!(
         matches!(
             drive.ran.as_slice(),
@@ -1632,9 +1676,10 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let switch_count = lash_core::runtime::logical_turn::MAX_AGENT_FRAME_SWITCHES;
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
@@ -1666,7 +1711,7 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
             task: Some(format!("continue bounded chain {index}")),
         })
         .collect();
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
@@ -1682,20 +1727,20 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
         "start bounded chain",
     )
     .await;
-
-    let terminal = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("bounded-frame-chain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("bounded-frame-chain").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let terminal = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("bounded chain terminalizes")
         .ran()
         .expect("bounded chain returns terminal turn");
+    handler.close().await.expect("close the scope's handler");
     assert!(matches!(
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::RuntimeError)
@@ -1729,10 +1774,11 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning_diagnostic()
  {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let switch_count = lash_core::runtime::logical_turn::MAX_AGENT_FRAME_SWITCHES;
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(false),
@@ -1781,7 +1827,7 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
             task: Some(format!("continue capture-abort chain {index}")),
         })
         .collect();
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![protocol_factory],
         Arc::new(TerminalControlTool { controls }),
@@ -1801,18 +1847,18 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
         "start capture-abort chain",
     )
     .await;
-
-    let committed = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("bounded-frame-capture-abort"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("bounded-frame-capture-abort").clone(),
         ))
         .await
+        .expect("open the scope's handler");
+    let committed = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .await
         .expect_err("failed terminal capture retains the pending run");
+    handler.close().await.expect("close the scope's handler");
     assert_eq!(
         committed.code,
         lash_core::RuntimeErrorCode::QueuedRunPending
@@ -1848,9 +1894,13 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn leading_session_command_drains_before_queued_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED + 17,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1862,37 +1912,35 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
             ..LlmResponse::default()
         }),
     }]);
-    let clock = Arc::new(ManualClock::new(1_000));
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
+    let clock = double.test_clock();
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store_clock(&backend, transport, store_clock)
-            .await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     let command = enqueue_session_command(
         store.as_ref(),
         &SessionId::from("root"),
         "refresh before turn",
     )
     .await;
-    clock.advance_ms(1);
+    clock.advance(1);
     let turn = enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "user turn").await;
     let turn_events = RecordingTurnEvents::default();
-
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("command-before-turn-drain").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     let drained = runtime
         .stream_next_queued_work(
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_queued_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("command-before-turn-drain"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("queued drain succeeds")
         .ran()
         .expect("queued turn runs after command");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(drained.assistant_output.safe_text, "queued answer");
     assert!(
@@ -1909,9 +1957,13 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth() {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED + 18,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
     for backlog_depth in [1, 256] {
         let transport = mock_provider(vec![MockCall {
             stream_events: Vec::new(),
@@ -1924,11 +1976,9 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
                 ..LlmResponse::default()
             }),
         }]);
-        let clock = Arc::new(ManualClock::new(1_500));
-        let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
+        let clock = double.test_clock();
         let (mut runtime, store) =
-            standard_runtime_with_transport_and_queue_store_clock(&backend, transport, store_clock)
-                .await;
+            standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
         for index in 0..backlog_depth {
             enqueue_session_command(
                 store.as_ref(),
@@ -1937,27 +1987,27 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
             )
             .await;
         }
-        clock.advance_ms(1);
+        clock.advance(1);
         enqueue_idle_turn_input(
             store.as_ref(),
             &SessionId::from("root"),
             "user turn after commands",
         )
         .await;
-
-        let drained = runtime
-            .stream_next_queued_work(TurnOptions::new(
-                CancellationToken::new(),
-                backend_queued_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from(format!("depth-invariance-{backlog_depth}")),
-                ),
+        let handler = double
+            .open_handler(AdmittedScope::queue_drain(
+                SessionId::from("root").clone(),
+                TurnId::from(format!("depth-invariance-{backlog_depth}")).clone(),
             ))
+            .await
+            .expect("open the scope's handler");
+        let drained = runtime
+            .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
             .await
             .expect("depth-invariance drain succeeds")
             .ran()
             .expect("queued turn runs after commands");
+        handler.close().await.expect("close the scope's handler");
 
         assert_eq!(
             drained.assistant_output.safe_text,
@@ -1971,9 +2021,13 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
-    let backend = memory_backend().await;
+    let double = kernel_double(
+        SEED + 19,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1985,34 +2039,32 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
             ..LlmResponse::default()
         }),
     }]);
-    let clock = Arc::new(ManualClock::new(2_000));
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
+    let clock = double.test_clock();
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store_clock(&backend, transport, store_clock)
-            .await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     let turn =
         enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "first user turn").await;
-    clock.advance_ms(1);
+    clock.advance(1);
     let command = enqueue_session_command(
         store.as_ref(),
         &SessionId::from("root"),
         "refresh admitted after input",
     )
     .await;
-
-    let drained = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("later-command-before-turn-drain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("later-command-before-turn-drain").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let drained = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("queued turn drain succeeds")
         .ran()
         .expect("first queued turn runs");
+    handler.close().await.expect("close the scope's handler");
 
     assert_eq!(drained.assistant_output.safe_text, "first turn answer");
     assert!(
@@ -2027,19 +2079,19 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
         command.batch_id,
         turn.input_id
     );
-
-    let command_only = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            backend_queued_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("later-command-drain"),
-            ),
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("later-command-drain").clone(),
         ))
+        .await
+        .expect("open the scope's handler");
+    let command_only = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("later command drain succeeds")
         .ran();
+    handler.close().await.expect("close the scope's handler");
     assert!(command_only.is_none());
     assert!(
         lash_core::store::QueuedWorkStore::list_queued_work(
@@ -2056,9 +2108,9 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
 // invariant. This full runtime test stays here because it verifies the
 // app-facing queued-work turn event, prompt projection, and blank-history
 // suppression produced by `stream_next_queued_work`.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let transport = TestProvider::builder()
@@ -2080,7 +2132,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         })
         .build();
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
+        standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
     let registry = runtime
         .host
         .process_registry()
@@ -2124,22 +2176,23 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
     .await;
 
     let turn_events = RecordingTurnEvents::default();
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from("root").clone(),
+            TurnId::from("queued-work-started-turn").clone(),
+        ))
+        .await
+        .expect("open the scope's handler");
     runtime
         .stream_next_queued_work(
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_queued_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("queued-work-started-turn"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("turn")
         .ran()
         .expect("queued turn");
+    handler.close().await.expect("close the scope's handler");
 
     let events = turn_events.snapshot();
     let lash_core::TurnEvent::TurnStarted { turn_id } = &events

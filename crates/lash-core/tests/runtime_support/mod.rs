@@ -143,6 +143,22 @@ pub(crate) async fn unbound_recording_store(
     ))
 }
 
+/// `unbound_recording_store` on any backend's session catalog — storage only.
+/// The store-set twin needs no concrete store type, so it serves
+/// [`memory_store_backend`] and a double's `lash_backend` alike: a test that
+/// runs no effect still gets the recording decorator's seams.
+pub(crate) async fn recording_unbound_store_on(
+    backend: &lash_core::Backend,
+) -> std::sync::Arc<lash_core::testing::runtime_helpers::RecordingStore> {
+    std::sync::Arc::new(lash_core::testing::runtime_helpers::RecordingStore::over(
+        lash_core::SessionStoreFactory::open_unbound_store(
+            backend.session_store_factory().as_ref(),
+        )
+        .await
+        .expect("open an unbound store on the backend's catalog"),
+    ))
+}
+
 /// [`unbound_recording_store`] whose store stamps and expires leases on
 /// `clock`, over the same databases as `backend`: a second handle on the
 /// backend configured with another clock.

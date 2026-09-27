@@ -10,6 +10,8 @@ use super::*;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
 use lash_sansio::sync::MutexExt;
 
+const SEED: u64 = 0x5_e224;
+
 struct ResponseHookFixture {
     provider_calls: Arc<std::sync::atomic::AtomicUsize>,
     hook_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -162,9 +164,10 @@ async fn drive_turn(
 /// Red before the split: the hook error occupied the journal slot the paid
 /// response would have, so recovery had nothing to replay and a retry bought a
 /// second generation.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_only_the_hook() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let fixture = response_hook_fixture(1, 0);
     let recorder = RecordingEffectController::default()
         .with_local_llm_execution()
@@ -242,9 +245,10 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
 ///
 /// The hook never runs on the first pass; the redrive completes phase 2 from
 /// the recorded completion with no provider re-invocation.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_provider() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let fixture = response_hook_fixture(0, 0);
     let recorder = RecordingEffectController::default()
         .with_local_llm_execution()
@@ -302,9 +306,10 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
 ///
 /// They are never folded into the provider-completion entry, and a replay of
 /// phase 2 serves them from its own record instead of re-running the hook.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let fixture = response_hook_fixture(0, 1);
     let recorder = RecordingEffectController::default()
         .with_local_llm_execution()
@@ -372,18 +377,24 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
     assert_eq!(replayed.assistant_output.safe_text, "paid completion 1");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn recording_response_hook_terminal_error_replays() {
     for recorder in [
         RecordingEffectController::default().with_replay_by_key(),
         RecordingEffectController::default().with_strict_replay_by_address(),
     ] {
-        let backend = memory_backend().await;
-        let controller = super::effect::layered_controller(
-            &backend,
+        let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(lash_core::AdmittedScope::runtime_operation(
+                "recording-terminal",
+            ))
+            .await
+            .expect("open the scope's handler");
+        let controller = lash_core::testing::LayeredEffectHost::layer_scoped(
+            handler.scoped(),
             Arc::new(recorder.clone()),
-            lash_core::AdmittedScope::runtime_operation("recording-terminal"),
-        );
+        )
+        .expect("layer the handler's scope");
         let scope = ExecutionScope::runtime_operation("recording-terminal");
         let envelope = RuntimeEffectEnvelope::new(
             lash_core::RuntimeEffectInvocation::new(
@@ -418,6 +429,8 @@ async fn recording_response_hook_terminal_error_replays() {
             .await
             .expect_err("terminal replays");
         assert_eq!(error.message, "terminal derivation error");
+        drop(controller);
+        handler.close().await.expect("close the scope's handler");
     }
 }
 
@@ -484,9 +497,10 @@ fn stream_state_plugin() -> Arc<dyn lash_core::facade_support::PluginFactory> {
 /// the journal: the stream hooks' end state rides phase 1's recorded outcome
 /// and phase 2's command, so the derivation reads it rather than the memory of
 /// a worker that is gone.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn phase_two_on_another_worker_derives_from_the_journaled_stream_state() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = || {
         let provider_calls = Arc::clone(&provider_calls);
