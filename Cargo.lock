@@ -2317,7 +2317,6 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "chrono",
- "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
  "lash-internal-core-worker",
