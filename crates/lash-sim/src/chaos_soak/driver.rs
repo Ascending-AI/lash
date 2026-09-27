@@ -2,6 +2,7 @@
 //! faults between them, and the ledger of what the host saw admitted.
 
 use std::collections::BTreeSet;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -21,8 +22,17 @@ const STEP_WALL_LIMIT: Duration = Duration::from_secs(300);
 const HELD_WAIT: Duration = Duration::from_secs(20);
 
 /// The ticks a rolling deploy's drain may take before the epoch reports the
-/// old generation stuck: five minutes of virtual time.
+/// old generation stuck: five minutes of virtual time, and
+/// [`lapsed_claim_ticks`] more for each host death during the drain.
 pub(super) const DRAIN_TICKS: usize = 30;
+
+/// The ticks a claim a dead host held takes to lapse and be retaken: the
+/// relay's claim TTL, then the tick that retakes it.
+fn lapsed_claim_ticks() -> usize {
+    let tick_ms = crate::crash_matrix::TICK.as_millis() as u64;
+    let ttl_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;
+    usize::try_from(ttl_ms.div_ceil(tick_ms) + 1).unwrap_or(usize::MAX)
+}
 
 /// The store's refusal of a deletion while a turn cancellation's closure is
 /// still pinned (`TurnCancelClosureLifecyclePinned`).
@@ -887,7 +897,12 @@ impl Driver {
             .drain_generation(&old)
             .await
             .map_err(|error| format!("mark `{old}` draining: {error}"))?;
-        for tick in 0..=DRAIN_TICKS {
+        // Each host death during the drain may leave a claim that only its
+        // lapse frees (ADR 0109 §1.8: `claimed_at + claim_ttl + T`), so the
+        // drain's bound grows by that much per death it saw.
+        let crashes_before = self.counts.crashes;
+        let mut tick = 0;
+        loop {
             self.world.quiesce().await;
             self.settle_crash().await?;
             let status = self
@@ -917,19 +932,77 @@ impl Driver {
                     "`{old}` drained after {tick} tick(s); now `{next}`"
                 ));
             }
-            if tick == DRAIN_TICKS {
+            let crashes = self.counts.crashes - crashes_before;
+            let bound = DRAIN_TICKS + crashes * lapsed_claim_ticks();
+            if tick >= bound {
                 return Err(format!(
-                    "generation `{old}` never drained within {DRAIN_TICKS} ticks: it holds {} live process(es), {} parked process(es), {} parked turn(s), {} closing session(s), stalled {:?}; open invocations pinned to its build: {pinned:?}",
+                    "generation `{old}` never drained within {bound} ticks ({DRAIN_TICKS} and {crashes} host death(s) during the drain): it holds {} live process(es), {} parked process(es), {} parked turn(s), {} closing session(s), stalled {:?}; open invocations pinned to its build: {pinned:?}; closing: {:?}; {:?}",
                     status.live_processes,
                     status.parked_processes,
                     status.parked_turns,
                     status.closing_sessions,
-                    status.stalled_obligations
+                    status.stalled_obligations,
+                    self.closing_sessions().await,
+                    super::checks::diagnose_recovery(&self.world, self.live_since_wall_ms).await
                 ));
             }
             self.tick().await?;
+            tick += 1;
         }
-        unreachable!("the drain loop returns on its last tick")
+    }
+
+    /// Every session the host asked to delete that is still closing: its
+    /// delete obligation's standing and the cleanup it waits on.
+    async fn closing_sessions(&self) -> Vec<String> {
+        let backend = self.world.backend();
+        let deletes = backend.session_delete_ledger();
+        let obligations =
+            backend.obligation_ledger(lash_core::store::ObligationKind::SessionDelete);
+        let intents = backend.obligation_ledger(lash_core::store::ObligationKind::ControlIntent);
+        let mut lines = Vec::new();
+        if let Ok(all) = backend
+            .session_store_factory()
+            .list_control_intents(None, NonZeroUsize::MIN.saturating_add(255))
+            .await
+        {
+            for intent in all {
+                let deleted = self
+                    .ledger
+                    .sessions
+                    .iter()
+                    .any(|slot| slot.id == intent.session_id && slot.deleted.is_some());
+                if !deleted {
+                    continue;
+                }
+                let standing = match &intent.obligation {
+                    Some(id) => format!("{:?}", intents.standing(id).await),
+                    None => "no obligation".to_owned(),
+                };
+                lines.push(format!(
+                    "intent {} of `{}` {:?} obligation {standing}",
+                    intent.id, intent.session_id, intent.state
+                ));
+            }
+        }
+        for slot in &self.ledger.sessions {
+            if slot.deleted.is_none() {
+                continue;
+            }
+            let line = match deletes.delete_obligation(&slot.id).await {
+                Ok(None) => continue,
+                Ok(Some(obligation)) => {
+                    let standing = obligations.standing(&obligation.id).await;
+                    let cleanup = deletes.undelivered_cleanup(&slot.id).await;
+                    format!(
+                        "`{}` delete {} {standing:?}, cleanup {cleanup:?}",
+                        slot.id, obligation.id
+                    )
+                }
+                Err(error) => format!("`{}` delete obligation unreadable: {error}", slot.id),
+            };
+            lines.push(line);
+        }
+        lines
     }
 }
 
