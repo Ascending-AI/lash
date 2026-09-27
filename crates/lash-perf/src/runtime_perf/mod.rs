@@ -1,10 +1,10 @@
 mod duration_trend;
 mod harness;
 mod measurement;
-mod openai_compat;
+pub(crate) mod openai_compat;
 mod plugin_stack;
 mod prompt;
-mod providers;
+pub(crate) mod providers;
 mod report;
 mod scenarios;
 mod smoke;

@@ -294,6 +294,56 @@ crash-matrix-restate-e2e:
     exit 1
   fi
 
+# The send-to-completion latency gate (FIG-3843): `send()` → Restate drive →
+# `outcome()` measured end to end on a live `restate-server`, the same-process
+# fast fixture gated at overhead p50 < 50 ms / p99 < 250 ms over 10,000
+# samples, every other case (stream, tool, failure, busy, controlled
+# real-provider, cross-worker, poll, grace) measured and reported. The report
+# and the raw sample ledger land under the artifact directory. The harness
+# builds in the release profile — the same build the release's perf guard
+# measures — so the budget binds optimized code, not a debug binary.
+latency-gate:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ -n "${KILN_GATE_ID:-}" ] && [ -z "${LASH_GATE_SLOT_OVERRIDE:-}" ]; then
+    gate_sum="$(printf '%s' "$KILN_GATE_ID" | cksum)"
+    export LASH_GATE_SLOT_OVERRIDE="$(( ${gate_sum%% *} % 90 ))"
+  fi
+  source "{{repo}}/scripts/worktree-gate-env.sh"
+  lash_gate_acquire_locks latency-gate
+  gate="${KILN_GATE_ID:-lash-${LASH_GATE_WORKTREE_SLUG}}"
+
+  artifacts="${LASH_LATENCY_ARTIFACT_DIR:-target/functional-e2e-artifacts/latency-gate}"
+  case "$artifacts" in
+    /*) ;;
+    *) artifacts="{{repo}}/$artifacts" ;;
+  esac
+  mkdir -p "$artifacts"
+  log="$artifacts/latency-gate.log"
+
+  cargo build --release --locked --package lash-perf --bin lash-perf
+  binary="${CARGO_TARGET_DIR:-{{repo}}/target}/release/lash-perf"
+
+  set +e
+  LASH_LATENCY_WORKER_BIND="127.0.0.1:$((LASH_E2E_PORT_BASE + 39))" \
+    timeout --kill-after=30 5400 \
+    python3 "{{repo}}/scripts/ci/restate_suite.py" serve \
+      --name "$gate" \
+      --port-base "$((LASH_E2E_PORT_BASE + 36))" \
+      --keep-log "$artifacts/restate-server.log" \
+      -- "$binary" latency \
+        --out "$artifacts/latency-report.json" \
+        --samples-out "$artifacts/latency-samples.json" \
+        --store-dir "$artifacts/stores" 2>&1 | tee "$log"
+  status="${PIPESTATUS[0]}"
+  set -e
+
+  grep -E '^latency gate: ' "$log" || true
+  if [ "$status" -ne 0 ]; then
+    echo "latency gate failed (exit $status); log: $log" >&2
+    exit "$status"
+  fi
+
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
 

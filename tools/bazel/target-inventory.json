@@ -7401,13 +7401,13 @@
         "dhat-heap"
       ],
       "kind": "bin",
-      "label": "//crates/lash-perf:lash-perf__bin__fv_9733d528",
+      "label": "//crates/lash-perf:lash-perf__bin__fv_8a00de75",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//crates/lash-perf:lash-perf__bin__fv_faece333",
+      "label": "//crates/lash-perf:lash-perf__bin__fv_e3462dec",
       "package": "lash-perf"
     },
     {
@@ -7415,13 +7415,13 @@
         "dhat-heap"
       ],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_9733d528",
+      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_8a00de75",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_faece333",
+      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_e3462dec",
       "package": "lash-perf"
     },
     {
@@ -7429,13 +7429,13 @@
         "dhat-heap"
       ],
       "kind": "lib",
-      "label": "//crates/lash-perf:lash-perf__fv_9733d528",
+      "label": "//crates/lash-perf:lash-perf__fv_8a00de75",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-perf:lash-perf__fv_faece333",
+      "label": "//crates/lash-perf:lash-perf__fv_e3462dec",
       "package": "lash-perf"
     },
     {
@@ -7443,13 +7443,13 @@
         "dhat-heap"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-perf:lash-perf__unit_test__fv_9733d528",
+      "label": "//crates/lash-perf:lash-perf__unit_test__fv_8a00de75",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "unit-test",
-      "label": "//crates/lash-perf:lash-perf__unit_test__fv_faece333",
+      "label": "//crates/lash-perf:lash-perf__unit_test__fv_e3462dec",
       "package": "lash-perf"
     },
     {
@@ -7457,13 +7457,13 @@
         "dhat-heap"
       ],
       "kind": "bin",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_9733d528",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_8a00de75",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_faece333",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_e3462dec",
       "package": "lash-perf"
     },
     {
@@ -7471,13 +7471,13 @@
         "dhat-heap"
       ],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_9733d528",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_8a00de75",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_faece333",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_e3462dec",
       "package": "lash-perf"
     },
     {
@@ -14464,24 +14464,6 @@
     },
     {
       "features": [
-        "default",
-        "rlm"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_2e49abe8",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_2e49abe8",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
         "sqlite"
       ],
       "kind": "lib",
@@ -14615,6 +14597,28 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_a10a75e3",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "restate",
+        "rlm",
+        "sqlite"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a49e0486",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "restate",
+        "rlm",
+        "sqlite"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a49e0486",
       "package": "lash-runtime"
     },
     {

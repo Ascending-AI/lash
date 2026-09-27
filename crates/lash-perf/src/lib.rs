@@ -12,6 +12,7 @@
 //! before/after table two ledgers imply, and `scripts/perf_baseline.py`
 //! archives a quiet-box level under `<root>/<sha>/`.
 
+pub mod latency;
 pub mod perf_support;
 pub mod runtime_perf;
 

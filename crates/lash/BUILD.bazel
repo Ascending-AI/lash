@@ -2131,43 +2131,6 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
-    name = "lash__fv_2e49abe8",
-    build_script = None,
-    crate_features = [
-        "default",
-        "rlm",
-    ],
-    crate_name = "lash",
-    declared_features = [
-        "anthropic",
-        "default",
-        "google",
-        "http-transport",
-        "mcp",
-        "openai",
-        "otel-trace",
-        "postgres",
-        "restate",
-        "rlm",
-        "s3",
-        "sqlite",
-        "subagents",
-        "testing",
-        "typescript",
-    ],
-    exec_properties = sized_exec_properties("lash-runtime", "lash"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash",
-    package_name = "lash-runtime",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_5ec7b16f", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_396997f7", "//crates/lash-perf": "//crates/lash-perf:lash-perf__fv_faece333", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_8a2664f5", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0fdc3c8c", "//crates/lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_115f5643", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_a7ab0d54", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_3ac03ca3"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
     name = "lash__fv_2f0df850",
     build_script = None,
     crate_features = [
@@ -2719,6 +2682,45 @@ lash_rust_feature_library(
         "manual",
     ],
     variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_103e7fe9", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_8d1fb13a", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_bff28357", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_55598223", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_fde97683", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_c32ff4f6", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_557d73ed", "//crates/lash-provider-google": "//crates/lash-provider-google:lash-provider-google__fv_155794c9", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_34a13f38", "//crates/lash-restate": "//crates/lash-restate:lash-restate__fv_ec2d4413", "//crates/lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_fe3c2baf", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_199586c4", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_8fd1fd09"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash__fv_a49e0486",
+    build_script = None,
+    crate_features = [
+        "default",
+        "restate",
+        "rlm",
+        "sqlite",
+    ],
+    crate_name = "lash",
+    declared_features = [
+        "anthropic",
+        "default",
+        "google",
+        "http-transport",
+        "mcp",
+        "openai",
+        "otel-trace",
+        "postgres",
+        "restate",
+        "rlm",
+        "s3",
+        "sqlite",
+        "subagents",
+        "testing",
+        "typescript",
+    ],
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash",
+    package_name = "lash-runtime",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_5ec7b16f", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_396997f7", "//crates/lash-perf": "//crates/lash-perf:lash-perf__fv_e3462dec", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_8a2664f5", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0fdc3c8c", "//crates/lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_115f5643", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_a7ab0d54", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_3ac03ca3"},
     version = "0.0.0-dev",
 )
 

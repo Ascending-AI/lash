@@ -1662,7 +1662,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         self.assertNotIn("install_lash.sh", workflow)
         self.assertIn("needs: [prepare-release, publish-crates]", publish)
         self.assertIn(
-            "needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, chaos-soak]",
+            "needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
             publish_crates,
         )
         self.assertIn("runs-on: ubuntu-24.04", validate_release)

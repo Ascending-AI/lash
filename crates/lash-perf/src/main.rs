@@ -149,6 +149,53 @@ enum Command {
         #[arg(long, value_name = "PROFILE")]
         profile: Option<String>,
     },
+
+    /// Run the send-to-completion latency gate (FIG-3843) against a live
+    /// restate-server: `RESTATE_INGRESS_URL`/`RESTATE_ADMIN_URL` when a
+    /// launcher provides one, a spawned private server otherwise.
+    Latency {
+        /// Write the latency gate JSON report to this file.
+        #[arg(long, value_name = "OUT.json")]
+        out: std::path::PathBuf,
+
+        /// Write the raw per-sample ledger here; default `<out>.samples.json`.
+        #[arg(long, value_name = "SAMPLES.json")]
+        samples_out: Option<std::path::PathBuf>,
+
+        /// Directory the run's SQLite store sets and the cross-worker's live in.
+        #[arg(long, value_name = "DIR")]
+        store_dir: std::path::PathBuf,
+
+        /// Limit the run to these comma-separated cases.
+        #[arg(long, value_delimiter = ',', value_name = "CASE")]
+        cases: Vec<String>,
+
+        /// Sample count for the gated `fast` case.
+        #[arg(long, default_value_t = lash_perf::latency::GATE_MIN_SAMPLES)]
+        fast_samples: usize,
+
+        /// Concurrent session lanes per case.
+        #[arg(long, default_value_t = 64)]
+        lanes: usize,
+
+        /// Shrink every case to a smoke-sized sample count for development.
+        #[arg(long)]
+        scale_down: bool,
+    },
+
+    /// The cross-worker child a latency case drives: serves lash's Restate
+    /// services over the shared store directory. Not run by hand; `latency`
+    /// spawns it.
+    LatencyWorker {
+        #[arg(long, value_name = "DIR")]
+        store_dir: std::path::PathBuf,
+
+        #[arg(long, value_name = "FILE")]
+        ready_file: std::path::PathBuf,
+
+        #[arg(long, value_name = "ADDR")]
+        endpoint_bind: std::net::SocketAddr,
+    },
 }
 
 fn tokio_thread_stack_bytes(args: &Args) -> usize {
@@ -163,9 +210,54 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    if let Some(Command::DurationTrend { history, profile }) = &args.command {
-        // Pure history reading: no runtime, no measurement, no exit code.
-        return lash_perf::runtime_perf::run_duration_trend_cli(history, profile.as_deref());
+    match &args.command {
+        Some(Command::DurationTrend { history, profile }) => {
+            // Pure history reading: no runtime, no measurement, no exit code.
+            return lash_perf::runtime_perf::run_duration_trend_cli(history, profile.as_deref());
+        }
+        Some(Command::Latency {
+            out,
+            samples_out,
+            store_dir,
+            cases,
+            fast_samples,
+            lanes,
+            scale_down,
+        }) => {
+            let run = lash_perf::latency::LatencyRun {
+                out: out.clone(),
+                samples_out: samples_out.clone(),
+                store_dir: store_dir.clone(),
+                cases: cases.clone(),
+                fast_samples: *fast_samples,
+                lanes: *lanes,
+                scale_down: *scale_down,
+            };
+            let mut runtime = tokio::runtime::Builder::new_multi_thread();
+            runtime.enable_all();
+            runtime.thread_stack_size(tokio_thread_stack_bytes(&args));
+            let code = runtime.build()?.block_on(lash_perf::latency::run(run))?;
+            std::process::exit(code);
+        }
+        Some(Command::LatencyWorker {
+            store_dir,
+            ready_file,
+            endpoint_bind,
+        }) => {
+            let worker = lash_perf::latency::LatencyWorkerArgs {
+                store_dir: store_dir.clone(),
+                ready_file: ready_file.clone(),
+                endpoint_bind: *endpoint_bind,
+            };
+            let mut runtime = tokio::runtime::Builder::new_multi_thread();
+            runtime.enable_all();
+            runtime.thread_stack_size(tokio_thread_stack_bytes(&args));
+            runtime
+                .build()?
+                .block_on(lash_perf::latency::run_worker(worker))?;
+            return Ok(());
+        }
+        None => {}
     }
     let worker_stack_bytes = tokio_thread_stack_bytes(&args);
     let mut runtime = tokio::runtime::Builder::new_multi_thread();

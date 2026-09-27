@@ -355,6 +355,78 @@ jobs:
           path: target/functional-e2e-artifacts/crash-matrix-restate
           if-no-files-found: warn
 
+  # The send-to-completion latency gate (FIG-3843): `send()` → Restate drive →
+  # `outcome()` measured on a live restate-server; the same-process fast
+  # fixture fails the release when added overhead reaches p50 >= 50 ms or
+  # p99 >= 250 ms. Every other case is measured and reported in the uploaded
+  # JSON. `just latency-gate` reproduces the run locally.
+  latency-gate:
+    name: Send-to-completion latency gate
+    runs-on: ubuntu-24.04
+    # The gate builds the harness in the release profile (restore-only against
+    # the linux-release cache, as the perf guard does) and then runs every
+    # latency case against a live restate-server.
+    timeout-minutes: 120
+    needs: prepare-release
+
+    steps:
+      - name: Check out repository
+        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
+        env:
+          CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
+          git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
+          git checkout --force --detach FETCH_HEAD
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          # Restore-only against the cache release-cache.yml warms on main.
+          shared-key: linux-release
+          save-if: false
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Install just
+        uses: ./.github/actions/install-tools
+        with:
+          tool: just
+
+      - name: Run the send-to-completion latency gate
+        env:
+          LASH_LATENCY_ARTIFACT_DIR: target/functional-e2e-artifacts/latency-gate
+        run: just latency-gate
+
+      - name: Upload latency-gate artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-latency-gate-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
+          path: target/functional-e2e-artifacts/latency-gate
+          if-no-files-found: warn
+
   package-crates:
     name: Dry-run package publishable crates
     runs-on: ubuntu-24.04
@@ -504,7 +576,7 @@ jobs:
     runs-on: ubuntu-latest
     # Per-layer crates.io index-visibility waits are externally paced.
     timeout-minutes: 20
-    needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, chaos-soak]
+    needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
     environment: main
