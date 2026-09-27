@@ -36,6 +36,7 @@ const HARNESS_SOURCES: &[&str] = &[
     include_str!("process_event_pages.rs"),
     include_str!("raw_durable_reader.rs"),
     include_str!("residue.rs"),
+    include_str!("session_lifecycle_cases.rs"),
     include_str!("session_meta_layout.rs"),
     include_str!("surface_sweep.rs"),
     include_str!("trait_surface_gate.rs"),
