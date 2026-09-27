@@ -203,6 +203,10 @@ effect (scope close does); the relay's settle then answers `ClaimLost`.
   outcome, carrying the `StalledObligation` fields. The ingress slice adds it.
 - **Drain status.** `DeploymentDrainStatus::stalled_obligations:
   BTreeMap<ObligationKind, u64>`. `drained()` is false while any is non-zero.
+  `GenerationDrainStatus` (FIG-3799), the per-build-generation read an
+  operator polls after `LashCore::drain_generation`, carries the same map
+  and the same rule beside the generation's live processes, parked
+  processes and parked turns.
 - **Metrics.** Counter `lash.obligation.attempts{kind, outcome}` with
   outcome `delivered | retried | stalled | claim_lost`; gauge
   `lash.obligations.stalled{kind}` (written by `drain_status`); gauges

@@ -183,6 +183,9 @@ pub(crate) async fn execute_parked_cell_for_tests(
             VmRunOutcome::Complete(other) => {
                 return Err(format!("parked cell resumed to {other:?}"));
             }
+            VmRunOutcome::HandedOver => {
+                return Err("a parked cell has no signal wait to hand over".to_owned());
+            }
         }
     };
     let globals = vm.into_globals().map_err(|error| error.to_string())?;

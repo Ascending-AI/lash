@@ -1,8 +1,9 @@
 use std::time::Instant;
 
 use super::super::{
-    COOPERATIVE_YIELD_INSTRUCTION_BUDGET, ExecutionBound, ExecutionHost, ExecutionMode,
-    ExecutionOutcome, RuntimeError, RuntimeFailure, Value, cancel_checkpoint_reached,
+    COOPERATIVE_YIELD_INSTRUCTION_BUDGET, ExecutionBound, ExecutionHost, ExecutionHostError,
+    ExecutionMode, ExecutionOutcome, RuntimeError, RuntimeFailure, Value,
+    cancel_checkpoint_reached,
 };
 use super::effects::VmEffect;
 use super::heap_plan::{
@@ -47,8 +48,21 @@ pub(super) enum VmOutcome {
     Finished(Value),
     ProcessFinished(Value),
     ProcessFailed(Value),
+    /// A process's signal wait was handed over to a successor segment; the
+    /// instruction pointer stands on the wait again.
+    HandedOver,
     #[cfg(test)]
     Suspended,
+}
+
+/// A whole-run executor has no successor segment to hand a signal wait to:
+/// only a run that stops after each effect can capture the continuation.
+fn handed_over_outside_a_segment() -> RuntimeError {
+    RuntimeError::WaitSignalFailed {
+        source: ExecutionHostError::new(
+            "wait_signal was handed over outside a segmented process run",
+        ),
+    }
 }
 
 struct VmTrap {
@@ -71,6 +85,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmOutcome::ProcessFailed(_) => Err(RuntimeError::SessionProcessAdminOutsideProcess {
                 keyword: "fail".into(),
             }),
+            VmOutcome::HandedOver => Err(handed_over_outside_a_segment()),
         }
     }
 
@@ -81,6 +96,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmOutcome::ProcessFinished(value) => Ok(ExecutionOutcome::Finished(value)),
             VmOutcome::ProcessFailed(value) => Ok(ExecutionOutcome::Failed(value)),
             VmOutcome::Finished(value) => Ok(ExecutionOutcome::Finished(value)),
+            VmOutcome::HandedOver => Err(handed_over_outside_a_segment()),
             #[cfg(test)]
             VmOutcome::Suspended => Ok(ExecutionOutcome::Continued),
         }
@@ -105,6 +121,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmOutcome::ProcessFailed(value) => {
                 Ok(VmRunOutcome::Complete(ExecutionOutcome::Failed(value)))
             }
+            VmOutcome::HandedOver => Ok(VmRunOutcome::HandedOver),
             #[cfg(test)]
             VmOutcome::Suspended => Ok(VmRunOutcome::EffectCompleted),
         }
@@ -124,6 +141,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmOutcome::ProcessFailed(value) => {
                 Ok(VmRunOutcome::Complete(ExecutionOutcome::Failed(value)))
             }
+            VmOutcome::HandedOver => Ok(VmRunOutcome::HandedOver),
             #[cfg(test)]
             VmOutcome::Suspended => Ok(VmRunOutcome::EffectCompleted),
         }
@@ -149,6 +167,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 },
                 span: None,
             }),
+            VmOutcome::HandedOver => Err(RuntimeFailure {
+                error: handed_over_outside_a_segment(),
+                span: None,
+            }),
         }
     }
 
@@ -160,6 +182,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmOutcome::ProcessFinished(value) => Ok(ExecutionOutcome::Finished(value)),
             VmOutcome::ProcessFailed(value) => Ok(ExecutionOutcome::Failed(value)),
             VmOutcome::Finished(value) => Ok(ExecutionOutcome::Finished(value)),
+            VmOutcome::HandedOver => Err(RuntimeFailure {
+                error: handed_over_outside_a_segment(),
+                span: None,
+            }),
             #[cfg(test)]
             VmOutcome::Suspended => Ok(ExecutionOutcome::Continued),
         }

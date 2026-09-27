@@ -1337,6 +1337,14 @@ CREATE TABLE IF NOT EXISTS tool_intent_submissions (
 CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
     ON tool_intent_submissions(session_id, execution_scope_id, intent_index);
 
+-- The build generations an operator marked draining (FIG-3799): the recovery
+-- leader wakes every live process whose current segment a marked generation
+-- admitted, so each hands its open wait to a successor on the newest build.
+CREATE TABLE IF NOT EXISTS draining_generations (
+    generation   TEXT PRIMARY KEY,
+    marked_at_ms INTEGER NOT NULL
+);
+
 ";
 
 // Bumped to 10: ADR 0020 added a per-store process-row `change_seq` plus the
@@ -1455,6 +1463,11 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// same writes. `route` is non-null — every write names the route its send
 /// took. A registry written before the change lacks the columns; recreate
 /// it.
+///
+/// Version 44 also holds the drain marks (FIG-3799, changed in place under
+/// the same freeze): `draining_generations` names each build generation an
+/// operator marked draining. A registry written before the change lacks the
+/// table until it is next opened, which creates it empty.
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "

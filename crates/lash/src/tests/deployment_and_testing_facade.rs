@@ -411,3 +411,119 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
     };
     assert!(!result.into_output().is_success());
 }
+
+/// FIG-3799: a core marks another build's generation draining, never its
+/// own, and the generation's status counts the live processes its segments
+/// hold until they are gone; the mark is what makes it drainable at all.
+#[tokio::test]
+async fn generation_drain_status_counts_the_generations_live_processes() {
+    let backend = memory_store_backend().await;
+    let registry = backend.process_registry();
+    let own = backend.build_generation().clone();
+    let core = explicit_ephemeral_facets(
+        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
+    )
+    .build(crate::testing::runtime_lease_owner())
+    .expect("build core with a process registry");
+    let retired = lash_core::engine::BuildGeneration::for_test("fig-3799-retired");
+    assert_ne!(retired, own);
+
+    let refused = core
+        .drain_generation(&own)
+        .await
+        .expect_err("a core never drains its own generation");
+    assert!(
+        matches!(&refused, crate::EmbedError::DrainOwnGeneration { generation } if *generation == own),
+        "{refused:?}"
+    );
+    assert!(refused.is_terminal() && !refused.is_retryable());
+
+    let process_id = registry
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::Rerunnable,
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
+        .await
+        .expect("register the retired generation's process")
+        .id;
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        "generation-drain-status-run",
+    )
+    .bind_attempt(1);
+    let mut started = authority
+        .invocation_started()
+        .expect("attempt-bound invocation has a start fact");
+    started.build_generation = Some(retired.clone());
+    registry
+        .record_first_started_with_authority(&process_id, started, &authority)
+        .await
+        .expect("start the process under the retired generation");
+
+    let unmarked = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the unmarked generation");
+    assert_eq!(
+        (unmarked.draining_since_ms, unmarked.live_processes),
+        (None, 1)
+    );
+    assert!(!unmarked.drained(), "an unmarked generation is not drained");
+
+    assert!(core.drain_generation(&retired).await.expect("mark"));
+    assert!(
+        !core.drain_generation(&retired).await.expect("mark again"),
+        "the first mark stands"
+    );
+    let draining = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the draining generation");
+    assert!(draining.draining_since_ms.is_some());
+    assert_eq!(
+        (
+            draining.live_processes,
+            draining.parked_processes,
+            draining.parked_turns
+        ),
+        (1, 0, 0)
+    );
+    assert_eq!(
+        draining.stalled_obligations.len(),
+        lash_core::store::ObligationKind::ALL.len(),
+        "every obligation kind is read"
+    );
+    assert!(!draining.drained(), "a live process holds the generation");
+    let wire = serde_json::to_value(&draining).expect("serialize the status");
+    assert_eq!(wire["drained"], serde_json::json!(false));
+    assert_eq!(wire["live_processes"], serde_json::json!(1));
+
+    registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key("generation-drain-status-run"),
+        )
+        .await
+        .expect("end the retired generation's process");
+    let emptied = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the emptied generation");
+    assert_eq!(emptied.live_processes, 0);
+    assert!(emptied.drained(), "{emptied:?}");
+
+    assert!(core.end_generation_drain(&retired).await.expect("clear"));
+    let cleared = core
+        .generation_drain_status(&retired)
+        .await
+        .expect("read the cleared generation");
+    assert_eq!(cleared.draining_since_ms, None);
+    assert!(!cleared.drained());
+}

@@ -492,9 +492,21 @@ pub(super) fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
             ordinal: 1,
         },
     });
-    assert!(boundary_must_be_declined(Some(&record)));
+    assert!(boundary_must_be_declined(
+        lash_core::BoundaryReason::JournalBudget,
+        Some(&record)
+    ));
+    // A hand-over boundary carries the armed wait to its successor
+    // (FIG-3799): declining it would only hand the wait over again.
+    assert!(!boundary_must_be_declined(
+        lash_core::BoundaryReason::HandOver,
+        Some(&record)
+    ));
     record.wait = None;
-    assert!(!boundary_must_be_declined(Some(&record)));
+    assert!(!boundary_must_be_declined(
+        lash_core::BoundaryReason::JournalBudget,
+        Some(&record)
+    ));
 }
 
 #[tokio::test]

@@ -651,8 +651,113 @@ async fn run_with_segment_budget(
                     boundaries += 1;
                 }
             }
+            VmRunOutcome::HandedOver => panic!("the host hands no wait over"),
         }
     }
+}
+
+/// A process host that hands its first `wait_signal` over to a successor
+/// segment and answers every later one (FIG-3799).
+#[derive(Default)]
+struct HandOverHost {
+    sleeps: Mutex<usize>,
+    waits: Mutex<Vec<String>>,
+}
+
+impl ExecutionHost for HandOverHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::Sleep(_) => {
+                *self.sleeps.lock_recover() += 1;
+                Ok(AbilityResult::Value(Value::Null))
+            }
+            AbilityOp::WaitSignal { name, .. } => {
+                let mut waits = self.waits.lock_recover();
+                waits.push(name.clone());
+                if waits.len() == 1 {
+                    return Ok(AbilityResult::HandedOver);
+                }
+                Ok(AbilityResult::Value(Value::String(
+                    format!("{name}-payload").into(),
+                )))
+            }
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unsupported host ability")),
+        }
+    }
+}
+
+/// A signal wait the host hands over stops the run on the wait instruction:
+/// the continuation captured there issues the same wait again once resumed,
+/// and nothing before it runs twice (FIG-3799).
+#[tokio::test(flavor = "current_thread")]
+async fn a_handed_over_signal_wait_resumes_as_the_same_wait() {
+    let program = Program::block(vec![
+        Expr::SleepFor(Box::new(Expr::Number(5.0))),
+        Expr::Assign {
+            target: crate::AssignTarget::variable("payload".into()),
+            expr: Box::new(Expr::WaitSignal {
+                name: "ready".into(),
+            }),
+        },
+        Expr::Finish(Box::new(Expr::Variable("payload".into()))),
+    ]);
+    let compiled = compile_program(&program);
+    let host = HandOverHost::default();
+    let env = ExecutionEnvironment::new(&host).process();
+    let mut state = State::new();
+    let mut vm = Vm::from_state(&compiled, &mut state, &env).expect("state should install");
+    assert_eq!(
+        vm.run_process_until_effect().await.expect("the sleep runs"),
+        VmRunOutcome::EffectCompleted
+    );
+    assert_eq!(
+        vm.run_process_until_effect()
+            .await
+            .expect("the wait is handed over"),
+        VmRunOutcome::HandedOver
+    );
+    let continuation = vm.suspend().expect("a handed-over wait is capturable");
+    let bytes = serde_json::to_vec(&continuation).expect("the continuation serializes");
+    let restored = serde_json::from_slice(&bytes).expect("the continuation deserializes");
+    let mut resumed = Vm::resume_from(restored, &compiled, &env).expect("the continuation resumes");
+    assert_eq!(
+        resumed
+            .run_process_until_effect()
+            .await
+            .expect("the resumed run issues the wait again"),
+        VmRunOutcome::EffectCompleted
+    );
+    assert_eq!(
+        resumed
+            .run_process_until_effect()
+            .await
+            .expect("the resumed run finishes"),
+        VmRunOutcome::Complete(ExecutionOutcome::Finished(Value::String(
+            "ready-payload".into()
+        )))
+    );
+    assert_eq!(*host.sleeps.lock_recover(), 1, "the sleep never runs again");
+    assert_eq!(
+        *host.waits.lock_recover(),
+        vec!["ready".to_owned(), "ready".to_owned()],
+        "the continuation issues the one wait the hand-over left open"
+    );
+}
+
+/// A whole-run executor has no successor to hand a wait to: a hand-over
+/// fails the run rather than skipping the wait.
+#[tokio::test(flavor = "current_thread")]
+async fn a_whole_run_refuses_a_handed_over_signal_wait() {
+    let program = Program::block(vec![Expr::Finish(Box::new(Expr::WaitSignal {
+        name: "ready".into(),
+    }))]);
+    let compiled = compile_program(&program);
+    let host = HandOverHost::default();
+    let error = execute_compiled_process(&compiled, &mut State::new(), &host)
+        .await
+        .expect_err("a whole run cannot hand a wait over");
+    assert_eq!(error.code(), "WaitSignalFailed");
 }
 
 #[tokio::test(flavor = "current_thread")]

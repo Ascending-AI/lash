@@ -738,6 +738,8 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
     let clock = world.backend.clock();
     let work = lash_core::NoSessionWork::new();
     let scopes = lash_core::engine::NoScopeClose;
+    let drain = world.backend.generation_drain();
+    let generation = world.backend.build_generation().clone();
     let parts = lash_core::drive::ReconcileParts {
         sessions: sessions.as_ref(),
         work: &work,
@@ -745,6 +747,8 @@ async fn an_unapplied_plan_is_applied_once_by_reconcile() {
         processes: Some(lash_core::drive::ReconcileProcesses {
             registry: world.registry.as_ref(),
             port: wiring.port().as_ref(),
+            drain: drain.as_ref(),
+            generation: &generation,
         }),
         clock: clock.as_ref(),
         duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,

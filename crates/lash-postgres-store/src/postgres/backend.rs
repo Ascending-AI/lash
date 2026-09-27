@@ -176,6 +176,14 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         ))
     }
 
+    fn generation_drain(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::generation_drain::GenerationDrainStore> {
+        Arc::new(crate::generation_drain::PostgresGenerationDrain::new(
+            self.inner.storage.pool().clone(),
+        ))
+    }
+
     fn obligation_ledger(
         &self,
         kind: lash_core_execution::store::ObligationKind,

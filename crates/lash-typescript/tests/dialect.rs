@@ -298,6 +298,7 @@ fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
             {
                 VmRunOutcome::EffectCompleted => {}
                 VmRunOutcome::Complete(outcome) => break outcome,
+                VmRunOutcome::HandedOver => panic!("the host hands no wait over"),
             }
         };
         (bytes, outcome)
@@ -674,6 +675,7 @@ fn a_process_suspended_inside_for_of_resumes() {
                     vm = Vm::resume_from(decoded, &program, &Host).expect("resume");
                     suspensions += 1;
                 }
+                VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
                 VmRunOutcome::Complete(outcome) => break outcome,
             }
         };

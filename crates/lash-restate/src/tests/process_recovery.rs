@@ -1009,7 +1009,7 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
         discovery.ty.to_string(),
         restate_sdk::discovery::ServiceType::Workflow.to_string()
     );
-    assert_eq!(discovery.handlers.len(), 6);
+    assert_eq!(discovery.handlers.len(), 7);
 
     let run = discovery
         .handlers
@@ -1041,6 +1041,11 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
         .iter()
         .find(|handler| handler.name.to_string() == "await_cancel")
         .expect("await_cancel handler discovery");
+    let deliver_hand_over = discovery
+        .handlers
+        .iter()
+        .find(|handler| handler.name.to_string() == "deliver_hand_over")
+        .expect("deliver_hand_over handler discovery");
 
     assert_eq!(
         run.ty.as_ref().map(ToString::to_string).as_deref(),
@@ -1076,6 +1081,14 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
     );
     assert_eq!(
         await_cancel.ty.as_ref().map(ToString::to_string).as_deref(),
+        Some("SHARED")
+    );
+    assert_eq!(
+        deliver_hand_over
+            .ty
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
         Some("SHARED")
     );
 

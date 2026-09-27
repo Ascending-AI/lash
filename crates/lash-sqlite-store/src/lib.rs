@@ -120,6 +120,7 @@ mod backend;
 mod effect_replay;
 mod fleet_format;
 mod forks;
+mod generation_drain;
 mod graph;
 mod lifecycle;
 mod location;

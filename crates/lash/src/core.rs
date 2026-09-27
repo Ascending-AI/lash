@@ -24,7 +24,7 @@ mod work_drivers;
 mod worker_capacity;
 
 pub use advanced_builder::AdvancedLashCoreBuilder;
-pub use drain::DeploymentDrainStatus;
+pub use drain::{DeploymentDrainStatus, GenerationDrainStatus};
 use queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
 pub(crate) use work_drivers::HeldWork;
 use work_drivers::{
@@ -224,6 +224,82 @@ impl LashCore {
             retired_by_executable_generation: parked.retired_by_executable_generation(),
             stalled_obligations,
             checked_at,
+        })
+    }
+
+    /// Mark `generation` draining (FIG-3799): from the next recovery tick the
+    /// deployment that leads recovery wakes every live process whose current
+    /// segment `generation` admitted, and each hands its open wait to a
+    /// successor on the newest build, where it waits again. Poll
+    /// [`generation_drain_status`](Self::generation_drain_status) until it
+    /// reports drained, then retire the generation's deployment.
+    ///
+    /// Idempotent: `true` when this call marked the generation, `false` when
+    /// it was already draining. A deployment cannot drain its own generation
+    /// ([`EmbedError::DrainOwnGeneration`](crate::EmbedError::DrainOwnGeneration)):
+    /// run it from a deployment of the replacing build. The generation's
+    /// deployment keeps serving until the host retires it — the hand-over
+    /// runs inside the segments it pinned.
+    pub async fn drain_generation(
+        &self,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<bool> {
+        if generation == self.backend.build_generation() {
+            return Err(crate::EmbedError::DrainOwnGeneration {
+                generation: generation.clone(),
+            });
+        }
+        let now_ms = self.env.core.clock.timestamp_ms();
+        Ok(self
+            .backend
+            .generation_drain()
+            .mark_draining(generation, now_ms)
+            .await?)
+    }
+
+    /// Stop draining `generation`: the recovery leader wakes none of its
+    /// processes from the next tick (a rollback to the generation, or a drain
+    /// abandoned). Segments already handed over stay where they run. `true`
+    /// when a mark was removed.
+    pub async fn end_generation_drain(
+        &self,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<bool> {
+        Ok(self
+            .backend
+            .generation_drain()
+            .clear_draining(generation)
+            .await?)
+    }
+
+    /// What `generation` still holds (FIG-3799): whether it is marked
+    /// draining, its live processes, the parked processes and turns its
+    /// checkpoints hold, and the stalled obligations every drain waits on.
+    pub async fn generation_drain_status(
+        &self,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<GenerationDrainStatus> {
+        let drain = self.backend.generation_drain();
+        let draining_since_ms = drain
+            .draining_generations()
+            .await?
+            .into_iter()
+            .find(|marked| &marked.generation == generation)
+            .map(|marked| marked.marked_at_ms);
+        let work = drain.generation_work(generation).await?;
+        let mut stalled_obligations = std::collections::BTreeMap::new();
+        for kind in lash_core::store::ObligationKind::ALL {
+            let count = self.backend.obligation_ledger(kind).count_stalled().await?;
+            stalled_obligations.insert(kind, count);
+        }
+        Ok(GenerationDrainStatus {
+            generation: generation.clone(),
+            draining_since_ms,
+            live_processes: work.live_processes,
+            parked_processes: work.parked_processes,
+            parked_turns: work.parked_turns,
+            stalled_obligations,
+            checked_at: self.env.core.clock.timestamp_ms(),
         })
     }
 

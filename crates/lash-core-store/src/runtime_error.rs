@@ -253,6 +253,10 @@ pub enum RuntimeErrorCode {
     ProcessNoLongerRetained,
     ProcessRegistryUnavailable,
     ProcessSignalWaitCancelled,
+    /// A process segment's signal wait was handed to a successor segment on
+    /// the drain's wake (FIG-3799): the wait stays open and the body stops on
+    /// it, for its continuation to wait again. Never a guest-visible outcome.
+    ProcessSignalWaitHandedOver,
     ProcessSignalWaitTimeout,
     EngineAwaitEventAwait,
     EngineAwaitEventCancel,
@@ -660,6 +664,7 @@ impl RuntimeErrorCode {
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
+            Self::ProcessSignalWaitHandedOver => "process_signal_wait_handed_over",
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
             Self::EngineAwaitEventAwait => "engine_await_event_await",
             Self::EngineAwaitEventCancel => "engine_await_event_cancel",
@@ -926,6 +931,7 @@ impl RuntimeErrorCode {
         Self::ProcessNoLongerRetained,
         Self::ProcessRegistryUnavailable,
         Self::ProcessSignalWaitCancelled,
+        Self::ProcessSignalWaitHandedOver,
         Self::ProcessSignalWaitTimeout,
         Self::EngineAwaitEventAwait,
         Self::EngineAwaitEventCancel,
@@ -1130,6 +1136,7 @@ impl RuntimeErrorCode {
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
+            "process_signal_wait_handed_over" => Self::ProcessSignalWaitHandedOver,
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
             "engine_await_event_await" => Self::EngineAwaitEventAwait,
             "engine_await_event_cancel" => Self::EngineAwaitEventCancel,

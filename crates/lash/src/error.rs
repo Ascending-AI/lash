@@ -123,6 +123,19 @@ pub enum EmbedError {
     /// whole status, and every facade result carries this enum.
     #[error("send: {0}")]
     Send(Box<SendError>),
+    /// [`LashCore::drain_generation`](crate::LashCore::drain_generation)
+    /// named the build generation this deployment runs (FIG-3799). The
+    /// hand-over sends each successor to the newest build, which could be
+    /// this one, so a generation is drained from a deployment of another
+    /// generation.
+    #[error(
+        "a deployment cannot drain its own build generation {}: drain it from a deployment of the build that replaces it",
+        generation.as_str()
+    )]
+    DrainOwnGeneration {
+        /// The generation this deployment runs.
+        generation: lash_core::engine::BuildGeneration,
+    },
 }
 
 impl From<SendError> for EmbedError {
@@ -308,6 +321,7 @@ impl EmbedError {
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
             | Self::Control(_)
+            | Self::DrainOwnGeneration { .. }
             | Self::Send(_) => false,
         }
     }
@@ -351,6 +365,7 @@ impl EmbedError {
             | Self::StoreSessionMismatch { .. }
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
+            | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. } => true,
             Self::Send(error) => matches!(**error, SendError::LiveTurnContext { .. }),
             Self::Store(err) => store_error_is_terminal(err),

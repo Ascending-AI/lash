@@ -29,6 +29,11 @@ const RECOVERY_LEADER_SOURCE: &str =
 const SESSION_DELETE_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/session_delete.rs");
 
+/// The build-generation drain (FIG-3799): every method is driven by
+/// `generation_drain_cases`, none is excluded.
+const GENERATION_DRAIN_SOURCE: &str =
+    include_str!("../../../lash-core-store/src/store/generation_drain.rs");
+
 /// Every source file that makes up this test binary. A method counts as
 /// covered when the harness calls it from one of these.
 const HARNESS_SOURCES: &[&str] = &[
@@ -40,6 +45,7 @@ const HARNESS_SOURCES: &[&str] = &[
     include_str!("corrupt_input_cases.rs"),
     include_str!("fork_cases.rs"),
     include_str!("generated_surface.rs"),
+    include_str!("generation_drain_cases.rs"),
     include_str!("obligation_cases.rs"),
     include_str!("observations.rs"),
     include_str!("plugin_state_case.rs"),
@@ -344,6 +350,7 @@ fn store_trait_surface_is_fully_gated() {
         (OBLIGATION_SOURCE, "ObligationLedger"),
         (RECOVERY_LEADER_SOURCE, "RecoveryLeaderStore"),
         (SESSION_DELETE_SOURCE, "SessionDeleteLedger"),
+        (GENERATION_DRAIN_SOURCE, "GenerationDrainStore"),
     ] {
         for method in fallible_trait_methods(source, trait_name) {
             if harness_drives(&method) {

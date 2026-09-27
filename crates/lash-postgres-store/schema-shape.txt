@@ -97,6 +97,10 @@ table lash_deleted_sessions
   column relation_kind text nullable
   column session_id text not-null
   primary-key (session_id)
+table lash_draining_generations
+  column generation text not-null
+  column marked_at_ms bigint not-null
+  primary-key (generation)
 table lash_fleet_format
   column format_version integer not-null
   column singleton boolean not-null default

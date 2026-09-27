@@ -773,47 +773,73 @@ async fn execute_lashlang(
                 let Some(reason) = controller.wants_segment_boundary(&progress) else {
                     continue;
                 };
-                match vm.suspend() {
-                    Ok(continuation) => {
-                        let segment_state = LashlangSegmentState {
-                            version: LASHLANG_SEGMENT_STATE_VERSION,
-                            vm: continuation,
-                            ordinals: host.ordinals.snapshot(&host.run),
-                            started_process_ids: host.ctx.started_process_ids(),
-                            child_max_attempts: host.child_max_attempts,
-                            incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
-                            pending_summary: host.effect_summary.pending(),
-                            effect_omissions: host.effect_summary.omissions(),
-                            outstanding_groups: host.ctx.outstanding_groups_snapshot(),
-                        };
-                        match serde_json::to_vec(&segment_state) {
-                            Ok(engine_state) => {
-                                return lash_core::ProcessRunOutcome::SegmentBoundary(
-                                    lash_core::SegmentHandover {
-                                        reason,
-                                        program_hash: program_hash.clone(),
-                                        engine_state,
-                                    },
-                                );
-                            }
-                            Err(err) => {
-                                record_segment_boundary_decline(
-                                    &err,
-                                    "lashlang segment continuation was not serializable; continuing",
-                                );
-                            }
-                        }
+                match capture_segment(&mut vm, host, reason, &program_hash) {
+                    Ok(handover) => {
+                        return lash_core::ProcessRunOutcome::SegmentBoundary(handover);
                     }
-                    Err(err) => {
-                        record_segment_boundary_decline(
-                            &err,
-                            "lashlang segment boundary declined at non-capturable point",
-                        );
-                    }
+                    Err((error, message)) => record_segment_boundary_decline(&error, message),
                 }
+            }
+            // The drain handed the open signal wait to a successor (FIG-3799):
+            // the VM stands on the wait, and the boundary is not optional —
+            // running on would only meet the same hand-over again.
+            Ok(lashlang::VmRunOutcome::HandedOver) => {
+                return match capture_segment(
+                    &mut vm,
+                    host,
+                    lash_core::BoundaryReason::HandOver,
+                    &program_hash,
+                ) {
+                    Ok(handover) => lash_core::ProcessRunOutcome::SegmentBoundary(handover),
+                    Err((error, message)) => process_lashlang_failure(
+                        LashlangProcessFailureCode::ProcessSegmentResumeFailed,
+                        format!("{message}: {error}"),
+                        None,
+                    )
+                    .into(),
+                };
             }
         }
     }
+}
+
+/// The segment state a boundary hands over: the VM's continuation beside the
+/// host state the next segment resumes with. An error names why the state
+/// could not be captured.
+fn capture_segment(
+    vm: &mut lashlang::Vm<'_, lashlang::ExecutionEnvironment<'_, LashlangProcessHost<'_>>>,
+    host: &LashlangProcessHost<'_>,
+    reason: lash_core::BoundaryReason,
+    program_hash: &str,
+) -> Result<lash_core::SegmentHandover, (String, &'static str)> {
+    let continuation = vm.suspend().map_err(|error| {
+        (
+            error.to_string(),
+            "lashlang segment boundary declined at non-capturable point",
+        )
+    })?;
+    let segment_state = LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: continuation,
+        ordinals: host.ordinals.snapshot(&host.run),
+        started_process_ids: host.ctx.started_process_ids(),
+        child_max_attempts: host.child_max_attempts,
+        incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
+        pending_summary: host.effect_summary.pending(),
+        effect_omissions: host.effect_summary.omissions(),
+        outstanding_groups: host.ctx.outstanding_groups_snapshot(),
+    };
+    let engine_state = serde_json::to_vec(&segment_state).map_err(|error| {
+        (
+            error.to_string(),
+            "lashlang segment continuation was not serializable; continuing",
+        )
+    })?;
+    Ok(lash_core::SegmentHandover {
+        reason,
+        program_hash: program_hash.to_owned(),
+        engine_state,
+    })
 }
 
 struct LashlangProcessHost<'run> {
@@ -1290,7 +1316,7 @@ impl LashlangProcessHost<'_> {
         &self,
         name: String,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
-    ) -> Result<lashlang::Value, ExecutionHostError> {
+    ) -> Result<lashlang::AbilityResult, ExecutionHostError> {
         let commands = self.commands();
         let command = commands.issue()?;
         let event_type = match lash_core::facade_support::process_signal_event_type(&name) {
@@ -1372,6 +1398,20 @@ impl LashlangProcessHost<'_> {
             .await;
         commands.finish(&in_flight)?;
         if matches!(&payload, Err(error)
+            if error.code == lash_core::RuntimeErrorCode::ProcessSignalWaitHandedOver)
+        {
+            // The drain woke this segment to hand its wait to a successor on
+            // the newest build (FIG-3799): the wait stays open, its wait
+            // state stays armed, and the successor issues it again under the
+            // same per-name ordinal, so it waits on the same key and the
+            // signal that resolves it is neither lost nor seen twice.
+            let mut wait_ordinals = self.ordinals.signal_wait_ordinals.lock_recover();
+            if let Some(ordinal) = wait_ordinals.get_mut(&name) {
+                *ordinal = ordinal.saturating_sub(1);
+            }
+            return Ok(lashlang::AbilityResult::HandedOver);
+        }
+        if matches!(&payload, Err(error)
             if error.code == lash_core::RuntimeErrorCode::ProcessSignalWaitCancelled)
         {
             // The recorded wait ended cancelled: the process's cancellation
@@ -1409,7 +1449,7 @@ impl LashlangProcessHost<'_> {
             self.lashlang_execution_trace
                 .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
         }
-        Ok(lashlang::from_json(payload))
+        Ok(lashlang::AbilityResult::Value(lashlang::from_json(payload)))
     }
 
     fn perform_selected_ability<'a>(
@@ -1444,11 +1484,9 @@ impl LashlangProcessHost<'_> {
             lashlang::AbilityOp::Sleep(sleep) => {
                 Box::pin(async move { self.sleep(sleep).await.map(lashlang::AbilityResult::Value) })
             }
-            lashlang::AbilityOp::WaitSignal { name, call_site } => Box::pin(async move {
-                self.wait_signal(name, call_site)
-                    .await
-                    .map(lashlang::AbilityResult::Value)
-            }),
+            lashlang::AbilityOp::WaitSignal { name, call_site } => {
+                Box::pin(async move { self.wait_signal(name, call_site).await })
+            }
             lashlang::AbilityOp::Print(_) => {
                 Box::pin(async { Err(LashlangHostError::PrintUnavailable.into()) })
             }

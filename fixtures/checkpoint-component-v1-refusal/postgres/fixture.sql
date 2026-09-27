@@ -181,6 +181,16 @@ CREATE TABLE lash_durable_read_fixture.lash_deleted_sessions (
 
 
 --
+-- Name: lash_draining_generations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_draining_generations (
+    generation text NOT NULL,
+    marked_at_ms bigint NOT NULL
+);
+
+
+--
 -- Name: lash_fleet_format; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1186,6 +1196,12 @@ INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-rea
 
 
 --
+-- Data for Name: lash_draining_generations; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_fleet_format; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1608,6 +1624,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_control_intents
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_deleted_sessions
     ADD CONSTRAINT lash_deleted_sessions_pkey PRIMARY KEY (session_id);
+
+
+--
+-- Name: lash_draining_generations lash_draining_generations_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_draining_generations
+    ADD CONSTRAINT lash_draining_generations_pkey PRIMARY KEY (generation);
 
 
 --

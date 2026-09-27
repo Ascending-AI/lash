@@ -181,6 +181,13 @@ impl Backend {
         self.stores().recovery_leader()
     }
 
+    /// The store set's build-generation drain marks and work reads.
+    pub fn generation_drain(
+        &self,
+    ) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore> {
+        self.stores().generation_drain()
+    }
+
     /// The store set's obligation ledger of `kind`.
     pub fn obligation_ledger(
         &self,
@@ -268,6 +275,10 @@ pub trait StoreSet: Send + Sync {
 
     /// The recovery leader lease over this storage (ADR 0109 §1.6).
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore>;
+
+    /// The build-generation drain marks and the per-generation work reads
+    /// (FIG-3799), over the storage that holds the process registry.
+    fn generation_drain(&self) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore>;
 
     /// The obligation ledger of `kind` (ADR 0109 §1.3).
     fn obligation_ledger(

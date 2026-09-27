@@ -52,6 +52,25 @@ pub(crate) use workflow::{LashProcessWorkflow, LashProcessWorkflowImpl};
 pub const PROCESS_HANDLER_MAX_ATTEMPTS: u64 = crate::TURN_HANDLER_MAX_ATTEMPTS;
 
 pub(crate) const PROCESS_CANCEL_PROMISE_KEY: &str = "process_cancel_requested";
+/// One segment's hand-over promise (FIG-3799): the drain's wake resolves it
+/// with the generation it drains, and a signal wait of a segment admitted
+/// under that generation loses its race to it and hands the wait over. It is
+/// a promise of its own, never the cancel promise: a wake that lands while
+/// the segment is not waiting stays latched for its next wait, and a cancel
+/// arriving after it still reaches the segment.
+pub(crate) const PROCESS_HAND_OVER_PROMISE_KEY: &str = "process_hand_over_requested";
+
+/// Whether a hand-over promise's `payload` names `own`, the generation that
+/// admitted the waiting segment. A wake naming another generation — a stale
+/// read that reached a segment already on the newest build — is not a
+/// hand-over: the wait goes on.
+pub(crate) fn process_hand_over_verdict(
+    payload: &str,
+    own: &lash_core::engine::BuildGeneration,
+) -> bool {
+    serde_json::from_str::<lash_core::engine::BuildGeneration>(payload)
+        .is_ok_and(|generation| &generation == own)
+}
 /// Wall-clock epoch milliseconds for terminal evidence written at the Restate
 /// tier (ADR 0019 recovery enforcement). The Restate boundary carries no
 /// injected Lash clock — its durability comes from the engine and workflow-key
@@ -163,8 +182,16 @@ pub(crate) fn process_ingress_submit_error(
     }
 }
 
-pub(crate) fn boundary_must_be_declined(record: Option<&ProcessRecord>) -> bool {
-    record.is_some_and(|record| record.wait.is_some())
+/// Whether a segment boundary is declined, and the runner re-entered in the
+/// same invocation: a budget boundary taken while the process's wait state is
+/// armed is. A hand-over boundary never is — it exists to carry an open wait
+/// to a successor (FIG-3799), and re-entering would only hand it over again.
+pub(crate) fn boundary_must_be_declined(
+    reason: lash_core::BoundaryReason,
+    record: Option<&ProcessRecord>,
+) -> bool {
+    reason != lash_core::BoundaryReason::HandOver
+        && record.is_some_and(|record| record.wait.is_some())
 }
 
 pub(crate) fn restate_process_terminal_await_key(
@@ -905,6 +932,68 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
     ) -> Result<(), PluginError> {
         deliver_process_cancel(&self.ingress, process_id, request, delivery_key).await
     }
+
+    /// The drain's wake (FIG-3799): a one-way send to the live segment's
+    /// `deliver_hand_over` handler, under the route its handover recorded,
+    /// keyed by generation and segment so a repeated wake names the first
+    /// invocation. The handler resolves the segment's hand-over promise.
+    async fn deliver_hand_over(
+        &self,
+        process_id: &ProcessId,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<(), PluginError> {
+        deliver_process_hand_over(
+            &self.ingress,
+            self.continuations.as_ref(),
+            process_id,
+            generation,
+        )
+        .await
+    }
+}
+
+/// Wake `process_id`'s live segment to hand its wait over from `generation`
+/// ([`ProcessWorkSubstrate::deliver_hand_over`] on Restate). The live segment
+/// is the latest handover's successor under the route recorded with it
+/// (FIG-3795 S3), or the root on the stable lane when nothing was handed
+/// over yet.
+pub(crate) async fn deliver_process_hand_over(
+    ingress: &RestateIngressClient,
+    continuations: &dyn lash_core::ProcessContinuationStore,
+    process_id: &ProcessId,
+    generation: &lash_core::engine::BuildGeneration,
+) -> Result<(), PluginError> {
+    let (segment_ordinal, route) = match continuations.latest_segment_handover(process_id).await? {
+        Some(handover) if handover.segment_ordinal > 0 => {
+            (handover.segment_ordinal, handover.route)
+        }
+        _ => (0, crate::LashService::ProcessWorkflow.name().to_owned()),
+    };
+    ingress
+        .send_workflow_json_idempotent(
+            &route,
+            &process_segment_workflow_key(process_id, segment_ordinal),
+            "deliver_hand_over",
+            &RestateProcessHandOverRequest {
+                process_id: process_id.clone(),
+                generation: generation.clone(),
+            },
+            &format!(
+                "hand-over:{}:{process_id}:{segment_ordinal}",
+                generation.as_str()
+            ),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            PluginError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::EngineProcessIngressSubmit,
+                format!(
+                    "the drain's hand-over wake of process `{process_id}` segment \
+                     {segment_ordinal} failed: {error}"
+                ),
+            ))
+        })
 }
 
 /// Send `request` to `process`'s `cancel` handler under `delivery_key`
@@ -1348,6 +1437,16 @@ pub struct RestateProcessCompleteRequest {
 )]
 pub struct RestateProcessAwaitRequest {
     pub process_id: ProcessId,
+}
+
+/// The drain's wake of a process's live segment (FIG-3799): resolve its
+/// hand-over promise with the generation the drain retires.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct RestateProcessHandOverRequest {
+    pub process_id: ProcessId,
+    /// The generation being drained. Only a segment admitted under it hands
+    /// its wait over.
+    pub generation: lash_core::engine::BuildGeneration,
 }
 
 /// Terminal value for one process segment's durable cancellation observer.

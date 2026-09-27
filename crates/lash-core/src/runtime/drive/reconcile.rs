@@ -23,8 +23,9 @@
 //!    after a crash between the commit and its notification.
 //! 5. **Parent-end plans (FIG-3822).** A named slot:
 //!    [`reconcile_parent_end_plans_slot`].
-//! 6. **Drain hand-over (FIG-3799).** A named slot:
-//!    [`drain_hand_over_slot`].
+//! 6. **Drain hand-over (FIG-3799).** Every live process of a generation an
+//!    operator marked draining is woken to hand its open wait to a successor
+//!    on the newest build: [`drain_hand_over_slot`].
 //!
 //! The engine supplies only the schedule: each engine runs the tick on an
 //! interval inside the driver's deployment and carries the
@@ -82,12 +83,19 @@ pub struct ReconcileParts<'a> {
     pub relays: &'a [Arc<dyn ObligationRelay>],
 }
 
-/// The process side of a tick: the registry the parent-end ledger lives in
-/// and the port that delivers to a running process.
+/// The process side of a tick: the registry the parent-end ledger lives in,
+/// the port that delivers to a running process, and what the drain slot
+/// reads — the drain marks and the build generation this deployment runs.
 #[derive(Clone, Copy)]
 pub struct ReconcileProcesses<'a> {
     pub registry: &'a dyn ProcessRegistry,
     pub port: &'a dyn ProcessWorkSubstrate,
+    /// The drain marks and each generation's live processes (FIG-3799).
+    pub drain: &'a dyn crate::store::generation_drain::GenerationDrainStore,
+    /// The build generation this deployment runs: never drained by its own
+    /// hand-over, since a successor on the newest build could land right
+    /// back on it.
+    pub generation: &'a crate::engine::BuildGeneration,
 }
 
 /// The drive request a tick asks for when `session`'s oldest open row is
@@ -310,12 +318,18 @@ pub async fn reconcile_once(
                 error: error.to_string(),
             }),
         }
-        match drain_hand_over_slot(&processes, parts.sessions, page).await {
-            Ok(pass) => report.drain_hand_over = pass,
-            Err(error) => report.failures.push(ReconcileFailure {
-                arm: ReconcileArm::DrainHandOver,
-                error: error.to_string(),
-            }),
+        match drain_hand_over_slot(&processes, cursor.drain.as_ref(), page).await {
+            Ok(hand_over) => {
+                report.drain_hand_over = hand_over.pass;
+                report.next.drain = hand_over.next;
+            }
+            Err(error) => {
+                report.next.drain = cursor.drain.clone();
+                report.failures.push(ReconcileFailure {
+                    arm: ReconcileArm::DrainHandOver,
+                    error: error.to_string(),
+                });
+            }
         }
     }
     report
@@ -355,23 +369,87 @@ pub async fn reconcile_parent_end_plans_slot(
     })
 }
 
-/// **FIG-3799 slot.** Wake and hand over the waiting processes of a draining
-/// generation, at most `page` of them: wake, hand over to the next segment
-/// on the latest build, re-wait.
+/// What one pass of the drain hand-over slot did, and where the next resumes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DrainHandOverPass {
+    /// Wakes delivered (`handled`) and wakes that failed and wait for the
+    /// next pass (`deferred`).
+    pub pass: SlotPass,
+    /// The last process this pass woke when it stopped at its page bound, with
+    /// its generation; `None` when it read every draining generation to the
+    /// end, so the next pass starts over.
+    pub next: Option<(crate::engine::BuildGeneration, crate::ProcessId)>,
+}
+
+/// **FIG-3799 slot.** Wake the live processes of every draining generation
+/// but this deployment's own, at most `page` of them, in (generation,
+/// process id) order from `after`: each live segment hands its open wait to
+/// a successor on the newest build, which waits again.
 ///
-/// The drain is a store fact (`lash drain --generation G` marks G draining);
-/// this slot is the step that moves its waiting work, run by the same tick
-/// as every other recovery, so a drain needs no second background actor. It
-/// must be idempotent and bounded by `page`.
-///
-/// FIG-3799 fills the body. Until then it hands over nothing.
+/// The drain is a store fact — an operator marks a generation draining — and
+/// this slot is the leader-only duty that moves its work (ADR 0109 §1.7),
+/// run by the same tick as every other recovery. It is idempotent: a wake is
+/// keyed by generation and segment, so a repeated wake of a segment is a
+/// no-op, and one that lands while the segment is not waiting holds for its
+/// next wait. A process leaves the listing once its successor's admission
+/// restamps it with the newest generation, or once it ends. One failed wake
+/// is logged and counted deferred, never failing the page; the next pass
+/// that reaches it wakes it again.
 pub async fn drain_hand_over_slot(
     processes: &ReconcileProcesses<'_>,
-    sessions: &dyn SessionStoreFactory,
+    after: Option<&(crate::engine::BuildGeneration, crate::ProcessId)>,
     page: NonZeroUsize,
-) -> Result<SlotPass, crate::PluginError> {
-    let _ = (processes, sessions, page);
-    Ok(SlotPass::default())
+) -> Result<DrainHandOverPass, StoreError> {
+    let draining = processes.drain.draining_generations().await?;
+    let mut report = DrainHandOverPass::default();
+    let mut remaining = page.get();
+    for marked in draining {
+        let generation = marked.generation;
+        if &generation == processes.generation {
+            continue;
+        }
+        // Generations are visited in order; the cursor's generation resumes
+        // after its process, an earlier one was finished last pass.
+        let resume = match after {
+            Some((cursor, _)) if generation < *cursor => continue,
+            Some((cursor, process)) if generation == *cursor => Some(process),
+            _ => None,
+        };
+        let Some(limit) = NonZeroUsize::new(remaining) else {
+            break;
+        };
+        let live = processes
+            .drain
+            .live_processes(&generation, resume, limit)
+            .await?;
+        for process_id in live {
+            match processes
+                .port
+                .deliver_hand_over(&process_id, &generation)
+                .await
+            {
+                Ok(()) => report.pass.handled += 1,
+                Err(error) => {
+                    tracing::warn!(
+                        process_id = process_id.as_str(),
+                        generation = generation.as_str(),
+                        error = %error,
+                        "the drain's hand-over wake failed; a later pass wakes the process again"
+                    );
+                    report.pass.deferred += 1;
+                }
+            }
+            remaining -= 1;
+            report.next = Some((generation.clone(), process_id));
+        }
+        if remaining == 0 {
+            return Ok(report);
+        }
+    }
+    // Every draining generation was read to its end: the next pass starts
+    // over.
+    report.next = None;
+    Ok(report)
 }
 
 /// The drive arm: ask `engine` to drive every live session with open

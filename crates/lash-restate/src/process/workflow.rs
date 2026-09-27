@@ -32,14 +32,14 @@ use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 
 use super::{
-    PROCESS_CANCEL_PROMISE_KEY, RestateProcessAwaitRequest, RestateProcessCancelRequest,
-    RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessRunner,
-    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, RestateProcessWorkflowPayload,
-    SegmentAdmission, SegmentStarted, admit_segment, boundary_must_be_declined,
-    handler_error_from_plugin, handover_digest, is_replay_mismatch, process_segment_workflow_key,
-    resolve_process_cancel_signal, resolve_process_terminal_promise, restate_now_ms,
-    restate_process_terminal_await_key, restate_process_terminal_output, terminal_process_output,
-    workflow_key_authority,
+    PROCESS_CANCEL_PROMISE_KEY, PROCESS_HAND_OVER_PROMISE_KEY, RestateProcessAwaitRequest,
+    RestateProcessCancelRequest, RestateProcessCancelSignal, RestateProcessCompleteRequest,
+    RestateProcessHandOverRequest, RestateProcessRunner, RestateProcessWorkflowInput,
+    RestateProcessWorkflowOutput, RestateProcessWorkflowPayload, SegmentAdmission, SegmentStarted,
+    admit_segment, boundary_must_be_declined, handler_error_from_plugin, handover_digest,
+    is_replay_mismatch, process_segment_workflow_key, resolve_process_cancel_signal,
+    resolve_process_terminal_promise, restate_now_ms, restate_process_terminal_await_key,
+    restate_process_terminal_output, terminal_process_output, workflow_key_authority,
 };
 use crate::controller::{
     RestateControllerContext, RestateEffectControllerOptions, RestateRuntimeEffectController,
@@ -204,6 +204,11 @@ pub trait LashProcessWorkflow {
 
     #[shared]
     async fn deliver_cancel(request: Json<RestateProcessCancelRequest>) -> HandlerResult<Json<()>>;
+
+    #[shared]
+    async fn deliver_hand_over(
+        request: Json<RestateProcessHandOverRequest>,
+    ) -> HandlerResult<Json<()>>;
 
     #[shared]
     async fn await_cancel(
@@ -1213,9 +1218,12 @@ where
                 }
             }
         };
+        // The segment's signal waits race the drain's hand-over of this
+        // build's generation (FIG-3799) beside its cancel promise.
         let options = RestateEffectControllerOptions::default()
             .segment_effect_budget(policy.effect_budget)
-            .process_segment_drive();
+            .process_segment_drive()
+            .segment_generation(self.build_generation.clone());
         let controller =
             RestateRuntimeEffectController::with_options(ctx, self.authority_id.clone(), options);
         let trace = self
@@ -1259,13 +1267,16 @@ where
                 // entered again in this invocation.
                 let registry = &self.registry;
                 let pid = &process_id;
+                let reason = boundary.reason;
                 let Json(declined) = controller
                     .context()
                     .run_json_or_retry_send::<Result<bool, String>, _>(
                         BOUNDARY_STEP.to_string(),
                         async move {
                             match registry.get_process(pid).await {
-                                Ok(record) => Ok(Ok(boundary_must_be_declined(record.as_ref()))),
+                                Ok(record) => {
+                                    Ok(Ok(boundary_must_be_declined(reason, record.as_ref())))
+                                }
                                 Err(error) => step_fault(error),
                             }
                         },
@@ -1585,6 +1596,22 @@ where
     ) -> HandlerResult<Json<()>> {
         record_cancel_step(&ctx, &self.registry, &request).await?;
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
+        Ok(Json(()))
+    }
+
+    /// The drain's wake (FIG-3799): resolve this segment's hand-over promise
+    /// with the generation being drained. A signal wait of a segment of that
+    /// generation loses its race to it and hands the wait to a successor on
+    /// the newest build; a segment that is not waiting keeps the promise
+    /// latched for its next wait. Idempotent: the first resolution stands.
+    async fn deliver_hand_over(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+        Json(request): Json<RestateProcessHandOverRequest>,
+    ) -> HandlerResult<Json<()>> {
+        let payload = serde_json::to_string(&request.generation)
+            .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
+        ctx.resolve_promise(PROCESS_HAND_OVER_PROMISE_KEY, payload);
         Ok(Json(()))
     }
 

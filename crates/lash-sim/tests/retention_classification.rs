@@ -263,6 +263,12 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "draining_generations",
+        Bounded {
+            lever: "LashCore::end_generation_drain removes a generation's drain mark (FIG-3799)",
+        },
+    ),
+    (
         "recovery_leader",
         PermanentlyExempt {
             reason: "one row per engine authority naming the recovery leader (ADR 0109 §1.6); a resign expires it in place so the term stays monotone",
@@ -507,7 +513,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 58, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 59, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

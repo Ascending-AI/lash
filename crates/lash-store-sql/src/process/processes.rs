@@ -123,6 +123,25 @@ crate::statements! {
         set_segment_generation = "UPDATE processes SET segment_generation = ?2
              WHERE process_id = ?1";
 
+        /// The live processes whose current segment build generation `?1`
+        /// admitted (FIG-3799), over the live-generation partial index.
+        count_live_by_segment_generation = "SELECT COUNT(*) FROM processes
+             WHERE segment_generation = ?1 AND {{live_process_status(status)}}";
+
+        /// The live processes of segment generation `?1` strictly after key
+        /// `?2` (`''` from the start), at most `?3`, in key order: the page
+        /// the drain's hand-over wakes (FIG-3799).
+        list_live_by_segment_generation = "SELECT process_id FROM processes
+             WHERE segment_generation = ?1 AND {{live_process_status(status)}}
+               AND process_id > ?2
+             ORDER BY process_id
+             LIMIT ?3";
+
+        /// The parked processes whose parked checkpoint build generation `?1`
+        /// wrote (FIG-3799), over the park build-generation index.
+        count_parked_by_build_generation = "SELECT COUNT(*) FROM processes
+             WHERE park_build_generation = ?1 AND parked_since_ms IS NOT NULL";
+
         /// Live process parks per reason code, with each code's oldest
         /// `since_ms`, over the parked projection's partial index.
         summarize_parked = "SELECT parked_reason_code, COUNT(*), MIN(parked_since_ms)

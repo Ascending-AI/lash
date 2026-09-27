@@ -394,6 +394,10 @@ impl StoreSet for LayeredStoreSet {
         self.inner.recovery_leader()
     }
 
+    fn generation_drain(&self) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore> {
+        self.inner.generation_drain()
+    }
+
     fn obligation_ledger(
         &self,
         kind: crate::store::ObligationKind,

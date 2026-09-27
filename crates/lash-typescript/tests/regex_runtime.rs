@@ -315,6 +315,7 @@ fn global_last_index_survives_a_real_park_between_exec_calls() {
                 .expect("complete resumed RegExp program")
             {
                 VmRunOutcome::EffectCompleted => {}
+                VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
                 VmRunOutcome::Complete(outcome) => break outcome,
             }
         };

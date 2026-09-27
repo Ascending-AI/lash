@@ -84,8 +84,8 @@ pub use crate::admin::{
     SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{
-    DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionClosing, SessionDeleteFailure,
-    SessionDeleteReport, SessionDeleteWait, SessionDeletion,
+    DeploymentDrainStatus, GenerationDrainStatus, LashCore, LashCoreBuilder, SessionClosing,
+    SessionDeleteFailure, SessionDeleteReport, SessionDeleteWait, SessionDeletion,
 };
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
@@ -369,6 +369,12 @@ pub mod persistence {
         TurnInputState, TurnInputStateKind, TurnWorkPayload,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
+    /// A build generation's drain marks and remaining work (FIG-3799): the
+    /// store half a [`StoreSet`](crate::StoreSet) supplies for
+    /// [`LashCore::drain_generation`](crate::LashCore::drain_generation).
+    pub use lash_core::store::generation_drain::{
+        DrainingGeneration, GenerationDrainStore, GenerationWork,
+    };
     /// The store halves a storage integrator's [`StoreSet`](crate::StoreSet)
     /// supplies: the obligation ledgers and the recovery leader lease
     /// (ADR 0109 §1.3, §1.6).

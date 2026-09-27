@@ -499,6 +499,13 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          and owned by the recovery-leader conformance laws",
     ),
     (
+        "draining_generations",
+        "deployment drain control, not session state: one row per build generation an operator \
+         marked draining (FIG-3799), keyed by the generation rather than by a session, so a \
+         session-scoped digest query could not read it; its operations are compared by the \
+         generation drain cases",
+    ),
+    (
         "process_definitions",
         "definition-registry surface: this fixture wires no ProcessDefinitionRegistry, so no \
          driven operation can write it, and the row is keyed by its owner scope rather than by a \

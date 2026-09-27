@@ -89,6 +89,11 @@ pub struct RestateEffectControllerOptions {
     /// observe no turn race the segment's durable cancel promise and whose
     /// cancel peeks read it (FIG-3673).
     process_cancel: context::ProcessCancelRace,
+    /// The generation that admitted the segment this controller drives: its
+    /// signal waits also race the segment's hand-over promise, and hand over
+    /// to a drain wake naming this generation (FIG-3799). Shared, so every
+    /// controller future that holds the options stays a pointer wider.
+    segment_generation: Option<Arc<lash_core::engine::BuildGeneration>>,
 }
 
 impl Default for RestateEffectControllerOptions {
@@ -99,6 +104,7 @@ impl Default for RestateEffectControllerOptions {
             journaled_effect_byte_budget: None,
             drain_budget: lash_core::EffectGroupDrainBudget::DEFAULT.duration(),
             process_cancel: context::ProcessCancelRace::NotRaced,
+            segment_generation: None,
         }
     }
 }
@@ -178,6 +184,18 @@ impl RestateEffectControllerOptions {
         self.process_cancel = context::ProcessCancelRace::Raced;
         self
     }
+
+    /// Mark a process segment's drive as admitted under `generation`
+    /// (FIG-3799): its signal waits race the segment's hand-over promise as
+    /// well as its cancel promise, and hand the wait to a successor when the
+    /// drain wakes this generation. Only the process workflow sets it.
+    pub(crate) fn segment_generation(
+        mut self,
+        generation: lash_core::engine::BuildGeneration,
+    ) -> Self {
+        self.segment_generation = Some(Arc::new(generation));
+        self
+    }
 }
 
 impl fmt::Debug for RestateEffectControllerOptions {
@@ -191,6 +209,7 @@ impl fmt::Debug for RestateEffectControllerOptions {
             )
             .field("drain_budget", &self.drain_budget)
             .field("process_cancel", &self.process_cancel)
+            .field("segment_generation", &self.segment_generation)
             .finish()
     }
 }
@@ -622,6 +641,82 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
+    /// A process segment's signal wait (FIG-3673, FIG-3799): the event
+    /// raced against the segment's cancel promise and the drain's hand-over.
+    /// A hand-over is not a wait outcome the body sees: it answers
+    /// [`RuntimeErrorCode::ProcessSignalWaitHandedOver`], on which the body
+    /// stops at the wait and the segment hands it to its successor.
+    async fn await_segment_signal(
+        &self,
+        invocation: &RuntimeEffectInvocation,
+        request: crate::durable_wait::RestateDurableWaitAwaitRequest,
+        replay_key: String,
+        generation: lash_core::engine::BuildGeneration,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let outcome = self
+            .context
+            .await_signal_or_segment_end(request, replay_key, generation.clone())
+            .await
+            .map_err(|err| {
+                self.emit_trace(Some(invocation), || {
+                    lash_trace::TraceEvent::DurableWaitResolved {
+                        wait_kind: "await_event".to_string(),
+                        resolution: lash_trace::TraceDurableWaitResolution::Failed,
+                    }
+                });
+                RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::EngineEffectController,
+                    err.to_string(),
+                )
+            })?;
+        match outcome {
+            RestateTurnCancelRaceOutcome::Completed(context::SignalWaitOutcome::Resolved(
+                resolution,
+            )) => {
+                self.emit_trace(Some(invocation), || {
+                    lash_trace::TraceEvent::DurableWaitResolved {
+                        wait_kind: "await_event".to_string(),
+                        resolution: resolution_trace_label(&resolution),
+                    }
+                });
+                Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
+            }
+            RestateTurnCancelRaceOutcome::ProcessCancelled => {
+                self.emit_trace(Some(invocation), || {
+                    lash_trace::TraceEvent::DurableWaitResolved {
+                        wait_kind: "await_event".to_string(),
+                        resolution: lash_trace::TraceDurableWaitResolution::Cancelled,
+                    }
+                });
+                Ok(RuntimeEffectOutcome::AwaitEvent {
+                    resolution: Resolution::Cancelled,
+                })
+            }
+            RestateTurnCancelRaceOutcome::Completed(context::SignalWaitOutcome::HandedOver) => {
+                tracing::info!(
+                    target: "lash::restate",
+                    event = "restate.signal_wait_handed_over",
+                    generation = generation.as_str(),
+                    "a process segment's signal wait was handed over to its successor"
+                );
+                Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::ProcessSignalWaitHandedOver,
+                    format!(
+                        "the drain of generation {} handed this signal wait to a successor segment",
+                        generation.as_str()
+                    ),
+                ))
+            }
+            RestateTurnCancelRaceOutcome::TurnCancelled
+            | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
+                Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::EngineEffectController,
+                    "a process signal wait observes no turn",
+                ))
+            }
+        }
+    }
+
     /// Opens `group` on behalf of `opener`, the admitted scope of the
     /// controller the group is opened through: the shape records it, and
     /// every child the dispatcher runs is admitted from it (FIG-3780).
@@ -1071,6 +1166,7 @@ where
             self.emit_trace(None, || lash_trace::TraceEvent::DurableSegmentBoundary {
                 reason: match reason {
                     lash_core::BoundaryReason::JournalBudget => "journal_budget",
+                    lash_core::BoundaryReason::HandOver => "hand_over",
                 }
                 .to_string(),
                 effects_executed: progress.effects_executed,
@@ -1286,6 +1382,29 @@ where
                     )
                 })?;
                 let replay_key = invocation.replay_key().to_string();
+                // A process segment's signal wait also races the drain's
+                // hand-over (FIG-3799); every other wait keeps its shape.
+                if let (
+                    None,
+                    context::ProcessCancelRace::Raced,
+                    Some(generation),
+                    lash_core::AwaitEventWaitIdentity::ProcessSignal { .. },
+                ) = (
+                    &turn_cancel,
+                    self.options.process_cancel,
+                    &self.options.segment_generation,
+                    &key.wait,
+                ) {
+                    // Boxed: the three-way race's state stays off the
+                    // controller's own future.
+                    return Box::pin(self.await_segment_signal(
+                        &invocation,
+                        request,
+                        replay_key,
+                        generation.as_ref().clone(),
+                    ))
+                    .await;
+                }
                 match self
                     .context
                     .await_event_or_turn_cancel(

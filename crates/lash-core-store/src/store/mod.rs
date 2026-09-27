@@ -23,6 +23,7 @@ pub mod fencing;
 mod fencing_tests;
 mod fleet_format;
 mod fork_plan;
+pub mod generation_drain;
 mod graph_commit;
 mod lease_timings;
 mod load;

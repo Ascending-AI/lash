@@ -31,6 +31,10 @@ pub struct ReconcileCursor {
     pub drives: Option<SessionId>,
     /// Last terminal root whose scope close was attempted.
     pub scopes: Option<(SessionId, crate::TurnId)>,
+    /// The last live process of a draining generation the previous tick's
+    /// hand-over slot woke (FIG-3799), with that generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drain: Option<(super::BuildGeneration, crate::ProcessId)>,
 }
 
 /// The tick ids one run of an engine's recovery interval hands

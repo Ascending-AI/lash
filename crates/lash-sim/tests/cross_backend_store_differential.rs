@@ -51,6 +51,8 @@ mod corrupt_input_cases;
 mod fork_cases;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
 mod generated_surface;
+#[path = "cross_backend_store_differential/generation_drain_cases.rs"]
+mod generation_drain_cases;
 #[path = "cross_backend_store_differential/obligation_cases.rs"]
 mod obligation_cases;
 #[path = "cross_backend_store_differential/observations.rs"]
@@ -2429,6 +2431,8 @@ async fn cross_backend_store_differential_agrees() {
     let run_nonce = run_nonce();
     obligation_cases::compare_obligation_ledgers(sqlite_root.path(), &postgres, &run_nonce).await;
     session_delete_cases::compare_session_deletes(sqlite_root.path(), &postgres, &run_nonce).await;
+    generation_drain_cases::compare_generation_drains(sqlite_root.path(), &postgres, &run_nonce)
+        .await;
     process_event_pages::compare_bounded_process_event_pages(
         sqlite_root.path(),
         &postgres,

@@ -714,6 +714,17 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         self.inner.recovery_leader.clone()
     }
 
+    /// The drain marks and live processes live in the process registry
+    /// file; the parked turns it counts, in the durable core.
+    fn generation_drain(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::generation_drain::GenerationDrainStore> {
+        Arc::new(crate::generation_drain::SqliteGenerationDrain::new(
+            self.inner.process_registry.conn.clone(),
+            self.inner.process_env_store.conn.clone(),
+        ))
+    }
+
     fn obligation_ledger(
         &self,
         kind: lash_core_execution::store::ObligationKind,

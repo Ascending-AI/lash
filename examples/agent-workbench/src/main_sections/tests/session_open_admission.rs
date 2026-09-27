@@ -296,6 +296,10 @@ impl lash::StoreSet for GatedStoreSet {
         self.inner.recovery_leader()
     }
 
+    fn generation_drain(&self) -> Arc<dyn lash::persistence::GenerationDrainStore> {
+        self.inner.generation_drain()
+    }
+
     fn obligation_ledger(
         &self,
         kind: lash::ObligationKind,

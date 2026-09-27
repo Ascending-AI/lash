@@ -190,6 +190,28 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         request: &crate::CancelRequest,
         key: &str,
     ) -> Result<(), PluginError>;
+
+    /// Wake `process_id`'s live execution so it hands its open signal wait
+    /// to a successor on the newest build (FIG-3799): the drain of
+    /// `generation` asks it of every process waiting on that generation.
+    /// Only an execution admitted under `generation` hands over; one on
+    /// another generation keeps waiting. Idempotent: a repeated wake of the
+    /// same execution is a no-op, and a wake that lands while the execution
+    /// is not waiting holds for its next wait.
+    ///
+    /// An engine that routes no work by build generation has nothing to hand
+    /// over to and refuses.
+    async fn deliver_hand_over(
+        &self,
+        process_id: &crate::ProcessId,
+        generation: &crate::engine::BuildGeneration,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::Invoke(format!(
+            "this engine routes no work by build generation, so it cannot hand \
+             process `{process_id}` over from generation {}",
+            generation.as_str()
+        )))
+    }
 }
 
 /// Outcome of one bounded terminal wait.

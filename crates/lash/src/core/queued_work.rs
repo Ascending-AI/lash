@@ -377,6 +377,9 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                 None => self.config.env.queued_work(),
             };
         let process_port = self.config.env.process_work();
+        let backend = self.config.env.core.backend();
+        let drain = backend.generation_drain();
+        let generation = backend.build_generation().clone();
         let processes = self
             .config
             .env
@@ -386,6 +389,8 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                 |(registry, port)| lash_core::runtime::drive::ReconcileProcesses {
                     registry: registry.as_ref(),
                     port: port.as_ref(),
+                    drain: drain.as_ref(),
+                    generation: &generation,
                 },
             );
         // Which recovery duties this deployment runs this tick (ADR 0109

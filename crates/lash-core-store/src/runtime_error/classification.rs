@@ -231,6 +231,9 @@ impl RuntimeErrorCode {
             Self::ProcessRegistryUnavailable => Terminal,
             // the durable signal wait settled cancelled.
             Self::ProcessSignalWaitCancelled => Terminal,
+            // the wait moved to a successor segment; this segment ends at a
+            // boundary, and no retry of it waits again.
+            Self::ProcessSignalWaitHandedOver => Terminal,
             // the durable signal wait settled timed out.
             Self::ProcessSignalWaitTimeout => Terminal,
             // engine interaction failed; the engine redrives the invocation.

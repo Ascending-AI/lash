@@ -87,6 +87,11 @@ crate::statements! {
              WHERE session_id = ?1 AND turn_id <> ?2
              RETURNING turn_id, park_id";
 
+        /// The live parks whose parked checkpoint build generation `?1`
+        /// wrote (FIG-3799), over the park build-generation index.
+        count_by_build_generation = "SELECT COUNT(*) FROM turn_parks
+             WHERE park_build_generation = ?1";
+
         select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation
              FROM turn_parks
              WHERE session_id = ?1";

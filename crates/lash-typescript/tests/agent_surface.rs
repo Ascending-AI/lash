@@ -1494,6 +1494,7 @@ fn suspend_and_resume_process(
                 .expect("complete resumed process")
             {
                 VmRunOutcome::EffectCompleted => {}
+                VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
                 VmRunOutcome::Complete(outcome) => break outcome,
             }
         }
@@ -1566,6 +1567,7 @@ fn uncaught_throw_fails_a_durable_process() {
         {
             VmRunOutcome::Complete(outcome) => outcome,
             VmRunOutcome::EffectCompleted => panic!("process failure should be terminal"),
+            VmRunOutcome::HandedOver => panic!("this host never hands a signal wait over"),
         };
         assert_eq!(
             outcome,

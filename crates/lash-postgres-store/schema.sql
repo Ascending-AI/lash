@@ -104,6 +104,14 @@ CREATE TABLE IF NOT EXISTS lash_recovery_leader (
     expires_at_ms BIGINT NOT NULL
 );
 
+-- The build generations an operator marked draining (FIG-3799): the recovery
+-- leader wakes every live process whose current segment a marked generation
+-- admitted, so each hands its open wait to a successor on the newest build.
+CREATE TABLE IF NOT EXISTS lash_draining_generations (
+    generation TEXT PRIMARY KEY,
+    marked_at_ms BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lash_deleted_sessions (
     session_id TEXT PRIMARY KEY,
     created_at_ms BIGINT,

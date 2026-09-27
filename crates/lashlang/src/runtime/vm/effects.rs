@@ -51,6 +51,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let result =
             Box::pin(self.resolve_effect_inner(effect, active.as_ref(), instruction_ip)).await;
         match (&result, active.as_ref()) {
+            // A handed-over wait did not complete: its node is left for the
+            // continuation that issues the wait again.
+            (Ok(Some(VmOutcome::HandedOver)), _) => {}
             (Ok(Some(VmOutcome::ProcessFailed(value))), Some(active)) => {
                 self.emit_lashlang_execution_failure(
                     active,
@@ -101,6 +104,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     ),
                     Ok(AbilityResult::Unit) => execution_host_error_value(
                         ExecutionHostError::new("module operation returned no value"),
+                        &operation_name,
+                    ),
+                    Ok(AbilityResult::HandedOver) => execution_host_error_value(
+                        ExecutionHostError::new("module operation returned a hand-over"),
                         &operation_name,
                     ),
                     Err(error) => execution_host_error_value(error, &operation_name),
@@ -184,13 +191,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.stack.push(Value::Null);
             }
             VmEffect::WaitSignal { name } => {
-                let value = self
+                let result = self
                     .host
                     .perform(AbilityOp::WaitSignal {
                         name: self.chunk.names[name].text.to_string(),
                         call_site: active.map(lashlang_execution_call_site),
                     })
-                    .await
+                    .await;
+                if matches!(result, Ok(AbilityResult::HandedOver)) {
+                    // The wait moved to a successor segment without
+                    // completing. The instruction takes no operand, so
+                    // standing on it again is the whole rewind: a
+                    // continuation captured now issues the same wait.
+                    self.ip = instruction_ip;
+                    return Ok(Some(VmOutcome::HandedOver));
+                }
+                let value = result
                     .and_then(|result| result.into_value("wait_signal"))
                     .map_err(|source| RuntimeError::WaitSignalFailed { source })?;
                 self.stack.push(value);
@@ -671,7 +687,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .await;
         let reply = match result {
             Ok(AbilityResult::ResourceOperationBatch(reply)) => reply,
-            Ok(AbilityResult::Value(_)) | Ok(AbilityResult::Unit) => {
+            Ok(AbilityResult::Value(_) | AbilityResult::Unit | AbilityResult::HandedOver) => {
                 return Err(self.fail_resource_operation_batch(
                     active_nodes,
                     RuntimeError::InvalidResourceBatchResult,
@@ -883,6 +899,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         ),
                         Ok(AbilityResult::Unit) => execution_host_error_value(
                             ExecutionHostError::new("await returned no value"),
+                            "await",
+                        ),
+                        Ok(AbilityResult::HandedOver) => execution_host_error_value(
+                            ExecutionHostError::new("await returned a hand-over"),
                             "await",
                         ),
                         Err(error) => execution_host_error_value(error, "await"),

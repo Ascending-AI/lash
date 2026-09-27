@@ -38,6 +38,12 @@ pub enum AbilityResult {
     Value(Value),
     ResourceOperationBatch(ResourceOperationBatchResult),
     Unit,
+    /// The host handed a process's pending `wait_signal` to a successor
+    /// segment instead of completing it: the wait is still open, and the VM
+    /// stops with [`VmRunOutcome::HandedOver`](crate::VmRunOutcome::HandedOver)
+    /// positioned to issue the same wait again when a continuation of it
+    /// resumes. Only a signal wait answers this.
+    HandedOver,
 }
 
 impl AbilityResult {
@@ -61,6 +67,9 @@ impl AbilityResult {
                 "{op} returned a resource operation batch result"
             ))),
             Self::Unit => Err(ExecutionHostError::new(format!("{op} returned no value"))),
+            Self::HandedOver => Err(ExecutionHostError::new(format!(
+                "{op} returned a hand-over, which only a signal wait may answer"
+            ))),
         }
     }
 }

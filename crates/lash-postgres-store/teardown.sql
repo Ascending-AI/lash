@@ -28,6 +28,8 @@ DROP TABLE IF EXISTS lash_checkpoint_blob_refs CASCADE;
 
 DROP TABLE IF EXISTS lash_recovery_leader CASCADE;
 
+DROP TABLE IF EXISTS lash_draining_generations CASCADE;
+
 DROP TABLE IF EXISTS lash_deleted_sessions CASCADE;
 
 DROP TABLE IF EXISTS lash_graph_nodes CASCADE;

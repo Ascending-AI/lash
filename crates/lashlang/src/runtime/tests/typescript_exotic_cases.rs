@@ -57,6 +57,7 @@ async fn run_typescript_ast_across_every_effect(program: Program) -> ExecutionOu
                 vm = Vm::resume_from(decoded, &compiled, &Host).expect("resume continuation");
             }
             VmRunOutcome::Complete(outcome) => return outcome,
+            VmRunOutcome::HandedOver => panic!("the host hands no wait over"),
         }
     }
 }

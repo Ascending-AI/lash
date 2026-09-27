@@ -17,7 +17,7 @@ use lash_sansio::core_support::Blake3DomainHasher;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The drain generation of one build (FIG-3795).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, schemars::JsonSchema)]
 pub struct BuildGeneration(String);
 
 /// Why a string is not a [`BuildGeneration`].

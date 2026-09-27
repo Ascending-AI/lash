@@ -284,6 +284,10 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("recovery leader lease")
     }
 
+    fn generation_drain(&self) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore> {
+        Self::no_second_substrate("generation drain store")
+    }
+
     fn obligation_ledger(
         &self,
         _kind: crate::store::ObligationKind,

@@ -86,6 +86,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("process_change_clock", "lash_process_change_clock"),
     pair("release_stamp", "lash_release_stamp"),
     pair("recovery_leader", "lash_recovery_leader"),
+    pair("draining_generations", "lash_draining_generations"),
     pair("process_events", "lash_process_events"),
     pair("process_leases", "lash_process_leases"),
     pair("process_observers", "lash_process_observers"),

@@ -1437,6 +1437,8 @@ mod connection_sql;
 mod evidence_retention;
 #[path = "postgres/fleet_format.rs"]
 mod fleet_format;
+#[path = "postgres/generation_drain.rs"]
+mod generation_drain;
 #[path = "postgres/migrate.rs"]
 mod migrate;
 #[path = "postgres/obligation_ledger.rs"]

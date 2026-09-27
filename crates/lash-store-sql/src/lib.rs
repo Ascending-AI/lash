@@ -87,6 +87,7 @@ mod render;
 
 pub mod artifact;
 pub mod attachment;
+pub mod draining_generations;
 pub mod effect;
 pub mod obligation;
 pub mod process;
@@ -116,6 +117,7 @@ pub const TABLES: &[&str] = &[
     attachment::blob::TABLE,
     attachment::condemnation::TABLE,
     attachment::manifest::TABLE,
+    draining_generations::TABLE,
     effect::replay::TABLE,
     effect::group::TABLE,
     effect::group_child::TABLE,
@@ -259,6 +261,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(turn_ingress::turn_parks::TurnParkStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::turn_park_events::TurnParkEventStatements::NEUTRAL);
     statements.extend_from_slice(recovery_leader::RecoveryLeaderStatements::NEUTRAL);
+    statements.extend_from_slice(draining_generations::DrainingGenerationStatements::NEUTRAL);
     statements.extend_from_slice(session_ingress::SessionIngressObligationStatements::NEUTRAL);
     statements.extend_from_slice(
         session_roots::control_intents::ControlIntentObligationStatements::NEUTRAL,

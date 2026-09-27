@@ -854,6 +854,25 @@ schema = [
 [families.recovery.table_modules]
 recovery_leader = "crates/lash-store-sql/src/recovery_leader.rs"
 
+[families.drain]
+tables = ["draining_generations"]
+statement_prefixes = ["draining_generation"]
+shared = ["crates/lash-store-sql/src/draining_generations.rs"]
+# The family forks nothing: each backend renders the shared statements. Its
+# work counts read the process and turn-park families through their own
+# statement sets.
+sqlite = ["crates/lash-sqlite-store/src/generation_drain.rs"]
+postgres = ["crates/lash-postgres-store/src/postgres/generation_drain.rs"]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.drain.table_modules]
+draining_generations = "crates/lash-store-sql/src/draining_generations.rs"
+
 [families.wait]
 tables = ["await_event_waits", "await_event_meta", "await_event_revoked_sessions"]
 statement_prefixes = [

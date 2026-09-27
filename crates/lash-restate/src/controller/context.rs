@@ -52,8 +52,12 @@ use crate::process::{
 };
 use crate::process_attach::{LashProcessAttachClient, RestateProcessAttachRequest};
 
+#[macro_use]
+mod segment_wait;
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
+use segment_wait::race_signal_wait;
+pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome};
 #[cfg(test)]
 pub(crate) use wake::guard_restate_context_future;
 pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_wakes};
@@ -68,21 +72,6 @@ pub(crate) type ResolveEventFuture<'run> =
     crate::JournaledFuture<'run, RestateDurableWaitResolveResponse>;
 
 type TurnCancelRaceFuture<'run, T> = crate::JournaledFuture<'run, RestateTurnCancelRaceOutcome<T>>;
-
-/// Whether a wait that observes no turn races its process segment's durable
-/// cancel promise (FIG-3673).
-///
-/// Only a process segment's own controller asks for the race, and only a
-/// context with a workflow promise surface can answer it: every other wait
-/// keeps the command shape it had.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProcessCancelRace {
-    /// The wait belongs to no process drive.
-    NotRaced,
-    /// The wait is a process drive's: its journal records whether it or the
-    /// segment's cancel promise completed first.
-    Raced,
-}
 
 /// Which side of a gate race the journal completed first.
 enum GateRaceWinner {
@@ -417,6 +406,21 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     ) -> TurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run;
+
+    /// A process segment's signal wait, raced against its cancel and
+    /// hand-over promises (FIG-3799): see the `segment_wait` module.
+    fn await_signal_or_segment_end<'run>(
+        &'run self,
+        request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
+        generation: lash_core::engine::BuildGeneration,
+    ) -> TurnCancelRaceFuture<'run, SignalWaitOutcome>
+    where
+        'ctx: 'run,
+    {
+        let _ = generation;
+        Box::pin(segment_wait::cancel_only(self, request, replay_key))
+    }
 
     /// A journaled peek of the running process workflow's own cancellation
     /// promise (FIG-3149, FIG-3673): a process drive's cancel checkpoint and
@@ -763,27 +767,6 @@ macro_rules! impl_process_cancel_peek {
     (no_promises, $ctx:expr) => {
         Box::pin(async move { Ok(false) })
     };
-}
-
-/// The segment's cancel promise as a durable future, on a context that has a
-/// workflow promise surface; `None` on every other context.
-macro_rules! process_cancel_promise {
-    (promises, $context:ident, $run:lifetime, $ctx:expr) => {{
-        // Workflow contexts are covariant in their lifetime: shortening it to
-        // the borrow lets the SDK's `promise` borrow the context for exactly
-        // as long as the race holds the future.
-        let context: &$run $context<$run> = $ctx;
-        Some(erase_gate_wait(
-            restate_sdk::context::ContextPromises::promise::<String>(
-                context,
-                crate::process::PROCESS_CANCEL_PROMISE_KEY,
-            ),
-        ))
-    }};
-    (no_promises, $context:ident, $run:lifetime, $ctx:expr) => {{
-        let _ = $ctx;
-        None::<GateWait<$run, String>>
-    }};
 }
 
 macro_rules! impl_restate_controller_context {
@@ -1151,6 +1134,8 @@ macro_rules! impl_restate_controller_context {
                         }
                     })
                 }
+
+                process_signal_wait_method!($promises, $context, 'ctx);
 
                 fn peek_event<'run>(
                     &'run self,
