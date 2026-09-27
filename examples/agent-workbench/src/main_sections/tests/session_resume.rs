@@ -78,6 +78,8 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
                 .expect("string terminal value")
                 .to_string(),
             None,
+            || first_core.session(session_id.clone()).open(),
+            |_, _| {},
         )
         .await
         .expect("commit assistant transcript");
@@ -87,6 +89,8 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         &TurnId::from("resume-turn-one"),
         "resume answer one".to_string(),
         None,
+        || first_core.session(session_id.clone()).open(),
+        |_, _| {},
     )
     .await
     .expect("replay first assistant transcript after a later turn");
@@ -296,6 +300,8 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
             .expect("string resumed terminal value")
             .to_string(),
         None,
+        || crate::open_session_with_bounded_retry(&state, &session_id, "turn.reply_commit"),
+        |event, payload| state.trace_for_session(&session_id, event, payload),
     )
     .await
     .expect("commit resumed assistant transcript");

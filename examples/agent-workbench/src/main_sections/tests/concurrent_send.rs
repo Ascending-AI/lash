@@ -497,6 +497,182 @@ async fn two_live_writers_rebase_appends_into_durable_graph_order() {
     );
 }
 
+/// Parks the first `parks` writers reaching `session_graph_append.pre_commit`
+/// until the test has committed a competing head advance for each one and
+/// released it, so every parked attempt loses its head CAS by construction
+/// (FIG-3925).
+///
+/// `arrivals` counts writers reaching the phase; `released` counts the parked
+/// attempts the driver has let go. Like [`AppendPreCommitBarrier`] the gate
+/// spins rather than awaits: `begin_named` is synchronous on a tokio worker,
+/// and an overlap that never forms must fail the test, not hang it.
+struct QueuedInputHeadConflictGate {
+    parks: usize,
+    arrivals: std::sync::atomic::AtomicUsize,
+    released: std::sync::atomic::AtomicUsize,
+}
+
+impl QueuedInputHeadConflictGate {
+    fn new(parks: usize) -> Self {
+        Self {
+            parks,
+            arrivals: std::sync::atomic::AtomicUsize::new(0),
+            released: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+impl lash::runtime::RuntimeTurnPhaseProbe for QueuedInputHeadConflictGate {
+    fn begin(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase != "session_graph_append.pre_commit" {
+            return;
+        }
+        let arrival = self
+            .arrivals
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if arrival >= self.parks {
+            return;
+        }
+        let deadline = std::time::Instant::now() + AppendPreCommitBarrier::OVERLAP_DEADLINE;
+        while self.released.load(std::sync::atomic::Ordering::SeqCst) <= arrival {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no competing head advance released parked append {arrival} within {:?}",
+                AppendPreCommitBarrier::OVERLAP_DEADLINE,
+            );
+            std::thread::sleep(AppendPreCommitBarrier::OVERLAP_POLL);
+        }
+    }
+}
+
+/// FIG-3925: the workbench's reply commit is a lane-less append that runs
+/// after its root settled, and the session's engine may commit the queued
+/// next-turn input between the commit's state read and its head CAS —
+/// `store head revision conflict: expected N, actual N+1`, which the live E2E
+/// saw surface as a terminal 500 about one run in five. The commit must
+/// reload the session and retry the conflict rather than report it.
+///
+/// The gate parks every `session_graph_append.pre_commit` the committing
+/// session runs, and each park is released only after a competing writer has
+/// advanced the durable head — the same interleaving the live law races, made
+/// deterministic. A retry that keeps appending through the stale session
+/// loses every attempt; reloading the session must converge the commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_commit_reloads_past_queued_input_head_conflicts() {
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-reply-commit-conflict")
+        .complete_error("the reply-commit gate drives no turn")
+        .build()
+        .into_handle();
+    let double = crate::tests::test_double_backend(0).await;
+    let state = queued_send_test_state(&double, provider).await;
+    let session_id = state.current_session_id();
+    let follower = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open the reply-committing session");
+    let engine = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open the competing engine writer");
+    // One injected conflict for each attempt the bounded retry may make: a
+    // loop that keeps appending on the session it already holds loses every
+    // one; the fix's reload converges after the first loss.
+    let gate = Arc::new(QueuedInputHeadConflictGate::new(
+        crate::SESSION_OPEN_MAX_ATTEMPTS,
+    ));
+    let probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe> = gate.clone();
+    follower.set_turn_phase_probe(probe).await;
+
+    let driver_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let bump_driver = {
+        let gate = Arc::clone(&gate);
+        let driver_done = Arc::clone(&driver_done);
+        tokio::spawn(async move {
+            let mut bumped = 0usize;
+            loop {
+                let waiting = gate
+                    .arrivals
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    .min(gate.parks)
+                    .saturating_sub(bumped);
+                if waiting == 0 {
+                    if driver_done.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                    tokio::time::sleep(AppendPreCommitBarrier::OVERLAP_POLL).await;
+                    continue;
+                }
+                engine
+                    .admin()
+                    .state()
+                    .append_messages(vec![lash::plugins::PluginMessage::text(
+                        lash::messages::MessageRole::Assistant,
+                        format!("fig3925-engine-commit-{bumped}"),
+                    )])
+                    .await
+                    .expect("the competing engine commit advances the head");
+                gate.released
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                bumped += 1;
+            }
+            bumped
+        })
+    };
+
+    let turn_id = TurnId::from("fig3925-queued-input-race");
+    let reply_id = crate::workbench_turn_assistant_message_id(&turn_id);
+    let commit = crate::commit_assistant_transcript(
+        &follower,
+        &turn_id,
+        "the settled assistant reply".to_string(),
+        None,
+        || crate::open_session_with_bounded_retry(&state, &session_id, "turn.reply_commit"),
+        |event, payload| state.trace_for_session(&session_id, event, payload),
+    )
+    .await;
+    driver_done.store(true, std::sync::atomic::Ordering::SeqCst);
+    let bumped = bump_driver.await.expect("engine bump driver");
+    assert!(
+        bumped >= 1,
+        "the precondition must hold: the engine committed between the reply commit's read and its append"
+    );
+    commit.expect("the reply commit must reload and retry past head conflicts");
+
+    let fresh = state
+        .core
+        .session(session_id)
+        .open()
+        .await
+        .expect("reopen the durable session");
+    let messages = fresh.read_view();
+    let replies = messages
+        .messages()
+        .iter()
+        .filter(|message| message.id == reply_id)
+        .count();
+    assert_eq!(
+        replies, 1,
+        "the reply commits exactly once across its retries"
+    );
+    for arrival in 0..bumped {
+        assert!(
+            messages.messages().iter().any(|message| {
+                lash::message_text(message) == format!("fig3925-engine-commit-{arrival}")
+            }),
+            "engine commit {arrival} must be durable"
+        );
+    }
+}
+
 /// A provider whose first call parks until released, so a turn can be held
 /// mid-flight while the routes under test are exercised against a busy session.
 pub(super) fn gated_first_call_provider(

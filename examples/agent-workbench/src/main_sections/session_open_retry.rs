@@ -36,8 +36,6 @@ where
     OpenFuture: std::future::Future<Output = Result<T, lash::EmbedError>>,
     Trace: FnMut(&str, Value),
 {
-    static RETRY_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
     let started = tokio::time::Instant::now();
     let mut last_contended = None;
     for attempt in 1..=SESSION_OPEN_MAX_ATTEMPTS {
@@ -75,13 +73,9 @@ where
                 if attempt == SESSION_OPEN_MAX_ATTEMPTS {
                     break;
                 }
-                let base_ms = 1_u64 << (attempt - 1).min(4);
-                let sequence = RETRY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let delay = Duration::from_millis(base_ms + sequence % (base_ms + 1));
-                let remaining = SESSION_OPEN_RETRY_BUDGET.saturating_sub(started.elapsed());
-                if delay > remaining {
+                let Some(delay) = contention_retry_delay(attempt, started) else {
                     break;
-                }
+                };
                 tokio::time::sleep(delay).await;
             }
             Err(error) => return Err(error),
@@ -98,6 +92,22 @@ where
         }),
     );
     Err(last_contended.expect("a retry budget exhausts only after typed contention"))
+}
+
+/// The jittered backoff between a bounded contention retry's attempts: the
+/// base doubles from 1 ms up to a 16 ms ceiling, jittered per process so
+/// contending callers do not re-collide in lockstep. `None` once
+/// [`SESSION_OPEN_RETRY_BUDGET`] has no room left for the wait.
+pub(crate) fn contention_retry_delay(
+    attempt: usize,
+    started: tokio::time::Instant,
+) -> Option<Duration> {
+    static RETRY_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let base_ms = 1_u64 << (attempt - 1).min(4);
+    let sequence = RETRY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let delay = Duration::from_millis(base_ms + sequence % (base_ms + 1));
+    let remaining = SESSION_OPEN_RETRY_BUDGET.saturating_sub(started.elapsed());
+    (delay <= remaining).then_some(delay)
 }
 
 pub(crate) fn session_open_is_contended(error: &lash::EmbedError) -> bool {
