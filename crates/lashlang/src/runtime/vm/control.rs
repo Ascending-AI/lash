@@ -1,4 +1,4 @@
-use std::time::Instant;
+use lash_sansio::profile::ProfileMark;
 
 use super::super::{
     COOPERATIVE_YIELD_INSTRUCTION_BUDGET, ExecutionBound, ExecutionHost, ExecutionHostError,
@@ -307,7 +307,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let profile = self
                 .profile
                 .as_ref()
-                .map(|_| (instruction.profile_tag(), Instant::now()));
+                .map(|_| (instruction.profile_tag(), ProfileMark::now()));
             let replayed = self.begin_instruction_coercions(instruction_ip);
             let operands = self.coercion_operands(instruction);
             let step = match self.step_instruction_fast(instruction) {
@@ -363,7 +363,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 heapified = true;
             }
             if let Some((tag, start)) = profile {
-                self.record_instruction_profile(tag, start.elapsed().as_nanos());
+                self.record_instruction_profile(tag, start.elapsed_nanos());
             }
             if result.is_ok() && matches!(instruction, super::Instruction::Intrinsic(_)) {
                 // An intrinsic can charge far more work than one dispatch, so

@@ -1,6 +1,4 @@
 use std::collections::BTreeSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 mod aggregate;
@@ -952,7 +950,7 @@ fn validate_process_claims<'a>(
     value: &'a serde_json::Value,
     expected: &'a lashlang::TypeExpr,
     path: String,
-) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {
+) -> lash_sansio::future::SendBoxFuture<'a, Result<(), LashlangRuntimeError>> {
     Box::pin(async move {
         let invalid = |message: String| LashlangRuntimeError::InvalidProcessArgument {
             path: path.clone(),

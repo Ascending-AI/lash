@@ -11,9 +11,8 @@
 
 use std::borrow::Borrow;
 use std::fmt;
-use std::future::Future;
+
 use std::ops::Deref;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use compact_str::CompactString;
@@ -617,7 +616,7 @@ enum ProjectedKind {
     Custom(Arc<dyn ProjectedHostDescriptor>),
 }
 
-pub type ProjectedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub type ProjectedFuture<'a, T> = lash_sansio::future::SendBoxFuture<'a, T>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProjectedReadRequest {
@@ -1208,7 +1207,7 @@ impl ProjectedValue {
     }
 
     pub fn materialize(&self) -> Result<Value, RuntimeError> {
-        futures_executor::block_on(self.materialize_async())
+        lash_sansio::future::drive_sync(self.materialize_async())
     }
 }
 

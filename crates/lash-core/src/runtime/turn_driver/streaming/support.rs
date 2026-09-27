@@ -92,13 +92,48 @@ pub(super) fn assistant_stream_finish_reason(
     }
 }
 
+/// Which of the recorded step's drive sources resolved first in one poll.
+pub(super) enum DrivePollOutcome<J> {
+    Cancelled,
+    Stream(Box<Option<LlmStreamEvent>>),
+    Joined(J),
+}
+
+/// Poll the drive's three in-step sources once, in written order: a ready
+/// cancellation is never shadowed by a randomly polled stream event, and the
+/// branch futures drop with the call so the caller's handlers can borrow the
+/// task and receiver again. A drained stream channel stays dormant — the same
+/// observation retired that branch under the old select.
+pub(super) async fn poll_drive_sources<T>(
+    cancel: &CancellationToken,
+    llm_task: &mut crate::task::JoinHandle<T>,
+    llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,
+    stream_closed: bool,
+) -> DrivePollOutcome<Result<T, crate::task::JoinError>> {
+    let cancelled = cancel.cancelled();
+    futures_util::pin_mut!(cancelled);
+    let stream_recv = async {
+        if stream_closed {
+            futures_util::future::pending().await
+        } else {
+            llm_stream_rx.recv().await
+        }
+    };
+    futures_util::pin_mut!(stream_recv);
+    futures_util::select_biased! {
+        _ = cancelled.fuse() => DrivePollOutcome::Cancelled,
+        stream_event = stream_recv.fuse() => DrivePollOutcome::Stream(Box::new(stream_event)),
+        join = (&mut *llm_task).fuse() => DrivePollOutcome::Joined(join),
+    }
+}
+
 pub(super) struct AbortOnDrop {
-    handle: tokio::task::AbortHandle,
+    handle: crate::task::AbortHandle,
     armed: bool,
 }
 
 impl AbortOnDrop {
-    pub(super) fn new(handle: tokio::task::AbortHandle) -> Self {
+    pub(super) fn new(handle: crate::task::AbortHandle) -> Self {
         Self {
             handle,
             armed: true,

@@ -1,7 +1,6 @@
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use lash_core::{
@@ -60,7 +59,7 @@ pub(super) struct HostBridgeConfig<'run> {
 }
 
 type HostAbilityFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<AbilityResult, ExecutionHostError>> + Send + 'a>>;
+    lash_sansio::future::SendBoxFuture<'a, Result<AbilityResult, ExecutionHostError>>;
 
 impl<'run> HostBridge<'run> {
     pub(super) fn new(config: HostBridgeConfig<'run>) -> Self {

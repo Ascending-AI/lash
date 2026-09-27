@@ -233,6 +233,22 @@ impl Default for SessionSpec {
     }
 }
 
+/// The receiving half of [`llm_stream_channel`]: the provider's stream events
+/// arriving at the journaled step body that forwards each one into the
+/// journal. Declared here so the channel's mechanism is named at the seam
+/// instead of inside scanned drive code (FIG-3672).
+pub type LlmStreamEventRx = tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>;
+
+/// Open the provider stream-event pipe [`transport_stream_events`] consumes:
+/// the sender goes into the request's `stream_events` so the provider's task
+/// can report progress, and the receiver stays with the step body.
+pub fn llm_stream_channel() -> (
+    tokio::sync::mpsc::UnboundedSender<LlmStreamEvent>,
+    LlmStreamEventRx,
+) {
+    tokio::sync::mpsc::unbounded_channel()
+}
+
 pub fn transport_stream_events(
     provider: &ProviderHandle,
     requested: Option<tokio::sync::mpsc::UnboundedSender<LlmStreamEvent>>,

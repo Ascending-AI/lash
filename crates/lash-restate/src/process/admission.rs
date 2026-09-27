@@ -471,7 +471,7 @@ pub(crate) async fn admit_segment(
                 Ok(Json(match started {
                     Some(lost) => AdmissionVerdict::SubstrateLost { lost },
                     None => AdmissionVerdict::Admit {
-                        nonce: uuid::Uuid::new_v4().to_string(),
+                        nonce: crate::journaled_nonce(),
                         handover,
                         policy: SegmentPolicy {
                             effect_budget: effect_budget().max(1),

@@ -26,7 +26,6 @@
 use lash_sansio::SessionId;
 use std::time::Duration;
 
-use lash_core::ClockWallTime as _;
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome, RuntimeError,
 };
@@ -743,8 +742,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
                 serde_json::from_str(&payload).map_err(TerminalError::from_error)?
             } else if let Some(deadline) = request.deadline {
                 let promise = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY);
-                let remaining =
-                    deadline.remaining(lash_core::facade_support::SystemClock.timestamp_ms())?;
+                let remaining = deadline.remaining(crate::system_clock().timestamp_ms())?;
                 // The workflow input is the stable absolute deadline. Restate's
                 // SleepCommand deliberately excludes its calculated wake time from
                 // replay comparison, so deriving only the remaining delay here

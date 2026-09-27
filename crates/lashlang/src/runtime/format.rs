@@ -22,7 +22,7 @@ pub(crate) async fn stringify_value_async(value: &Value) -> Result<String, Runti
 
 pub(crate) fn stringify_value(value: &Value) -> Result<String, RuntimeError> {
     if value_contains_projected(value) {
-        futures_executor::block_on(stringify_value_async(value))
+        lash_sansio::future::drive_sync(stringify_value_async(value))
     } else {
         stringify_value_direct(value)
     }
@@ -107,7 +107,7 @@ pub(crate) fn append_stringified_value(
     output: &mut String,
     value: &Value,
 ) -> Result<(), RuntimeError> {
-    futures_executor::block_on(append_stringified_value_async(output, value))
+    lash_sansio::future::drive_sync(append_stringified_value_async(output, value))
 }
 
 pub(crate) fn append_tuple_literal_direct(
@@ -339,7 +339,7 @@ pub(crate) async fn apply_format_async(
 
 #[cfg(test)]
 pub(crate) fn apply_format(template: &str, args: &[Value]) -> Result<String, RuntimeError> {
-    futures_executor::block_on(apply_format_async(template, args))
+    lash_sansio::future::drive_sync(apply_format_async(template, args))
 }
 
 pub(crate) fn compile_format_template(template: &str, argc: usize) -> CompiledFormatTemplate {

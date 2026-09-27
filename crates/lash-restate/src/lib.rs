@@ -186,6 +186,16 @@ pub(crate) fn system_clock() -> &'static dyn lash_core::Clock {
     &lash_core::facade_support::SystemClock
 }
 
+/// A fresh, unguessable nonce drawn from OS randomness. Journaled verdicts
+/// that must mint a discriminator no redrive can reproduce — a process
+/// segment's admission nonce — draw it through this seam so the scanned drive
+/// paths name the draw rather than spelling `Uuid::new_v4` (FIG-3672). The
+/// Restate context RNG and the invocation id are never substitutes: both
+/// repeat after a purge, and the nonce exists to tell those apart.
+pub(crate) fn journaled_nonce() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 /// The boxed completion a journaled engine-context operation returns. The
 /// controller context's methods hand back the Restate `ctx.run` step's
 /// future; boxing keeps the trait object-safe across its generic methods.
@@ -193,6 +203,13 @@ pub(crate) fn system_clock() -> &'static dyn lash_core::Clock {
 /// paths, so drive code refers to the seam by name.
 pub(crate) type JournaledFuture<'a, T, E = restate_sdk::errors::TerminalError> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'a>>;
+
+/// A journaled step's body as the recorded-effect protocol hands it to the
+/// engine: its output is the entry the journal slot keeps. Same erased-shape
+/// seam as [`JournaledFuture`], for bodies that produce a record rather than
+/// a `Result` (FIG-3672).
+pub(crate) type JournaledStepFuture<'a, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 #[cfg(test)]
 mod tests;

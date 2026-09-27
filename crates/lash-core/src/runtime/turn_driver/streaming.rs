@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use futures_util::FutureExt as _;
+
 use crate::ModelGenerationClamp;
 
 use lash_trace::{
@@ -241,8 +243,7 @@ impl RuntimeTurnDriver<'_> {
                 self.host.core.clock.as_ref(),
             );
         }
-        let (llm_stream_tx, mut llm_stream_rx) =
-            tokio::sync::mpsc::unbounded_channel::<LlmStreamEvent>();
+        let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
         let provider_trace =
             self.provider_trace_sender(protocol_iteration, llm_call_id.clone(), &debug);
@@ -332,17 +333,19 @@ impl RuntimeTurnDriver<'_> {
             ))),
         );
         let mut call_record = None;
+        let mut stream_closed = false;
         let result = loop {
-            tokio::select! {
-                _ = cancel.cancelled() => {
+            match poll_drive_sources(cancel, &mut llm_task, &mut llm_stream_rx, stream_closed).await
+            {
+                DrivePollOutcome::Cancelled => {
                     llm_task.abort();
                     let failure = crate::llm::transport::LlmTransportError::new("cancelled")
-                    .with_kind(crate::ProviderFailureKind::Unknown)
-                    .with_lash_code(TurnFailureCode::Cancelled)
-                    .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
-                    .with_retry_verdict(
-                        crate::llm::transport::TransportRetryVerdict::NotRetryable,
-                    );
+                        .with_kind(crate::ProviderFailureKind::Unknown)
+                        .with_lash_code(TurnFailureCode::Cancelled)
+                        .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
+                        .with_retry_verdict(
+                            crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                        );
                     call_record = Some(crate::provider::synthetic_terminal_call_record(
                         call_id.clone(),
                         crate::AttemptOutcome::Aborted,
@@ -355,9 +358,15 @@ impl RuntimeTurnDriver<'_> {
                         ),
                         completion_sideband.replay_drops(),
                     ));
-                    break Err(crate::runtime::effect::llm_call_error_from_transport(failure));
+                    break Err(crate::runtime::effect::llm_call_error_from_transport(
+                        failure,
+                    ));
                 }
-                Some(stream_event) = llm_stream_rx.recv() => {
+                DrivePollOutcome::Stream(stream_event) => {
+                    let Some(stream_event) = *stream_event else {
+                        stream_closed = true;
+                        continue;
+                    };
                     if let Err(err) = self
                         .forward_provider_stream_event(
                             &mut host_forwarder,
@@ -455,7 +464,7 @@ impl RuntimeTurnDriver<'_> {
                         break Ok(resp);
                     }
                 }
-                join = &mut llm_task => {
+                DrivePollOutcome::Joined(join) => {
                     let result = match join {
                         Ok(v) => {
                             llm_task_abort.disarm();
@@ -463,7 +472,8 @@ impl RuntimeTurnDriver<'_> {
                         }
                         Err(e) if e.is_panic() => {
                             let payload = e.into_panic();
-                            let message = crate::panic_containment::payload_message(payload.as_ref());
+                            let message =
+                                crate::panic_containment::payload_message(payload.as_ref());
                             call_record = Some(crate::LlmCallRecord {
                                 call_id: call_id.clone(),
                                 label: None,
@@ -480,8 +490,12 @@ impl RuntimeTurnDriver<'_> {
                                         charge_safety: None,
                                     }),
                                     error: Some(crate::NormalizedError {
-                                        class: crate::ProviderFailureKind::Unknown.code().to_string(),
-                                        code: Some(FailureCode::lash(TurnFailureCode::ProviderPanicked)),
+                                        class: crate::ProviderFailureKind::Unknown
+                                            .code()
+                                            .to_string(),
+                                        code: Some(FailureCode::lash(
+                                            TurnFailureCode::ProviderPanicked,
+                                        )),
                                         http_status: None,
                                         provider_request_id: None,
                                         retry_after: None,
@@ -554,7 +568,7 @@ impl RuntimeTurnDriver<'_> {
                                 resp.usage = streamed_usage.clone();
                             }
                             stream_accumulator.apply_to_response(&mut resp);
-                            break Ok(resp)
+                            break Ok(resp);
                         }
                         Err(e) => {
                             let crate::ProviderCompletionError {
@@ -1428,15 +1442,20 @@ impl RuntimeTurnDriver<'_> {
     async fn collect_trailing_stream_events_before_abort<T>(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
-        llm_task: &mut tokio::task::JoinHandle<T>,
-        llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,
+        llm_task: &mut crate::task::JoinHandle<T>,
+        llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
-        let deadline = self.host.core.clock.now() + self.host.core.control.abort_drain_grace;
+        let clock = self.host.core.clock.clone();
+        let deadline = clock.now() + self.host.core.control.abort_drain_grace;
         loop {
-            tokio::select! {
-                _ = self.host.core.clock.sleep_until(deadline) => break,
-                event = llm_stream_rx.recv() => match event {
+            let deadline_wait = clock.sleep_until(deadline);
+            futures_util::pin_mut!(deadline_wait);
+            let stream_recv = llm_stream_rx.recv();
+            futures_util::pin_mut!(stream_recv);
+            futures_util::select_biased! {
+                _ = deadline_wait.fuse() => break,
+                event = stream_recv.fuse() => match event {
                     None | Some(LlmStreamEvent::AttemptReset) => break,
                     Some(event) => {
                         self.forward_provider_stream_event(forwarder, event, state).await?;
@@ -1451,7 +1470,7 @@ impl RuntimeTurnDriver<'_> {
     async fn drain_provider_stream_queue(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
-        llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,
+        llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
         while let Ok(stream_event) = llm_stream_rx.try_recv() {

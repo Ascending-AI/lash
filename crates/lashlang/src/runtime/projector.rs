@@ -94,7 +94,7 @@ impl BudgetedJsonProjector {
     }
 
     pub fn project_blocking(&self, context: ValueProjectionContext<'_>) -> String {
-        futures_executor::block_on(self.project(context))
+        lash_sansio::future::drive_sync(self.project(context))
     }
 
     fn is_unbounded(&self) -> bool {

@@ -1,7 +1,7 @@
 //! Bytecode executor for compiled chunks, host effects, and trace/profile data.
 
+use lash_sansio::profile::ProfileMark;
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::span::Span;
@@ -1431,7 +1431,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         reason = "the push item was reserved in this same slot walk above, per the thrice-repeated message"
     )]
     async fn execute_intrinsic_instruction(&mut self, op: IntrinsicOp) -> Result<(), RuntimeError> {
-        let start = self.profile.as_ref().map(|_| Instant::now());
+        let start = self.profile.as_ref().map(|_| ProfileMark::now());
         match op {
             IntrinsicOp::JavaScriptSplit => self.execute_javascript_split()?,
             IntrinsicOp::JavaScriptJoin => self.execute_javascript_join()?,
@@ -1627,7 +1627,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
         }
         if let Some(start) = start {
-            self.record_builtin_profile(op, start.elapsed().as_nanos());
+            self.record_builtin_profile(op, start.elapsed_nanos());
         }
         Ok(())
     }

@@ -951,7 +951,7 @@ pub(crate) async fn execute_join_builtin_async(
 
 #[cfg(test)]
 pub(crate) fn execute_join_builtin(items: &Value, sep: &Value) -> Result<Value, RuntimeError> {
-    futures_executor::block_on(execute_join_builtin_async(items, sep))
+    lash_sansio::future::drive_sync(execute_join_builtin_async(items, sep))
 }
 
 pub(crate) fn execute_range_builtin(values: &[Value]) -> Result<Value, RuntimeError> {
@@ -1027,7 +1027,7 @@ pub(crate) async fn execute_push_builtin_async(
 
 #[cfg(test)]
 pub(crate) fn execute_push_builtin(list: &Value, item: Value) -> Result<Value, RuntimeError> {
-    futures_executor::block_on(execute_push_builtin_async(list.clone(), item))
+    lash_sansio::future::drive_sync(execute_push_builtin_async(list.clone(), item))
 }
 
 pub(crate) fn as_range_bound(value: &Value) -> Result<i64, RuntimeError> {
@@ -1426,7 +1426,7 @@ pub(crate) fn is_truthy(value: &Value) -> Result<bool, RuntimeError> {
         Value::String(value) => !value.is_empty(),
         Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => true,
         Value::Tuple(values) => !values.is_empty(),
-        Value::Projected(value) => futures_executor::block_on(value.truthy())?,
+        Value::Projected(value) => lash_sansio::future::drive_sync(value.truthy())?,
         Value::Ref(_) => {
             debug_assert_exported_value("truthiness");
             true

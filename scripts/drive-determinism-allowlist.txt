@@ -12,32 +12,6 @@
 # delete or decrement entries. The comment carries the FIG-3672 inventory id
 # for each pinned site (UNMAPPED = the line lint flags code the §1 tables do
 # not cite by line; OBS = a §1 observation-only site).
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,  |  2  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_task: &mut tokio::task::JoinHandle<T>,  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  tokio::select! {  |  2  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  tokio::sync::mpsc::unbounded_channel::<LlmStreamEvent>();  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  handle: tokio::task::AbortHandle,  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn new(handle: tokio::task::AbortHandle) -> Self {  |  1  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED
-crates/lash-lashlang-runtime/src/process.rs  |  Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB3
-crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  Pin<Box<dyn Future<Output = Result<AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB2
-crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = JournaledEffectRecord> + Send + 'run>>,  |  1  # SB30
-crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = RecordedRuntimeEffect> + Send + 'run>>,  |  1  # SB30
-crates/lash-restate/src/durable_wait.rs  |  deadline.remaining(lash_core::facade_support::SystemClock.timestamp_ms())?;  |  1  # CR13
 crates/lash-restate/src/effect_group/dispatch.rs  |  let Json(outcome) = tokio::select! {  |  1  # UNMAPPED
 crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select! {  |  2  # AC18 UNMAPPED
 crates/lash-restate/src/effect_group/dispatch.rs  |  tokio::select! {  |  1  # AC18
-crates/lash-restate/src/process/admission.rs  |  nonce: uuid::Uuid::new_v4().to_string(),  |  1  # UNMAPPED
-crates/lash-restate/src/process/mod.rs  |  std::time::SystemTime::now()  |  1  # CR16
-crates/lashlang/src/runtime/format.rs  |  futures_executor::block_on(append_stringified_value_async(output, value))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/format.rs  |  futures_executor::block_on(apply_format_async(template, args))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/format.rs  |  futures_executor::block_on(stringify_value_async(value))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/json.rs  |  futures_executor::block_on(to_json_async(value))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/ops.rs  |  Value::Projected(value) => futures_executor::block_on(value.truthy())?,  |  1  # AC38
-crates/lashlang/src/runtime/ops.rs  |  futures_executor::block_on(execute_join_builtin_async(items, sep))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/ops.rs  |  futures_executor::block_on(execute_push_builtin_async(list.clone(), item))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/projector.rs  |  futures_executor::block_on(self.project(context))  |  1  # UNMAPPED
-crates/lashlang/src/runtime/value.rs  |  futures_executor::block_on(self.materialize_async())  |  1  # AC38
-crates/lashlang/src/runtime/value.rs  |  pub type ProjectedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;  |  1  # SB5
-crates/lashlang/src/runtime/vm/control.rs  |  .map(|_| (instruction.profile_tag(), Instant::now()));  |  1  # UNMAPPED
-crates/lashlang/src/runtime/vm/mod.rs  |  let start = self.profile.as_ref().map(|_| Instant::now());  |  1  # UNMAPPED

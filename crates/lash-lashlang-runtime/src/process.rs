@@ -2,7 +2,6 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 #[cfg(any(test, feature = "testing"))]
 use std::sync::atomic::AtomicBool;
@@ -1038,7 +1037,7 @@ async fn wait_since_ms(
 }
 
 type ProcessHostAbilityFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;
+    lash_sansio::future::SendBoxFuture<'a, Result<lashlang::AbilityResult, ExecutionHostError>>;
 
 impl LashlangProcessHost<'_> {
     fn resource_payload(

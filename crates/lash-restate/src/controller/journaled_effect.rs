@@ -5,7 +5,6 @@
 //! give-up because the effect could never be journaled at all.
 
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use lash_core::{
@@ -214,7 +213,7 @@ where
         // Restate SDK stores this future in its ctx.run state machine, so
         // accepting it inline here makes every composed turn carry the whole
         // executor frame through the durable adapter.
-        future: Pin<Box<dyn Future<Output = RecordedRuntimeEffect> + Send + 'run>>,
+        future: crate::JournaledStepFuture<'run, RecordedRuntimeEffect>,
     ) -> Result<RecordedRuntimeEffect, RestateEffectError>
     where
         'ctx: 'run,
@@ -358,12 +357,9 @@ where
     pub(super) async fn record_eager_effect<'run>(
         &'run self,
         envelope: &RuntimeEffectEnvelope,
-        future: Pin<
-            Box<
-                dyn Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
-                    + Send
-                    + 'run,
-            >,
+        future: crate::JournaledStepFuture<
+            'run,
+            Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
         >,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>
     where
@@ -404,7 +400,7 @@ where
         &'run self,
         effect_name: String,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
-        future: Pin<Box<dyn Future<Output = JournaledEffectRecord> + Send + 'run>>,
+        future: crate::JournaledStepFuture<'run, JournaledEffectRecord>,
     ) -> Result<RecordedRuntimeEffect, RestateEffectError>
     where
         'ctx: 'run,

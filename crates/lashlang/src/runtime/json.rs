@@ -92,7 +92,7 @@ pub(crate) fn to_json_async<'a>(value: &'a Value) -> ProjectedFuture<'a, serde_j
 #[cfg(test)]
 pub(crate) fn to_json(value: &Value) -> serde_json::Value {
     if value_contains_projected(value) {
-        futures_executor::block_on(to_json_async(value))
+        lash_sansio::future::drive_sync(to_json_async(value))
     } else {
         to_json_direct(value)
     }

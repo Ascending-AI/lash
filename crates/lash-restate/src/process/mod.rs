@@ -73,14 +73,12 @@ pub(crate) fn process_hand_over_verdict(
 /// Wall-clock epoch milliseconds for terminal evidence written at the Restate
 /// tier (ADR 0110). The Restate boundary carries no
 /// injected Lash clock — its durability comes from the engine and workflow-key
-/// coalescing rather than a Lash lease — so it reads the system clock directly,
-/// and only inside a journaled step or before the handler's first command
-/// (FIG-3673): the stamp a step journals is the one every redrive publishes.
+/// coalescing rather than a Lash lease — so it reads the system clock through
+/// [`crate::system_clock`], and only inside a journaled step or before the
+/// handler's first command (FIG-3673): the stamp a step journals is the one
+/// every redrive publishes.
 fn restate_now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as u64)
-        .unwrap_or(0)
+    crate::system_clock().timestamp_ms()
 }
 
 /// Restate's single-writer discipline is per-`process_id` workflow-key coalescing, not a Lash
