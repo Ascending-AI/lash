@@ -8,6 +8,7 @@
 //! the refusal on every engine: in process, and inside a Restate handler.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 use pretty_assertions::assert_eq;
 
 /// What a refused run of a law's turn reports: the builder's admission
@@ -416,7 +417,7 @@ async fn refuse_claim<F, S>(
                             crate::TurnInput::text("direct turn on a pre-cutover session");
                         input.trace_turn_id = Some(identity.turn_id.clone());
                         runtime
-                            .stream_turn(
+                            .drive_child_session_turn(
                                 input,
                                 crate::TurnOptions::new(
                                     tokio_util::sync::CancellationToken::new(),

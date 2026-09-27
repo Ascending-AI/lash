@@ -311,20 +311,6 @@ impl LashRuntime {
         .await
     }
 
-    pub(in crate::runtime) async fn stream_prepared_turn_inner(
-        &mut self,
-        context: PreparedTurnExecuteContext<'_, '_>,
-    ) -> Result<PhysicalTurnExecution, RuntimeError> {
-        // Host-prepared turns ran no prepare-turn hooks, so no in-turn graph
-        // append can predate this draft.
-        let turn_graph_appends = TurnGraphAppendDraft::from_resident_state(
-            &self.state,
-            Arc::clone(&self.host.core.clock),
-        );
-        self.stream_prepared_turn_inner_with_graph_appends(context, turn_graph_appends)
-            .await
-    }
-
     /// Run one prepared physical turn. Everything it publishes goes through
     /// the logical turn's observer, addressed to this turn.
     #[expect(

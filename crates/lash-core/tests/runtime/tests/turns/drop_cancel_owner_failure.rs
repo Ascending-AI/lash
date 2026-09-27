@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::store::{RuntimePersistenceDecorator, TurnInputStore as _};
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f460;
 
@@ -33,9 +34,13 @@ impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
         authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(lash_core::StoreError::Backend(
-                "injected finish-time cancellation authorization failure".to_string(),
-            ));
+            // An outcome, not a live fault: the engine refuses the root
+            // instead of retrying it, so the owner's teardown runs
+            // (FIG-3897).
+            return Err(lash_core::StoreError::RecordEncodingFailed {
+                record_kind: "turn cancel closure".to_string(),
+                message: "injected finish-time cancellation authorization failure".to_string(),
+            });
         }
         lash_core::store::TurnInputStore::authorize_turn_cancel_closure(
             self.inner.as_ref(),
@@ -108,10 +113,12 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .run_turn_assembled(
+                .drive_turn(
                     TurnInput::text("cancel before the owner loses its finish commit"),
-                    CancellationToken::new(),
-                    handler.scoped(),
+                    lash_core::facade_support::TurnOptions::new(
+                        CancellationToken::new(),
+                        handler.scoped(),
+                    ),
                 )
                 .await;
             handler.close().await.expect("close the scope's handler");
@@ -167,7 +174,15 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         .expect("failed owner turn should return")
         .expect("turn task")
         .expect_err("injected owner failure must reject finish-time authorization");
-    assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RecordEncodingFailed
+    );
+    assert_eq!(
+        error.turn_failure_cause(),
+        lash_core::TurnFailureCause::Outcome,
+        "the owner failure is an outcome the engine refuses, not a live fault it retries"
+    );
     assert!(
         error
             .message

@@ -11,6 +11,7 @@
 //! ignores its cancellation token.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -119,7 +120,7 @@ fn spawn_turn(
                     Box::pin(async move {
                         let turn = build_runtime(parts)
                             .await
-                            .stream_turn(
+                            .drive_turn(
                                 input,
                                 crate::TurnOptions::new(
                                     tokio_util::sync::CancellationToken::new(),

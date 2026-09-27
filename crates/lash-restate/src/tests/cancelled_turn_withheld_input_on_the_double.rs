@@ -1,5 +1,5 @@
 //! The FIG-3531 cancelled-turn withheld-input law under the Restate effect
-//! engine's in-process face. The law drives `stream_turn` itself, which a
+//! engine's in-process face. The law drives its turn itself, which a
 //! handler-bound controller cannot serve from a test task, so the fixture is
 //! the direct-turn one: the Restate controller over its recording context —
 //! the same journaled-run and scope-fence path a handler execution takes —

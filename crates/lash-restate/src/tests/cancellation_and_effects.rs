@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 #[tokio::test]
 pub(super) async fn execute_await_event_forwards_the_invocation_replay_key() {
@@ -1365,7 +1366,7 @@ pub(super) async fn run_restate_replay_turn(
         .scoped_effect_controller(durable_admission(&durable_turn_scope(session_id, turn_id)))
         .expect("scoped restate controller");
     runtime
-        .stream_turn(
+        .drive_turn(
             replay_test_input(turn_id),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

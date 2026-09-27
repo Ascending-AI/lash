@@ -12,6 +12,7 @@
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f460;
 
@@ -52,7 +53,7 @@ async fn run_pinned_controller_turn(
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text(prompt),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -87,7 +88,7 @@ async fn code_execution_turn_commits_the_pinned_bytes() {
     assert_commit_pins(
         "code execution",
         &commits,
-        &["9627bb31bbda473b74cc895bbbaeed7e61a166407ba59bdd52c7c6840cbc8500"],
+        &["26ca4be0977f6975a77465628326edffda66e1386270aa7426b3b672ffe4f09e"],
     );
 }
 
@@ -110,7 +111,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["04f4b86b5c96e393fe93bae4416757672caca6bad3c5a7b5492393b7ebe2a2fe"],
+        &["e374dc3576b3797cbaac67212e5efa1b49ae826602477635fcad211d023f7998"],
     );
 }
 
@@ -134,6 +135,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["37c7458cbe3e75f5131b9fee0a499d6a8bb637ca824159edc99ea283731a5740"],
+        &["131762ec49e49902ec7b56de703a81ee4490ebe001002efde1e2194d589f93be"],
     );
 }

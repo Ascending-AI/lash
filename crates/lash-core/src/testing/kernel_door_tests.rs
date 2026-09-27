@@ -2,6 +2,7 @@
 //! Restate server double links another build of this crate, so only types
 //! from below it cross, and a turn still runs on an open handler.
 
+use crate::testing::TestTurnDrive as _;
 use std::sync::Arc;
 
 use super::runtime_helpers::{
@@ -45,7 +46,7 @@ async fn a_unit_test_turn_runs_in_an_open_handler_on_the_double() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

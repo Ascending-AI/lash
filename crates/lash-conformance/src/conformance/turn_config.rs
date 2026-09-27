@@ -7,6 +7,7 @@
 //! reaches the root's replay, and an input that arrives after the change
 //! runs under it.
 
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -174,7 +175,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
             Box::pin(async move {
                 let mut runtime = build_runtime(parts).await;
                 let turn = runtime
-                    .stream_turn(
+                    .drive_turn(
                         text_input(&root, "first question"),
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )
@@ -201,7 +202,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
             Box::pin(async move {
                 let mut runtime = build_runtime(parts).await;
                 let turn = runtime
-                    .stream_turn(
+                    .drive_turn(
                         text_input(&root, "first question"),
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )
@@ -288,7 +289,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_replays_its_recorded
                 Box::pin(async move {
                     let mut runtime = build_runtime(parts).await;
                     let turn = runtime
-                        .stream_turn(
+                        .drive_turn(
                             text_input(&next, "second question"),
                             crate::TurnOptions::new(
                                 tokio_util::sync::CancellationToken::new(),
@@ -397,7 +398,7 @@ fn text_attempt(
                 command_second_model(&mut runtime).await;
             }
             let turn = runtime
-                .stream_turn(
+                .drive_turn(
                     text_input(&root, text),
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )

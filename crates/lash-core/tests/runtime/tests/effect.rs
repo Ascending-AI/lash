@@ -14,6 +14,7 @@ use lash_core::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice,
 };
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 mod commit_pins;
 mod fig1127;
@@ -63,7 +64,7 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
     .await;
 
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -72,8 +73,10 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("standard-effects")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("standard-effects")),
+            ),
         )
         .await
         .expect("turn");
@@ -131,10 +134,12 @@ async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
     let large_marker = format!("large-turn-marker-{}", "x".repeat(16_384));
 
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text(large_marker.clone()),
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("checkpoint-envelope")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("checkpoint-envelope")),
+            ),
         )
         .await
         .expect("turn");
@@ -177,11 +182,13 @@ async fn controller_rejection_fails_turn_explicitly() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("hello"),
-            CancellationToken::new(),
-            lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
-                .expect("layer the handler's scope"),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
+                    .expect("layer the handler's scope"),
+            ),
         )
         .await
         .expect("turn");
@@ -220,11 +227,13 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("hello"),
-            CancellationToken::new(),
-            lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
-                .expect("layer the handler's scope"),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
+                    .expect("layer the handler's scope"),
+            ),
         )
         .await
         .expect("turn");
@@ -273,7 +282,7 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     let scoped_effect_controller =
         scoped_test_turn(&backend, &recorder, &TurnId::from("stable-scoped-turn"));
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), scoped_effect_controller)
                 .with_events(&NoopEventSink),
@@ -387,7 +396,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         &TurnId::from("scoped-tool-direct"),
     );
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("use direct tool"),
             TurnOptions::new(CancellationToken::new(), scoped_effect_controller)
                 .with_events(&NoopEventSink),
@@ -763,7 +772,7 @@ async fn tool_batch_child_trigger_reaches_the_enclosing_group_settlement() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("emit trigger through a nested batch"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -879,7 +888,7 @@ async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appen
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("emit trigger from tool"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -1046,7 +1055,7 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
     let scoped_effect_controller =
         scoped_test_turn(&backend, &recorder, &TurnId::from("scoped-retry-sleep"));
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("use retry tool"),
             TurnOptions::new(CancellationToken::new(), scoped_effect_controller)
                 .with_events(&NoopEventSink),
@@ -1122,7 +1131,7 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
     .await;
 
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "use the tool".to_string(),
@@ -1131,8 +1140,10 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("tool-replay-effects")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("tool-replay-effects")),
+            ),
         )
         .await
         .expect("turn");
@@ -1218,7 +1229,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     .expect("runtime");
 
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run code".to_string(),
@@ -1227,8 +1238,10 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("exec-surface-effects")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("exec-surface-effects")),
+            ),
         )
         .await
         .expect("turn");
@@ -1287,7 +1300,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run code".to_string(),
@@ -1296,8 +1309,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -1842,7 +1854,7 @@ async fn an_in_turn_orchestrating_tools_nested_call_emits_one_started_completed_
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("call the nested echo"),
             TurnOptions::new(
                 CancellationToken::new(),

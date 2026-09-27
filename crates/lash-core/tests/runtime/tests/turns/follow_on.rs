@@ -2,6 +2,7 @@
 //! FIG-3542): recovery after a lost drive, chain depth, and the recovery bound.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_b100;
 
@@ -135,7 +136,7 @@ async fn owed_follow_on_with(
         .await
         .expect("open the scope's handler");
     let run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("switch frames"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -466,9 +467,8 @@ async fn drive(
 
 /// FIG-3542, FIG-3600: the session drive recovers a follow-on the head owes
 /// at admission, as a root of its own, before the input waiting behind it.
-/// A direct turn that meets the owed follow-on runs nothing and answers the
-/// typed `QueuedRunPending` hold; the drive then answers its input after the
-/// follow-on, each once.
+/// An input sent while the follow-on is owed runs nothing until the drive,
+/// which answers it after the follow-on, each once.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_the_input_behind_it()
  {
@@ -488,29 +488,20 @@ pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_
         .await
         .expect("the switch owes its follow-on");
 
+    // A host sends an input while the follow-on is owed: it is accepted and
+    // waits, and nothing runs until the session's drive.
     let direct = TurnId::from("fig3542-drive-direct");
-    let handler = owed_run
-        .double
-        .open_handler(AdmittedScope::turn(SessionId::from("root"), direct.clone()))
-        .await
-        .expect("open the scope's handler");
-    let held = owed_run
+    owed_run
         .runtime
         .lock()
         .await
-        .run_turn_assembled(
+        .enqueue_turn_input(
             TurnInput::text("direct input behind the follow-on"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::TurnInputIngress::next_turn(),
+            Some(direct.as_str().to_owned()),
         )
         .await
-        .expect_err("a direct turn never recovers the follow-on");
-    handler.close().await.expect("close the scope's handler");
-    assert_eq!(
-        held.code,
-        lash_core::RuntimeErrorCode::QueuedRunPending,
-        "the direct turn waits behind the follow-on: {held:?}"
-    );
+        .expect("the input is accepted behind the follow-on");
     assert_eq!(owed_run.requests.lock_recover().len(), 1);
     assert_eq!(owed(&owed_run.store).await, Some(follow_on.clone()));
 

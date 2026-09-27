@@ -1,6 +1,6 @@
 use super::turn_loop::{
-    LogicalTurnErrorContext, PreparedTurnExecuteContext, SessionExecutionLeaseReleasePolicy,
-    TurnLeaseScope, TurnPrepareContext, TurnSinks, TurnStopwatch,
+    LogicalTurnErrorContext, SessionExecutionLeaseReleasePolicy, TurnLeaseScope,
+    TurnPrepareContext, TurnSinks, TurnStopwatch,
 };
 use super::*;
 use crate::TurnId;
@@ -337,7 +337,6 @@ pub(super) enum LogicalTurnStart {
     /// An input, with the protocol turn options a follow-on turn recorded
     /// beyond its root's view (`None` for a root's own first turn).
     Input(TurnInput, Option<crate::ProtocolTurnOptions>),
-    Prepared(PreparedLogicalTurn),
     /// A recovered follow-on whose recovery bound is spent (ADR 0101 §3): it
     /// never runs, and commits as the failed turn carrying
     /// `FollowOnRecoveryExhausted` with its task as the delivered input.
@@ -360,11 +359,6 @@ impl LogicalTurnStart {
                     .trace_turn_id
                     .clone()
                     .unwrap_or_else(|| TurnId::from("")),
-            ),
-            Self::Prepared(prepared) => (
-                prepared.protocol_turn_options.clone(),
-                prepared.turn_context.clone(),
-                prepared.trace_turn_id.clone(),
             ),
             Self::ExhaustedFollowOn(owed) => (
                 owed.options.as_deref().cloned(),
@@ -692,33 +686,6 @@ impl LashRuntime {
                             },
                         },
                     ))
-                    .await
-                }
-                LogicalTurnStart::Prepared(mut prepared) => {
-                    prepared.trace_turn_id = turn_trace_turn_id.clone();
-                    // Host-prepared turns enter the physical stream directly,
-                    // bypassing the Input branch's owner-binding wrapper.
-                    // Keep this guard on the logical-turn caller's stack so all
-                    // puts are attributed before final-commit stamping.
-                    let _attachment_owner_binding = self
-                        .host
-                        .core
-                        .durability
-                        .attachment_store
-                        .bind_turn_scoped(prepared.trace_turn_id.clone());
-                    Box::pin(self.stream_prepared_turn_inner(PreparedTurnExecuteContext {
-                        turn: prepared,
-                        sinks: TurnSinks { observer },
-                        scoped_effect_controller: turn_effect_controller,
-                        local_stop: local_stop.clone(),
-                        initial_queue_claims: claims.queued,
-                        initial_turn_input_claims: claims.turn_inputs,
-                        lease: TurnLeaseScope {
-                            guard: session_execution_lease.as_ref(),
-                            release_policy:
-                                SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
-                        },
-                    }))
                     .await
                 }
                 // Committed as its terminal above; it never executes.

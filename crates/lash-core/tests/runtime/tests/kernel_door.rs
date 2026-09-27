@@ -4,6 +4,7 @@
 //! by `&mut`.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_2d00;
 
@@ -49,10 +50,9 @@ async fn a_no_summary_response_is_established_before_execution_evidence_on_the_d
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("observe a response without summary metadata"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("completed response after establishment returns an assembled turn");

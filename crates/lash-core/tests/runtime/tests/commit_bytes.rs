@@ -27,6 +27,7 @@
 //! pinned.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_c2;
 
@@ -120,7 +121,7 @@ async fn run_pinned_turn(
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("use the tool, then answer"),
             TurnOptions::new(cancel, handler.scoped())
                 .with_events(&sessions)
@@ -192,7 +193,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "tool turn",
         &pinned,
-        &["fb91013bf9e95f7c8f571eda41cf50c0da8a632b02c8308c57fea44fbf5ed1dc"],
+        &["8f62b0b8cb285115e28fe8a6fd86e85dfbce05c3e9ba8c77e1db8343eaabe44f"],
         r#"{
             "assistant_output": "done",
             "errors": [],
@@ -266,7 +267,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "parallel tool turn",
         &pinned,
-        &["cef41e5cda12e486a8f896d9ffeade22c56b65d22cf47a16158b022f33b234cb"],
+        &["8cae6d4f9985436c3fd43bfdb9ceb595ce34141c9b2dc55b9af64e2d316f847a"],
         r#"{
             "assistant_output": "all three echoed",
             "errors": [],
@@ -363,7 +364,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "provider failure",
         &pinned,
-        &["cb4d3a13a070305e20a95b75a6426b043f00e9326b7b68be2de9c73ff9588b03"],
+        &["7cad0ebbd30de89790c3cbe31a3b160f54e2ae39ab9152fb5c743da618e8df38"],
         r#"{
             "assistant_output": "",
             "errors": [
@@ -401,7 +402,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled",
         &pinned,
-        &["59f8d07a787b40e9583a15258760cb39af4c1422b76b6e6cd29da82dc5f4502d"],
+        &["535e5a09671c638a224a4ab47b6fbfbb5b831be26c76ec775cc31e890523e82d"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -463,7 +464,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["34c9eecafc3517d074812cefdefb6fb87a6c6fba05cdd49908350280136ffb06"],
+        &["906bfcfabb81bd399d9e59c35523d3158f8e8bbe1f6405e4bdac30e24abd24e0"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -595,7 +596,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .stream_turn(
+                .drive_turn(
                     TurnInput::text("use the tool, then answer"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped())
                         .with_events(&host)
@@ -619,7 +620,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     crate::runtime_support::commit_pins::assert_commit_pins(
         "blocked host",
         &store.runtime_commits(),
-        &["cef41e5cda12e486a8f896d9ffeade22c56b65d22cf47a16158b022f33b234cb"],
+        &["8cae6d4f9985436c3fd43bfdb9ceb595ce34141c9b2dc55b9af64e2d316f847a"],
     );
     assert!(host.received().is_empty(), "the host has taken nothing yet");
 

@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -308,7 +309,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
 
     let turn_activities = RecordingTurnActivities::default();
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             lash_core::TurnInput::text("exercise discovery refusal"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

@@ -443,7 +443,7 @@ impl LashRuntime {
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
         self.mark_phase_end(RuntimeTurnPhase::ContextTransform);
         // Release the read-view's graph clone before the rest of the turn
-        // runs. Keeping it alive into `stream_prepared_turn` forces the
+        // runs. Keeping it alive into the execute phase forces the
         // post-turn `append_active_read_delta` to deep-clone the session
         // graph (Arc::make_mut with refcount > 1).
         drop(turn_ctx);

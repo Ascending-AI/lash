@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_e215;
 
@@ -212,10 +213,12 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
         ))
         .await
         .expect("open the scope's handler");
-    let mut turn = Box::pin(runtime.run_turn_assembled(
+    let mut turn = Box::pin(runtime.drive_turn(
         TurnInput::text("run the first cell"),
-        CancellationToken::new(),
-        turn_scope(&handler, &controller),
+        lash_core::facade_support::TurnOptions::new(
+            CancellationToken::new(),
+            turn_scope(&handler, &controller),
+        ),
     ));
     tokio::select! {
         outcome = turn.as_mut() => panic!("the first cell must still be running: {outcome:?}"),
@@ -285,10 +288,12 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         ))
         .await
         .expect("open the scope's handler");
-    let mut first = Box::pin(runtime.run_turn_assembled(
+    let mut first = Box::pin(runtime.drive_turn(
         TurnInput::text("abort the first cell handoff"),
-        CancellationToken::new(),
-        turn_scope(&handler, &controller),
+        lash_core::facade_support::TurnOptions::new(
+            CancellationToken::new(),
+            turn_scope(&handler, &controller),
+        ),
     ));
     tokio::select! {
         outcome = first.as_mut() => panic!("the first cell must still be running: {outcome:?}"),
@@ -320,10 +325,12 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         .await
         .expect("open the scope's handler");
     let second = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("run the next cell"),
-            CancellationToken::new(),
-            turn_scope(&handler, &controller),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                turn_scope(&handler, &controller),
+            ),
         )
         .await
         .expect("the next cell executes after settlement");

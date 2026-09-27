@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -233,7 +234,7 @@ impl ProductionToolCell {
             .scoped(durable_admission(&turn_scope))
             .expect("scope production tool cell");
         runtime
-            .stream_turn(
+            .drive_turn(
                 replay_test_input(&self.turn_id),
                 lash_core::facade_support::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
@@ -476,7 +477,7 @@ async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec
     let mut crashed = cell.runtime_on(Arc::clone(&crashing)).await;
     let turn_scope = crashed.export_persistence_state().turn_scope(&cell.turn_id);
     let crashed_turn = crashed
-        .stream_turn(
+        .drive_turn(
             replay_test_input(&cell.turn_id),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

@@ -13,6 +13,7 @@
 //! nor the probe is asked again.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -193,7 +194,7 @@ fn attempt(
             let mut input = crate::TurnInput::text("relay, then probe");
             input.trace_turn_id = Some(turn_id);
             let turn = runtime
-                .stream_turn(
+                .drive_turn(
                     input,
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )

@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
+use lash_core::testing::TestTurnDrive as _;
 
 #[path = "lease_and_claims/acceptance_window.rs"]
 mod acceptance_window;
@@ -42,7 +43,7 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
     let turn_events_for_task = turn_events.clone();
     let turn = lash_core::task::spawn(async move {
         runtime
-            .stream_turn(
+            .drive_turn(
                 TurnInput::text("cancel after partial stream"),
                 TurnOptions::new(
                     turn_cancel,
@@ -175,7 +176,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
     let mut runtime = standard_runtime_with_transport(&backend, transport).await;
 
     let assembled = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -260,7 +261,7 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
     let turn_events = RecordingTurnEvents::default();
 
     let assembled = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("retry a pre-response transport failure"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -357,7 +358,7 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
     let turn_events = RecordingTurnEvents::default();
 
     let assembled = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("defer to a provider retry-after"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -481,7 +482,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
     let turn_events = RecordingTurnEvents::default();
 
     let assembled = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("retry after paid output"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -600,7 +601,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
     );
 
     runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("follow up after the failed generation"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -684,7 +685,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
     ))
     .await;
     let first_error = first_worker
-        .stream_turn(
+        .drive_turn(
             input.clone(),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -712,7 +713,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
     ))
     .await;
-    let replayed = Box::pin(replacement.stream_turn(
+    let replayed = Box::pin(replacement.drive_turn(
         input,
         TurnOptions::new(
             CancellationToken::new(),

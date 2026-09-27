@@ -8,6 +8,7 @@
 //! second time.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 use pretty_assertions::assert_eq;
 
 const DIRECT_INPUT: &str = "direct accepted input";
@@ -115,7 +116,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
                 .await
                 .expect("build the direct-acceptance reference runtime");
                 let turn = runtime
-                    .stream_turn(
+                    .drive_child_session_turn(
                         direct_input(&identity),
                         crate::TurnOptions::new(
                             tokio_util::sync::CancellationToken::new(),

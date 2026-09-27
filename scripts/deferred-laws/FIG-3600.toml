@@ -13,7 +13,7 @@ claimant = "lash_restate::tests::turn_laws_on_the_double"
 suite = "direct_turn_acceptance_tests"
 recipe = "parked"
 ticket = "FIG-3600"
-reason = "the laws drive stream_turn on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); S5a-q3 or S8 brings back a handler-bound direct-turn path"
+reason = "the laws drive their turns on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); S5a-q3 or S8 brings back a handler-bound direct-turn path"
 
 [[deferred]]
 file = "crates/lash-restate/src/tests/turn_laws_on_the_double.rs"
@@ -21,7 +21,7 @@ claimant = "lash_restate::tests::turn_laws_on_the_double"
 suite = "restored_claim_cede_tests"
 recipe = "parked"
 ticket = "FIG-3600"
-reason = "the laws drive stream_turn on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); S5a-q3 or S8 brings back a handler-bound redrive path"
+reason = "the laws drive their turns on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); S5a-q3 or S8 brings back a handler-bound redrive path"
 
 [[deferred]]
 file = "crates/lash-restate/src/tests/turn_laws_on_the_double.rs"

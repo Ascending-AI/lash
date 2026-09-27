@@ -411,9 +411,9 @@ pub use normalized_item::NormalizedItem;
 #[cfg(not(feature = "testing"))]
 pub(crate) use normalized_item::NormalizedItem;
 
-/// Optional sinks and scoped effect controller passed to one of [`LashRuntime`]'s
-/// turn-driving entry points (`stream_turn`,
-/// `stream_turn_with_agent_frames`).
+/// Optional sinks and scoped effect controller for a turn the kernel drives in
+/// process: a child session's turn, and a test's turn on the engine's calls
+/// (`testing::TestTurnDrive`).
 ///
 /// Event sinks default to no-op sinks.
 /// Execution scope is explicit and required at every runtime boundary that can execute

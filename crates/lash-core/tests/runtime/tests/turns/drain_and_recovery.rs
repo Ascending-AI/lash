@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 fn sid(s: &str) -> SessionId {
     SessionId::from(s)
@@ -503,10 +504,12 @@ pub(super) async fn cancellation_sealed_before_renewal_failure_remains_evidence_
         async move {
             let handler = open_admitted(&double, admitted).await;
             let assembled = runtime
-                .run_turn_assembled(
+                .drive_turn(
                     TurnInput::text("cancel before the lease renewal fails"),
-                    CancellationToken::new(),
-                    handler.scoped(),
+                    lash_core::facade_support::TurnOptions::new(
+                        CancellationToken::new(),
+                        handler.scoped(),
+                    ),
                 )
                 .await;
             handler.close().await.expect("close the scope's handler");
@@ -633,10 +636,9 @@ pub(super) async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAtPreparedTurn::new(Arc::clone(&clock))));
     let handler = open_turn(&double, sid("root"), tid("final-commit-lease-expiry-turn")).await;
     let assembled = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("lease expires at commit"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("head CAS must authorize final commit after advisory lease expiry");
@@ -694,10 +696,9 @@ pub(super) async fn prepared_checkpoint_continues_after_advisory_lease_expiry() 
     )
     .await;
     let assembled = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("lease expires at prepared checkpoint"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("prepared checkpoint must continue after advisory lease expiry");
@@ -791,7 +792,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     let turn_events = RecordingTurnEvents::default();
     let handler = open_turn(&double, sid("root"), tid("process-wake-turn")).await;
     runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_events(&sink)
@@ -948,10 +949,9 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
         .expect("constrain context window");
     let handler = open_turn(&double, sid("root"), tid("seed-retained-history")).await;
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("r".repeat(900)),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("seed retained history without queued work");
@@ -1373,7 +1373,7 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
     let turn_id = "child-lifecycle-turn";
     let handler = open_turn(&double, handle.session_id.clone(), TurnId::from(turn_id)).await;
     let assembled = child
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1382,8 +1382,7 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("child turn");
@@ -1453,10 +1452,9 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
 
     let handler = open_turn(&double, handle.session_id.clone(), TurnId::from(turn_id)).await;
     let error = child
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("preserve the runtime error"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect_err("the held child session lane must refuse the turn");
@@ -1596,7 +1594,7 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
     assert_eq!(runtime.session_id(), "root");
     let handler = open_turn(&double, sid("root"), tid("ordinary-child-parent-turn")).await;
     let assembled = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "parent turn".to_string(),
@@ -1605,8 +1603,7 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("parent turn");
@@ -1750,7 +1747,7 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
 
     let handler = open_turn(&double, sid("root"), tid("alias-normalize-turn")).await;
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1759,8 +1756,7 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -1836,7 +1832,7 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
 
     let handler = open_turn(&double, sid("root"), tid("unsupported-effort-turn")).await;
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1845,8 +1841,7 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -1915,7 +1910,7 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
     let run_turn = async |runtime: &mut LashRuntime, turn_id: &TurnId| {
         let handler = open_turn(&double, sid("root"), turn_id.clone()).await;
         runtime
-            .run_turn_assembled(
+            .drive_turn(
                 TurnInput {
                     items: vec![InputItem::Text {
                         text: "hello".to_string(),
@@ -1924,8 +1919,10 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
                     protocol_extension: None,
                     turn_context: lash_core::TurnContext::default(),
                 },
-                CancellationToken::new(),
-                handler.scoped(),
+                lash_core::facade_support::TurnOptions::new(
+                    CancellationToken::new(),
+                    handler.scoped(),
+                ),
             )
             .await
             .expect("turn");
@@ -2025,7 +2022,7 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
 
     let handler = open_turn(&double, sid("root"), tid("generation-disposition-turn")).await;
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -2034,8 +2031,7 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -2128,7 +2124,7 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
 
     let handler = open_turn(&double, sid("root"), tid("clamped-cap-turn")).await;
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -2137,8 +2133,7 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("a cap above the model's capacity must not fail the turn");

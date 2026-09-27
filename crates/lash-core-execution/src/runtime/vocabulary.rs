@@ -118,8 +118,8 @@ pub struct AssembledTurn {
 /// Result of driving one logical host turn through any AgentFrame switches.
 ///
 /// A frame switch is an internal runtime continuation, similar to compaction
-/// from a host's perspective. Callers that need a final answer can use
-/// [`LashRuntime::stream_turn_with_agent_frames`] and inspect `final_turn()`.
+/// from a host's perspective. Callers that need a final answer inspect
+/// `final_turn()`.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AgentFrameRun {
     pub turns: Vec<AssembledTurn>,

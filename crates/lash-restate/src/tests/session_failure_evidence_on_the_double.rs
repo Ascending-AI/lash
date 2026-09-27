@@ -1,5 +1,5 @@
 //! The mid-stream failure-evidence law under the Restate effect engine's
-//! in-process face: the law drives `stream_turn` itself, so its effect host is
+//! in-process face: the law drives its turn itself, so its effect host is
 //! the Restate controller over its recording context — journaled runs execute
 //! locally through the same path a handler execution records — over a SQLite
 //! memory store set on an injected clock, so the two settlements order by a

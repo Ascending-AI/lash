@@ -13,6 +13,7 @@
     reason = "test target: the shared turn helper asserts its setup, and clippy exempts only #[test] functions"
 )]
 
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 
 use lash_core::facade_support::{TurnFinish, TurnOptions, TurnOutcome};
@@ -61,7 +62,7 @@ async fn a_kernel_turn_finishes_inside_a_handler_on_the_double() {
                 let turn = runtime
                     .lock()
                     .await
-                    .stream_turn(
+                    .drive_turn(
                         TurnInput::text("hello"),
                         TurnOptions::new(CancellationToken::new(), scoped),
                     )
@@ -152,7 +153,7 @@ async fn a_turn_finishes_in_an_open_handler(double: &lash_restate_test::RestateT
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

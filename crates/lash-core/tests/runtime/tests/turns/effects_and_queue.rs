@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_a300;
 
@@ -110,10 +111,9 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
     // generation and cannot re-steal the turn's own rows.
     let turn = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        runtime.run_turn_assembled(
+        runtime.drive_turn(
             TurnInput::text("long running user turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         ),
     )
     .await
@@ -579,7 +579,7 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
         .await
         .expect("open the scope's handler");
     runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("store an attachment"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -588,158 +588,6 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
     handler.close().await.expect("close the scope's handler");
 
     assert_turn_owned_attachment(store.as_ref(), &TurnId::from(TURN_ID));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-pub(super) async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
-    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    const TURN_ID: &str = "attachment-owner-prepared-turn";
-    let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(AttachmentPutTool),
-        attachment_put_transport(),
-        test_host_config(&backend),
-        runtime_store,
-    )
-    .await;
-    let messages = lash_core::facade_support::MessageSequence::from_owned(vec![Message {
-        id: "prepared-attachment-user".to_string(),
-        role: MessageRole::User,
-        parts: vec![Part::text(
-            "prepared-attachment-user.p0".to_string(),
-            "store an attachment".to_string(),
-            None,
-        )]
-        .into(),
-        origin: None,
-    }]);
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root").clone(),
-            TurnId::from(TURN_ID).clone(),
-        ))
-        .await
-        .expect("open the scope's handler");
-    runtime
-        .stream_prepared_turn(
-            messages,
-            None,
-            None,
-            None,
-            lash_core::TurnContext::default(),
-            Vec::new(),
-            TurnId::from(TURN_ID.to_string()),
-            1,
-            &NoopEventSink,
-            &NoopTurnActivitySink,
-            handler.scoped(),
-            CancellationToken::new(),
-            None,
-            None,
-        )
-        .await
-        .expect("prepared stream turn succeeds");
-    handler.close().await.expect("close the scope's handler");
-
-    assert_turn_owned_attachment(store.as_ref(), &TurnId::from(TURN_ID));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-pub(super) async fn stream_prepared_turn_follows_agent_frame_switch() {
-    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let captured_call_index = Arc::clone(&call_index);
-    let transport = TestProvider::builder()
-        .kind("mock")
-        .requires_streaming(true)
-        .complete(move |_| {
-            let call_index = Arc::clone(&captured_call_index);
-            async move {
-                match call_index.fetch_add(1, Ordering::SeqCst) {
-                    0 => Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::ToolCall {
-                            call_id: "prepared-switch".to_string(),
-                            tool_name: "terminal_tool_0".to_string(),
-                            input_json: "{}".to_string(),
-                            replay: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    }),
-                    1 => Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text: "prepared follow-on complete".to_string(),
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    }),
-                    index => panic!("unexpected provider call {index}"),
-                }
-            }
-        })
-        .build();
-    let mut runtime = runtime_with_plugins_and_tools(
-        &backend,
-        Vec::new(),
-        Arc::new(TerminalControlTool {
-            controls: vec![lash_core::ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("prepared-follow-frame")
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some("finish prepared follow-on".to_string()),
-            }],
-        }),
-        transport,
-    )
-    .await;
-    let messages = lash_core::facade_support::MessageSequence::from_owned(vec![Message {
-        id: "prepared-user".to_string(),
-        role: MessageRole::User,
-        parts: vec![Part::text(
-            "prepared-user.p0".to_string(),
-            "prepared input".to_string(),
-            None,
-        )]
-        .into(),
-        origin: None,
-    }]);
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root").clone(),
-            TurnId::from("prepared-chain").clone(),
-        ))
-        .await
-        .expect("open the scope's handler");
-    let terminal = runtime
-        .stream_prepared_turn(
-            messages,
-            None,
-            None,
-            None,
-            lash_core::TurnContext::default(),
-            Vec::new(),
-            TurnId::from("prepared-chain".to_string()),
-            1,
-            &NoopEventSink,
-            &NoopTurnActivitySink,
-            handler.scoped(),
-            CancellationToken::new(),
-            None,
-            None,
-        )
-        .await
-        .expect("prepared logical turn succeeds");
-    handler.close().await.expect("close the scope's handler");
-    assert_eq!(
-        terminal.assistant_output.safe_text,
-        "prepared follow-on complete"
-    );
-    assert_eq!(call_index.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
@@ -806,7 +654,7 @@ pub(super) async fn process_scoped_agent_frame_follow_on_uses_distinct_cancel_pe
     let follow_on_turn_id = TurnId::from(format!("{root_turn_id}:agent-frame:1"));
 
     let run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("start the process-backed frame chain"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -919,7 +767,7 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
         .await
         .expect("open the scope's handler");
     let run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("start finalized borrowed append probe"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1312,7 +1160,7 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
         .await
         .expect("open the scope's handler");
     let run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("start lapsed in-process handoff"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1444,7 +1292,7 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         .await
         .expect("open the scope's handler");
     let run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("start retained lease chain"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1493,7 +1341,7 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
     }
 
     runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("turn after lease release"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1593,7 +1441,7 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
         .await
         .expect("open the scope's handler");
     let frame_run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("lose the retained lease"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

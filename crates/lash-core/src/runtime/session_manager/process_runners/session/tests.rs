@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::TestTurnDrive as _;
 
 fn recording_factory(
     backend: &crate::Backend,
@@ -817,13 +818,15 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     );
 
     let parent = runtime
-        .run_turn_assembled(
+        .drive_turn(
             crate::TurnInput::text("continue parent"),
-            tokio_util::sync::CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from(runtime.session_id()),
-                &crate::TurnId::from("parent-after-child-panic"),
+            crate::runtime::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                host_turn_scope(
+                    &runtime.host.core,
+                    &SessionId::from(runtime.session_id()),
+                    &crate::TurnId::from("parent-after-child-panic"),
+                ),
             ),
         )
         .await

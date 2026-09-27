@@ -5,6 +5,7 @@
 
 use lash_core::SessionId;
 use lash_core::TurnId;
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -755,10 +756,12 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         .await
         .expect("open the scope's handler");
     let first = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("call the tool"),
-            CancellationToken::new(),
-            first_handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                first_handler.scoped(),
+            ),
         )
         .await
         .expect("turn survives tool panic");
@@ -783,10 +786,12 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         .await
         .expect("open the scope's handler");
     let next = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("continue"),
-            CancellationToken::new(),
-            next_handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                next_handler.scoped(),
+            ),
         )
         .await
         .expect("next turn");
@@ -830,10 +835,12 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         .await
         .expect("open the scope's handler");
     let failed = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("panic provider"),
-            CancellationToken::new(),
-            failed_handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                failed_handler.scoped(),
+            ),
         )
         .await
         .expect("provider panic terminates the turn cleanly");
@@ -869,10 +876,12 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         .await
         .expect("open the scope's handler");
     let next = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("continue"),
-            CancellationToken::new(),
-            next_handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                next_handler.scoped(),
+            ),
         )
         .await
         .expect("next turn");
@@ -918,13 +927,15 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
 
     lash_core::panic_containment::set_loud(false);
     quiet_runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("record provider panic quietly"),
-            CancellationToken::new(),
-            recording_turn_scope(
-                &quiet_controller,
-                &SessionId::from("quiet-provider-record-session"),
-                &TurnId::from("quiet-provider-record-turn"),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                recording_turn_scope(
+                    &quiet_controller,
+                    &SessionId::from("quiet-provider-record-session"),
+                    &TurnId::from("quiet-provider-record-turn"),
+                ),
             ),
         )
         .await
@@ -957,13 +968,15 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
     .expect("loud runtime");
 
     lash_core::panic_containment::set_loud(true);
-    let loud_result = std::panic::AssertUnwindSafe(loud_runtime.run_turn_assembled(
+    let loud_result = std::panic::AssertUnwindSafe(loud_runtime.drive_turn(
         TurnInput::text("record provider panic loudly"),
-        CancellationToken::new(),
-        recording_turn_scope(
-            &loud_controller,
-            &SessionId::from("loud-provider-record-session"),
-            &TurnId::from("loud-provider-record-turn"),
+        lash_core::facade_support::TurnOptions::new(
+            CancellationToken::new(),
+            recording_turn_scope(
+                &loud_controller,
+                &SessionId::from("loud-provider-record-session"),
+                &TurnId::from("loud-provider-record-turn"),
+            ),
         ),
     ))
     .catch_unwind()
@@ -1020,10 +1033,12 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
         ))
         .await
         .expect("open the scope's handler");
-    let panic = std::panic::AssertUnwindSafe(runtime.run_turn_assembled(
+    let panic = std::panic::AssertUnwindSafe(runtime.drive_turn(
         TurnInput::text("panic provider loudly"),
-        CancellationToken::new(),
-        panic_handler.scoped(),
+        lash_core::facade_support::TurnOptions::new(
+            CancellationToken::new(),
+            panic_handler.scoped(),
+        ),
     ))
     .catch_unwind()
     .await;

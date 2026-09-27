@@ -4,6 +4,7 @@
 //! than an `include!`, so `cargo fmt` keeps walking it.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 #[tokio::test]
 pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
@@ -84,7 +85,7 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
         .await;
 
     let assembled = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -191,7 +192,7 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
         .await;
 
     let assembled = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("every attempt fails"),
             TurnOptions::new(
                 CancellationToken::new(),

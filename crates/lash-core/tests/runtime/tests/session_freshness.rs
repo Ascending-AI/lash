@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::SessionCommitStore as _;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f502;
 
@@ -650,10 +651,9 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("drive the invalidated turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the invalidated turn reloads and runs");

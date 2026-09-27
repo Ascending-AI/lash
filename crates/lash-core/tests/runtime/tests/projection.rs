@@ -7,6 +7,7 @@ use super::*;
 use lash_core::PartKind;
 use lash_core::SessionCommitStore as _;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::core_support::*;
 
 const SEED: u64 = 0x5_f505;
@@ -208,7 +209,7 @@ async fn presentation_step_only_changes_model_observation() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run the tool".to_string(),
@@ -217,8 +218,7 @@ async fn presentation_step_only_changes_model_observation() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -313,7 +313,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         .await
         .expect("open the turn's handler");
     let _turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "where did this go?".to_string(),
@@ -322,8 +322,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -955,7 +954,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
         .await
         .expect("open the turn's handler");
     let _turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "where did this go?".to_string(),
@@ -964,8 +963,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");

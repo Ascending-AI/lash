@@ -717,10 +717,12 @@ advisory lock on the merged table.
 **Status.** Decided by Sam on FIG-3600, 2026-09-24, and implemented: `send()`
 is the only caller path, the backend's work driver runs every turn through a
 journaled admission, and the session model is durable config changed by
-command. FIG-3589's surface is deleted (A8). Still published, and owned by
-FIG-3837: `LashRuntime::{stream_turn, run_turn_assembled,
-stream_prepared_turn}` and the live-input gate `ensure_durable_effect_input`
-(A6, A8). It is one wholehog cutover: no aliases,
+command. FIG-3589's surface is deleted (A8), and so are the borrowed-controller
+turn entries `LashRuntime::{stream_turn, run_turn_assembled,
+stream_prepared_turn}` (FIG-3837). A child session's turn, which runs inside
+its parent's execution, is the one turn the kernel still drives in process.
+Still published, and owned by FIG-3837: the live-input gate
+`ensure_durable_effect_input` (A6, A8). It is one wholehog cutover: no aliases,
 no compatibility path for caller-driven turns, and no convenience wrapper that
 runs a turn inline. The evidence, including the design that was not taken, is
 in `/workspace/notes/lash/fig3573-arc/input-lifecycle/`. It amends ADR 0045,

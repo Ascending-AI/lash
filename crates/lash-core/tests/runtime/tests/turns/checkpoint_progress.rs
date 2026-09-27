@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f450;
 
@@ -47,7 +48,7 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -56,8 +57,7 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -110,7 +110,7 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "/yolopush\n\n<skill>\nbody\n</skill>".to_string(),
@@ -119,8 +119,7 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -213,7 +212,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -222,8 +221,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -278,7 +276,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -287,8 +285,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -339,7 +336,7 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -348,8 +345,7 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -407,7 +403,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -416,8 +412,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -519,7 +514,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
         .await
         .expect("open the turn's handler");
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -528,8 +523,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -618,7 +612,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -627,8 +621,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -713,7 +706,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
@@ -882,7 +875,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
@@ -992,7 +985,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1177,7 +1170,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
     // belongs to the admitted turn, which is the run's first one; the run
     // carries the same identity for callers that do not index turns.
     let committed = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             input.clone(),
             TurnOptions::new(CancellationToken::new(), scope),
         )
@@ -1216,7 +1209,7 @@ pub(super) async fn redrive_checkpoint_injected_turn(
     // terminal-checkpoint claim drives. The acceptance identity belongs to
     // the admitted turn, so that is the one returned here.
     let run = runtime
-        .stream_turn_with_agent_frames(input, TurnOptions::new(CancellationToken::new(), scope))
+        .drive_turn_frames(input, TurnOptions::new(CancellationToken::new(), scope))
         .await?;
     handler.close().await.expect("close the scope's handler");
     Ok(run
@@ -1316,7 +1309,7 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
         .expect("layer the handler's scope");
 
     let error = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("claimed out from under the acceptance"),
             TurnOptions::new(CancellationToken::new(), scope),
         )
@@ -1403,10 +1396,12 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
             .await
             .expect("open the turn's handler");
         runtime
-            .run_turn_assembled(
+            .drive_turn(
                 TurnInput::text("first turn input"),
-                CancellationToken::new(),
-                handler.scoped(),
+                lash_core::facade_support::TurnOptions::new(
+                    CancellationToken::new(),
+                    handler.scoped(),
+                ),
             )
             .await
             .expect("first turn");
@@ -1903,7 +1898,7 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
         .await
         .expect("open the turn's handler");
     let run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

@@ -1,3 +1,4 @@
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeSet;
@@ -999,10 +1000,12 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             lash_core::TurnInput::text("run durable follow-on work"),
-            tokio_util::sync::CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                handler.scoped(),
+            ),
         )
         .await
         .expect("run Standard intent turn");

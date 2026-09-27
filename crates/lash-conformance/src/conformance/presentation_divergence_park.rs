@@ -12,6 +12,7 @@
 //! every later redrive refuses the same way.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -143,7 +144,7 @@ fn attempt(
             let mut input = crate::TurnInput::text("call the refusing tool");
             input.trace_turn_id = Some(parts.turn_id.clone());
             let turn = runtime
-                .stream_turn(
+                .drive_turn(
                     input,
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )

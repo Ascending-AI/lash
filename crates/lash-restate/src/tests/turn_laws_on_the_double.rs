@@ -53,7 +53,7 @@ async fn law_session_store(
 // ADR 0069 direct-turn acceptance on the double: one durable acceptance per
 // turn over the deployment host's journaled ingress.
 lash_conformance::direct_turn_acceptance_tests!(
-    #[ignore = "parked: the laws drive stream_turn on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); FIG-3600 S5a-q3 or S8"]
+    #[ignore = "parked: the laws drive their turns on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); FIG-3600 S5a-q3 or S8"]
     {
         let harness =
             LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
@@ -68,7 +68,7 @@ lash_conformance::direct_turn_acceptance_tests!(
 // FIG-3552: a redrive whose journal-restored claim another driver answered
 // cedes instead of committing the same words again.
 lash_conformance::restored_claim_cede_tests!(
-    #[ignore = "parked: the laws drive stream_turn on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); FIG-3600 S5a-q3 or S8"]
+    #[ignore = "parked: the laws drive their turns on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); FIG-3600 S5a-q3 or S8"]
     {
         let harness =
             LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;

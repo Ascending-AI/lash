@@ -19,6 +19,7 @@
 
 use super::direct_turn_acceptance::{acceptance_runtime_for_session, direct_input, text_response};
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use lash_core::testing::conformance_support::ActiveTurnControl;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -240,7 +241,7 @@ impl Harness {
             .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
             .expect("scope the turn");
         self.runtime
-            .stream_turn_with_agent_frames(
+            .drive_turn_frames(
                 direct_input(turn_id, text),
                 crate::TurnOptions::new(cancel, scope),
             )

@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
+use lash_core::testing::TestTurnDrive as _;
 
 #[tokio::test]
 pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
@@ -230,7 +231,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         .scoped_effect_controller(durable_admission(&durable_turn_scope(session_id, turn_id)))
         .expect("scoped replay controller");
     let replay_turn = fresh_worker
-        .stream_turn(
+        .drive_turn(
             replay_test_input(&TurnId::from(turn_id)),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

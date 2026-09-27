@@ -5,6 +5,7 @@ use super::*;
 use lash_core::ToolProvider as _;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::plugin::StaticPluginFactory;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
 
 const SEED: u64 = 0x5_f506;
@@ -739,10 +740,10 @@ async fn preserve_persisted_open_survives_append_receipt_replay() {
     assert_persisted_surface_unchanged(&store, persisted_generation).await;
 }
 
-/// `PreservePersisted` is a fence, not a claim: every turn-execution entry —
-/// a direct turn and the prepared/queued drive a worker would take — refuses
-/// before admission, so the unreconciled surface is never executed against
-/// and `ToolSourcePolicy::Require` cannot be bypassed by opening enqueue-only.
+/// `PreservePersisted` is a fence, not a claim: the engine's drive of a turn
+/// on an enqueue-only open refuses before the turn executes, so the
+/// unreconciled surface is never executed against and
+/// `ToolSourcePolicy::Require` cannot be bypassed by opening enqueue-only.
 #[tokio::test(flavor = "multi_thread")]
 async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
     let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
@@ -778,10 +779,12 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .await
         .expect("open the turn's handler");
     let direct = enqueue_only
-        .run_turn_assembled(
+        .drive_turn(
             lash_core::TurnInput::text("run me anyway"),
-            CancellationToken::new(),
-            direct_handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                direct_handler.scoped(),
+            ),
         )
         .await
         .expect_err("a direct turn on a preserve open is refused");
@@ -795,64 +798,21 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
     );
     assert!(direct.code.is_terminal(), "reopen is the only recovery");
 
-    let messages = lash_core::facade_support::MessageSequence::from_owned(vec![Message {
-        id: "fig3353-prepared".to_string(),
-        role: MessageRole::User,
-        parts: vec![Part::text(
-            "fig3353-prepared.p0".to_string(),
-            "drive the queued row anyway".to_string(),
-            None,
-        )]
-        .into(),
-        origin: None,
-    }]);
-    let queued_handler = double
-        .open_handler(AdmittedScope::turn(
-            session_id.clone(),
-            lash_core::TurnId::from("fig3353-queued"),
-        ))
-        .await
-        .expect("open the turn's handler");
-    let queued = enqueue_only
-        .stream_prepared_turn(
-            messages,
-            None,
-            None,
-            None,
-            lash_core::TurnContext::default(),
-            Vec::new(),
-            lash_core::TurnId::from("fig3353-queued"),
-            1,
-            &NoopEventSink,
-            &NoopTurnActivitySink,
-            queued_handler.scoped(),
-            CancellationToken::new(),
-            None,
-            None,
-        )
-        .await
-        .expect_err("the queued/prepared drive is refused the same way");
-    queued_handler
-        .close()
-        .await
-        .expect("close the turn's handler");
-    assert_eq!(
-        queued.code,
-        lash_core::RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface,
-    );
-
     Box::pin(enqueue_only.park())
         .await
         .expect("park the enqueue-only open");
 
-    // The refused drives left the pending row and the tool surface untouched.
+    // The refused drive left both accepted rows, the queued one and the one
+    // the refused turn sent, pending, and the tool surface untouched.
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
-    assert_eq!(
-        pending.len(),
-        1,
-        "the pending row was never claimed or settled"
+    assert_eq!(pending.len(), 2, "no pending row was settled");
+    assert!(
+        pending
+            .iter()
+            .all(|row| row.input.state == lash_core::TurnInputState::DeferredNextTurn),
+        "no pending row was claimed: {pending:?}"
     );
     assert_persisted_surface_unchanged(&store, persisted_generation).await;
 }

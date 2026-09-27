@@ -17,6 +17,7 @@
 //! model call, finishes the turn and clears the park.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -173,7 +174,7 @@ fn attempt(
                 runtime.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
             }
             let turn = runtime
-                .stream_turn(
+                .drive_turn(
                     drift_input(&turn_id),
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )

@@ -5,6 +5,7 @@
 
 use super::*;
 use lash_core::plugin::AssistantStreamTransform;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f504;
 
@@ -93,7 +94,10 @@ async fn run(
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(TurnInput::text("continue"), token, handler.scoped())
+        .drive_turn(
+            TurnInput::text("continue"),
+            lash_core::facade_support::TurnOptions::new(token, handler.scoped()),
+        )
         .await
         .expect("real runtime driver returns an assembled turn");
     handler.close().await.expect("close the turn's handler");

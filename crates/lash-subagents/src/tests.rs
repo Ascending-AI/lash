@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
@@ -1192,10 +1193,12 @@ async fn run_seed_probe_inner(
         .open_handler(lash_core::AdmittedScope::turn("root", "subagent-test-turn"))
         .await
         .expect("open the turn's handler");
-    let turn = Box::pin(runtime.run_turn_assembled(
+    let turn = Box::pin(runtime.drive_turn(
         input,
-        tokio_util::sync::CancellationToken::new(),
-        handler.scoped(),
+        lash_core::facade_support::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            handler.scoped(),
+        ),
     ))
     .await
     .expect("turn");

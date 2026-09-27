@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::AttachmentStore as _;
 use lash_core::facade_support::ToolStateFacadeOps;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_c401;
@@ -399,10 +400,9 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         .await
         .expect("open the scope's handler");
     child_runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("write the attachment"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("child turn");
@@ -553,10 +553,9 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         .await
         .expect("open the scope's handler");
     child_runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("register the process"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("first child turn");
@@ -799,7 +798,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .await
         .expect("open the scope's handler");
     let first_parent = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("run child"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -844,10 +843,9 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .await
         .expect("open the scope's handler");
     let child_turn = child_runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("run the child turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("child turn");
@@ -865,7 +863,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .await
         .expect("open the scope's handler");
     let second_parent = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("finish up"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1000,7 +998,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         .await
         .expect("open the scope's handler");
     runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("run parent"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1041,10 +1039,9 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         .await
         .expect("open the scope's handler");
     child_runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("run the child turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("child turn");
@@ -1213,10 +1210,9 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
         ))
         .await
         .expect("open the scope's handler");
-    let mut turn = Box::pin(child.run_turn_assembled(
+    let mut turn = Box::pin(child.drive_turn(
         TurnInput::text("park the child turn"),
-        CancellationToken::new(),
-        handler.scoped(),
+        lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
     ));
     tokio::select! {
         _ = started_rx.recv() => {}
@@ -1262,10 +1258,9 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
         .await
         .expect("open the scope's handler");
     let retried = retry_child
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("park the child turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("retried child turn");
@@ -1294,10 +1289,9 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
         .await
         .expect("open the scope's handler");
     let recovered = child
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("park the child turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the dropped turn future leaves the child session reusable");

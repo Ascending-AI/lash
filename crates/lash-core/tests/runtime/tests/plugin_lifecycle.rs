@@ -1,5 +1,6 @@
 use super::effect::{RecordingEffectController, host_with_effect_recorder};
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f508;
 
@@ -88,7 +89,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
     )
     .expect("layer the lent controller with the recorder");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -97,8 +98,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            scoped,
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), scoped),
         )
         .await
         .expect("turn remains committed despite an observer-hook failure");

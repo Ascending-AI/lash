@@ -24,6 +24,7 @@
 //! restores the executor at that head (FIG-3684).
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -205,7 +206,7 @@ fn attempt(
                 runtime.set_turn_phase_probe(Arc::new(PanicAfterTurnCommit));
             }
             let turn = runtime
-                .stream_turn(
+                .drive_turn(
                     redrive_input(&turn_id, text),
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )

@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::SessionCommitStore as _;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_a503;
@@ -55,10 +56,9 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         .await
         .expect("open the scope's handler");
     let error = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("account this turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect_err("overflow must reject the durable commit");
@@ -78,10 +78,9 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         .await
         .expect("open the scope's handler");
     let next_error = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("the poisoned ledger must fail closed again"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect_err("the unconfirmed overflowing row must poison the next turn");
@@ -153,10 +152,9 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         .await
         .expect("open the scope's handler");
     let error = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("use the tool, then answer"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect_err("the second LLM usage event must reject cumulative overflow");
@@ -211,7 +209,7 @@ async fn standard_runtime_assembles_stream_only_text_response() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hi".to_string(),
@@ -293,7 +291,7 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "continue".to_string(),
@@ -363,7 +361,7 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "continue".to_string(),
@@ -456,7 +454,7 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
         .expect("open the scope's handler");
     let turn = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        runtime.run_turn_assembled(
+        runtime.drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "trigger slow tool".to_string(),
@@ -465,8 +463,7 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            cancel,
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(cancel, handler.scoped()),
         ),
     )
     .await
@@ -556,7 +553,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run terminal tools".to_string(),
@@ -658,7 +655,7 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run failing terminal tool".to_string(),
@@ -739,7 +736,7 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run the tool".to_string(),
@@ -748,8 +745,7 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -797,7 +793,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hi".to_string(),
@@ -865,7 +861,7 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -874,8 +870,7 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -929,7 +924,7 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -938,8 +933,7 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -1152,10 +1146,9 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         .await
         .expect("open the scope's handler");
     let error = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("account this turn"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect_err("the landed commit's reply is lost");
@@ -1205,10 +1198,12 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
             .await
             .expect("open the scope's handler");
         runtime
-            .run_turn_assembled(
+            .drive_turn(
                 TurnInput::text("account the next turn"),
-                CancellationToken::new(),
-                handler.scoped(),
+                lash_core::facade_support::TurnOptions::new(
+                    CancellationToken::new(),
+                    handler.scoped(),
+                ),
             )
             .await
             .expect("the next turn commits normally");

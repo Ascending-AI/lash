@@ -4,6 +4,7 @@ use lash_core::SessionCommitStore as _;
 use lash_core::ToolProvider as _;
 use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_core::plugin::{SessionAuthorityContext, StaticPluginFactory};
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_c402;
@@ -491,10 +492,9 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .await
         .expect("open the scope's handler");
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("observe the narrowed surface"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("run with narrowed authority");
@@ -511,10 +511,9 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .await
         .expect("open the scope's handler");
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("observe the widened surface"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("run with widened authority");
@@ -1470,10 +1469,9 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .await
         .expect("open the scope's handler");
     resumed
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("commit the rebuilt surface"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("commit after live rebuild");
@@ -1761,10 +1759,9 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("use the newly composed tool"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn through compose_session_catalog boundary");

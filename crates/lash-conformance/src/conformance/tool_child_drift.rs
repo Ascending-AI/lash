@@ -25,6 +25,7 @@
 //! finishes.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -216,7 +217,7 @@ async fn drive(
         let mut input = crate::TurnInput::text("call the probe");
         input.trace_turn_id = Some(turn_id.clone());
         let turn = runtime
-            .stream_turn(
+            .drive_turn(
                 input,
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope.clone()),
             )

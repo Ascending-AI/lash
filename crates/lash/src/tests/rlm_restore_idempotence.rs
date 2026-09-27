@@ -23,6 +23,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -540,47 +541,29 @@ fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController
     lash_core::testing::runtime_helpers::host_turn_scope(&runtime.host.core, &session_id, turn_id)
 }
 
-/// The switch committed its follow-on onto the session head, so a direct turn
-/// meeting it is held behind it (ADR 0101 §3, FIG-3542); the next drain
-/// recovers the owed follow-on on the reloaded resident state and answers it.
+/// The switch committed its follow-on onto the session head, so the
+/// session's next drive recovers the owed follow-on (ADR 0101 §3, FIG-3542) on
+/// the reloaded resident state before it admits anything else.
 async fn run_owed_follow_on(
     runtime: &mut LashRuntime,
     label: &str,
-    held_turn: &str,
+    drive: &str,
 ) -> lash_core::facade_support::AssembledTurn {
-    let held = runtime
-        .run_turn_assembled(
-            TurnInput::text("held behind the follow-on"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(runtime, &TurnId::from(held_turn)),
-        )
-        .await
-        .expect_err("the held turn waits behind the owed follow-on");
-    assert_eq!(
-        held.code,
-        lash_core::RuntimeErrorCode::QueuedRunPending,
-        "{label}: a direct turn waits behind the owed follow-on: {held}"
-    );
-    let view = runtime
-        .read_view()
-        .expect("test runtime frame scope resolves");
-    let session_id = SessionId::from(view.session_id());
-    let drain_id = TurnId::from(format!("{held_turn}-drain"));
+    let turn_id = TurnId::from(drive);
     runtime
-        .stream_next_queued_work(lash_core::facade_support::TurnOptions::new(
-            tokio_util::sync::CancellationToken::new(),
-            lash_core::testing::runtime_helpers::host_queued_scope(
-                &runtime.host.core,
-                &session_id,
-                &drain_id,
+        .drive_next_root(
+            drive,
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                turn_scope(runtime, &turn_id),
             ),
-        ))
+        )
         .await
         .unwrap_or_else(|error| {
             panic!("{label}: resident reload on the same frame must succeed: {error:?}")
         })
-        .ran()
-        .unwrap_or_else(|| panic!("{label}: the drain answers the owed follow-on"))
+        .and_then(lash_core::facade_support::AgentFrameRun::into_final_turn)
+        .unwrap_or_else(|| panic!("{label}: the drive answers the owed follow-on"))
 }
 
 /// (a) A follow-on turn fails after an agent-frame switch; the next turn must
@@ -606,10 +589,12 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
     let old_frame = runtime.export_persistence_state().current_frame_node_id;
 
     let run = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("switch"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, &TurnId::from("fig2521-switch")),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                turn_scope(&runtime, &TurnId::from("fig2521-switch")),
+            ),
         )
         .await
         .expect("a follow-on failure is reported on the committed switch turn");
@@ -708,10 +693,12 @@ async fn reopen_seed_receipt_replay(backend: Backend) {
     assert_eq!(replayed_snapshot, snapshot, "{}", backend.label);
 
     let run = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("go"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, &TurnId::from("fig2521-after-replay")),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                turn_scope(&runtime, &TurnId::from("fig2521-after-replay")),
+            ),
         )
         .await
         .expect("turn after replay");
@@ -804,10 +791,12 @@ async fn faulted_append_rollback(backend: Backend) {
     );
 
     let run = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("go"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, &TurnId::from("fig2521-after-rollback")),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                turn_scope(&runtime, &TurnId::from("fig2521-after-rollback")),
+            ),
         )
         .await
         .unwrap_or_else(|error| panic!("{}: turn after rollback: {error:?}", backend.label));
@@ -874,10 +863,12 @@ async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) 
     } = Box::pin(backend.seeded_session("follow-on-execution", Arc::clone(&script))).await;
 
     let run = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("switch"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, &TurnId::from("fig2521-switch-mutating")),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                turn_scope(&runtime, &TurnId::from("fig2521-switch-mutating")),
+            ),
         )
         .await
         .expect("a follow-on failure is reported on the committed switch turn");
@@ -990,10 +981,12 @@ async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_sqlite() {
 
 async fn turn(runtime: &mut LashRuntime, id: &str) -> lash_core::facade_support::AssembledTurn {
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text(id),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(runtime, &TurnId::from(id)),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                turn_scope(runtime, &TurnId::from(id)),
+            ),
         )
         .await
         .unwrap_or_else(|error| panic!("turn `{id}`: {error:?}"))
@@ -1594,10 +1587,12 @@ fn reassign_response() -> String {
 /// without a commit.
 async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
     let rejected = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("reject-reassignment"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(runtime, &TurnId::from("reject-reassignment")),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                turn_scope(runtime, &TurnId::from("reject-reassignment")),
+            ),
         )
         .await
         .expect_err("the refused finalization fails the turn");

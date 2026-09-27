@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f501;
 
@@ -42,10 +43,9 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("observe a response without summary metadata"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("completed response after establishment returns an assembled turn");
@@ -107,10 +107,9 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("reset response evidence"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("protocol evidence failure returns an assembled turn");
@@ -140,7 +139,7 @@ async fn drive_streamed_turn(
         .await
         .expect("open the turn's handler");
     runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("drive the scripted stream"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_events(&events)

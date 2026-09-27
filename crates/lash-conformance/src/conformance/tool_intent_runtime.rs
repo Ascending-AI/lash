@@ -1,5 +1,6 @@
 use crate::ProcessEventLogTestSupport as _;
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -235,7 +236,7 @@ pub async fn public_signal_intent_wakes_parked_process(
                     .await
                     .expect("build public signal-intent conformance runtime");
                     let turn = runtime
-                        .stream_turn(
+                        .drive_turn(
                             input,
                             crate::TurnOptions::new(
                                 tokio_util::sync::CancellationToken::new(),

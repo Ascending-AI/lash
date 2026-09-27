@@ -1,5 +1,5 @@
-//! Turn ingress: accepting a host turn as durable admission evidence and
-//! claiming the row it just wrote (ADR 0069).
+//! Turn ingress for a child session's in-process turn: accepting it as durable
+//! admission evidence and claiming the row it just wrote (ADR 0069).
 //!
 //! Everything here runs before the prepare phase and hands it a claim, an
 //! execution lane, and the input the claim actually materialized.
@@ -19,28 +19,6 @@ fn clear_process_invocation_correlation_for_ordinary_turn(
 }
 
 impl LashRuntime {
-    /// Accept `input` as durable admission evidence, then drive it to a terminal turn ([ADR
-    /// 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
-    ///
-    /// Identical to [`stream_turn_with_agent_frames`](Self::stream_turn_with_agent_frames)
-    /// except that it returns only the run's terminal physical turn.
-    #[expect(
-        clippy::expect_used,
-        reason = "a logical turn always ends in a physical turn"
-    )]
-    pub async fn stream_turn(
-        &mut self,
-        input: TurnInput,
-        opts: TurnOptions<'_>,
-    ) -> Result<AssembledTurn, RuntimeError> {
-        self.stream_turn_with_agent_frames(input, opts)
-            .await
-            .map(|run| {
-                run.into_final_turn()
-                    .expect("logical turn always contains a terminal physical turn")
-            })
-    }
-
     pub(in crate::runtime) async fn stream_turn_with_scoped_effect_controller_inner(
         &mut self,
         context: TurnPrepareContext<'_, '_>,
@@ -110,68 +88,28 @@ impl LashRuntime {
         .await
     }
 
-    /// Stream one logical host turn, following foreground AgentFrame switches
-    /// until a terminal outcome is reached.
+    /// Run one child session's turn inside its parent's execution, following
+    /// foreground AgentFrame switches until a terminal outcome is reached.
     ///
-    /// A protocol continuation creates a new frame in the same session. Hosts
-    /// that only care about the benchmark/app answer should not need to
-    /// special-case that intermediate outcome; this helper keeps driving the
-    /// same session through each frame's task with the normal runtime turn
-    /// guards.
-    ///
-    /// It is also where a turn is *accepted*: `input` becomes durable admission
-    /// evidence before it is driven
-    /// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
-    ///
-    /// This is the sole turn ingress. The call first commits `input` as a
-    /// `NextTurn` Pending Turn Input row — the same admission evidence
-    /// [`enqueue_turn_input`](Self::enqueue_turn_input) writes
-    /// ([ADR 0010](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0010-pending-turn-input-is-admission-evidence.md))
-    /// — and only then claims that row under the generation-fenced claim
-    /// machinery of
-    /// [ADR 0029](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md)
-    /// and drives it. The acceptance identity rides back on
-    /// [`AgentFrameRun::acceptance`] and on every assembled turn's
-    /// [`AssembledTurn::turn_input_acceptance`].
-    ///
-    /// Consequences a caller must plan for:
-    ///
-    /// * **Durable backends pay one extra store commit per turn.** That is the
-    ///   acceptance commit, and it is stated rather than gated.
-    /// * **This caller is the first driver, not the owner.** Dropping the
-    ///   returned future does not stop the turn; abandonment is expressed by
-    ///   cancelling the accepted input, never by silence.
-    /// * **The session drive runs it, in arrival order (FIG-3600).** The
-    ///   accepted row is driven by the drive body
-    ///   ([`drive_session`](crate::drive::drive_session)): work admitted ahead
-    ///   of it runs first, each root under its own recorded admission, and a
-    ///   root's claim takes the claimable prefix up to
-    ///   [`QueuedWorkBatchingConfig::max_turn_input_claim`](crate::QueuedWorkBatchingConfig::max_turn_input_claim),
-    ///   so this row may run inside an earlier input's root. The call returns
-    ///   the run of the root that drove it.
-    /// * **Live per-turn context stays with this caller.** `protocol_extension`
-    ///   and live `TurnContext` plugin inputs are process-local and cannot be
-    ///   persisted, so a worker that recovers this accepted row drives its
-    ///   durable projection.
-    /// * **One turn id, one admission.** The accepted input's id is derived
-    ///   from the turn's acceptance address (ADR 0069 §6), so re-running the
-    ///   same turn id, whether a durable engine's redrive or a host retry,
-    ///   names the same row: identical words adopt it, and different words are
-    ///   refused as `durable_identity_conflict`. A turn id reused after its
-    ///   turn completed therefore cedes
-    ///   (`accepted_turn_input_ceded`) instead of admitting a second turn. A
-    ///   retry under a fresh turn id is a new turn; a caller that needs
-    ///   at-most-once submission across turn ids names its own `source_key`
-    ///   through [`enqueue_turn_input`](Self::enqueue_turn_input).
-    /// * **A turn id is a source key.** The accepted row's `source_key` is the
-    ///   turn id, so direct turns share the session's
-    ///   `UNIQUE (session_id, source_key)` space with host enqueue ids: a
-    ///   direct turn whose id equals an earlier `.enqueue().id(..)` adopts that
-    ///   row instead of accepting a new one.
+    /// A host never drives a turn: it sends an input and the engine's session
+    /// drive runs it (FIG-3600). The one turn the kernel drives in process is
+    /// a child session's, which runs under its parent's process or turn
+    /// controller (`session_init`). The turn is still *accepted* first:
+    /// `input`'s durable projection is committed as a `NextTurn` Pending Turn
+    /// Input row through a journaled acceptance step
+    /// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)),
+    /// whose id derives from the acceptance address and whose source key is
+    /// the turn id, so a replay adopts the row the first run wrote. The
+    /// session drive body then runs it in arrival order, and the call returns
+    /// the run of the root that drove it, with the acceptance identity on
+    /// [`AgentFrameRun::acceptance`] and on the admitted turn's
+    /// [`AssembledTurn::turn_input_acceptance`]. The live `TurnContext`
+    /// (the parent's process correlation and lineage) cannot be persisted, so
+    /// it is re-attached when the root's claim drives the row.
     ///
     /// A store-less runtime has no store to accept into and drives `input`
-    /// directly; it is the one configuration with no durable ingress at all.
-    pub async fn stream_turn_with_agent_frames(
+    /// directly.
+    pub(crate) async fn stream_turn_with_agent_frames(
         &mut self,
         mut input: TurnInput,
         opts: TurnOptions<'_>,
@@ -421,100 +359,6 @@ impl LashRuntime {
             })
             .count();
         Ok(Some(u64::try_from(ahead).unwrap_or(u64::MAX)))
-    }
-
-    pub async fn run_turn_assembled(
-        &mut self,
-        input: TurnInput,
-        cancel: CancellationToken,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<AssembledTurn, RuntimeError> {
-        self.stream_turn(input, TurnOptions::new(cancel, scoped_effect_controller))
-            .await
-    }
-
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "this is the published `LashRuntime::stream_prepared_turn` signature; \
-                  folding these into a context struct would be a \
-                  public API change, which this ticket forbids"
-    )]
-    #[expect(
-        clippy::expect_used,
-        reason = "the lease is held here and a logical turn ends in a physical turn"
-    )]
-    pub async fn stream_prepared_turn(
-        &mut self,
-        messages: crate::MessageSequence,
-        previous_prompt_usage: Option<TokenUsage>,
-        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
-        protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
-        turn_context: crate::TurnContext,
-        initial_turn_causes: Vec<crate::TurnCause>,
-        trace_turn_id: TurnId,
-        turn_index: usize,
-        events: &dyn EventSink,
-        turn_events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-        cancel: CancellationToken,
-        initial_queue_claim: Option<crate::QueuedWorkClaim>,
-        initial_turn_input_claim: Option<crate::TurnInputClaim>,
-    ) -> Result<AssembledTurn, RuntimeError> {
-        // FIG-3353: queued/prepared drives are turn execution too; a
-        // `PreservePersisted` open refuses before claiming the lane.
-        self.refuse_turn_execution_on_preserved_tool_surface()?;
-        let local_stop = LocalTurnStop::from_token(cancel, None);
-        let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-        let mut session_execution_lease = self.claim_session_execution_lease().await?;
-        if let Some(store) = self.session.as_ref().and_then(Session::history_store) {
-            let fence = session_execution_lease
-                .as_ref()
-                .map(SessionExecutionLeaseGuard::fence)
-                .expect("a store-backed prepared turn acquires its execution lease");
-            if let Err(error) = self
-                .defer_orphaned_turn_inputs_before_drain(
-                    &store,
-                    &fence,
-                    &trace_turn_id,
-                    &scoped_effect_controller,
-                )
-                .await
-            {
-                if let Some(lease) = session_execution_lease.as_ref() {
-                    let _ = lease.release_if_live().await;
-                }
-                return Err(error);
-            }
-        }
-        let result = Box::pin(self.drive_logical_turn(
-            LogicalTurnStart::Prepared(PreparedLogicalTurn {
-                messages,
-                previous_prompt_usage,
-                protocol_turn_options,
-                protocol_extension,
-                turn_context,
-                initial_turn_causes,
-                trace_turn_id,
-                turn_index,
-            }),
-            events,
-            turn_events,
-            scoped_effect_controller,
-            local_stop,
-            LogicalTurnClaims::new(
-                initial_queue_claim.into_iter().collect(),
-                initial_turn_input_claim.into_iter().collect(),
-            ),
-            &mut session_execution_lease,
-            stopwatch,
-        ))
-        .await
-        .map(|run| {
-            run.into_final_turn()
-                .expect("logical turn always contains a terminal physical turn")
-        });
-        self.settle_session_execution_lease(session_execution_lease.as_ref(), result)
-            .await
     }
 }
 

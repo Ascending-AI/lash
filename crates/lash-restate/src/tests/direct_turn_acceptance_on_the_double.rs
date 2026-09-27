@@ -1,5 +1,5 @@
 //! The direct-turn acceptance laws (ADR 0069) under the Restate effect
-//! engine's in-process face. The laws drive `stream_turn` themselves, which a
+//! engine's in-process face. The laws drive their turns themselves, which a
 //! handler-bound controller cannot serve from a test task, so the fixture's
 //! host is the Restate controller over its recording context — the same
 //! journaled-run and scope-fence path a handler execution takes — over a

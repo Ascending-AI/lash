@@ -6,12 +6,18 @@
 //! shape its own drains cannot recover, has a different ingress from its
 //! siblings.
 //!
+//! A host's turn is a send the engine drives; the in-process entry these laws
+//! drive is the one a child session's turn takes inside its parent's
+//! execution, through the testing door
+//! [`TestTurnDrive::drive_child_session_turn`](crate::testing::TestTurnDrive::drive_child_session_turn).
+//!
 //! The suites run a real runtime turn over the supplied durable store and read
 //! it back only through surfaces every backend already owes:
 //! `list_pending_turn_inputs`, `list_turn_input_applications`, and
 //! `cancel_pending_turn_input`.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -199,7 +205,7 @@ pub async fn direct_turn_accepts_before_driving(
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the direct acceptance turn");
     let turn = runtime
-        .stream_turn(
+        .drive_child_session_turn(
             direct_input(&turn_id, "direct turn under durable acceptance"),
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
         )
@@ -318,7 +324,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     crash_turn(
         &store,
         &died,
-        first_driver.stream_turn(
+        first_driver.drive_child_session_turn(
             direct_input(&turn_id, "input the first driver never commits"),
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
         ),
@@ -443,7 +449,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
             .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
             .expect("scope a resubmitted direct turn");
         let turn = runtime
-            .stream_turn(
+            .drive_child_session_turn(
                 direct_input(&turn_id, "the very same words"),
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
             )
@@ -535,7 +541,7 @@ pub async fn busy_execution_lane_defers_an_accepted_direct_turn(
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the refused direct turn");
     let failure = loser
-        .stream_turn(
+        .drive_child_session_turn(
             direct_input(&turn_id, "words admitted only after takeover"),
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
         )
@@ -573,7 +579,7 @@ pub async fn busy_execution_lane_defers_an_accepted_direct_turn(
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the successor direct turn");
     successor
-        .stream_turn(
+        .drive_child_session_turn(
             direct_input(&turn_id, "words admitted only after takeover"),
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
         )
@@ -1018,7 +1024,7 @@ impl Journal {
         crash_turn(
             store,
             &died,
-            runtime.stream_turn(
+            runtime.drive_child_session_turn(
                 direct_input(turn_id, text),
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
             ),
@@ -1054,7 +1060,7 @@ impl Journal {
             .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
             .expect("scope the journaled direct turn");
         runtime
-            .stream_turn(
+            .drive_child_session_turn(
                 direct_input(turn_id, text),
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
             )

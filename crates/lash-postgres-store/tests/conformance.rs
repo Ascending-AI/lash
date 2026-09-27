@@ -312,7 +312,7 @@ fn pg_law_stores(
 }
 
 /// A backend for a law's runtime over `storage`'s store set. These laws drive
-/// real turns through `stream_turn`, so the host must execute effects outside
+/// real turns through the engine's drive calls, so the host must execute effects outside
 /// a handler: a full SQLite engine in a scratch directory is the one
 /// executing host an in-process test can drive that way, and the laws stay on
 /// it until the B4 lane removes the SQL effect host. The store under test is

@@ -4,6 +4,7 @@
 //! commands; a replaying owner honours the same request at the same identity.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_e279;
 
@@ -23,10 +24,12 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
     .await;
 
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("cancel while the model is running"),
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("llm-cancel-boundary")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("llm-cancel-boundary")),
+            ),
         )
         .await
         .expect("cancelled turn");
@@ -109,10 +112,12 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
     .await;
 
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("use the tool, then stop after the step"),
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("after-step-boundary")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("after-step-boundary")),
+            ),
         )
         .await
         .expect("stopped turn");
@@ -184,10 +189,12 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
     .await;
 
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("use the tool, then escalate"),
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("escalated-after-llm")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("escalated-after-llm")),
+            ),
         )
         .await
         .expect("aborted turn");
@@ -243,10 +250,12 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
     )
     .await;
     let first = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("use the tool, then crash before the stop commits"),
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("replayed-after-step")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("replayed-after-step")),
+            ),
         )
         .await
         .expect("first owner stops");
@@ -274,10 +283,12 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
     )
     .await;
     let replayed = replayed_runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("use the tool, then crash before the stop commits"),
-            CancellationToken::new(),
-            scoped_test_turn(&backend, &replaying, &TurnId::from("replayed-after-step")),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &replaying, &TurnId::from("replayed-after-step")),
+            ),
         )
         .await
         .expect("replayed owner stops");

@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_c0aa;
 
@@ -42,12 +43,14 @@ async fn assert_commit_placement(
         session_id,
     );
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("commit"),
-            CancellationToken::new(),
-            effect_host
-                .scoped(lash_core::AdmittedScope::turn(session_id, "placement-turn"))
-                .unwrap(),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                effect_host
+                    .scoped(lash_core::AdmittedScope::turn(session_id, "placement-turn"))
+                    .unwrap(),
+            ),
         )
         .await
         .expect("commit real turn");
@@ -144,7 +147,10 @@ async fn durable_journaled_engine_commits_bypass_local_admission() {
     )
     .expect("layer the handler's scope");
     runtime
-        .run_turn_assembled(TurnInput::text("commit"), CancellationToken::new(), scope)
+        .drive_turn(
+            TurnInput::text("commit"),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), scope),
+        )
         .await
         .expect("commit real turn");
     handler.close().await.expect("close the scope's handler");

@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::Barrier;
@@ -511,7 +512,7 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
     .expect("runtime");
 
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             lash_core::TurnInput::text("respond with mixed parts"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -637,7 +638,7 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
     .expect("runtime");
 
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             lash_core::TurnInput::text("run the batch"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -811,7 +812,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     .expect("runtime");
 
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             lash_core::TurnInput::text("check status"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

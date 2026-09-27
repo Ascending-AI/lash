@@ -67,6 +67,9 @@ mod recording_store;
 pub mod runtime_helpers;
 #[cfg(feature = "testing")]
 pub mod runtime_internals;
+mod turn_drive;
+
+pub use turn_drive::TestTurnDrive;
 
 #[cfg(test)]
 std::thread_local! {

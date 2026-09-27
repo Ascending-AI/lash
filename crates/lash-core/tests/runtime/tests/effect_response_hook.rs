@@ -7,6 +7,7 @@
 
 use super::effect::{RecordingEffectController, host_with_effect_recorder, scoped_test_turn};
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
 use lash_sansio::sync::MutexExt;
 
@@ -120,41 +121,24 @@ fn journaled_raw_completion(recorder: &RecordingEffectController) -> LlmResponse
 
 /// One physical drive of the same logical turn.
 ///
-/// Prepared turns pin the turn index, so a second drive addresses the *same*
-/// journal entries — which is what a redrive is. `run_turn_assembled` would
-/// allocate the next index and silently become a fresh logical turn.
+/// The input's trace id is the turn id, so a second drive re-sends the same
+/// input under the same source key and replays the same admission and root
+/// journal entries, which is what the engine's redrive of the root is.
 async fn drive_turn(
     runtime: &mut LashRuntime,
     backend: &lash_core::Backend,
     recorder: &RecordingEffectController,
     turn_id: &TurnId,
 ) -> Result<AssembledTurn, RuntimeError> {
+    let mut input = TurnInput::text("produce a completion");
+    input.trace_turn_id = Some(turn_id.clone());
     runtime
-        .stream_prepared_turn(
-            lash_core::facade_support::MessageSequence::from_owned(vec![Message {
-                id: format!("{turn_id}-user"),
-                role: MessageRole::User,
-                parts: vec![Part::text(
-                    format!("{turn_id}-user.p0"),
-                    "produce a completion".to_string(),
-                    None,
-                )]
-                .into(),
-                origin: None,
-            }]),
-            None,
-            None,
-            None,
-            lash_core::TurnContext::default(),
-            Vec::new(),
-            TurnId::from(turn_id.to_string()),
-            1,
-            &NoopEventSink,
-            &NoopTurnActivitySink,
-            scoped_test_turn(backend, recorder, turn_id),
-            CancellationToken::new(),
-            None,
-            None,
+        .drive_turn(
+            input,
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(backend, recorder, turn_id),
+            ),
         )
         .await
 }
@@ -317,7 +301,7 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         vec![Arc::clone(&fixture.plugin)],
         Arc::new(EmptyTools),
-        fixture.transport,
+        fixture.transport.clone(),
         host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
@@ -356,8 +340,17 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
         lash_core::PluginRuntimeEvent::Custom { name, .. } if name == "derived-0"
     ));
 
+    // A redrive of the same turn on a fresh runtime addresses the same
+    // journal entries, so both phases replay from the record.
+    let mut redriven_runtime = runtime_with_plugins_and_tools_and_host(
+        vec![Arc::clone(&fixture.plugin)],
+        Arc::new(EmptyTools),
+        fixture.transport,
+        host_with_effect_recorder(&backend, recorder.clone()),
+    )
+    .await;
     let replayed = drive_turn(
-        &mut runtime,
+        &mut redriven_runtime,
         &backend,
         &recorder,
         &TurnId::from("hook-events"),

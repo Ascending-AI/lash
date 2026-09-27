@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_5c02;
 use proptest::prelude::*;
@@ -661,10 +662,12 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .await
         .expect("mint runtime-tier process-signal wait");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             lash_core::TurnInput::text("run intent scenario"),
-            tokio_util::sync::CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                handler.scoped(),
+            ),
         )
         .await
         .expect("run opted-in provider intent turn");

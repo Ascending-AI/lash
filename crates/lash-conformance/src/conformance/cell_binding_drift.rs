@@ -15,6 +15,7 @@
 //!   `lashlang_cell_binding_drift`, parks the turn and dispatches nothing.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -204,7 +205,7 @@ fn attempt(
             let mut input = crate::TurnInput::text("call the probe");
             input.trace_turn_id = Some(turn_id);
             let turn = runtime
-                .stream_turn(
+                .drive_turn(
                     input,
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )

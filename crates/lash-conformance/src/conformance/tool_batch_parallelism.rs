@@ -58,6 +58,7 @@
 //! added.
 
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1224,7 +1225,7 @@ async fn drive_turn(
     // is registered and never run, say.
     let turn = tokio::time::timeout(
         TURN_BUDGET,
-        runtime.stream_turn(
+        runtime.drive_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
         ),

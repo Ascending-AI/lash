@@ -17,6 +17,10 @@
 //! peer turn tries to run first, the owed follow-on blocks its claim: the peer
 //! takes nothing, and the redrive answers the rows once from its journal.
 //!
+//! The logical run and the peer run through the kernel's in-process
+//! accept-then-drive entry, the one a child session's turn takes
+//! ([`TestTurnDrive::drive_child_session_turn`](crate::testing::TestTurnDrive::drive_child_session_turn)).
+//!
 //! A resumed queued run is the complement: it retakes the rows its
 //! checkpoints were assigned under its own generation first, so a restored
 //! claim it settles under that retaken claim is never a peer's supersession
@@ -28,6 +32,7 @@ use super::direct_turn_acceptance::{
 };
 use crate::admit;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -398,7 +403,7 @@ impl JournaledRun {
             )))
             .expect("scope the journaled logical turn");
         runtime
-            .stream_turn(
+            .drive_child_session_turn(
                 direct_input(&self.turn_id, "start the logical run"),
                 crate::TurnOptions::new(CancellationToken::new(), scope),
             )
@@ -491,7 +496,7 @@ async fn peer_is_refused(
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
         .expect("scope the peer turn");
     let held = peer
-        .stream_turn(
+        .drive_child_session_turn(
             direct_input(turn_id, "the peer's own input"),
             crate::TurnOptions::new(CancellationToken::new(), scope),
         )

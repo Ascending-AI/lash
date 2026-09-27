@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_e217;
 
@@ -132,10 +133,9 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         ))
         .await
         .expect("open the scope's handler");
-    let mut turn = Box::pin(runtime.run_turn_assembled(
+    let mut turn = Box::pin(runtime.drive_turn(
         TurnInput::text("wait for host cancellation"),
-        CancellationToken::new(),
-        handler.scoped(),
+        lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
     ));
     tokio::select! {
         outcome = turn.as_mut() => panic!("the turn must still be running: {outcome:?}"),

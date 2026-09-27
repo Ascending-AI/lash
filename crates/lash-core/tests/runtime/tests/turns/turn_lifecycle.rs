@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f410;
 
@@ -148,7 +149,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         ))
         .await
         .expect("open the turn's handler");
-    let mut turn = Box::pin(runtime.stream_turn(
+    let mut turn = Box::pin(runtime.drive_turn(
         TurnInput::text("commit before delivering"),
         TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
     ));
@@ -176,10 +177,9 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         .await
         .expect("open the turn's handler");
     let recovered = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("continue after dropped host delivery"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the adopted resident state remains usable");
@@ -259,10 +259,9 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         .await
         .expect("open the turn's handler");
     let committed = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("switch frames"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("a published commit must not become a whole-turn error");
@@ -361,48 +360,30 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
     );
 
     // The switch committed its follow-on onto the head before the restore
-    // failed, so the next direct turn reloads and then waits behind it
-    // (ADR 0101 §3); the next drain runs the follow-on in its frame.
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root"),
-            TurnId::from("after-post-commit-restore-failure"),
-        ))
-        .await
-        .expect("open the turn's handler");
-    let held = runtime
-        .run_turn_assembled(
-            TurnInput::text("use the reloaded state"),
-            CancellationToken::new(),
-            handler.scoped(),
-        )
-        .await
-        .expect_err("the next direct turn waits behind the owed follow-on");
-    handler.close().await.expect("close the turn's handler");
-    assert_eq!(
-        held.code,
-        lash_core::RuntimeErrorCode::QueuedRunPending,
-        "{held}"
-    );
-    assert_eq!(
-        *runtime.resident_session.validity(),
-        ResidentSessionState::Valid
-    );
-    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
+    // failed, so the session's next drive reloads and then recovers the
+    // owed follow-on in its frame before anything else (ADR 0101 §3).
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             SessionId::from("root"),
             "after-post-commit-restore-failure-drain",
         ))
         .await
-        .expect("open the drain's handler");
+        .expect("open the drive's handler");
     let follow_on = runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_next_root(
+            "after-post-commit-restore-failure-drain",
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
         .await
-        .expect("the drain runs")
-        .ran()
-        .expect("the drain answers the owed follow-on");
-    handler.close().await.expect("close the drain's handler");
+        .expect("the drive runs")
+        .and_then(lash_core::facade_support::AgentFrameRun::into_final_turn)
+        .expect("the drive answers the owed follow-on");
+    handler.close().await.expect("close the drive's handler");
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
+    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
     assert_eq!(
         follow_on.assistant_output.safe_text,
         "resident state reloaded"
@@ -537,10 +518,12 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
             .await
             .expect("open the turn's handler");
         let error = runtime
-            .run_turn_assembled(
+            .drive_turn(
                 lash_core::TurnInput::text("reach the production final commit caller"),
-                CancellationToken::new(),
-                handler.scoped(),
+                lash_core::facade_support::TurnOptions::new(
+                    CancellationToken::new(),
+                    handler.scoped(),
+                ),
             )
             .await
             .expect_err("the injected final commit refusal must reject the turn");
@@ -606,8 +589,13 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     .await
     .expect("enqueue an input scoped to the live turn");
 
-    store.fail_next_runtime_commit(lash_core::StoreError::SessionExecutionLeaseExpired {
-        session_id: SessionId::from(session_id.to_string()),
+    // An outcome, not a live fault: a live fault is the engine's to retry
+    // under the same root, so no teardown runs for it (FIG-3897); a commit
+    // the store refuses for good ends the root, and its teardown owes the
+    // pinned input the repair.
+    store.fail_next_runtime_commit(lash_core::StoreError::RecordEncodingFailed {
+        record_kind: "turn commit".to_string(),
+        message: "injected commit refusal".to_string(),
     });
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -617,17 +605,20 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         .await
         .expect("open the turn's handler");
     let error = runtime
-        .run_turn_assembled(
+        .drive_turn(
             lash_core::TurnInput::text("run the turn that will be fenced at commit"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
-        .expect_err("a fenced commit must fail the turn");
+        .expect_err("a refused commit must fail the turn");
     handler.close().await.expect("close the turn's handler");
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
+        lash_core::RuntimeErrorCode::RecordEncodingFailed
+    );
+    assert_eq!(
+        error.turn_failure_cause(),
+        lash_core::TurnFailureCause::Outcome
     );
 
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(
@@ -724,10 +715,9 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .await
         .expect("open the turn's handler");
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("commit the baseline"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("baseline turn commits its execution state");
@@ -742,10 +732,9 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .await
         .expect("open the turn's handler");
     let error = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("capture must fail"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect_err("dirty capture failure must abort before the turn commit");
@@ -887,10 +876,9 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         .await
         .expect("open the turn's handler");
     let switched = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("redrive an already materialized frame switch"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("an already-current frame switch remains an idempotent no-op");
@@ -1017,10 +1005,9 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
         .await
         .expect("open the turn's handler");
     let switched = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text("switch to a distinct frame"),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("materialized frame switch commits");
@@ -1443,7 +1430,7 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
         .await
         .expect("open the turn's handler");
     let run = runtime
-        .stream_turn_with_agent_frames(
+        .drive_turn_frames(
             TurnInput::text("rotate the frame"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

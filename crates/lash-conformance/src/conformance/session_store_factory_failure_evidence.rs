@@ -2,6 +2,7 @@
 
 use super::session_store_factory::session_store_request;
 use crate::admit;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnFailureCode;
 use lash_sansio::TurnId;
@@ -107,7 +108,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     let mut input = crate::TurnInput::text("trigger a paid mid-stream failure");
     input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
         )
@@ -126,7 +127,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     let mut later_input = crate::TurnInput::text("trigger a later paid mid-stream failure");
     later_input.trace_turn_id = Some(TurnId::from(later_turn_id.to_string()));
     let later_turn = runtime
-        .stream_turn(
+        .drive_turn(
             later_input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), later_scope),
         )

@@ -6,6 +6,7 @@
 use super::*;
 use ::tracing::Instrument;
 use lash_core::facade_support::ToolStateFacadeOps;
+use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
@@ -63,10 +64,9 @@ async fn run_composition_probe_turn(
         .await
         .expect("open the turn's handler");
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput::text(turn_id),
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("composition probe turn");
@@ -426,7 +426,7 @@ async fn provider_spans_are_children_of_the_turn_span() {
         .expect("open the turn's handler");
 
     runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -435,8 +435,7 @@ async fn provider_spans_are_children_of_the_turn_span() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .instrument(turn_span)
         .await
@@ -515,7 +514,7 @@ async fn assert_standard_tool_lifecycle(
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "call the tool".to_string(),
@@ -809,7 +808,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     let turn_events = RecordingTurnEvents::default();
 
     let turn = runtime
-        .stream_turn(
+        .drive_turn(
             TurnInput::text("call the pending tool"),
             TurnOptions::new(CancellationToken::new(), scope).with_turn_events(&turn_events),
         )
@@ -976,7 +975,7 @@ async fn standard_runtime_trace_records_stream_event_entries() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -985,8 +984,7 @@ async fn standard_runtime_trace_records_stream_event_entries() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -1191,7 +1189,7 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1200,8 +1198,7 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -1321,7 +1318,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
             .await
             .expect("open the turn's handler");
         runtime
-            .run_turn_assembled(
+            .drive_turn(
                 TurnInput {
                     items: vec![InputItem::Text {
                         text: "hello".to_string(),
@@ -1330,8 +1327,10 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
                     protocol_extension: None,
                     turn_context: lash_core::TurnContext::default(),
                 },
-                CancellationToken::new(),
-                handler.scoped(),
+                lash_core::facade_support::TurnOptions::new(
+                    CancellationToken::new(),
+                    handler.scoped(),
+                ),
             )
             .await
             .expect("turn");
@@ -1411,7 +1410,7 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1420,8 +1419,7 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");
@@ -1491,7 +1489,7 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .run_turn_assembled(
+        .drive_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1500,8 +1498,7 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            CancellationToken::new(),
-            handler.scoped(),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("turn");

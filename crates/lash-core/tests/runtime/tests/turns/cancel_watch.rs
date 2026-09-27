@@ -16,6 +16,7 @@
 //! from the top on every retry, as a deployment re-runs a turn's handler.
 
 use super::*;
+use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x36_68ca;
 
@@ -115,7 +116,7 @@ where
                 let turn = runtime
                     .lock()
                     .await
-                    .stream_turn(
+                    .drive_turn(
                         TurnInput::text("run a model call over a failing cancellation watch"),
                         TurnOptions::new(CancellationToken::new(), scoped),
                     )
