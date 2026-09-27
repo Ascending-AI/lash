@@ -44,9 +44,12 @@ pub(crate) async fn run_admitted_root_observed(
     controller: &ScopedEffectController<'_>,
     admitted: lash_core::engine::Admitted,
 ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
+    let session = admitted.session().clone();
+    // Marked before the root can commit: a handle that sees its commit waits
+    // for the deposit below while the run is under way.
+    let _running = crate::send::running(binding, &session, admitted.root());
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
-    let session = admitted.session().clone();
     let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
     let sinks = lash_core::drive::DriveSinks {
         events: &lash_core::runtime::NoopEventSink,

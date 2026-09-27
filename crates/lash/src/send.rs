@@ -49,7 +49,7 @@ use lash_core::store::{ParkId, ParkReason, StallReason};
 
 pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
-pub(crate) use mailbox::deposit_settled_root;
+pub(crate) use mailbox::{deposit_settled_root, running};
 
 /// The session a send, a handle or a cancel is bound to.
 #[derive(Clone)]

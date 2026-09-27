@@ -10,9 +10,10 @@
 //!   rides the poll cadence alone — the measured `settle→complete` tail is
 //!   the realized 25 ms..1 s backoff.
 //! * [`AwaitDriveMode::Pending`] never answers the attach, exactly as a
-//!   drive that outlives the measured root does, so a settled root with no
-//!   live report waits the follower's 5 s live-report grace before the
-//!   durable thin report answers.
+//!   drive that outlives the measured root does. The follower's 5 s
+//!   live-report grace binds only while a run in the host may still deposit
+//!   a report, so a root the worker ran answers with the durable thin report
+//!   once the store shows it settled.
 //!
 //! Both still deliver the drive: `schedule_drive`/`request_drive` forward
 //! untouched, only the host-side wait is stubbed, and the real drive runs to
@@ -32,8 +33,7 @@ pub(crate) enum AwaitDriveMode {
     /// Answer immediately as if the drive already stopped; polls alone
     /// carry settlement detection.
     Answered,
-    /// Never answer; the follower waits out the live-report grace before
-    /// reading the durable report.
+    /// Never answer, as a drive that outlives the root does.
     Pending,
 }
 

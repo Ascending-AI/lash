@@ -46,8 +46,16 @@ struct Fixture {
 }
 
 async fn fixture(batch: usize) -> Result<Fixture> {
+    fixture_over(batch, |backend| backend).await
+}
+
+/// [`fixture`] over the double's backend as `layer` rebuilds it.
+async fn fixture_over(
+    batch: usize,
+    layer: impl FnOnce(lash_core::Backend) -> lash_core::Backend,
+) -> Result<Fixture> {
     let double = restate_double(SEED).await;
-    let backend = double.lash_backend();
+    let backend = layer(double.lash_backend());
     let release = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
     let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
@@ -116,6 +124,83 @@ async fn a_root_whose_live_report_is_gone_answers_its_durable_report() -> Result
         Some(&input_id)
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+/// An engine whose drives never answer that they stopped, as a drive that
+/// outlives the root a handle follows does: every other call goes to the
+/// engine underneath.
+struct UnstoppedDrives(Arc<dyn SessionWorkEngine>);
+
+#[async_trait]
+impl SessionWorkEngine for UnstoppedDrives {
+    fn schedule_drive(&self, session: &SessionId, request: lash_core::engine::DriveRequestId) {
+        self.0.schedule_drive(session, request);
+    }
+
+    async fn request_drive(
+        &self,
+        session: &SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> std::result::Result<(), lash_core::engine::EngineRefusal> {
+        self.0.request_drive(session, request).await
+    }
+
+    fn install_session_driver(
+        &self,
+        driver: Arc<dyn lash_core::SessionDriver>,
+    ) -> Arc<dyn lash_core::SessionDriver> {
+        self.0.install_session_driver(driver)
+    }
+
+    fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
+        self.0.control()
+    }
+
+    async fn await_drive(
+        &self,
+        _session: &SessionId,
+        _request: &lash_core::engine::DriveRequestId,
+    ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+        std::future::pending().await
+    }
+}
+
+/// A settled root whose report no run in this process can still deposit
+/// answers from the store at once, although its drive never says it
+/// stopped: the follower waits for a live report only while a run here may
+/// still deposit one, never on a root that ran elsewhere or whose report is
+/// gone (FIG-3843). Before, it waited out the 5 s live-report grace.
+async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
+    let fixture = fixture_over(1, |backend| {
+        let work = backend.session_work();
+        crate::testing::LayeredBackend::over(backend)
+            .with_session_work(Arc::new(UnstoppedDrives(work)))
+            .into_backend()
+    })
+    .await?;
+    let session = fixture.core.session("send-no-grace").open().await?;
+
+    let handle = session
+        .send(TurnInput::text("report me once"))
+        .id("no-grace-root")
+        .await?;
+    let input_id = handle.input_id().clone();
+    let live = handle.output().await?;
+    assert_eq!(live.result.source, crate::ReportSource::Live);
+
+    // The live report is taken and no run of this session is under way here,
+    // so nothing can deposit another: a handle attached now answers from the
+    // store without waiting on the drive that never says it stopped.
+    let started = std::time::Instant::now();
+    let durable = session.attach(input_id).output().await?;
+    let waited = started.elapsed();
+    assert_eq!(durable.result.source, crate::ReportSource::Durable);
+    assert_eq!(durable.assistant_message(), Some("echo: report me once"));
+    assert!(
+        waited < std::time::Duration::from_secs(2),
+        "a root no run here can report answers at once, not after the live-report grace: waited {waited:?}"
+    );
     Ok(())
 }
 
@@ -809,6 +894,11 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_root_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
                 super::a_root_whose_live_report_is_gone_answers_its_durable_report().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
+                super::a_settled_root_no_run_here_can_report_answers_at_once().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

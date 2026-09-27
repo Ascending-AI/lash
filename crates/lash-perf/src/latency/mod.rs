@@ -13,7 +13,8 @@
 //! host-visible completion. Failures land in the same ledger. The
 //! `poll` and `grace` cases isolate the send follower's two tail
 //! behaviours — the 25 ms..1 s polling backoff and the 5 s live-report
-//! grace — by fixing the drive-attach wake the follower waits on.
+//! grace, which binds only while a run in the host may still deposit a
+//! report — by fixing the drive-attach wake the follower waits on.
 
 mod provider;
 mod restate;
@@ -118,9 +119,11 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             lanes,
             busy: false,
         },
-        // The 5 s live-report grace isolated: the drive-attach wake never
-        // resolves, so a settled root with no live report waits the grace
-        // before the durable answer. Runs cross-worker for the same reason.
+        // The 5 s live-report grace's reach: the drive-attach wake never
+        // resolves, as for a drive that outlives the root. The root ran in
+        // the worker, so no run in this process can deposit its report and
+        // the handle answers from the store without waiting the grace.
+        // Runs cross-worker for the same reason.
         CaseSpec {
             name: "grace",
             topology: Topology::CrossWorker,

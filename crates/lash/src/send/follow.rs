@@ -35,8 +35,10 @@ use crate::turn::{ReportSource, TurnOutput, TurnReport};
 const POLL_FLOOR: Duration = Duration::from_millis(25);
 /// The longest wait between store reads.
 const POLL_CEILING: Duration = Duration::from_secs(1);
-/// How long a follower waits for a live report from this process once the
-/// store shows the root settled but the engine's drive has not stopped.
+/// The longest a follower waits for a live report once the store shows the
+/// root settled, while a run in this process may still deposit it and the
+/// engine's drive has not stopped. A root no run here can report answers
+/// from the store at once.
 const LIVE_REPORT_GRACE: Duration = Duration::from_secs(5);
 /// How long an applied input's terminal may stay unreadable after its drive
 /// stopped before the follower answers [`SendError::Unresolved`].
@@ -440,6 +442,11 @@ pub(super) async fn follow(
                     let waiting_for_live = live.is_none()
                         && !last_pass
                         && drive_stopped.is_none()
+                        && mailbox::may_deposit(
+                            ctx.parts.work.store_binding(),
+                            &ctx.parts.session_id,
+                            &root,
+                        )
                         && settled_since.elapsed() < LIVE_REPORT_GRACE;
                     if !waiting_for_live {
                         drain(ctx, &mut adoption, &mut observation, tap).await;
@@ -613,16 +620,18 @@ pub(super) async fn follow(
                 }
             }
             () = &mut deposited => {
-                // A root this process ran deposited its report: resolve
-                // again only when it may be this follower's.
-                resolve_now = match subject {
-                    Subject::Input(receipt) => mailbox::holds_settled_root(
-                        ctx.parts.work.store_binding(),
-                        &ctx.parts.session_id,
-                        &receipt.input_id,
-                    ),
-                    Subject::Root(_) => settled_at.is_some(),
-                };
+                // A run in this process deposited its report or ended:
+                // resolve again when this follower waits on a settled root's
+                // report, or when the deposit may be its input's.
+                resolve_now = settled_at.is_some()
+                    || match subject {
+                        Subject::Input(receipt) => mailbox::holds_settled_root(
+                            ctx.parts.work.store_binding(),
+                            &ctx.parts.session_id,
+                            &receipt.input_id,
+                        ),
+                        Subject::Root(_) => false,
+                    };
             }
             () = &mut sleep => {
                 poll = (poll * 2).min(POLL_CEILING);
