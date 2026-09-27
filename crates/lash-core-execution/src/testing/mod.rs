@@ -988,8 +988,13 @@ pub fn cancelled_code_execution_context<'run>(
         .with_cancellation_token(cancellation)
 }
 
-/// Build an empty code-execution context cancelled after its runtime yields.
-pub async fn code_execution_context_cancelling_after_yield<'run>(
+/// Build an empty code-execution context whose turn's cancellation gate
+/// already carries an `Immediate` local stop. Delivering the stop here, before
+/// the cell runs, is what makes the observation deterministic: a code cell
+/// running on the context meets the request at its first journaled cancel
+/// checkpoint, the same boundary a request landing mid-run would be met at,
+/// instead of racing a spawned delivery against its checkpoint schedule.
+pub async fn code_execution_context_stopped<'run>(
     ports: impl Into<TestExecutionPorts<'run>>,
 ) -> crate::RuntimeExecutionContext<'run> {
     let ports = ports.into();
@@ -1005,23 +1010,18 @@ pub async fn code_execution_context_cancelling_after_yield<'run>(
         .await
         .expect("the test host keys a turn's cancellation gate"),
     );
-    let stopper = Arc::clone(&control);
-    let stop_host = Arc::clone(&host);
-    crate::task::spawn(async move {
-        tokio::task::yield_now().await;
-        stopper
-            .request_local_stop(
-                host.await_event_resolver(),
-                crate::TurnCancelMode::Immediate,
-                None,
-            )
-            .await
-            .expect("the test host resolves the cancellation gate");
-    });
+    control
+        .request_local_stop(
+            host.await_event_resolver(),
+            crate::TurnCancelMode::Immediate,
+            None,
+        )
+        .await
+        .expect("the test host resolves the cancellation gate");
     context.with_recorded_turn_cancel(
         false,
         control,
-        stop_host,
+        host,
         tokio_util::sync::CancellationToken::new(),
     )
 }

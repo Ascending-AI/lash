@@ -529,7 +529,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 std::time::Duration::from_secs(5),
                 execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context_cancelling_after_yield(
+                    lash_core::testing::code_execution_context_stopped(
                         crate::testing::double_ports(&double, &handler),
                     )
                     .await,

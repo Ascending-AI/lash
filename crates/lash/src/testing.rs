@@ -47,7 +47,7 @@ pub use lash_core::testing::{
 /// [`TestExecutionPorts::over_host`]. There is no in-memory default.
 pub use lash_core::testing::{
     TestExecutionPorts, cancelled_code_execution_context, code_execution_context,
-    code_execution_context_cancelling_after_yield, code_execution_context_for_process,
+    code_execution_context_for_process, code_execution_context_stopped,
     code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
     code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
