@@ -35,9 +35,11 @@ ticket per file under `scripts/restate-divergences/`.
 Usage:
   restate_suite.py suite <name> --leg live|replay [--artifacts DIR]
       Build the suite's test binary on the shared build pool, then run it.
-  restate_suite.py serve [--leg live] -- <command...>
+  restate_suite.py serve [--leg live] [--name N] [--port-base P] -- <command...>
       Run <command> beside one server, with RESTATE_INGRESS_URL and
       RESTATE_ADMIN_URL exported (for drivers that own their test processes).
+      A gate that owns a port block passes its base: the server then binds
+      ingress, admin and node on P, P+1 and P+2 instead of free ports.
   restate_suite.py build <label>...
       Build Bazel labels from the shared cache and print each output path.
   restate_suite.py stage-binaries <package> <dir>
@@ -223,6 +225,21 @@ class ReservedPort:
             self._socket = None
 
 
+class FixedPort:
+    """A port a gate owns: its port block is the gate's alone (a kiln gate's
+    or a worktree slot's lock guards it), so nothing is held until the
+    consumer binds it."""
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+
+    def claim(self) -> int:
+        return self.port
+
+    def close(self) -> None:
+        pass
+
+
 def http_ok(url: str) -> bool:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
@@ -240,14 +257,22 @@ def tail(path: Path, lines: int) -> str:
     return "\n".join(content[-lines:])
 
 
+SERVER_PORT_ROLES = ("ingress", "admin", "node")
+
+
 class RestateServer:
-    def __init__(self, name: str, workdir: Path, config: dict[str, str]) -> None:
+    def __init__(self, name: str, workdir: Path, config: dict[str, str], port_base: int | None = None) -> None:
         self.name = name
         self.workdir = workdir
         self.config = config
         # Reserved at construction so a suite can hold every shard's ports
-        # before the first server starts binding them.
-        self.reserved = {role: ReservedPort() for role in ("ingress", "admin", "node")}
+        # before the first server starts binding them; a gate that owns a
+        # port block binds its own.
+        self.reserved: dict[str, ReservedPort | FixedPort] = (
+            {role: ReservedPort() for role in SERVER_PORT_ROLES}
+            if port_base is None
+            else {role: FixedPort(port_base + offset) for offset, role in enumerate(SERVER_PORT_ROLES)}
+        )
         self.ingress_port = 0
         self.admin_port = 0
         self.process: subprocess.Popen[bytes] | None = None
@@ -733,7 +758,12 @@ def command_serve(args: argparse.Namespace) -> int:
         raise SystemExit("serve needs a command after --")
     workdir = Path(tempfile.mkdtemp(prefix="lash-restate-serve-"))
     overrides = dict(assignment.split("=", 1) for assignment in args.server_env)
-    server = RestateServer(name=f"serve-{args.leg}", workdir=workdir, config={**LEGS[args.leg], **overrides})
+    server = RestateServer(
+        name=args.name or f"serve-{args.leg}",
+        workdir=workdir,
+        config={**LEGS[args.leg], **overrides},
+        port_base=args.port_base,
+    )
 
     # The server runs in a session of its own, so a signal to this process
     # group never reaches it: a SIGTERM (a CI cancel, `timeout`) has to unwind
@@ -777,6 +807,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve.add_argument("--leg", choices=sorted(LEGS), default="live")
     serve.add_argument("--server-env", action="append", default=[], help="KEY=VALUE server override")
     serve.add_argument("--keep-log", help="copy the server log here on exit")
+    serve.add_argument("--name", help="the server's name (its cluster name and log file); default serve-<leg>")
+    serve.add_argument(
+        "--port-base", type=int, help="bind ingress, admin and node on this port and the next two (a gate's block)"
+    )
     serve.add_argument("command", nargs=argparse.REMAINDER)
 
     suite = sub.add_parser("suite", help="build and run a registered suite")

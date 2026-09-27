@@ -1,15 +1,16 @@
-//! One crash-matrix world: lash-restate's engine on the server double over a
-//! SQLite memory store set, and the deployment that runs on it.
+//! One crash-matrix world: lash-restate's engine over a SQLite memory store
+//! set, on the server double or a live `restate-server` ([`Engine`]), and the
+//! deployment that runs on it.
 //!
 //! A deployment is a [`lash::LashCore`] built over the world's backend, the
 //! session driver it installs, and its recovery interval. The interval does
-//! not tick on wall time: [`CrashWorld::tick`] moves the server's virtual
-//! clock by one jittered `T` and runs the deployment's recovery pass, so a
-//! detection bound is measured in sim time. [`CrashWorld::kill`] ends the
-//! deployment where it stands — its host tasks aborted, every attempt the
-//! engine was running on it dropped and replayed — and
-//! [`CrashWorld::restart`] brings up a fresh process (a new core, a new owner
-//! incarnation, a new interval with a fresh cursor and tick nonce).
+//! not tick on wall time: [`CrashWorld::tick`] moves the engine's clock by
+//! one jittered `T` and runs the deployment's recovery pass, so a detection
+//! bound is measured in sim time. [`CrashWorld::kill`] ends the deployment
+//! where it stands — its host tasks aborted, every attempt the engine was
+//! running on it dropped and replayed — and [`CrashWorld::restart`] brings up
+//! a fresh process (a new core, a new owner incarnation, a new interval with
+//! a fresh cursor and tick nonce).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -21,16 +22,13 @@ use lash_core::sync::MutexExt as _;
 use super::deployment::{
     CrashProcessPort, CrashSessionFactory, CrashSessionWork, DriverProxy, HostFaults, Trip,
 };
+use super::engine::{Engine, EngineHold, EngineInvocation, EngineKind};
 
 /// Builds one deployment's core over the world's backend under a fresh
 /// owner incarnation.
 pub type CoreBuild = Arc<
     dyn Fn(Backend, lash_core::LeaseOwnerIdentity) -> Result<lash::LashCore, String> + Send + Sync,
 >;
-
-/// The handler host service the double's `run_in_handler` jobs run in: a
-/// host's own call, which dies with the host rather than replaying.
-const HANDLER_HOST: &str = "LashTestHandlerHost";
 
 /// How long a recovery pass may run in wall time before the world calls it
 /// hung.
@@ -41,13 +39,16 @@ const TICK_WALL_LIMIT: Duration = Duration::from_secs(30);
 struct Interval {
     cursor: lash_core::engine::ReconcileCursor,
     ticks: lash_core::engine::ReconcileTicks,
+    /// Engine time at the interval's last tick, or at its start.
+    last_tick_ms: u64,
 }
 
 impl Interval {
-    fn fresh() -> Self {
+    fn fresh(now_ms: u64) -> Self {
         Self {
             cursor: lash_core::engine::ReconcileCursor::default(),
             ticks: lash_core::engine::ReconcileTicks::start("crash-matrix"),
+            last_tick_ms: now_ms,
         }
     }
 }
@@ -61,7 +62,7 @@ struct Deployment {
 pub struct CrashWorld {
     seed: u64,
     rng: Mutex<fastrand::Rng>,
-    restate: lash_restate_test::RestateTestBackend,
+    engine: Engine,
     backend: Backend,
     proxy: Arc<DriverProxy>,
     faults: Arc<HostFaults>,
@@ -88,31 +89,25 @@ impl std::fmt::Debug for CrashWorld {
 }
 
 impl CrashWorld {
-    /// A world under `seed` whose deployments `build` builds. No deployment
-    /// is up until [`restart`](Self::restart). `serve_processes` installs
-    /// each deployment's durable process worker on the engine's endpoint.
+    /// A world under `seed` whose deployments `build` builds, on the engine
+    /// the environment names ([`EngineKind::from_env`]). No deployment is up
+    /// until [`restart`](Self::restart). `serve_processes` installs each
+    /// deployment's durable process worker on the engine's endpoint.
     pub async fn new(seed: u64, build: CoreBuild, serve_processes: bool) -> Result<Self, String> {
-        let mut config = lash_restate_test::ServerConfig::default();
-        // A crashed attempt is retried at once: retry timing is no contract,
-        // and a crash-matrix world crashes an attempt at every cut.
-        config.retry.initial_interval = Duration::from_millis(1);
-        config.retry.max_interval = Duration::from_millis(10);
-        let restate = lash_restate_test::backend(seed, config)
-            .await
-            .map_err(|error| format!("build the Restate test backend: {error}"))?;
-        let clock: Arc<dyn lash_core::Clock> = restate.test_clock();
+        let engine = Engine::start(&EngineKind::from_env()?, seed).await?;
+        let clock: Arc<dyn lash_core::Clock> = engine.clock();
         let trip = Arc::new(Trip::new(clock));
         let faults = Arc::new(HostFaults::new(Arc::clone(&trip)));
         let proxy = Arc::new(DriverProxy::default());
         let work = Arc::new(CrashSessionWork::new(
-            restate.explicit_reconcile_session_work(),
+            engine.explicit_reconcile_session_work(),
             Arc::clone(&proxy),
             Arc::clone(&faults),
         ));
         let backend = {
             let factory_faults = Arc::clone(&faults);
             let port_faults = Arc::clone(&faults);
-            lash_core::testing::runtime_helpers::LayeredBackend::over(restate.lash_backend())
+            lash_core::testing::runtime_helpers::LayeredBackend::over(engine.lash_backend())
                 .with_session_work(Some(work))
                 .map_session_store_factory(move |factory| {
                     Arc::new(CrashSessionFactory::new(factory, factory_faults))
@@ -130,7 +125,7 @@ impl CrashWorld {
             let trip: Weak<Trip> = Arc::downgrade(&trip);
             let proxy: Weak<DriverProxy> = Arc::downgrade(&proxy);
             let killing = Arc::clone(&killing);
-            restate.server().on_crash(Arc::new(move |target| {
+            engine.on_crash(Arc::new(move |target| {
                 if killing.load(Ordering::SeqCst) {
                     return;
                 }
@@ -142,10 +137,11 @@ impl CrashWorld {
                 }
             }));
         }
+        let engine_now_ms = engine.now_ms();
         Ok(Self {
             seed,
             rng: Mutex::new(fastrand::Rng::with_seed(seed)),
-            restate,
+            engine,
             backend,
             proxy,
             faults,
@@ -155,7 +151,7 @@ impl CrashWorld {
             serve_processes,
             live: Mutex::new(None),
             incarnations: AtomicU32::new(0),
-            interval: tokio::sync::Mutex::new(Interval::fresh()),
+            interval: tokio::sync::Mutex::new(Interval::fresh(engine_now_ms)),
             ticks_run: std::sync::atomic::AtomicUsize::new(0),
             quiesce_ms: std::sync::atomic::AtomicU64::new(2_000),
         })
@@ -171,14 +167,35 @@ impl CrashWorld {
         self.rng.lock_recover().u64(range)
     }
 
+    /// The engine this world runs on.
     #[must_use]
-    pub fn restate(&self) -> &lash_restate_test::RestateTestBackend {
-        &self.restate
+    pub fn engine(&self) -> &Engine {
+        &self.engine
     }
 
-    #[must_use]
-    pub fn server(&self) -> &lash_restate_test::RestateTestServer {
-        self.restate.server()
+    /// Arm a journal-step crash on the engine.
+    pub fn crash_on(&self, rule: lash_restate_test::CrashRule) {
+        self.engine.crash_on(rule);
+    }
+
+    /// Every invocation the engine holds.
+    pub async fn invocations(&self) -> Vec<EngineInvocation> {
+        self.engine.invocations().await
+    }
+
+    /// Kill `id` as an operator does, and wait until it can run nothing more.
+    pub async fn kill_invocation(&self, id: &str) -> Result<(), String> {
+        self.engine.kill_and_await(id).await
+    }
+
+    /// Hold the engine's drive of `session` ([`Engine::hold_session_drive`]).
+    pub async fn hold_session_drive(&self, session: &lash_core::SessionId) -> EngineHold {
+        self.engine.hold_session_drive(session).await
+    }
+
+    /// Hold every invocation of `service` ([`Engine::hold_service`]).
+    pub async fn hold_service(&self, service: &str) -> EngineHold {
+        self.engine.hold_service(service).await
     }
 
     /// The backend every deployment builds over.
@@ -200,7 +217,7 @@ impl CrashWorld {
     /// Virtual now, the store clock's epoch milliseconds.
     #[must_use]
     pub fn now_ms(&self) -> u64 {
-        self.restate.server().now_ms()
+        self.engine.now_ms()
     }
 
     /// The live deployment's core.
@@ -230,17 +247,17 @@ impl CrashWorld {
             let config = core
                 .durable_process_worker_config()
                 .map_err(|error| format!("the core's process worker config: {error}"))?;
-            self.restate.install_process_worker(
+            self.engine.install_process_worker(
                 lash::durability::DurableProcessWorker::new(config)
                     .map_err(|error| format!("build the process worker: {error}"))?,
             );
         }
-        *self.interval.lock().await = Interval::fresh();
+        *self.interval.lock().await = Interval::fresh(self.engine.now_ms());
         *self.live.lock_recover() = Some(Deployment {
             core,
             tasks: Vec::new(),
         });
-        Ok(())
+        self.engine.revive_deployment().await
     }
 
     /// Run `task` as the live deployment's host work: it dies with the
@@ -285,17 +302,7 @@ impl CrashWorld {
             }
             drop(deployment);
         }
-        let server = self.restate.server();
-        for view in server.invocations() {
-            if view.status != "running" {
-                continue;
-            }
-            if view.target.starts_with(HANDLER_HOST) {
-                let _ = server.kill_and_await(&view.id).await;
-            } else {
-                let _ = server.crash(&view.id);
-            }
-        }
+        self.engine.kill_deployment().await;
         self.killing.store(false, Ordering::SeqCst);
     }
 
@@ -304,7 +311,7 @@ impl CrashWorld {
     pub async fn crash_and_restart(&self) -> Result<(), String> {
         self.kill().await;
         let outage = Duration::from_millis(self.draw(0..5_001));
-        self.restate.server().advance(outage);
+        self.engine.advance(outage);
         self.restart().await
     }
 
@@ -314,7 +321,7 @@ impl CrashWorld {
     pub async fn quiesce(&self) {
         let budget = Duration::from_millis(self.quiesce_ms.load(Ordering::SeqCst));
         for _ in 0..2 {
-            let _ = tokio::time::timeout(budget, self.restate.server().settle()).await;
+            self.engine.settle(budget).await;
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
@@ -327,16 +334,21 @@ impl CrashWorld {
             .store(budget.as_millis() as u64, Ordering::SeqCst);
     }
 
-    /// One tick of the live deployment's recovery interval: the virtual
-    /// clock moves one `T` with ±10 % seeded jitter, then the deployment runs
-    /// its recovery pass. A pass that dies with the deployment is not an
-    /// error of the tick.
-    pub async fn tick(&self) -> Result<(), String> {
+    /// One tick of the live deployment's recovery interval: the engine's
+    /// clock moves one `T` with ±10 % seeded jitter
+    /// ([`Engine::advance_tick`]), then the deployment runs its recovery
+    /// pass. A pass that dies with the deployment is not an
+    /// error of the tick. Answers the tick's engine time.
+    pub async fn tick(&self) -> Result<u64, String> {
         let tick_ms = super::TICK.as_millis() as u64;
         let jittered = tick_ms - tick_ms / 10 + self.draw(0..tick_ms / 5 + 1);
-        self.restate
-            .server()
-            .advance(Duration::from_millis(jittered));
+        let ticked_at = {
+            let mut interval = self.interval.lock().await;
+            interval.last_tick_ms = self
+                .engine
+                .advance_tick(interval.last_tick_ms, Duration::from_millis(jittered));
+            interval.last_tick_ms
+        };
         self.ticks_run.fetch_add(1, Ordering::SeqCst);
         let driver = self
             .proxy
@@ -358,15 +370,15 @@ impl CrashWorld {
         match tokio::time::timeout(TICK_WALL_LIMIT, pass).await {
             Ok(Ok(Ok(next))) => {
                 self.interval.lock().await.cursor = next;
-                Ok(())
+                Ok(ticked_at)
             }
             // A failed pass is retried by the next tick, as the interval's is.
-            Ok(Ok(Err(_))) => Ok(()),
+            Ok(Ok(Err(_))) => Ok(ticked_at),
             // Aborted: the deployment died during its pass.
-            Ok(Err(_)) => Ok(()),
+            Ok(Err(_)) => Ok(ticked_at),
             Err(_) => {
                 if self.trip.tripped().is_some() {
-                    Ok(())
+                    Ok(ticked_at)
                 } else {
                     Err(format!(
                         "a recovery pass ran past {TICK_WALL_LIMIT:?} of wall time"
@@ -380,5 +392,6 @@ impl CrashWorld {
     pub async fn finish(&self) {
         self.kill().await;
         self.faults.clear();
+        self.engine.finish().await;
     }
 }

@@ -141,7 +141,7 @@ async fn start_process(
     request: lash_core::ProcessStartRequest,
 ) -> Result<ProcessId, String> {
     let core = world.core()?;
-    let restate = world.restate().clone();
+    let restate = world.engine().clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let started = world
         .host_op(async move {
@@ -194,14 +194,26 @@ fn waiter_completed(waiter: String, process: ProcessId) -> CustomCheck {
                 Ok(None) => violations.push(format!("process `{process}` is gone")),
                 Err(error) => violations.push(format!("read process `{process}`: {error}")),
             }
-            match world.server().outcome(&waiter) {
-                Some(Ok(_)) => {}
+            match world.engine().outcome(&waiter).await {
+                Some(Ok(())) => {}
                 Some(Err(failure)) => violations.push(format!(
-                    "the engine waiter on `{process}`'s terminal failed: {failure:?}"
+                    "the engine waiter on `{process}`'s terminal failed: {failure}"
                 )),
                 None => violations.push(format!(
                     "the engine waiter on `{process}`'s terminal is stranded: its promise was never resolved"
                 )),
+            }
+            if !violations.is_empty() {
+                let workflow = format!("{PROCESS_WORKFLOW}/{process}/");
+                for view in world.invocations().await {
+                    if view.target.starts_with(&workflow) {
+                        let outcome = world.engine().outcome(&view.id).await;
+                        violations.push(format!(
+                            "engine: {} {} attempts={} last_failure={:?} outcome={outcome:?}",
+                            view.target, view.status, view.attempts, view.last_failure
+                        ));
+                    }
+                }
             }
             violations
         })
@@ -217,7 +229,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         CrashPoint::MidJournalStep => {
             let index = 1 + world.draw(0..RUN_JOURNAL_CUTS) as usize;
             notes.push(format!("cut=command {index}"));
-            world.server().crash_on(
+            world.crash_on(
                 CrashRule::new(EngineCut::BeforeCommand { index })
                     .service(PROCESS_WORKFLOW)
                     .handler("run")
@@ -225,7 +237,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
             );
         }
         CrashPoint::InvocationLost => {
-            world.server().crash_on(
+            world.crash_on(
                 CrashRule::new(EngineCut::BeforeRun {
                     name: AFTER_TERMINAL_WRITE.to_owned(),
                 })
@@ -236,9 +248,15 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         }
         other => return Err(format!("process terminal has no {other:?} cell")),
     }
+    // The process's workflow waits until the start answered and the waiter
+    // is armed: a live server dispatches the run the moment the start
+    // journals it, and a cut the run reached first would kill the host
+    // inside the start, whose job dies with it and takes the run it called
+    // along.
+    let hold = world.hold_service(PROCESS_WORKFLOW).await;
     let process = start_process(&world, request).await?;
     let waiter = world
-        .restate()
+        .engine()
         .ingress()
         .send_workflow_json(
             PROCESS_WORKFLOW,
@@ -251,16 +269,17 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         .await
         .map_err(|error| format!("arm the engine waiter: {error}"))?
         .into_string();
+    hold.release();
     let origin_ms = match world.trip().wait(std::time::Duration::from_secs(20)).await {
         Some(tripped) => {
             if point == CrashPoint::InvocationLost {
                 let run = format!("{PROCESS_WORKFLOW}/{process}");
-                for view in world.server().invocations() {
+                for view in world.invocations().await {
                     if view.target.starts_with(&run)
                         && view.target.ends_with("/run")
                         && view.status != "completed"
                     {
-                        let _ = world.server().kill_and_await(&view.id).await;
+                        world.kill_invocation(&view.id).await?;
                     }
                 }
             }

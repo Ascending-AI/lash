@@ -52,7 +52,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
                 crash_and_restart(&world).await?
             }
             CrashPoint::DuringEngineDelivery => {
-                world.server().crash_on(
+                world.crash_on(
                     CrashRule::new(EngineCut::BeforeCommand { index: 1 })
                         .service(SESSION_DRIVER_SERVICE)
                         .key(session.as_str())
@@ -62,7 +62,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
                 crash_and_restart(&world).await?
             }
             CrashPoint::AfterDeliveryBeforeSettle => {
-                world.server().crash_on(
+                world.crash_on(
                     CrashRule::new(EngineCut::BeforeRunResult { name: None })
                         .service(SESSION_DRIVER_SERVICE)
                         .key(session.as_str())
@@ -73,7 +73,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
             }
             CrashPoint::MidJournalStep => {
                 let index = 1 + world.draw(0..ROOT_JOURNAL_CUTS) as usize;
-                world.server().crash_on(
+                world.crash_on(
                     CrashRule::new(EngineCut::BeforeCommand { index })
                         .service(TURN_DRIVER_SERVICE)
                         .within_attempts(1),
@@ -84,15 +84,15 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
             CrashPoint::InvocationLost => {
                 // The drive the acceptance asked for is lost by the engine
                 // before it admits anything; the host lives on.
-                let hold = world.restate().hold_session_drive(&session).await;
+                let hold = world.hold_session_drive(&session).await;
                 send(&world, &session, &root).await?;
                 let prefix = format!("{SESSION_DRIVER_SERVICE}/{session}/");
                 // The acceptance's ask is fire-and-forget: wait until it lands.
                 let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
                 let lost = loop {
                     let lost: Vec<String> = world
-                        .server()
                         .invocations()
+                        .await
                         .into_iter()
                         .filter(|view| {
                             view.target.starts_with(&prefix) && view.status != "completed"
@@ -108,10 +108,10 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
                     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                 };
                 for id in &lost {
-                    let _ = world.server().kill_and_await(id).await;
+                    world.kill_invocation(id).await?;
                 }
                 world.trip().fire(format!("engine-lost:{prefix}"));
-                drop(hold);
+                hold.release();
                 world.trip().tripped().map(|tripped| tripped.at_ms)
             }
             other => return Err(format!("ingress has no {other:?} cell")),

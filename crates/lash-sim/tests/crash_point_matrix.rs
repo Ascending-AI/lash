@@ -2,12 +2,15 @@
 //!
 //! One test per registered cell of {seam or obligation kind} × {crash point},
 //! each running its cell's seeds (`LASH_CRASH_MATRIX_SEEDS`, default 3) on the
-//! in-process Restate server double: the deployment dies at the cell's crash
-//! point, a fresh one comes up, and the recovery interval ticks on virtual
-//! time until every input was driven exactly once, every obligation settled
-//! or stalled typed, no child is orphaned, no session wedged, every terminal
-//! root's scope closed, within the ADR 0109 §1.8 bound. The harness is
-//! `lash_sim::crash_matrix`; its module docs say how a cell is built.
+//! in-process Restate server double, or with `LASH_CRASH_MATRIX_ENGINE=live`
+//! on a live `restate-server` (`just crash-matrix-restate-e2e`): the
+//! deployment dies at the cell's crash point, a fresh one comes up, and the
+//! recovery interval ticks until every input was driven exactly once, every
+//! obligation settled or stalled typed, no child is orphaned, no session
+//! wedged, every terminal root's scope closed, within the ADR 0109 §1.8
+//! bound. The harness is `lash_sim::crash_matrix`; its module docs say how a
+//! cell is built, and `lash_sim::crash_matrix::engine` how each engine runs
+//! it.
 //!
 //! A cell today's `main` cannot pass is ignored with what makes it pass: the
 //! S8 slice (`FIG-3600 S8-<slice>`), or a defect the matrix found

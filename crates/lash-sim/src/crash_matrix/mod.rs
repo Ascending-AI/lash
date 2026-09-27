@@ -1,16 +1,19 @@
-//! The crash-point matrix (FIG-3849): the 1.0 durability gate on the
-//! in-process Restate server double.
+//! The crash-point matrix (FIG-3849): the 1.0 durability gate, on the
+//! in-process Restate server double or a live `restate-server`
+//! ([`engine`]; FIG-3872).
 //!
 //! Every case is one cell of {seam or obligation kind} × {crash point} ×
 //! {seed}. A case builds a [`world::CrashWorld`] — lash-restate's engine on
-//! the server double over a SQLite memory store set, with one deployment (a
-//! [`lash::LashCore`], its session driver and its recovery interval) — drives
-//! the seam's workload, and kills the deployment at the named crash point:
-//! the host process dies where it stands, every attempt the engine was
-//! running on it is dropped and replayed, and a fresh deployment comes up
-//! after a seeded outage. The recovery interval then ticks on the server's
-//! virtual clock until the [`invariants`] hold, and the case fails when they
-//! never do, or hold only after the ADR 0109 §1.8 detection bound.
+//! the run's [`engine::Engine`] over a SQLite memory store set, with one
+//! deployment (a [`lash::LashCore`], its session driver and its recovery
+//! interval) — drives the seam's workload, and kills the deployment at the
+//! named crash point: the host process dies where it stands, every attempt
+//! the engine was running on it is dropped and replayed, and a fresh
+//! deployment comes up after a seeded outage. The recovery interval then
+//! ticks on the engine's clock until the [`invariants`] hold, and the case
+//! fails when they never do, or hold only after the ADR 0109 §1.8 detection
+//! bound. A cell is written once against [`engine::Engine`], so every cell
+//! runs on both engines, one an S8 slice activates included.
 //!
 //! # Crash points
 //!
@@ -57,6 +60,7 @@
 
 pub mod cases;
 pub mod deployment;
+pub mod engine;
 pub mod invariants;
 pub mod world;
 
@@ -611,8 +615,13 @@ pub async fn assert_cell(seam: Seam, point: CrashPoint) {
             report.notes
         );
     }
+    let engine = match engine::EngineKind::from_env() {
+        Ok(engine::EngineKind::Double) => "double",
+        Ok(engine::EngineKind::Live(_)) => "live",
+        Err(_) => "unconfigured",
+    };
     println!(
-        "{seam:?} × {point:?}: {} seed(s) in {:?}, {} failed",
+        "{seam:?} × {point:?} on the {engine} engine: {} seed(s) in {:?}, {} failed",
         reports.len(),
         started.elapsed(),
         failed.len()

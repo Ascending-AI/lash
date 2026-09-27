@@ -584,8 +584,8 @@ async fn check_deletions(world: &CrashWorld, expected: &Expected, violations: &m
 }
 
 /// No lash drive of a live session is paused, backing off, or running.
-fn check_engine(world: &CrashWorld, expected: &Expected, violations: &mut Vec<String>) {
-    for view in world.server().invocations() {
+async fn check_engine(world: &CrashWorld, expected: &Expected, violations: &mut Vec<String>) {
+    for view in world.invocations().await {
         let lash_drive =
             view.target.starts_with("LashSession/") || view.target.starts_with("LashTurn/");
         if !lash_drive || view.status == "completed" || view.status == "suspended" {
@@ -624,7 +624,7 @@ pub async fn check(world: &CrashWorld, expected: &Expected) -> Vec<String> {
     check_children(world, expected, &mut violations).await;
     check_scopes(world, expected, &mut violations).await;
     check_deletions(world, expected, &mut violations).await;
-    check_engine(world, expected, &mut violations);
+    check_engine(world, expected, &mut violations).await;
     for (name, custom) in &expected.custom {
         violations.extend(
             custom(world)
@@ -690,8 +690,8 @@ pub async fn probe_live_sessions(
 /// lash invocation that has not completed, and every stalled scope close.
 pub async fn diagnose(world: &CrashWorld) -> Vec<String> {
     let mut lines: Vec<String> = world
-        .server()
         .invocations()
+        .await
         .into_iter()
         .filter(|view| view.status != "completed")
         .map(|view| {
@@ -734,20 +734,11 @@ pub async fn diagnose(world: &CrashWorld) -> Vec<String> {
 
 /// Every invocation's journal commands, named, for a case whose engine crash
 /// point never fired.
-pub fn journal_names(world: &CrashWorld) -> Vec<String> {
-    let server = world.server();
-    server
-        .invocations()
-        .into_iter()
-        .map(|view| {
-            let names: Vec<String> = server
-                .journal(&view.id)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|entry| entry.ty.is_command())
-                .map(|entry| format!("{:?}:{}", entry.ty, entry.name.unwrap_or_default()))
-                .collect();
-            format!("journal: {} {names:?}", view.target)
-        })
-        .collect()
+pub async fn journal_names(world: &CrashWorld) -> Vec<String> {
+    let mut lines = Vec::new();
+    for view in world.invocations().await {
+        let names = world.engine().journal_names(&view.id).await;
+        lines.push(format!("journal: {} {names:?}", view.target));
+    }
+    lines
 }

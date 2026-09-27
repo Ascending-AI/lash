@@ -55,7 +55,7 @@ impl lash_core::SessionDeleteExecution for HandlerExecution<'_> {
 async fn delete_session(world: &CrashWorld, session: &SessionId) -> Result<(), String> {
     let core = world.core()?;
     let admin = core.session_administration().await;
-    let restate = world.restate().clone();
+    let restate = world.engine().clone();
     let session = session.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Result<(), String>>();
     let deleted = world.host_op(async move {
@@ -124,7 +124,9 @@ async fn tick_until_tripped(world: &CrashWorld) -> Result<(), String> {
             return Ok(());
         }
         tokio::select! {
-            ticked = world.tick() => ticked?,
+            ticked = world.tick() => {
+                ticked?;
+            }
             _ = world.trip().wait(TRIP_WAIT) => {}
         }
     }

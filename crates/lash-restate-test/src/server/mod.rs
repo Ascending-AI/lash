@@ -35,6 +35,7 @@ use restate_sdk::endpoint::Endpoint;
 use tokio::sync::Notify;
 
 pub use catalog::{HandlerKind, OnMaxAttempts, ServiceKind};
+pub(crate) use crash::{CrashPlan, CrashSite};
 pub use crash::{CrashPoint, CrashRule, RandomCrashes};
 pub use ids::{DeploymentId, InvocationId};
 pub use model::TimerView;
@@ -1091,6 +1092,13 @@ impl RestateTestServer {
             shared: Arc::downgrade(&self.shared),
             target: Some(target),
         }
+    }
+
+    /// [`hold`](Self::hold) every invocation of `service`, whatever its key:
+    /// no attempt of one starts until the returned [`Hold`] is released or
+    /// dropped.
+    pub async fn hold_service(&self, service: &str) -> Hold {
+        self.hold(service, processor::ANY_KEY).await
     }
 
     // --- crashes and operator commands -------------------------------------

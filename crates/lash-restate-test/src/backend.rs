@@ -547,8 +547,8 @@ impl RestateTestBackend {
 /// scenario reconciles through [`SessionDriver::reconcile`] itself, so a
 /// seeded run never meets a drive ask whose request id and landing point
 /// wall time picked.
-struct ExplicitlyReconciledSessionWork {
-    inner: Arc<RestateSessionWork>,
+pub(crate) struct ExplicitlyReconciledSessionWork {
+    pub(crate) inner: Arc<RestateSessionWork>,
 }
 
 impl std::fmt::Debug for ExplicitlyReconciledSessionWork {
@@ -606,9 +606,9 @@ impl SessionWorkEngine for ExplicitlyReconciledSessionWork {
 // The handler host
 // ---------------------------------------------------------------------------
 
-const HANDLER_HOST: &str = "LashTestHandlerHost";
+pub(crate) const HANDLER_HOST: &str = "LashTestHandlerHost";
 
-enum Parked {
+pub(crate) enum Parked {
     Replayed(HandlerAttempt),
     CrashThenRedrive {
         /// The attempts that crash, in the order the server runs them.
@@ -620,22 +620,45 @@ enum Parked {
 }
 
 #[derive(Default)]
-struct ParkedJobs {
+pub(crate) struct ParkedJobs {
     next: AtomicU64,
+    /// Spliced into every job key: empty on the double, whose server is the
+    /// backend's own, and a run nonce on a live server that outlives one
+    /// backend, where a workflow key runs once.
+    prefix: String,
     jobs: Mutex<HashMap<String, (AdmittedScope, Parked)>>,
 }
 
 impl ParkedJobs {
-    fn park(&self, admitted: AdmittedScope, parked: Parked) -> String {
+    /// Jobs whose keys carry `prefix`.
+    pub(crate) fn with_prefix(prefix: impl Into<String>) -> Self {
+        Self {
+            prefix: prefix.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Drop every parked job: the host that parked them died, so a handler
+    /// the server invokes again for one finds nothing to run and fails it.
+    pub(crate) fn clear(&self) {
+        self.jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+    }
+
+    pub(crate) fn park(&self, admitted: AdmittedScope, parked: Parked) -> String {
         let ordinal = self.next.fetch_add(1, Ordering::SeqCst);
+        let prefix = &self.prefix;
         // A session-scoped job carries the session in its key exactly as a
         // `LashTurn` key does: the engine's live-work read parses the owner
         // back out and leaves a suspended job's session ingress to it.
         let key = match admitted.scope().session_id() {
-            Some(session) => {
-                turn_workflow_key(session, &lash_core::TurnId::from(format!("job-{ordinal}")))
-            }
-            None => format!("job-{ordinal}"),
+            Some(session) => turn_workflow_key(
+                session,
+                &lash_core::TurnId::from(format!("job-{prefix}{ordinal}")),
+            ),
+            None => format!("job-{prefix}{ordinal}"),
         };
         self.jobs
             .lock()
@@ -644,7 +667,7 @@ impl ParkedJobs {
         key
     }
 
-    fn take(&self, key: &str) -> Option<(AdmittedScope, Parked)> {
+    pub(crate) fn take(&self, key: &str) -> Option<(AdmittedScope, Parked)> {
         self.jobs
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -689,9 +712,9 @@ impl ParkedJobs {
 
 /// The workflow a job runs in. One key per job; the handler takes the parked
 /// job and runs it on its own `ctx`-bound controller.
-struct HandlerHost {
-    jobs: Arc<ParkedJobs>,
-    authority: RestateAuthorityId,
+pub(crate) struct HandlerHost {
+    pub(crate) jobs: Arc<ParkedJobs>,
+    pub(crate) authority: RestateAuthorityId,
 }
 
 #[restate_sdk::workflow(name = "LashTestHandlerHost")]

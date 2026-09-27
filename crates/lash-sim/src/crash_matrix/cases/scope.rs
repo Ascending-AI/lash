@@ -59,8 +59,8 @@ pub(super) async fn register_until_child(
 /// attempts it stopped have ended.
 async fn lose_root_invocation(world: &CrashWorld, root: &str) -> Result<(), String> {
     let lost: Vec<String> = world
-        .server()
         .invocations()
+        .await
         .into_iter()
         .filter(|view| {
             view.target.starts_with(&format!("{TURN_DRIVER_SERVICE}/"))
@@ -75,7 +75,7 @@ async fn lose_root_invocation(world: &CrashWorld, root: &str) -> Result<(), Stri
         ));
     }
     for id in &lost {
-        let _ = world.server().kill_and_await(id).await;
+        world.kill_invocation(id).await?;
     }
     Ok(())
 }
@@ -113,7 +113,7 @@ pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<St
     let notes = vec![format!("children={child_count}")];
     let origin_ms = match point {
         CrashPoint::AfterStateCommit => {
-            world.server().crash_on(
+            world.crash_on(
                 CrashRule::new(EngineCut::BeforeRun { name: close_step })
                     .service(TURN_DRIVER_SERVICE)
                     .within_attempts(1),
@@ -132,7 +132,7 @@ pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<St
             crash_and_restart(&world).await?
         }
         CrashPoint::MidJournalStep => {
-            world.server().crash_on(
+            world.crash_on(
                 CrashRule::new(EngineCut::BeforeRunResult {
                     name: Some(close_step),
                 })
@@ -146,7 +146,7 @@ pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<St
             // The root's terminal is committed and its close step is next;
             // the deployment dies there and the engine loses the root's
             // invocation, so no replay closes the scope.
-            world.server().crash_on(
+            world.crash_on(
                 CrashRule::new(EngineCut::BeforeRun { name: close_step })
                     .service(TURN_DRIVER_SERVICE)
                     .within_attempts(1),

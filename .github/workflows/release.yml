@@ -287,6 +287,74 @@ jobs:
           path: .benchmarks/perf-guard/*
           if-no-files-found: warn
 
+  crash-matrix-restate:
+    name: Crash-point matrix on live Restate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: prepare-release
+    # The matrix's test binary builds from the shared cache; a dispatch is a
+    # trusted event, so the job may read the build-cache credentials.
+    environment: build-cache
+
+    steps:
+      - name: Check out repository
+        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
+        env:
+          CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
+          git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
+          git checkout --force --detach FETCH_HEAD
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Configure shared build cache
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Install just
+        uses: ./.github/actions/install-tools
+        with:
+          tool: just
+
+      # Every active cell of the FIG-3849 crash-point matrix, with the pinned
+      # restate-server as the engine instead of the in-process double.
+      - name: Run the crash-point matrix against a live restate-server
+        env:
+          LASH_CRASH_MATRIX_ARTIFACT_DIR: target/functional-e2e-artifacts/crash-matrix-restate
+        run: just crash-matrix-restate-e2e
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+      - name: Upload crash-matrix artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-crash-matrix-restate-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
+          path: target/functional-e2e-artifacts/crash-matrix-restate
+          if-no-files-found: warn
+
   package-crates:
     name: Dry-run package publishable crates
     runs-on: ubuntu-24.04
@@ -353,7 +421,7 @@ jobs:
     runs-on: ubuntu-latest
     # Per-layer crates.io index-visibility waits are externally paced.
     timeout-minutes: 20
-    needs: [prepare-release, validate-release-ref, package-crates]
+    needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
     environment: main

@@ -537,12 +537,11 @@ impl State {
     // Holds
     // ---------------------------------------------------------------------
 
-    /// Whether `key` targets a held `(service, key)`.
+    /// Whether `key` targets a held `(service, key)`, or a held service.
     fn is_held(&self, key: InvKey) -> bool {
-        self.invocations[key.0]
-            .target
-            .service_key()
-            .is_some_and(|target| self.held.contains(&target))
+        self.held
+            .iter()
+            .any(|target| holds(target, &self.invocations[key.0].target))
     }
 
     /// Hold `target`: no attempt of an invocation on it starts until
@@ -554,7 +553,7 @@ impl State {
         let running = (0..self.invocations.len())
             .map(InvKey)
             .filter(|key| {
-                self.invocations[key.0].target.service_key().as_ref() == Some(&target)
+                holds(&target, &self.invocations[key.0].target)
                     && matches!(self.invocations[key.0].status, Status::Running(_))
             })
             .collect::<Vec<_>>();
@@ -566,8 +565,7 @@ impl State {
     /// Whether an attempt of an invocation on `target` still runs.
     pub(super) fn runs_on(&self, target: &(String, String)) -> bool {
         self.invocations.iter().any(|invocation| {
-            invocation.target.service_key().as_ref() == Some(target)
-                && matches!(invocation.status, Status::Running(_))
+            holds(target, &invocation.target) && matches!(invocation.status, Status::Running(_))
         })
     }
 
@@ -579,7 +577,7 @@ impl State {
         }
         let (released, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.deferred)
             .into_iter()
-            .partition(|key| self.invocations[key.0].target.service_key().as_ref() == Some(target));
+            .partition(|key| holds(target, &self.invocations[key.0].target));
         self.deferred = kept;
         for key in released {
             if !matches!(
@@ -1517,4 +1515,15 @@ impl From<pb::get_invocation_output_command_message::Target> for AttachTarget {
             },
         }
     }
+}
+
+/// The key of a hold on a whole service: a NUL-led name no object or
+/// workflow key a test addresses carries.
+pub(super) const ANY_KEY: &str = "\u{0}any-key";
+
+/// Whether the held `(service, key)` covers an invocation on `target`: its
+/// own key, or any invocation of the service when `key` is [`ANY_KEY`].
+fn holds(held: &(String, String), target: &Target) -> bool {
+    target.service == held.0
+        && (held.1 == ANY_KEY || target.key.as_deref() == Some(held.1.as_str()))
 }

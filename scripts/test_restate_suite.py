@@ -218,6 +218,14 @@ class ReservationTests(unittest.TestCase):
             reservation.claim()
 
 
+    def test_a_gate_port_base_binds_the_gates_own_block(self) -> None:
+        server = MODULE.RestateServer("gate", pathlib.Path(tempfile.gettempdir()), {}, port_base=61230)
+        self.assertEqual(
+            {"ingress": 61230, "admin": 61231, "node": 61232},
+            {role: port.claim() for role, port in server.reserved.items()},
+        )
+
+
 class RunnerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()

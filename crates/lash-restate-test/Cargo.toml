@@ -21,9 +21,12 @@ workspace = true
 async-trait = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
+chrono = { workspace = true }
 http = "1"
 http-body = "1"
 http-body-util = "0.1"
+hyper = { version = "1", features = ["http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-worker = { workspace = true }
 lash-http-transport = { workspace = true }

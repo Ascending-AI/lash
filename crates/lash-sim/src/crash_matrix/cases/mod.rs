@@ -238,7 +238,9 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
         report
             .violations
             .push(format!("the crash point {:?} never fired", spec.point));
-        report.violations.extend(invariants::journal_names(&world));
+        report
+            .violations
+            .extend(invariants::journal_names(&world).await);
         report
             .violations
             .extend(invariants::check(&world, &expected).await);
@@ -253,11 +255,16 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
     let min_tick = super::TICK - super::TICK / 10;
     let max_ticks = (bound.as_millis() / min_tick.as_millis()) as usize + 2;
     let mut last = Vec::new();
+    let mut ticked_at_ms = None;
     for tick in 0..=max_ticks {
         world.quiesce().await;
         last = invariants::check(&world, &expected).await;
         if last.is_empty() {
-            let after = Duration::from_millis(world.now_ms().saturating_sub(origin_ms));
+            // Detected at the first tick after which every invariant held,
+            // not after the harness's own wait for the engine to settle; with
+            // no tick yet, at the check itself.
+            let detected_ms = ticked_at_ms.unwrap_or_else(|| world.now_ms());
+            let after = Duration::from_millis(detected_ms.saturating_sub(origin_ms));
             report.detected_after = Some(after);
             if after > bound {
                 report.violations.push(format!(
@@ -267,11 +274,14 @@ async fn run_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport) {
             }
             break;
         }
-        if tick < max_ticks
-            && let Err(error) = world.tick().await
-        {
-            report.violations.push(error);
-            break;
+        if tick < max_ticks {
+            match world.tick().await {
+                Ok(at_ms) => ticked_at_ms = Some(at_ms),
+                Err(error) => {
+                    report.violations.push(error);
+                    break;
+                }
+            }
         }
     }
     report.ticks = world.ticks_run();

@@ -41,6 +41,7 @@
 //! say what it cannot order.
 
 mod backend;
+pub mod live;
 mod open_handler;
 pub mod protocol;
 pub mod server;

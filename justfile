@@ -226,6 +226,72 @@ server-double-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg replay
 
+# The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
+# (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its
+# seeds, the deployment killed for real at each crash point (its endpoint's
+# connections dropped, or cut at the journal frame the cell names), and the
+# same invariants checked. The test binary is the double's own, switched by
+# `LASH_CRASH_MATRIX_ENGINE=live`; it runs one cell at a time because every
+# world shares the one server. Under `kiln gate lash <fork> -- just
+# crash-matrix-restate-e2e` the gate's KILN_GATE_ID names the server and picks
+# the port block.
+crash-matrix-restate-e2e:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ -n "${KILN_GATE_ID:-}" ] && [ -z "${LASH_GATE_SLOT_OVERRIDE:-}" ]; then
+    gate_sum="$(printf '%s' "$KILN_GATE_ID" | cksum)"
+    export LASH_GATE_SLOT_OVERRIDE="$(( ${gate_sum%% *} % 90 ))"
+  fi
+  source "{{repo}}/scripts/worktree-gate-env.sh"
+  lash_gate_acquire_locks crash-matrix-restate-e2e
+  gate="${KILN_GATE_ID:-lash-${LASH_GATE_WORKTREE_SLUG}}"
+
+  artifacts="${LASH_CRASH_MATRIX_ARTIFACT_DIR:-target/functional-e2e-artifacts/crash-matrix-restate}"
+  case "$artifacts" in
+    /*) ;;
+    *) artifacts="{{repo}}/$artifacts" ;;
+  esac
+  mkdir -p "$artifacts"
+  log="$artifacts/crash-matrix.log"
+
+  binary="$(python3 "{{repo}}/scripts/ci/restate_suite.py" build //crates/lash-sim:crash_point_matrix__test | tail -n 1)"
+
+  # The server redelivers a failed attempt within a quarter second of the
+  # deployment coming back, and never kills or pauses one on its own: a cell
+  # judges a paused drive a wedge, so a retry budget must not decide it.
+  set +e
+  LASH_CRASH_MATRIX_ENGINE=live \
+  LASH_CRASH_MATRIX_ENDPOINT_BIND="127.0.0.1:$((LASH_E2E_PORT_BASE + 33))" \
+    timeout --kill-after=30 2400 \
+    python3 "{{repo}}/scripts/ci/restate_suite.py" serve \
+      --name "$gate" \
+      --port-base "$((LASH_E2E_PORT_BASE + 30))" \
+      --keep-log "$artifacts/restate-server.log" \
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__INITIAL_INTERVAL=10ms \
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__EXPONENTIATION_FACTOR=2.0 \
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL=250ms \
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS=1000000 \
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS=pause \
+      -- bash -c 'cd "$1" && exec "$2" --test-threads=1 --nocapture' _ \
+        "{{repo}}/crates/lash-sim" "$binary" 2>&1 | tee "$log"
+  status="${PIPESTATUS[0]}"
+  set -e
+
+  # The counts: every cell that ran says which engine it ran on.
+  live_cells="$(grep -c ' on the live engine: ' "$log" || true)"
+  other_cells="$(grep -E ' on the [a-z]+ engine: ' "$log" | grep -vc ' on the live engine: ' || true)"
+  echo "crash matrix on live Restate: ${live_cells} cell(s) ran live, ${other_cells} elsewhere"
+  grep -E ' on the [a-z]+ engine: ' "$log" || true
+  grep -E '^test result: ' "$log" | tail -n 1 || true
+  if [ "$status" -ne 0 ]; then
+    echo "crash matrix on live Restate failed (exit $status); log: $log" >&2
+    exit "$status"
+  fi
+  if [ "$live_cells" -eq 0 ] || [ "$other_cells" -ne 0 ]; then
+    echo "crash matrix on live Restate: expected every cell on the live engine" >&2
+    exit 1
+  fi
+
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
 

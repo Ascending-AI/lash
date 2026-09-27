@@ -241,6 +241,24 @@ kiln run //crates/lash-sim:crash_point_matrix__test -- --nocapture
 kiln run //crates/lash-sim:crash_point_matrix__test -- --include-ignored parent_end
 ```
 
+The same cells run against a live `restate-server` (FIG-3872):
+`LASH_CRASH_MATRIX_ENGINE=live` switches every world from the double to the
+server `RESTATE_INGRESS_URL`/`RESTATE_ADMIN_URL` name, with the deployment's
+endpoint served on `LASH_CRASH_MATRIX_ENDPOINT_BIND`. Each cell is written
+once against `crash_matrix::engine::Engine`, so a cell an S8 slice activates
+runs live with no further change. Live, a deployment kill drops the endpoint's
+listener and every connection it served, a journal-step crash cuts the attempt
+at the matching frame before it leaves the deployment, and a hold refuses the
+held invocation's attempts; the engine module says how each fault lands and
+where it differs from the double. `just crash-matrix-restate-e2e` builds the
+binary, starts the pinned server (its name and port block from `KILN_GATE_ID`
+under `kiln gate`), runs every active cell one at a time and prints the counts;
+the Release workflow's `crash-matrix-restate` job runs it before publishing.
+
+```sh
+kiln gate lash <fork> -- just crash-matrix-restate-e2e
+```
+
 ## Search fleet
 
 The confidence gate's search lane (`run_sim_search_lane`) runs `--mode search`
