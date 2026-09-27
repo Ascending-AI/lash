@@ -44,12 +44,16 @@
 
 use std::num::NonZeroUsize;
 
+use std::sync::Arc;
+
 use super::control::apply_control_intent;
 use super::park::StoreParkRecovery;
+use super::relay::{ObligationRelay, relay_due, relay_kind};
 use crate::engine::{
     DriveReconcileReport, DriveRequestId, EnginePage, ReconcileArm, ReconcileCursor,
     ReconcileFailure, ReconcileTick, ScopeCloseSink, SlotPass,
 };
+use crate::runtime::recovery_lease::RecoveryDuties;
 use crate::{
     Clock, ProcessRegistry, ProcessWorkSubstrate, SessionId, SessionStoreFactory,
     SessionWorkEngine, StoreError,
@@ -71,6 +75,11 @@ pub struct ReconcileParts<'a> {
     pub processes: Option<ReconcileProcesses<'a>>,
     /// The caller's clock: intent timestamps and recovery slots.
     pub clock: &'a dyn Clock,
+    /// Which duties this deployment runs this tick (ADR 0109 §1.7): the
+    /// leader-only arms, and the due-obligation claims.
+    pub duties: RecoveryDuties,
+    /// Every obligation kind's relay whose due index this tick claims from.
+    pub relays: &'a [Arc<dyn ObligationRelay>],
 }
 
 /// The process side of a tick: the registry the parent-end ledger lives in
@@ -102,7 +111,31 @@ pub async fn reconcile_once(
     page: NonZeroUsize,
     tick: &str,
 ) -> ReconcileTick {
-    let mut report = ReconcileTick::default();
+    let mut report = ReconcileTick {
+        next: cursor.clone(),
+        led: parts.duties.leader,
+        ..ReconcileTick::default()
+    };
+
+    // Due obligations: every deployment where claims skip each other, the
+    // leader alone where they do not (ADR 0109 §1.7).
+    if parts.duties.due_claims {
+        for relay in parts.relays {
+            let kind = relay_kind(relay.as_ref());
+            match relay_due(relay.as_ref(), parts.clock, page).await {
+                Ok(pass) => report.obligations.push((kind, pass)),
+                Err(error) => report.failures.push(ReconcileFailure {
+                    arm: ReconcileArm::Obligations,
+                    error: format!("{kind} obligations: {error}"),
+                }),
+            }
+        }
+    }
+    if !parts.duties.leader {
+        // Every arm below is a leader-only repair pass; a follower keeps
+        // its cursors for the tick it leads.
+        return report;
+    }
     let control = parts.work.control();
 
     // 1. Parks: the engine's stalled work becomes lash parks.

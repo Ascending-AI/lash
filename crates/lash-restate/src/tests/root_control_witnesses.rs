@@ -490,6 +490,8 @@ async fn crash_gaps(server: HarnessServer) {
                     scopes: &scopes,
                     processes: None,
                     clock: &clock,
+                    duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
+                    relays: &[],
                 },
                 &ReconcileCursor::default(),
                 NonZeroUsize::MIN.saturating_add(15),

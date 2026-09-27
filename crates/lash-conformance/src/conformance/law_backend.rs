@@ -279,4 +279,15 @@ impl crate::StoreSet for StoreLawStores {
     fn module_artifacts(&self) -> Arc<dyn crate::ModuleArtifactStore> {
         Self::no_second_substrate("Lashlang artifact store")
     }
+
+    fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
+        Self::no_second_substrate("recovery leader lease")
+    }
+
+    fn obligation_ledger(
+        &self,
+        _kind: crate::store::ObligationKind,
+    ) -> Arc<dyn crate::store::ObligationLedger> {
+        Self::no_second_substrate("obligation ledger")
+    }
 }

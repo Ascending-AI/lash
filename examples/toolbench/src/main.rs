@@ -262,7 +262,7 @@ async fn main() -> Result<()> {
         let writer = &writer;
         async move {
             let model = &args.model[item.model_index];
-            let (outcome, probes) = runtime::preflight(&tasks[0], model, api_key, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref()).await;
+            let (outcome, probes) = Box::pin(runtime::preflight(&tasks[0], model, api_key, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref())).await;
             let mut file = writer.lock().await;
             let mut all_attempts = Vec::new();
             for (repetition, probe) in probes.iter().enumerate() {

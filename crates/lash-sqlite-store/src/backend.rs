@@ -157,6 +157,7 @@ struct StoreParts {
     process_definitions: Arc<SqliteProcessDefinitionRegistry>,
     process_env_store: Arc<Store>,
     attachment_store: Arc<SqliteAttachmentStore>,
+    recovery_leader: Arc<crate::recovery_leader::SqliteRecoveryLeader>,
 }
 
 /// Validate and create a file root, answering its canonical location.
@@ -526,6 +527,9 @@ impl SqliteStoreSet {
             Some(injector) => factory.with_fault_injector(injector),
             None => factory,
         };
+        let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
+            process_env_store.conn.clone(),
+        ));
         Ok(Self {
             inner: Arc::new(StoreParts {
                 binding: lash_core_execution::StoreBindingId::new(Arc::clone(&identity)),
@@ -540,6 +544,7 @@ impl SqliteStoreSet {
                 process_definitions,
                 process_env_store,
                 attachment_store,
+                recovery_leader,
             }),
         })
     }
@@ -703,6 +708,26 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     /// keeps the Lashlang module artifacts too.
     fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
         SqliteStoreSet::process_env_store(self)
+    }
+
+    fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
+        self.inner.recovery_leader.clone()
+    }
+
+    fn obligation_ledger(
+        &self,
+        kind: lash_core_execution::store::ObligationKind,
+    ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
+        // Each kind's table lives in one database: the process registry file
+        // holds plans and processes, the durable core everything else.
+        let conn = if crate::obligation_ledger::in_process_registry(kind) {
+            self.inner.process_registry.conn.clone()
+        } else {
+            self.inner.process_env_store.conn.clone()
+        };
+        Arc::new(crate::obligation_ledger::SqliteObligationLedger::new(
+            kind, conn,
+        ))
     }
 }
 

@@ -545,3 +545,31 @@ impl RootStore for PostgresSessionStore {
         tx.commit().await.map_err(store_sqlx_error)
     }
 }
+
+lash_store_sql::statements! {
+    /// `control_intents` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
+    pub(crate) struct ControlIntentObligationPostgresStatements @ "control_intent" {
+        /// At most `?2` obligations due at `?1`, oldest due first, each row
+        /// locked for the caller's claim and skipped by every concurrent
+        /// claimant: two deployments' relays take disjoint pages.
+        obligation_select_due_locking = "SELECT obligation_id FROM control_intents
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `session_roots` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
+    pub(crate) struct SessionRootObligationPostgresStatements @ "session_root" {
+        /// At most `?2` obligations due at `?1`, oldest due first, each row
+        /// locked for the caller's claim and skipped by every concurrent
+        /// claimant: two deployments' relays take disjoint pages.
+        obligation_select_due_locking = "SELECT obligation_id FROM session_roots
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
+    }
+}

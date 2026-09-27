@@ -945,3 +945,31 @@ pub(crate) fn list_processes_sql(filter: &lash_core_execution::ProcessListFilter
         (true, true) => statements.list_by_lifetime_scope_pending_cancel.sql(),
     }
 }
+
+lash_store_sql::statements! {
+    /// `parent_end_plans` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
+    pub(crate) struct ParentEndPlanObligationPostgresStatements @ "parent_end_plan" {
+        /// At most `?2` obligations due at `?1`, oldest due first, each row
+        /// locked for the caller's claim and skipped by every concurrent
+        /// claimant: two deployments' relays take disjoint pages.
+        obligation_select_due_locking = "SELECT obligation_id FROM parent_end_plans
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `processes` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
+    pub(crate) struct ProcessObligationPostgresStatements @ "process" {
+        /// At most `?2` obligations due at `?1`, oldest due first, each row
+        /// locked for the caller's claim and skipped by every concurrent
+        /// claimant: two deployments' relays take disjoint pages.
+        obligation_select_due_locking = "SELECT obligation_id FROM processes
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
+    }
+}

@@ -101,6 +101,23 @@ const fn postgres_only_constraint(postgres: RenderedConstraint) -> ExpectedConst
     }
 }
 
+/// The obligation state machine every ledger table declares (ADR 0109 §1.1).
+const OBLIGATION_CHECK: &str = "(obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)";
+
+/// The obligation `CHECK` on one ledger table, named alike on both backends.
+const fn obligation_constraint(
+    sqlite_database: &'static [SqliteConstraintDatabase],
+    sqlite_table: &'static str,
+    postgres_table: &'static str,
+    name: &'static str,
+) -> ExpectedConstraint {
+    expected_constraint(
+        sqlite_database,
+        rendered(sqlite_table, name, OBLIGATION_CHECK),
+        rendered(postgres_table, name, OBLIGATION_CHECK),
+    )
+}
+
 /// The named `CHECK`s Lash's published schemas must declare, one row per
 /// constraint with each backend's rendering beside the other.
 pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
@@ -1040,6 +1057,42 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "ck_control_intents_state",
             "state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')",
         ),
+    ),
+    obligation_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        "session_ingress",
+        "lash_session_ingress",
+        "ck_session_ingress_obligation",
+    ),
+    obligation_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        "control_intents",
+        "lash_control_intents",
+        "ck_control_intents_obligation",
+    ),
+    obligation_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        "session_roots",
+        "lash_session_roots",
+        "ck_session_roots_obligation",
+    ),
+    obligation_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        "session_meta",
+        "lash_session_meta",
+        "ck_session_meta_obligation",
+    ),
+    obligation_constraint(
+        &[SqliteConstraintDatabase::ProcessRegistry],
+        "parent_end_plans",
+        "lash_parent_end_plans",
+        "ck_parent_end_plans_obligation",
+    ),
+    obligation_constraint(
+        &[SqliteConstraintDatabase::ProcessRegistry],
+        "processes",
+        "lash_processes",
+        "ck_processes_obligation",
     ),
 ];
 

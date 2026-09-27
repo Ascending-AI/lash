@@ -169,6 +169,22 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
         PostgresStoreSet::process_env_store(self)
     }
+
+    fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
+        Arc::new(crate::recovery_leader::PostgresRecoveryLeader::new(
+            self.inner.storage.pool().clone(),
+        ))
+    }
+
+    fn obligation_ledger(
+        &self,
+        kind: lash_core_execution::store::ObligationKind,
+    ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
+        Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
+            kind,
+            self.inner.storage.pool().clone(),
+        ))
+    }
 }
 
 impl std::fmt::Debug for PostgresStoreSet {
