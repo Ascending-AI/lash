@@ -1,7 +1,7 @@
 # Drive determinism allowlist (FIG-3672 inventory). One entry per
 # (file, normalized line text) pair:
 #
-#   path  |  <normalized line text>  |  <occurrence count>  # <inventory id>
+#   path  |  <normalized line text>  |  <occurrence count>  # <tag>
 #
 # The line text is the offending source line trimmed, with internal whitespace
 # collapsed to single spaces; the `  |  ` / `  # ` separators use a double
@@ -9,9 +9,52 @@
 # so edits that move or reindent a pinned site stay pinned. A hit fails when
 # its (file, text) is unlisted or occurs more times than the count; a count
 # that exceeds the current occurrences is stale and fails, so fixes must
-# delete or decrement entries. The comment carries the FIG-3672 inventory id
-# for each pinned site (UNMAPPED = the line lint flags code the §1 tables do
-# not cite by line; OBS = a §1 observation-only site).
+# delete or decrement entries. The tag's first word is the class: a FIG-3672
+# inventory id for a site the inventory still counts (UNMAPPED = the line lint
+# flags code the §1 tables do not cite by line; OBS = a §1 observation-only
+# site), RECORDED for a use whose result a journaled step records, or BENIGN
+# for one that provably cannot affect replay (test-only or observational) --
+# the rest of the tag is the site's one-line reason. Only the inventory-id
+# occurrences count against scripts/drive-determinism-allowlist.count.
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  futures_util::select_biased! {  |  1  # RECORDED winner of a race inside the recorded LlmCall step body is the journaled step outcome
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();  |  1  # RECORDED provider stream channel of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  let mut llm_task = crate::task::spawn(async move {  |  1  # RECORDED provider task spawned inside the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,  |  2  # RECORDED stream receiver of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_task: &mut crate::task::JoinHandle<T>,  |  1  # RECORDED provider task handle of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  ) -> DrivePollOutcome<Result<T, crate::task::JoinError>> {  |  1  # RECORDED source poll of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  futures_util::select_biased! {  |  1  # RECORDED winner of a race inside the recorded LlmCall step body is the journaled step outcome
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  handle: crate::task::AbortHandle,  |  1  # RECORDED abort handle of the recorded LlmCall step body's provider task
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,  |  1  # RECORDED stream receiver of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  llm_task: &mut crate::task::JoinHandle<T>,  |  1  # RECORDED provider task handle of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn new(handle: crate::task::AbortHandle) -> Self {  |  1  # RECORDED abort guard of the recorded LlmCall step body's provider task
+crates/lash-lashlang-runtime/src/lib.rs  |  ) -> lash_sansio::future::SendBoxFuture<'a, Result<(), LashlangRuntimeError>> {  |  1  # BENIGN SB-pure validate_process_claims recursion box; no production caller outside tests
+crates/lash-lashlang-runtime/src/process.rs  |  lash_sansio::future::SendBoxFuture<'a, Result<lashlang::AbilityResult, ExecutionHostError>>;  |  1  # RECORDED SB3 ability-call reply box; the reply arrives through the journaled ability protocol
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  lash_sansio::future::SendBoxFuture<'a, Result<AbilityResult, ExecutionHostError>>;  |  1  # RECORDED SB2 host-ability reply box; the reply arrives through the journaled ability protocol
+crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
+crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<'run, JournaledEffectRecord>,  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
+crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<'run, RecordedRuntimeEffect>,  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
+crates/lash-restate/src/controller/mod.rs  |  crate::system_clock(),  |  1  # RECORDED CR-adjacent: the stamp feeds a journaled durable-wait request
+crates/lash-restate/src/durable_wait.rs  |  let remaining = deadline.remaining(crate::system_clock().timestamp_ms())?;  |  1  # RECORDED CR13: sizes only a ctx.sleep whose wake time Restate journals
 crates/lash-restate/src/effect_group/dispatch.rs  |  let Json(outcome) = tokio::select! {  |  1  # UNMAPPED
 crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select! {  |  2  # AC18 UNMAPPED
 crates/lash-restate/src/effect_group/dispatch.rs  |  tokio::select! {  |  1  # AC18
+crates/lash-restate/src/process/admission.rs  |  nonce: crate::journaled_nonce(),  |  1  # RECORDED minted inside the journaled ADMIT_STEP; deliberately unreproducible (ADR 0110)
+crates/lash-restate/src/process/admission.rs  |  started.started_at_ms = super::restate_now_ms();  |  1  # RECORDED stamped inside the journaled START_STEP
+crates/lash-restate/src/process/admission.rs  |  started_at_ms: super::restate_now_ms(),  |  1  # RECORDED stamped inside the journaled START_STEP
+crates/lash-restate/src/process/mod.rs  |  crate::system_clock().timestamp_ms()  |  1  # RECORDED restate_now_ms seam body; every caller is a journaled step or out-of-workflow evidence
+crates/lash-restate/src/process/mod.rs  |  fn restate_now_ms() -> u64 {  |  1  # RECORDED seam; every caller is a journaled step or out-of-workflow evidence
+crates/lash-restate/src/process/park_reconcile.rs  |  epoch_ms: super::restate_now_ms(),  |  1  # BENIGN out-of-workflow park reconciler evidence stamp; no workflow decision reads it
+crates/lash-restate/src/process/workflow.rs  |  epoch_ms: restate_now_ms(),  |  1  # RECORDED stamped inside the journaled COMPLETE_STEP
+crates/lash-restate/src/process/workflow.rs  |  restate_now_ms(),  |  1  # RECORDED stamped inside the journaled PARENT_END_STEP
+crates/lashlang/src/runtime/format.rs  |  lash_sansio::future::drive_sync(append_stringified_value_async(output, value))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/format.rs  |  lash_sansio::future::drive_sync(apply_format_async(template, args))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
+crates/lashlang/src/runtime/format.rs  |  lash_sansio::future::drive_sync(stringify_value_async(value))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/json.rs  |  lash_sansio::future::drive_sync(to_json_async(value))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
+crates/lashlang/src/runtime/ops.rs  |  Value::Projected(value) => lash_sansio::future::drive_sync(value.truthy())?,  |  1  # AC38
+crates/lashlang/src/runtime/ops.rs  |  lash_sansio::future::drive_sync(execute_join_builtin_async(items, sep))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
+crates/lashlang/src/runtime/ops.rs  |  lash_sansio::future::drive_sync(execute_push_builtin_async(list.clone(), item))  |  1  # BENIGN #[cfg(test)] helper; never in a production build
+crates/lashlang/src/runtime/projector.rs  |  lash_sansio::future::drive_sync(self.project(context))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/value.rs  |  lash_sansio::future::drive_sync(self.materialize_async())  |  1  # AC38
+crates/lashlang/src/runtime/value.rs  |  pub type ProjectedFuture<'a, T> = lash_sansio::future::SendBoxFuture<'a, T>;  |  1  # BENIGN SB5 alias; the async reads it boxes are pinned at their drive_sync sites
+crates/lashlang/src/runtime/vm/control.rs  |  .map(|_| (instruction.profile_tag(), ProfileMark::now()));  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision
+crates/lashlang/src/runtime/vm/mod.rs  |  let start = self.profile.as_ref().map(|_| ProfileMark::now());  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision

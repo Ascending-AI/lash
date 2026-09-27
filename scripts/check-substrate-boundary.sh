@@ -358,19 +358,36 @@ fi
 #
 # Forbidden constructs: Tokio scheduling and time (spawn/select!/join!/sync::/
 # time::/task::/task_local!, including grouped `use tokio::{...}` imports),
-# futures::join_all, Instant::now, SystemTime, SystemClock, Uuid::new_v4,
+# futures::join_all, futures/futures_util select!/select_biased!,
+# Instant::now, SystemTime, SystemClock, Uuid::new_v4,
 # rand::, block_on, `dyn Future + Send`, and HashMap/HashSet mentions (a superset of the plan's "no iterating hash
 # collections": FxHash maps use a fixed hasher and stay legal).
 #
+# The scan also names the seams that wrap those facilities so a call renamed
+# to the seam still flags (FIG-3902): drive_sync() (a hand-rolled block_on),
+# system_clock(), journaled_nonce() and restate_now_ms() (wall clock and OS
+# randomness), ProfileMark::now (a monotonic Instant::now), llm_stream_channel()
+# and LlmStreamEventRx (a Tokio mpsc), the task:: spawn/JoinHandle/AbortHandle/
+# JoinError re-exports, and the SendBoxFuture/JournaledStepFuture boxed-future
+# aliases. A `dyn Future` whose `+ Send` bound spills onto a following line is
+# caught by the second alternative, which flags any `dyn Future` the line
+# leaves unterminated (no `;` or `+` after it).
+#
 # Every current hit is pinned in scripts/drive-determinism-allowlist.txt as
-# `path  |  <normalized line text>  |  <occurrence count>  # <inventory id>`,
+# `path  |  <normalized line text>  |  <occurrence count>  # <tag>`,
 # where the text is the offending line trimmed with internal whitespace
-# collapsed. Entries key on the matched text, not the line number, so an
-# unrelated edit that shifts lines in a drive file does not break the check;
-# a hit fails when its (file, text) is unlisted or occurs more times than
-# pinned, and a pinned entry that occurs fewer times than listed is stale and
-# fails, so later slices must delete or decrement their lines. The ratchet
-# test only lets the total occurrence count shrink.
+# collapsed. The tag's first word is the class: a FIG-3672 inventory id for a
+# site the inventory still counts (UNMAPPED = the line lint flags code the §1
+# tables do not cite by line; OBS = a §1 observation-only site), RECORDED for
+# a use whose result a journaled step records, and BENIGN for one that
+# provably cannot affect replay (test-only code, observational reads); the
+# rest of the tag is the site's one-line reason. Entries key on the matched
+# text, not the line number, so an unrelated edit that shifts lines in a
+# drive file does not break the check; a hit fails when its (file, text) is
+# unlisted or occurs more times than pinned, and a pinned entry that occurs
+# fewer times than listed is stale and fails, so later slices must delete or
+# decrement their lines. The ratchet test only lets the occurrence count of
+# non-RECORDED/non-BENIGN pins shrink.
 
 drive_paths=(
   crates/lash-core/src/runtime/drive.rs
@@ -397,7 +414,7 @@ drive_paths=(
   crates/lash-restate/src/session_driver.rs
 )
 
-drive_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)'
+drive_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(futures(_util)?::)?select_biased!|futures(_util)?::select!|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|dyn[[:space:]]+Future[^;+]*$|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)|drive_sync[[:space:]]*\(|system_clock[[:space:]]*\(|journaled_nonce[[:space:]]*\(|restate_now_ms[[:space:]]*\(|ProfileMark::now|llm_stream_channel[[:space:]]*\(|(^|[^[:alnum:]_])(SendBoxFuture|JournaledStepFuture|LlmStreamEventRx)([^[:alnum:]_]|$)|task::(spawn|JoinHandle|AbortHandle|JoinError)'
 drive_allowlist=scripts/drive-determinism-allowlist.txt
 
 # Rule 6 — drive store-call ratchet (FIG-3824).
@@ -518,7 +535,7 @@ ratchet_rule() {
     # Rewrite the allowlist from the current tree, keeping each surviving
     # entry's tag; new keys are tagged UNMAPPED.
     local -A tags=()
-    local tag tfile trest ttext header total=0
+    local tag tfile trest ttext header total=0 first_tag
     while IFS= read -r entry || [[ -n $entry ]]; do
       [[ $entry == \#* || -z ${entry//[[:space:]]/} || $entry != *'  # '* ]] && continue
       body=${entry%%  # *}
@@ -534,7 +551,16 @@ ratchet_rule() {
       done | LC_ALL=C sort
     } >"$allowlist.new"
     for key in "${!seen[@]}"; do
-      [[ -n ${RATCHET_UNCAPPED_TAG:-} && ${tags[$key]:-UNMAPPED} == "$RATCHET_UNCAPPED_TAG" ]] && continue
+      # The tag's first word is the class; RATCHET_UNCAPPED_TAG is a case
+      # alternation of the uncapped classes (e.g. 'RECORDED|BENIGN'), so a
+      # tag may carry a one-line reason after the class word.
+      first_tag=${tags[$key]:-UNMAPPED}
+      first_tag=${first_tag%%[[:space:]]*}
+      if [[ -n ${RATCHET_UNCAPPED_TAG:-} ]]; then
+        case $first_tag in
+          $RATCHET_UNCAPPED_TAG) continue ;;
+        esac
+      fi
       total=$(( total + seen[$key] ))
     done
     mv "$allowlist.new" "$allowlist"
@@ -573,7 +599,7 @@ ratchet_rule() {
   done
 }
 
-ratchet_rule 5 "nondeterministic facility" "$drive_forbidden" "$drive_allowlist" "${drive_paths[@]}"
+RATCHET_UNCAPPED_TAG='RECORDED|BENIGN' ratchet_rule 5 "nondeterministic facility" "$drive_forbidden" "$drive_allowlist" "${drive_paths[@]}"
 RATCHET_UNCAPPED_TAG=RECORDED ratchet_rule 6 "unpinned store call" "$drive_store_forbidden" "$drive_store_allowlist" "${drive_store_paths[@]}"
 if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
   exit 0

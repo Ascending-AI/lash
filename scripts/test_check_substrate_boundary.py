@@ -113,17 +113,28 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
 
     def test_allowlist_only_shrinks(self) -> None:
         # Every entry pins a forbidden-construct site as
-        # `path  |  <normalized line text>  |  <occurrence count>  # id`.
+        # `path  |  <normalized line text>  |  <occurrence count>  # tag`.
         # A fix deletes or decrements entries; nothing may grow them, so the
-        # total pinned occurrence count is capped by the committed count file.
+        # pinned occurrence count is capped by the committed count file. Pins
+        # whose tag's first word is RECORDED (a journaled step records the
+        # result) or BENIGN (the site provably cannot affect replay) carry a
+        # one-line reason and raise no cap, the way rule 6 treats RECORDED.
+        uncapped = {"RECORDED", "BENIGN"}
+        capped = 0
         entries = parse_allowlist(ALLOWLIST.read_text())
         for path, text, count in entries:
             with self.subTest(path=path, text=text):
                 self.assertTrue(path.startswith("crates/"), path)
                 self.assertTrue(text, path)
                 self.assertGreaterEqual(count, 1, path)
+        for line in ALLOWLIST.read_text().splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            body, _, tag = line.partition("  # ")
+            if tag.strip().split(" ", 1)[0] not in uncapped:
+                capped += int(body.split(ENTRY_SEPARATOR)[2])
         cap = int(COUNT.read_text().strip())
-        self.assertLessEqual(sum(count for _, _, count in entries), cap)
+        self.assertLessEqual(capped, cap)
 
     def test_store_allowlist_only_shrinks(self) -> None:
         # The store-call rule pins every direct persistence call in the
@@ -143,7 +154,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             if not line.strip() or line.startswith("#"):
                 continue
             body, _, tag = line.partition("  # ")
-            if tag.strip() != "RECORDED":
+            if tag.strip().split(" ", 1)[0] != "RECORDED":
                 unrecorded += int(body.split(ENTRY_SEPARATOR)[2])
         cap = int(STORE_COUNT.read_text().strip())
         self.assertLessEqual(unrecorded, cap)
@@ -300,6 +311,88 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             self.build_fixture(root, ["fn drive() {", "}"], [])
             hit = root / "crates/lash/src/restate.rs"
             hit.write_text("pub enum EngineFormats {\n" + FIXTURE_ENGINE_FORMAT_LINE + "\n}\n")
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_new_rule5_patterns_each_flag_a_synthetic_offender(self) -> None:
+        # Every seam name added to the drive_forbidden scan (FIG-3902) must
+        # flag a line that reaches a forbidden facility through it.
+        offenders = [
+            "        let out = lash_sansio::future::drive_sync(work());",
+            "            futures_util::select_biased! {",
+            "            futures::select! {",
+            "        let now = crate::system_clock().timestamp_ms();",
+            "        let nonce = crate::journaled_nonce();",
+            "        let epoch_ms = super::restate_now_ms();",
+            "type Fut<'a> = lash_sansio::future::SendBoxFuture<'a, ()>;",
+            "        future: crate::JournaledStepFuture<'run, T>,",
+            "        let mark = ProfileMark::now();",
+            "        let (tx, rx) = crate::session_model::llm_stream_channel();",
+            "        rx: &mut crate::session_model::LlmStreamEventRx,",
+            "        let task = crate::task::spawn(async move {});",
+            "        task: &mut crate::task::JoinHandle<T>,",
+            "        handle: crate::task::AbortHandle,",
+            "        err: crate::task::JoinError,",
+        ]
+        for line in offenders:
+            with self.subTest(line=line):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    self.build_fixture(root, ["fn drive() {", line, "}"], [])
+                    result = self.run_check(root)
+                self.assertNotEqual(result.returncode, 0, line)
+                self.assertIn("rule 5 failed", result.stderr)
+
+    def test_multiline_dyn_future_send_is_caught(self) -> None:
+        # A `dyn Future` whose `+ Send` bound spills onto following lines must
+        # flag just like the single-line spelling.
+        lines = [
+            "fn drive<'a>() -> std::pin::Pin<",
+            "    std::boxed::Box<",
+            "        dyn Future<Output = Result<(), Error>>",
+            "            + Send",
+            "            + 'a,",
+            "    >,",
+            "> {",
+            "    unreachable!()",
+            "}",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, lines, [])
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 5 failed", result.stderr)
+
+    def test_recorded_pin_with_a_reason_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hit = "        let now = crate::system_clock().timestamp_ms();"
+            self.build_fixture(
+                root,
+                ["fn drive() {", hit, "}"],
+                [
+                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"let now = crate::system_clock().timestamp_ms();{ENTRY_SEPARATOR}"
+                    "1  # RECORDED inside a journaled step"
+                ],
+            )
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_benign_pin_with_a_reason_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hit = "        let mark = ProfileMark::now();"
+            self.build_fixture(
+                root,
+                ["fn drive() {", hit, "}"],
+                [
+                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"let mark = ProfileMark::now();{ENTRY_SEPARATOR}"
+                    "1  # BENIGN observational only"
+                ],
+            )
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
 
