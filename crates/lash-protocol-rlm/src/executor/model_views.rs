@@ -64,10 +64,10 @@ impl ModelViews {
         }
         self.entries.insert(key.clone(), view);
         self.oldest_first.push_back(key);
-        if self.entries.len() > MAX_ENTRIES {
-            if let Some(oldest) = self.oldest_first.pop_front() {
-                self.entries.remove(&oldest);
-            }
+        if self.entries.len() > MAX_ENTRIES
+            && let Some(oldest) = self.oldest_first.pop_front()
+        {
+            self.entries.remove(&oldest);
         }
     }
 }
