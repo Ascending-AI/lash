@@ -331,6 +331,7 @@ impl LashRuntime {
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
             unreported_usage_attempts: outstanding_unreported_attempts,
             journaled_drive_claims: std::collections::BTreeSet::new(),
+            engine_retries_root: false,
             admitted_turn_index: None,
             drive_root: None,
             process_sync_needed: Arc::new(AtomicBool::new(false)),

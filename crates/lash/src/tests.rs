@@ -2212,6 +2212,7 @@ mod aggregate_oracle;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
 mod failure_settlement;
+mod finalize_fault;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;

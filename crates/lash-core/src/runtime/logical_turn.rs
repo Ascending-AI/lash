@@ -407,6 +407,13 @@ impl LashRuntime {
         }
     }
 
+    /// Whether the root this turn runs under is retried on `err`: a live
+    /// fault aborts the attempt an engine runs the root in, and the engine
+    /// retries it under the same root (FIG-3897).
+    fn drive_retries(&self, err: &RuntimeError) -> bool {
+        self.engine_retries_root && err.turn_failure_cause() == crate::TurnFailureCause::LiveFault
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "a follow-on failure follows a committed turn"
@@ -745,15 +752,23 @@ impl LashRuntime {
                 // next use reloads from the accepted snapshot instead of running
                 // the executor this turn dirtied.
                 //
-                // A parked turn is exempt: its journal diverged at the refusal,
-                // so it issues no further journaled effect (the repair's cancel
-                // gate peek is one), and its turn id is the one its redrive
-                // carries, so the inputs routed to it are not orphaned.
+                // A parked turn is exempt, and so is a drive root's live fault,
+                // whose attempt its engine retries under the same root
+                // (FIG-3897): a parked turn's journal diverged at the refusal,
+                // and a retry that commits would meet the repair's journaled
+                // effects where it publishes its terminal. Either way it issues
+                // no further journaled effect (the repair's cancel gate peek is
+                // one), and its turn id is the one its redrive carries, so the
+                // inputs routed to it are not orphaned. A failed follow-on
+                // frame is recorded instead, so only a park exempts it.
                 //
                 // A follow-on that fails before its commit stays owed on the
                 // head (ADR 0101 §3): the next drive recovers it.
                 Err(err) if turns.is_empty() => {
-                    if !parks(&err) && !self.owes_follow_on(&turn_trace_turn_id) {
+                    if !parks(&err)
+                        && !self.drive_retries(&err)
+                        && !self.owes_follow_on(&turn_trace_turn_id)
+                    {
                         self.defer_orphaned_turn_inputs_after_teardown(
                             &turn_trace_turn_id,
                             session_execution_lease

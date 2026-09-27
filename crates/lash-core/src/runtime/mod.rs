@@ -558,6 +558,10 @@ pub struct LashRuntime {
     /// any generation: if its rows were reclaimed while the turn was down,
     /// another driver answered them, so committing would answer them twice.
     pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
+    /// Set while an engine runs one admitted root as an attempt of its own
+    /// ([`run_admitted_root`](crate::drive::run_admitted_root)): the engine retries
+    /// that attempt on a live fault, under the same root (FIG-3897).
+    pub(crate) engine_retries_root: bool,
     /// The turn index the running direct turn's admission recorded
     /// (FIG-3682). The accept phase sets it after it adopted the head the
     /// turn was admitted on; the prepare phase takes it, so the admitted

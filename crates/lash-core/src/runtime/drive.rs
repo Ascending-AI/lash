@@ -405,7 +405,7 @@ pub async fn run_admitted_root_with(
     admitted: Admitted,
     sinks: DriveSinks<'_>,
 ) -> Result<RootOutcome, DriveAbort> {
-    Box::pin(runtime.run_admitted_root_step(controller, admitted, &sinks, None))
+    Box::pin(runtime.run_engine_root(controller, admitted, &sinks))
         .await
         .map(|run| run.outcome)
 }
@@ -474,7 +474,7 @@ pub async fn run_admitted_root_reporting(
     admitted: Admitted,
     sinks: DriveSinks<'_>,
 ) -> Result<RootReport, DriveAbort> {
-    Box::pin(runtime.run_admitted_root_step(controller, admitted, &sinks, None))
+    Box::pin(runtime.run_engine_root(controller, admitted, &sinks))
         .await
         .map(RootReport::from)
 }
@@ -499,20 +499,21 @@ pub fn physical_turn_of(root: &TurnId, ordinal: u64) -> TurnId {
     crate::store::QueuedRunPosition::derive_turn_id(root, ordinal)
 }
 
-/// The disposition of a runtime error that ends a drive attempt.
+/// The disposition of a runtime error that ends a drive attempt, by its cause
+/// (FIG-3575). A live fault recorded nothing, so the engine retries the
+/// attempt, whether or not the identical call is declared safe to repeat:
+/// its retry is the redrive that repairs it (ADR 0104 O3, FIG-3897). A
+/// refusal that parks a root parks it, and an outcome is refused.
 pub(crate) fn drive_abort(root: Option<&TurnId>, error: RuntimeError) -> DriveAbort {
-    if let Some(root) = root
-        && error.turn_failure_cause() == crate::TurnFailureCause::Parked
-    {
-        return DriveAbort::Parked {
+    match (error.turn_failure_cause(), root) {
+        (crate::TurnFailureCause::Parked, Some(root)) => DriveAbort::Parked {
             root: root.clone(),
             error: Box::new(error),
-        };
-    }
-    if error.is_retryable() {
-        DriveAbort::Retry(error)
-    } else {
-        DriveAbort::Refused(error)
+        },
+        (crate::TurnFailureCause::LiveFault, _) => DriveAbort::Retry(error),
+        (crate::TurnFailureCause::Parked | crate::TurnFailureCause::Outcome, _) => {
+            DriveAbort::Refused(error)
+        }
     }
 }
 
@@ -656,6 +657,20 @@ impl LashRuntime {
             self.host.core.session_store_factory(),
         )
         .await
+    }
+
+    /// Run `admitted`'s root as an engine's attempt of its own: the engine
+    /// retries the attempt on a live fault (FIG-3897).
+    async fn run_engine_root(
+        &mut self,
+        controller: &ScopedEffectController<'_>,
+        admitted: Admitted,
+        sinks: &DriveSinks<'_>,
+    ) -> Result<RootRun, DriveAbort> {
+        let outer = std::mem::replace(&mut self.engine_retries_root, true);
+        let run = Box::pin(self.run_admitted_root_step(controller, admitted, sinks, None)).await;
+        self.engine_retries_root = outer;
+        run
     }
 
     /// Seal `admitted`, then run its root.
