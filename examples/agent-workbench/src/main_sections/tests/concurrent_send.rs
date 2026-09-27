@@ -1669,32 +1669,43 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
                 .expect("settled snapshot");
             if snapshot.pending_turn_inputs.is_empty() && state_rows(&snapshot).len() == 4 {
                 let rows = state_rows(&snapshot);
-                if rows
-                    == vec![
-                        ("user".to_string(), "first send".to_string()),
-                        ("assistant".to_string(), "answer 0".to_string()),
-                        // The queued send is the next turn's input: the
-                        // engine admits it once the running turn settled.
-                        ("user".to_string(), "second send".to_string()),
-                        ("assistant".to_string(), "answer 1".to_string()),
-                    ]
-                {
-                    break;
+                let observed = rows
+                    .iter()
+                    .map(|(role, text)| (role.as_str(), text.as_str()))
+                    .collect::<Vec<_>>();
+                let first_user = ("user", "first send");
+                let second_user = ("user", "second send");
+                let first_answer = ("assistant", "answer 0");
+                let second_answer = ("assistant", "answer 1");
+                let first_failure = ("event", PUBLIC_TURN_FAILURE_MESSAGE);
+                // NextTurn waits for the first root's final engine commit, not
+                // for its workbench follower. The follower appends a `finish`
+                // answer after that commit, so the second user can precede
+                // either answer, and either follower can append first. The
+                // first root's head-CAS loss instead publishes its failure
+                // event; the queued root must still commit and answer once.
+                let legal = [
+                    [first_user, first_answer, second_user, second_answer],
+                    [first_user, second_user, first_answer, second_answer],
+                    [first_user, second_user, second_answer, first_answer],
+                    [first_user, first_failure, second_user, second_answer],
+                    [first_user, second_user, first_failure, second_answer],
+                    [first_user, second_user, second_answer, first_failure],
+                ];
+                assert!(
+                    legal.iter().any(|order| order.as_slice() == observed),
+                    "the queued send must settle once after the first root's engine commit: {rows:?}"
+                );
+                if observed.contains(&first_failure) {
+                    assert_eq!(
+                        product_event_rows(&state, &session_id),
+                        vec![(
+                            format!("turn:{first_turn_id}:failed"),
+                            PUBLIC_TURN_FAILURE_MESSAGE.to_string(),
+                        )],
+                        "only the first root's head-CAS loss can replace its answer"
+                    );
                 }
-                // The queued send's durable admission commits against the same
-                // session head the running turn's own persist races; the only
-                // accepted concurrent-writer loss is head CAS (#2278), in
-                // which the running turn publishes the failure event while
-                // the queued send still settles its answer.
-                assert!(
-                    rows.contains(&("event".to_string(), PUBLIC_TURN_FAILURE_MESSAGE.to_string())),
-                    "the only legal alternate settle is the head-CAS loss event, got: {rows:?}"
-                );
-                assert!(
-                    rows.contains(&("user".to_string(), "second send".to_string()))
-                        && rows.iter().any(|(role, _)| role == "assistant"),
-                    "the queued send must still commit and answer after the running turn's CAS loss: {rows:?}"
-                );
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
