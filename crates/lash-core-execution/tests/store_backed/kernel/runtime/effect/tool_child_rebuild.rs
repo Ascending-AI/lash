@@ -349,11 +349,21 @@ mod tests {
     /// opener" is the invocation retrying its drive — so the typed refusal
     /// is observed in the invocation's `last_failure` rather than an outcome.
     async fn await_child_retry(backend: &Backend, group_key: &str, needle: &str) -> (u32, String) {
-        let target = format!("EffectGroupDispatch/{group_key}/child");
+        // The dispatch runs on the lane the opener's build recorded: stable
+        // `EffectGroupDispatch` or a generation lane `EffectGroupDispatch_g<G>`
+        // (FIG-3795), so the observation matches the lane prefix rather than
+        // one service name.
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
             for view in backend.double.server().invocations() {
-                if view.target == target
+                let mut segments = view.target.split('/');
+                let is_child = segments.next().is_some_and(|service| {
+                    service
+                        .strip_prefix("EffectGroupDispatch")
+                        .is_some_and(|lane| lane.is_empty() || lane.starts_with("_g"))
+                }) && segments.next() == Some(group_key)
+                    && segments.next() == Some("child");
+                if is_child
                     && let Some(failure) = &view.last_failure
                     && failure.1.contains(needle)
                 {
