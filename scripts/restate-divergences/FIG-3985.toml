@@ -1,0 +1,13 @@
+# Replay-leg divergences held back under the ticket that brings them back:
+# `scripts/restate-divergences/<ticket>.toml`, one file per ticket, so a new
+# divergence never edits `scripts/restate-suites.toml`. Each entry is the
+# law's libtest name and the reason it is held, ending `(FIG-n)` -- the
+# shard's own ticket. The runner refuses an entry that names no test, and
+# `--include-divergent` runs them.
+
+[suites.effect-group.replay.divergent]
+# FIG-3712's residue: while the turn is suspended at an await on this leg, a
+# tool child that fails retryably and then sleeps finds no dispatch context
+# ("no executor currently routes ... tool child 0") and never takes its first
+# attempt, so the test times out waiting for it.
+"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "a suspended turn strands its retrying tool child: no executor routes it (FIG-3985)"
