@@ -73,7 +73,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         ),
     );
     let mut state = RlmExecutionState::for_engine("typescript");
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         ctx.clone(),
         ExecRequest {

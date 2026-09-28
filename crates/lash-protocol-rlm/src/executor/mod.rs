@@ -102,6 +102,7 @@ pub(crate) async fn execute_code_with_bounds(
         lashlang_execution_trace_config,
         execution_bounds,
         crate::plugin::RlmChannel::Cell,
+        crate::render::CodeRendererSlot::default(),
     ))
     .await
 }
@@ -118,12 +119,8 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
+    code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
-    let ctx = ctx.with_recorded_render(lash_core::RecordedRender {
-        renderer_id: "lash.ax.v1".to_string(),
-        params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
-            .unwrap_or_default(),
-    });
     Box::pin(execute_code_with_channel_and_bounds_with_trigger_resolver(
         state,
         ctx,
@@ -136,7 +133,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         lashlang_execution_trace_config,
         execution_bounds,
         channel,
-        crate::render::CodeRendererSlot::default(),
+        code_renderer,
     ))
     .await
 }
@@ -156,16 +153,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     channel: crate::plugin::RlmChannel,
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
-    #[cfg(test)]
-    let ctx = if ctx.recorded_render().is_none() {
-        ctx.with_recorded_render(lash_core::RecordedRender {
-            renderer_id: code_renderer.0.id().to_string(),
-            params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
-                .unwrap_or_default(),
-        })
-    } else {
-        ctx
-    };
     let clean_code = clean_model_code(&request.code);
     // The cell's replay run (FIG-3586): every command it issues is keyed by
     // its issue ordinal under the cell's own replay key, and the cell seals
@@ -242,7 +229,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
                                 }
                                 serde_json::to_value(observations).map_err(|error| {
                                     lash_core::RuntimeEffectControllerError::new(
-                                        lash_core::RuntimeErrorCode::RecordedRendererUnavailable,
+                                        lash_core::RuntimeErrorCode::RecordEncodingFailed,
                                         error.to_string(),
                                     )
                                 })

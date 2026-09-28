@@ -143,6 +143,8 @@ pub struct ToolInvocation {
     pub issuing_language_node_id: Option<String>,
 }
 
+struct AdmittedCallIdentity(String, crate::ToolId);
+
 impl ToolInvocation {
     pub fn new(id: impl Into<String>, tool_id: crate::ToolId, args: serde_json::Value) -> Self {
         Self {
@@ -761,6 +763,7 @@ impl RuntimeExecutionContext<'_> {
     pub async fn complete_tool_call(
         &self,
         call_id: String,
+        tool_id: crate::ToolId,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
         call_key: &str,
@@ -797,9 +800,7 @@ impl RuntimeExecutionContext<'_> {
                         ),
                         crate::RuntimeEffectCommand::PresentToolResult {
                             call_id: call_id.clone(),
-                            tool_id: self
-                                .callable_tool_id_by_name(&outcome.record.tool)
-                                .unwrap_or_else(|| crate::ToolId::new(outcome.record.tool.clone())),
+                            tool_id,
                             tool_name: outcome.record.tool.clone(),
                             render: self.dispatch.execution_env_spec.render.clone(),
                             args: outcome.record.args.clone(),
@@ -926,6 +927,7 @@ impl RuntimeExecutionContext<'_> {
     pub async fn complete_undispatched_tool_call(
         &self,
         call_id: String,
+        tool_id: crate::ToolId,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
         call_key: &str,
@@ -938,7 +940,7 @@ impl RuntimeExecutionContext<'_> {
             outcome.record.args.clone(),
             tool_activity_id(&call_id),
         );
-        self.complete_tool_call(call_id, replay, outcome, call_key, duration_ms)
+        self.complete_tool_call(call_id, tool_id, replay, outcome, call_key, duration_ms)
             .await
     }
 
@@ -989,13 +991,14 @@ impl RuntimeExecutionContext<'_> {
     /// [`Self::emit_tool_call_started`].
     async fn complete_language_tool_call(
         &self,
-        call_id: String,
+        identity: AdmittedCallIdentity,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
         undispatched: bool,
         call_key: &str,
         duration_ms: u64,
     ) -> CompletedProtocolToolCall {
+        let AdmittedCallIdentity(call_id, tool_id) = identity;
         let (tool, args) = (outcome.record.tool.clone(), outcome.record.args.clone());
         // A run that already recorded a nested effect error aborts: this call
         // was settled from inside it — an orchestrating body whose nested call
@@ -1011,6 +1014,7 @@ impl RuntimeExecutionContext<'_> {
         let completed = if undispatched {
             Box::pin(self.complete_undispatched_tool_call(
                 call_id.clone(),
+                tool_id,
                 replay,
                 outcome,
                 call_key,
@@ -1020,6 +1024,7 @@ impl RuntimeExecutionContext<'_> {
         } else {
             Box::pin(self.complete_tool_call(
                 call_id.clone(),
+                tool_id,
                 replay,
                 outcome,
                 call_key,
@@ -1442,7 +1447,7 @@ impl RuntimeExecutionContext<'_> {
             };
             return self
                 .complete_language_tool_call(
-                    call_id,
+                    AdmittedCallIdentity(call_id, tool_id.clone()),
                     replay,
                     outcome,
                     true,
@@ -1451,6 +1456,7 @@ impl RuntimeExecutionContext<'_> {
                 )
                 .await;
         };
+        let admitted_tool_id = authorization.tool_id().clone();
         self.emit_tool_call_started(
             &call_key,
             &call_id,
@@ -1601,7 +1607,7 @@ impl RuntimeExecutionContext<'_> {
         outcome.record.call_id = Some(call_id.clone());
 
         self.complete_language_tool_call(
-            call_id,
+            AdmittedCallIdentity(call_id, admitted_tool_id),
             replay,
             outcome,
             false,

@@ -74,14 +74,6 @@ impl RlmRuntimeState {
         recorded: Option<&lash_core::RecordedRender>,
     ) -> Result<Arc<str>, SessionError> {
         let renderer = self.dialect.renderer();
-        #[cfg(test)]
-        let fallback = lash_core::RecordedRender {
-            renderer_id: renderer.0.id().to_string(),
-            params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
-                .unwrap_or_default(),
-        };
-        #[cfg(test)]
-        let recorded = recorded.or(Some(&fallback));
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
             .map_err(|code| SessionError::Protocol(code.to_string()))?;
         let params: crate::render::ResolvedRlmRender =
@@ -802,8 +794,9 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
+                let render = crate::testing::recorded_test_render();
                 let prompt = state
-                    .bound_variables_prompt(None)
+                    .bound_variables_prompt(Some(&render))
                     .await
                     .expect("bound variables prompt");
                 assert!(!prompt.contains("scratch_note"));
@@ -819,7 +812,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .bound_variables_prompt(None)
+                    .bound_variables_prompt(Some(&render))
                     .await
                     .expect("bound variables prompt");
                 assert!(prompt.contains(r#"- `scratch_note` = "after execution""#));
@@ -834,6 +827,7 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
+                let render = crate::testing::recorded_test_render();
 
                 execute_cell(&state, cell("let survives = 7;"))
                     .await
@@ -846,7 +840,7 @@ mod tests {
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .bound_variables_prompt(None)
+                    .bound_variables_prompt(Some(&render))
                     .await
                     .expect("bound variables prompt");
                 assert!(rendered.contains("cancelled_tail"));
@@ -856,7 +850,7 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .bound_variables_prompt(None)
+                    .bound_variables_prompt(Some(&render))
                     .await
                     .expect("bound variables prompt");
                 assert!(rendered.contains("survives"));

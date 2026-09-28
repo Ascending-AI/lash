@@ -98,7 +98,7 @@ async fn run_step_with_sink(
     if let Some(cancellation) = cancellation {
         ctx = ctx.with_cancellation_token(cancellation);
     }
-    let response = execute_code_unbounded_for_tests(
+    let response = execute_code_unbounded_with_test_render(
         &mut RlmExecutionState::new(),
         ctx,
         ExecRequest {

@@ -243,7 +243,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let context = context.unwrap_or_else(|| {
         lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler))
     });
-    let response = execute_code_unbounded_for_tests(
+    let response = execute_code_unbounded_with_test_render(
         &mut state,
         context,
         request,
@@ -421,7 +421,7 @@ pub(super) async fn execute_and_collect_inventory(
             ),
         );
     let mut state = RlmExecutionState::for_engine(language);
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         context,
         ExecRequest {
@@ -534,7 +534,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 .open_handler(crate::testing::default_cell_scope())
                 .await
                 .expect("open the cell's handler");
-            let successful = execute_code_with_channel_and_bounds(
+            let successful = execute_code_with_test_render(
                 &mut state,
                 lash_core::testing::code_execution_context(crate::testing::double_ports(
                     &double, &handler,
@@ -564,7 +564,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 .expect("open the cell's handler");
             let response = tokio::time::timeout(
                 std::time::Duration::from_secs(5),
-                execute_code_with_channel_and_bounds(
+                execute_code_with_test_render(
                     &mut state,
                     lash_core::testing::code_execution_context_stopped(
                         crate::testing::double_ports(&double, &handler),
@@ -633,7 +633,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the first cell's handler");
-        let first = execute_code_with_channel_and_bounds(
+        let first = execute_code_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -675,7 +675,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
         )
         .await;
         let execution = async {
-            execute_code_with_channel_and_bounds(
+            execute_code_with_test_render(
                 &mut state,
                 context,
                 ExecRequest {
@@ -692,14 +692,17 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
             )
             .await
         };
-        let response = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            let (response, ()) = tokio::join!(execution, async {
-                checkpoint.entered.cancelled().await;
-                stop.cancel();
-                checkpoint.stop_recorded.cancelled().await;
-            });
-            response
-        })
+        let response = Box::pin(tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            async {
+                let (response, ()) = tokio::join!(execution, async {
+                    checkpoint.entered.cancelled().await;
+                    stop.cancel();
+                    checkpoint.stop_recorded.cancelled().await;
+                });
+                response
+            },
+        ))
         .await
         .expect("the running loop reaches a checkpoint and observes the mid-spin stop");
         handler
@@ -744,7 +747,7 @@ pub(super) fn an_immediate_stop_ends_a_sleeping_cell_promptly() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let mut execution = Box::pin(execute_code_with_channel_and_bounds(
+        let mut execution = Box::pin(execute_code_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context_stopped_on(
                 crate::testing::double_ports(&double, &handler),
@@ -792,7 +795,7 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                 .open_handler(crate::testing::default_cell_scope())
                 .await
                 .expect("open the cell's handler");
-            let response = execute_code_with_channel_and_bounds(
+            let response = execute_code_with_test_render(
                 &mut state,
                 lash_core::testing::cancelled_code_execution_context(crate::testing::double_ports(
                     &double, &handler,
@@ -841,7 +844,7 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                     .open_handler(crate::testing::default_cell_scope())
                     .await
                     .expect("open the cell's handler");
-                let response = execute_code_with_channel_and_bounds(
+                let response = execute_code_with_test_render(
                     &mut state,
                     lash_core::testing::code_execution_context(crate::testing::double_ports(
                         &double, &handler,
@@ -902,7 +905,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     .open_handler(crate::testing::default_cell_scope())
                     .await
                     .expect("open the cell's handler");
-                let first = execute_code_with_channel_and_bounds(
+                let first = execute_code_with_test_render(
                     &mut state,
                     lash_core::testing::code_execution_context(crate::testing::double_ports(
                         &double, &handler,
@@ -937,7 +940,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     .open_handler(crate::testing::default_cell_scope())
                     .await
                     .expect("open the cell's handler");
-                let tail = execute_code_with_channel_and_bounds(
+                let tail = execute_code_with_test_render(
                     &mut state,
                     lash_core::testing::code_execution_context(crate::testing::double_ports(
                         &double, &handler,
@@ -1331,7 +1334,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
             catalog,
             invocation,
         );
-    let response = execute_code_unbounded_for_tests(
+    let response = execute_code_unbounded_with_test_render(
         &mut RlmExecutionState::new(),
         context,
         ExecRequest {
@@ -1446,7 +1449,7 @@ pub(super) async fn execute_test_code(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let response = Box::pin(execute_code_unbounded_for_tests(
+    let response = Box::pin(execute_code_unbounded_with_test_render(
         &mut state,
         lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
         ExecRequest {
@@ -1584,7 +1587,7 @@ pub(super) async fn execute_with_host_environment(
         lashlang::LashlangLanguageFeatures::default(),
         resources,
     );
-    let response = execute_code_with_bounds(
+    let response = execute_code_with_bounds_test_render(
         &mut state,
         ctx,
         ExecRequest {
@@ -1617,7 +1620,7 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let _ = execute_code_with_bounds(
+        let _ = execute_code_with_bounds_test_render(
             &mut RlmExecutionState::new(),
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -1652,7 +1655,7 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let result = execute_code_with_bounds(
+        let result = execute_code_with_bounds_test_render(
             &mut RlmExecutionState::new(),
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -1705,7 +1708,7 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let first = execute_code_unbounded_for_tests(
+        let first = execute_code_unbounded_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -1731,7 +1734,7 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let second = execute_code_unbounded_for_tests(
+        let second = execute_code_unbounded_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,

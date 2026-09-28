@@ -4,6 +4,37 @@ use lash_render::{
 };
 use serde_json::{Value, json};
 use std::borrow::Cow;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[derive(Clone)]
+struct CountedArray {
+    value: Value,
+    visits: Arc<AtomicUsize>,
+}
+
+impl RenderValue for CountedArray {
+    fn node(&self) -> RenderNode<'_> {
+        match &self.value {
+            Value::Array(items) => RenderNode::Array(items.len()),
+            Value::Number(number) => RenderNode::Number(Cow::Owned(number.to_string())),
+            _ => unreachable!("the fixture contains only an array of numbers"),
+        }
+    }
+
+    fn index(&self, index: usize) -> Option<Cow<'_, Self>> {
+        let item = self.value.as_array()?.get(index)?.clone();
+        self.visits.fetch_add(1, Ordering::SeqCst);
+        Some(Cow::Owned(Self {
+            value: item,
+            visits: Arc::clone(&self.visits),
+        }))
+    }
+
+    fn fields(&self) -> impl Iterator<Item = (Cow<'_, str>, Cow<'_, Self>)> + '_ {
+        std::iter::empty()
+    }
+}
 
 #[test]
 fn ax_ascii_corpus_matches_at_equivalent_parameters() {
@@ -69,6 +100,33 @@ fn depth_and_stack_boundaries_report_original_characters() {
         ..RenderParams::default()
     };
     assert!(render(&json!({"stack": stack}), &params).cuts.is_empty());
+}
+
+#[test]
+fn empty_stack_falls_back_to_json() {
+    let value = json!({"stack": "", "message": "boom"});
+    let rendered = render(&value, &RenderParams::default());
+    assert!(rendered.body.contains("\"message\": \"boom\""));
+    assert!(rendered.body.contains("\"stack\": \"\""));
+    assert_eq!(rendered.cuts.original_chars, rendered.body.chars().count());
+}
+
+#[test]
+fn auto_inline_probe_stops_after_the_width_is_exceeded() {
+    let visits = Arc::new(AtomicUsize::new(0));
+    let value = CountedArray {
+        value: Value::Array((0..1_000).map(|index| json!(index)).collect()),
+        visits: Arc::clone(&visits),
+    };
+    let params = RenderParams {
+        line_width: 8,
+        array_threshold: 1_001,
+        max_chars: 20_000,
+        ..RenderParams::default()
+    };
+    let rendered = render(&value, &params);
+    assert!(rendered.body.contains('\n'));
+    assert!(visits.load(Ordering::SeqCst) < 2_100);
 }
 
 #[test]

@@ -96,7 +96,7 @@ async fn run_cell(
 ) -> lash_core::ExecResponse {
     crate::executor::execute_code_with_channel_and_bounds(
         &mut crate::executor::RlmExecutionState::for_engine("typescript"),
-        context,
+        context.with_recorded_render(super::recorded_test_render()),
         lash_core::ExecRequest {
             language: "typescript".to_string(),
             code: code.to_string(),
@@ -108,6 +108,7 @@ async fn run_cell(
         crate::executor::RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
+        crate::render::CodeRendererSlot::default(),
     )
     .await
 }

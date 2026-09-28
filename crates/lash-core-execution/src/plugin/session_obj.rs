@@ -645,11 +645,6 @@ impl PluginSession {
             ctx.tool_name.clone(),
             &ctx.output,
         );
-        crate::session::tool_execution::surface_attachment_materialization_notices(
-            attachment_acceptance,
-            &ctx.output,
-            &mut model_return,
-        );
         if let Some(presenter) = &self.contributions.presentation_presenter {
             model_return = (presenter.hook)(ToolPresentationInput {
                 previous: model_return,
@@ -673,6 +668,11 @@ impl PluginSession {
                 ),
             };
         }
+        crate::session::tool_execution::surface_attachment_materialization_notices(
+            attachment_acceptance,
+            &ctx.output,
+            &mut model_return,
+        );
         Ok(crate::runtime::effect::ToolPresentation {
             version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
             model_return,
@@ -1109,5 +1109,79 @@ impl PluginSession {
         plugin_id: &str,
     ) -> super::PluginStateStore {
         super::PluginStateStore::bind(session_id, plugin_id, Arc::clone(&self.state))
+    }
+}
+
+#[cfg(test)]
+mod attachment_notice_order_tests {
+    use super::*;
+    use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+
+    #[tokio::test]
+    async fn attachment_notice_follows_a_step_that_replaces_the_model_parts() {
+        let step: super::super::ToolPresentationStep = Arc::new(|input| {
+            Box::pin(async move {
+                Ok(crate::ModelToolReturn::text(
+                    input.context.call_id,
+                    input.context.tool_name,
+                    "replacement".to_string(),
+                ))
+            })
+        });
+        let host = crate::testing::test_plugin_host(vec![Arc::new(
+            super::super::StaticPluginFactory::new(
+                "notice-order-step",
+                super::super::PluginSpec::new().with_presentation_step(step),
+            ),
+        )]);
+        let session = host
+            .build_session("notice-order-session")
+            .expect("plugin session");
+        let reference = crate::AttachmentRef::new(
+            crate::AttachmentId::parse("notice-order").expect("attachment id"),
+            crate::MediaType::parse("application/octet-stream").expect("media type"),
+            4,
+            None,
+            None,
+        );
+        let output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
+            crate::AttachmentSource::stored(reference),
+        ));
+        let baseline =
+            crate::ModelToolReturn::from_output("call".to_string(), "fixture".to_string(), &output);
+        let settlement = Arc::new(crate::runtime::effect::ToolSettlement {
+            version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
+            intent_outcomes: Vec::new(),
+            possession: Vec::new(),
+            triggers: Vec::new(),
+            checkpoint_messages: Vec::new(),
+            usage: Vec::new(),
+            stream: Default::default(),
+            model_return: baseline,
+        });
+        let presented = session
+            .present_tool_result(
+                super::super::ToolResultProjectionContext {
+                    session_id: "notice-order-session".into(),
+                    call_id: "call".into(),
+                    tool_id: crate::ToolId::new("fixture:id"),
+                    tool_name: "fixture".into(),
+                    render: None,
+                    args: serde_json::Value::Null,
+                    output,
+                    duration_ms: 0,
+                    artifacts: Arc::new(super::super::NoPresentationArtifacts),
+                },
+                settlement,
+                &crate::provider::AttachmentCapabilitySnapshot::default(),
+            )
+            .await
+            .expect("present result");
+        assert_eq!(presented.model_return.parts.len(), 2);
+        assert_eq!(
+            presented.model_return.parts[0],
+            crate::ModelToolReturnPart::text("replacement".to_string())
+        );
+        assert_eq!(presented.model_return.attachment_notices.len(), 1);
     }
 }

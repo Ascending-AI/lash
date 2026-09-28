@@ -105,7 +105,7 @@ async fn execute_with_deferred_trigger(
         ))
         .await
         .expect("open the cell's handler");
-    let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
+    let response = execute_code_with_trigger_test_render(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
             crate::testing::double_ports(&double, &handler),
@@ -315,7 +315,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             ))
             .await
             .expect("open the cell's handler");
-        let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
+        let response = execute_code_with_trigger_test_render(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
                 crate::testing::double_ports(&double, &handler),
@@ -497,7 +497,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         lashlang::LashlangLanguageFeatures::default(),
         timer_trigger_resources(),
     );
-    let response = execute_code_unbounded_for_tests(
+    let response = execute_code_unbounded_with_test_render(
         &mut state,
         ctx,
         ExecRequest {
@@ -683,7 +683,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             lashlang::LashlangLanguageFeatures::default(),
             timer_trigger_resources(),
         );
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
@@ -875,7 +875,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let first = execute_code_unbounded_for_tests(
+        let first = execute_code_unbounded_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(
                 crate::testing::double_ports(&double, &handler),
@@ -926,7 +926,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let unrelated = execute_code_unbounded_for_tests(
+        let unrelated = execute_code_unbounded_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(
                 crate::testing::double_ports(&double, &handler),
@@ -1010,7 +1010,7 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             owner_error.to_string().contains("bare host authority"),
             "{owner_error}"
         );
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut state,
             context,
             ExecRequest {
@@ -1299,7 +1299,7 @@ async fn execute_trigger_process_with_originator(
     } else {
         RlmExecutionState::new()
     };
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         ctx,
         ExecRequest {
@@ -2068,7 +2068,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store(
             crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),

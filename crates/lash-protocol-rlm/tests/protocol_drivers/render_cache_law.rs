@@ -44,6 +44,35 @@ impl CodeRenderer for CountingRenderer {
     }
 }
 
+struct SwitchingRenderer {
+    mode: AtomicUsize,
+    first: AtomicUsize,
+    second: AtomicUsize,
+}
+
+impl CodeRenderer for SwitchingRenderer {
+    fn id(&self) -> &str {
+        if self.mode.load(Ordering::SeqCst) == 0 {
+            "law.first"
+        } else {
+            "law.second"
+        }
+    }
+
+    fn print(
+        &self,
+        value: &lashlang::Value,
+        params: &lash_render::RenderParams,
+    ) -> lash_render::Rendered<String> {
+        if self.mode.load(Ordering::SeqCst) == 0 {
+            self.first.fetch_add(1, Ordering::SeqCst);
+        } else {
+            self.second.fetch_add(1, Ordering::SeqCst);
+        }
+        lash_render::render(value, params)
+    }
+}
+
 struct Script {
     responses: Vec<String>,
     calls: AtomicUsize,
@@ -166,6 +195,62 @@ async fn drive(
     assert!(result.errors.is_empty(), "{:?}", result.errors);
 }
 
+async fn drive_with_run_spec(
+    runtime: &mut LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &SessionId,
+) {
+    let mut options = lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+        render: Some(lash_rlm_types::RlmRenderPatch {
+            print: lash_render::RenderParamsPatch {
+                max_chars: Some(2),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+    .expect("run spec render options");
+    options.payload["channel"] = serde_json::json!("cell");
+    store
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                session_id.clone(),
+                lash_core::TurnInputIngress::next_turn(),
+                TurnInput::text("run-spec"),
+            )
+            .with_source_key("rlm-render-law-run-spec")
+            .with_run_spec(lash_core::RunSpec::overrides(lash_core::RunOverrides {
+                protocol_turn_options: Some(options),
+                ..Default::default()
+            })),
+        )
+        .await
+        .expect("enqueue run spec");
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::queue_drain(
+            session_id.clone(),
+            TurnId::from("run-spec"),
+        ))
+        .await
+        .expect("open drive handler");
+    let build_generation = runtime.host.core.backend().build_generation().clone();
+    let outcome = lash_core::drive::drive_session(
+        runtime,
+        &handler.scoped(),
+        &lash_core::engine::DriveRequest {
+            session: session_id.clone(),
+            request: lash_core::engine::DriveRequestId::new("rlm-render-law-run-spec"),
+            build_generation,
+        },
+    )
+    .await
+    .expect("drive run spec");
+    handler.close().await.expect("close drive handler");
+    assert_eq!(outcome.ran.len(), 1);
+}
+
 fn history_prefix(request: &LlmRequest) -> Vec<lash_sansio::llm::types::LlmMessage> {
     let last = request
         .messages
@@ -239,15 +324,17 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     "first done".into(),
                     format!("<typescript>\n{next_code}\n</typescript>"),
                     "second done".into(),
+                    "<typescript>\nprint(\"run spec\");\n</typescript>".into(),
+                    "run spec done".into(),
                     "reopened done".into(),
                 ],
                 calls: AtomicUsize::new(0),
                 requests: Mutex::new(Vec::new()),
             });
-            let first_calls = Arc::new(AtomicUsize::new(0));
-            let first_renderer: Arc<dyn CodeRenderer> = Arc::new(CountingRenderer {
-                id: "law.first",
-                prints: Arc::clone(&first_calls),
+            let renderer = Arc::new(SwitchingRenderer {
+                mode: AtomicUsize::new(0),
+                first: AtomicUsize::new(0),
+                second: AtomicUsize::new(0),
             });
             let mut created_options =
                 lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
@@ -271,12 +358,12 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     protocol_turn_options: created_options,
                     ..RuntimeSessionState::new(policy())
                 },
-                first_renderer,
+                renderer.clone(),
                 9,
             )
             .await;
             drive(&mut runtime, &double, &session_id, "first").await;
-            assert_eq!(first_calls.load(Ordering::SeqCst), 2);
+            assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
             assert_eq!(script.calls.load(Ordering::SeqCst), 2);
             let (prefix, prefix_bytes) = {
                 let first_requests = script.requests.lock().expect("requests");
@@ -310,30 +397,10 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                 .set_protocol_turn_options(replacement)
                 .await
                 .expect("replace protocol options command");
-            Box::pin(runtime.park())
-                .await
-                .expect("park first runtime");
-            let state = lash_core::store::load_persisted_session_state(base.as_ref())
-                .await
-                .expect("load first state")
-                .expect("persisted first state");
-            let second_calls = Arc::new(AtomicUsize::new(0));
-            let second_renderer: Arc<dyn CodeRenderer> = Arc::new(CountingRenderer {
-                id: "law.second",
-                prints: Arc::clone(&second_calls),
-            });
-            let mut runtime = open_runtime(
-                &backend,
-                base.clone(),
-                Arc::clone(&script),
-                state,
-                second_renderer,
-                7,
-            )
-            .await;
+            renderer.mode.store(1, Ordering::SeqCst);
             drive(&mut runtime, &double, &session_id, "second").await;
-            assert_eq!(first_calls.load(Ordering::SeqCst), 2);
-            assert_eq!(second_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
+            assert_eq!(renderer.second.load(Ordering::SeqCst), 1);
             {
                 let requests = script.requests.lock().expect("requests");
                 let after_change = requests.get(2).expect("request after renderer change");
@@ -359,6 +426,20 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     "{latest_observation}"
                 );
             }
+            drive_with_run_spec(&mut runtime, &double, &base, &session_id).await;
+            assert_eq!(renderer.second.load(Ordering::SeqCst), 2);
+            {
+                let requests = script.requests.lock().expect("requests");
+                let run_spec_request = requests.get(4).expect("run spec request");
+                assert_eq!(
+                    stable_history_bytes(&run_spec_request.messages[..prefix.len()]),
+                    prefix_bytes
+                );
+                assert!(
+                    format!("{:?}", requests.get(5).expect("run spec observation"))
+                        .contains("within 2")
+                );
+            }
             Box::pin(runtime.park())
                 .await
                 .expect("park second runtime");
@@ -382,7 +463,7 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
             .await;
             drive(&mut runtime, &double, &session_id, "reopened").await;
             let requests = script.requests.lock().expect("requests");
-            let after_reopen = requests.get(4).expect("request after reopen");
+            let after_reopen = requests.get(6).expect("request after reopen");
             assert_eq!(
                 stable_history_bytes(&after_reopen.messages[..prefix.len()]),
                 prefix_bytes

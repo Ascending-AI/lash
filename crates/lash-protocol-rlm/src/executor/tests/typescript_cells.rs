@@ -3,6 +3,210 @@ use lash_lashlang_runtime::TraceLanguageExecutionFailure;
 
 const SEED: u64 = 0x5_2c01;
 
+#[test]
+fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
+    block_on(async {
+        for (offset, recorded) in [None, Some("another.renderer")].into_iter().enumerate() {
+            let double = crate::testing::kernel_double(
+                SEED + offset as u64,
+                lash_restate_test::ServerConfig::default(),
+            )
+            .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("open cell handler");
+            let mut context = lash_core::testing::code_execution_context(
+                crate::testing::double_ports(&double, &handler),
+            );
+            if let Some(id) = recorded {
+                let mut render = crate::testing::recorded_test_render();
+                render.renderer_id = id.to_string();
+                context = context.with_recorded_render(render);
+            }
+            let response = crate::executor::execute_code_with_channel_and_bounds(
+                &mut RlmExecutionState::for_engine("typescript"),
+                context,
+                ExecRequest {
+                    language: "typescript".to_string(),
+                    code: "print('value');".to_string(),
+                },
+                crate::testing::memory_artifact_store().await,
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+                crate::plugin::RlmChannel::Cell,
+                crate::render::CodeRendererSlot::default(),
+            )
+            .await;
+            handler.close().await.expect("close cell handler");
+            assert!(
+                response
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.message.contains("recorded_renderer_unavailable")),
+                "{response:?}"
+            );
+            assert!(response.observations.is_empty());
+        }
+    });
+}
+
+struct JournalPrintRenderer {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl crate::render::CodeRenderer for JournalPrintRenderer {
+    fn id(&self) -> &str {
+        "law.journal-print"
+    }
+
+    fn print(
+        &self,
+        value: &lashlang::Value,
+        params: &lash_render::RenderParams,
+    ) -> lash_render::Rendered<String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        lash_render::render(value, params)
+    }
+}
+
+#[test]
+fn bounded_test_entry_uses_the_recorded_params_and_supplied_renderer() {
+    block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED + 11, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open cell handler");
+        let mut params = crate::render::ResolvedRlmRender::default();
+        params.print.max_chars = 3;
+        let context = lash_core::testing::code_execution_context(crate::testing::double_ports(
+            &double, &handler,
+        ))
+        .with_recorded_render(lash_core::RecordedRender {
+            renderer_id: "law.journal-print".into(),
+            params: serde_json::to_value(params).expect("render params"),
+        });
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let response = crate::executor::execute_code_with_channel_and_bounds(
+            &mut RlmExecutionState::for_engine("typescript"),
+            context,
+            ExecRequest {
+                language: "typescript".into(),
+                code: "print('abcdefgh');".into(),
+            },
+            crate::testing::memory_artifact_store().await,
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+            crate::render::CodeRendererSlot(Arc::new(JournalPrintRenderer {
+                calls: Arc::clone(&calls),
+            })),
+        )
+        .await;
+        handler.close().await.expect("close cell handler");
+        assert_eq!(response.error, None, "{response:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let [print] = response.observations.as_slice() else {
+            panic!("expected one print: {response:?}");
+        };
+        assert_eq!(print.projection.limit_chars, 3);
+        assert!(print.text.contains("rendered within 3"), "{}", print.text);
+        assert!(print.text.contains("\nabc"), "{}", print.text);
+    });
+}
+
+#[test]
+fn journaled_prints_replay_without_calling_the_renderer() {
+    block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED + 20, lash_restate_test::ServerConfig::default())
+                .await;
+        let backend = double.lash_backend();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observations = Arc::new(std::sync::Mutex::new(None));
+        let attempt = |crash: bool| -> lash_restate_test::HandlerAttempt {
+            let backend = backend.clone();
+            let calls = Arc::clone(&calls);
+            let observations = Arc::clone(&observations);
+            Arc::new(move |scoped| {
+                let backend = backend.clone();
+                let calls = Arc::clone(&calls);
+                let observations = Arc::clone(&observations);
+                Box::pin(async move {
+                    let context = lash_core::testing::code_execution_context_with_invocation(
+                        crate::testing::attempt_ports(&backend, scoped),
+                        lash_core::testing::exec_code_invocation(
+                            "print-replay-session",
+                            "print-replay-turn",
+                            0,
+                            0,
+                            "exec-code:print-replay",
+                            "exec-code:print-replay",
+                        ),
+                    )
+                    .with_recorded_render(lash_core::RecordedRender {
+                        renderer_id: "law.journal-print".into(),
+                        params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
+                            .expect("render params"),
+                    });
+                    let response = crate::executor::execute_code_with_channel_and_bounds(
+                        &mut RlmExecutionState::for_engine("typescript"),
+                        context,
+                        ExecRequest {
+                            language: "typescript".into(),
+                            code: "print('journaled');".into(),
+                        },
+                        crate::testing::memory_artifact_store().await,
+                        LashlangSurface::default(),
+                        None,
+                        RlmProjectedBindings::default(),
+                        RlmLashlangExecutionTraceConfig::default(),
+                        lashlang::ExecutionBounds::unbounded(),
+                        crate::plugin::RlmChannel::Cell,
+                        crate::render::CodeRendererSlot(Arc::new(JournalPrintRenderer {
+                            calls: Arc::clone(&calls),
+                        })),
+                    )
+                    .await;
+                    assert_eq!(response.error, None, "{response:?}");
+                    if crash {
+                        assert_eq!(calls.load(Ordering::SeqCst), 1);
+                        *observations.lock().expect("observations") =
+                            Some(response.observations.clone());
+                        panic!("crash after the prints step");
+                    }
+                    assert_eq!(
+                        response.observations,
+                        observations
+                            .lock()
+                            .expect("observations")
+                            .clone()
+                            .expect("first pass")
+                    );
+                    assert_eq!(calls.load(Ordering::SeqCst), 1);
+                })
+            })
+        };
+        double
+            .run_crashed_then_redriven(
+                lash_core::AdmittedScope::turn("print-replay-session", "print-replay-turn"),
+                attempt(true),
+                attempt(false),
+            )
+            .await
+            .expect("crashed attempt and replay");
+    });
+}
+
 fn approval_request_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:approval_request",
@@ -68,7 +272,7 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
             lash_core::ToolCatalog::from_tool_definitions(vec![definition]),
         );
         let mut state = RlmExecutionState::for_engine("typescript");
-        let response = execute_code_with_channel_and_bounds(
+        let response = execute_code_with_test_render(
             &mut state,
             context,
             ExecRequest {
@@ -161,7 +365,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 ))
                 .await
                 .expect("open the cell's handler");
-            let response = execute_code_with_channel_and_bounds(
+            let response = execute_code_with_test_render(
                 &mut RlmExecutionState::for_engine("typescript"),
                 lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::double_ports(&double, &handler), Arc::new(PolicyDeniedToolProvider), lash_core::ToolCatalog::from_tool_definitions(vec![approval_request_definition()]), lash_core::testing::exec_code_invocation(
                         "failure-session", "failure-turn", 0, 0, "failure-exec", "exec:failure",
@@ -271,7 +475,7 @@ async fn execute_typescript_test_cell(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
         ExecRequest {
@@ -481,8 +685,57 @@ impl lash_core::ToolProvider for EchoToolProvider {
             .get("text")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        lash_core::ToolAttemptOutcome::done_without_intents(lash_core::ToolOutcomeDone::ok(text))
+        lash_core::ToolAttemptOutcome::done_without_intents(
+            lash_core::ToolOutcomeDone::from_output(
+                lash_core::ToolCallOutput::success(text).with_view(lash_core::ToolView {
+                    blocks: vec![lash_core::ToolViewBlock::Text {
+                        text: "model-only view".to_string(),
+                        meta: Default::default(),
+                    }],
+                }),
+            ),
+        )
     }
+}
+
+#[test]
+fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
+    block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED + 10, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open cell handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::double_ports(&double, &handler),
+            Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        let response = execute_code_with_test_render(
+            &mut RlmExecutionState::for_engine("typescript"),
+            context,
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: "finish(await echo.say({ text: 'structured' }));".to_string(),
+            },
+            crate::testing::memory_artifact_store().await,
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+        )
+        .await;
+        handler.close().await.expect("close cell handler");
+        assert_eq!(response.error, None, "{response:?}");
+        assert_eq!(
+            response.terminal_finish,
+            Some(serde_json::json!("structured"))
+        );
+    });
 }
 
 /// Two identical aggregates raised from one cell must not share identities.
@@ -513,7 +766,7 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
         );
         let mut state = RlmExecutionState::for_engine("typescript");
-        let response = execute_code_with_channel_and_bounds(
+        let response = execute_code_with_test_render(
             &mut state,
             context,
             ExecRequest {

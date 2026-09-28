@@ -269,3 +269,13 @@ pub(crate) async fn memory_process_registry() -> Arc<dyn lash_core::ProcessRegis
 pub(crate) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
     lash_core::StoreSet::trigger_store(memory_store_set().await.as_ref())
 }
+pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
+    lash_core::RecordedRender {
+        renderer_id: crate::render::CodeRendererSlot::default()
+            .0
+            .id()
+            .to_string(),
+        params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
+            .expect("test render params serialize"),
+    }
+}

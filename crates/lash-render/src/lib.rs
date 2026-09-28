@@ -258,6 +258,7 @@ struct Sink {
     body: Option<String>,
     chars: usize,
     column: usize,
+    limit: Option<usize>,
 }
 
 impl Sink {
@@ -266,11 +267,36 @@ impl Sink {
             body: collect.then(String::new),
             chars: 0,
             column: 0,
+            limit: None,
         }
     }
 
+    fn capped(limit: usize) -> Self {
+        Self {
+            limit: Some(limit),
+            ..Self::new(false)
+        }
+    }
+
+    fn saturated(&self) -> bool {
+        self.limit.is_some_and(|limit| self.chars > limit)
+    }
+
     fn write(&mut self, text: &str) {
-        self.chars += text.chars().count();
+        if self.saturated() {
+            return;
+        }
+        self.chars += self.limit.map_or_else(
+            || text.chars().count(),
+            |limit| {
+                text.chars()
+                    .take(limit.saturating_sub(self.chars) + 1)
+                    .count()
+            },
+        );
+        if self.saturated() {
+            return;
+        }
         self.column = text.rsplit('\n').next().map_or(0, |tail| {
             if text.contains('\n') {
                 tail.chars().count()
@@ -324,6 +350,9 @@ fn write_json_string(sink: &mut Sink, value: &str) {
     sink.write("\"");
     let mut segment = 0;
     for (index, ch) in value.char_indices() {
+        if sink.saturated() {
+            return;
+        }
         let escape = match ch {
             '"' => Some("\\\""),
             '\\' => Some("\\\\"),
@@ -392,7 +421,7 @@ fn write_value<V: RenderValue>(
             }
 
             let layout = if matches!(config.layout, WalkLayout::Auto) {
-                let mut candidate = Sink::new(false);
+                let mut candidate = Sink::capped(params.line_width.saturating_sub(sink.column));
                 write_container(
                     value,
                     params,
@@ -439,6 +468,9 @@ fn write_container<V: RenderValue>(
     let mut count = 0;
     if array {
         for index in 0..len {
+            if sink.saturated() {
+                return;
+            }
             write_entry_prefix(sink, params, config, count);
             match value.index(index) {
                 None => sink.write("null"),
@@ -449,6 +481,9 @@ fn write_container<V: RenderValue>(
         }
     } else {
         for (key, child) in value.fields() {
+            if sink.saturated() {
+                return;
+            }
             if matches!(child.node(), RenderNode::Undefined) {
                 continue;
             }
@@ -580,7 +615,7 @@ fn sample_array<V: RenderValue>(
 pub fn render<V: RenderValue>(value: &V, params: &RenderParams) -> Rendered<String> {
     let mut full = Sink::new(false);
     let mut ignored = CutReport::default();
-    if let Some(stack) = value.stack() {
+    if let Some(stack) = value.stack().filter(|stack| !stack.is_empty()) {
         full.write(&stack);
     } else {
         let layout = walk_layout(params);
@@ -601,7 +636,7 @@ pub fn render<V: RenderValue>(value: &V, params: &RenderParams) -> Rendered<Stri
         original_chars: full.chars,
         ..CutReport::default()
     };
-    let body = if let Some(stack) = value.stack() {
+    let body = if let Some(stack) = value.stack().filter(|stack| !stack.is_empty()) {
         compress_stack(&stack, params, &mut cuts)
     } else if let RenderNode::Array(len) = value.node() {
         if len > params.array_threshold {

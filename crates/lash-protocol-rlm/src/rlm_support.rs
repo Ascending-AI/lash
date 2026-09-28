@@ -472,14 +472,11 @@ fn value_hash(value: &FlowValue, params: &RenderParams, renderer_id: &str) -> u6
     serde_json::to_vec(params)
         .unwrap_or_default()
         .hash(&mut hasher);
-    hash_render_value(value, &mut hasher, 0);
+    hash_render_value(value, &mut hasher);
     hasher.finish()
 }
 
-fn hash_render_value<H: Hasher>(value: &FlowValue, hasher: &mut H, depth: usize) {
-    if depth > 64 {
-        return;
-    }
+fn hash_render_value<H: Hasher>(value: &FlowValue, hasher: &mut H) {
     match value.node() {
         RenderNode::Null => 0u8.hash(hasher),
         RenderNode::Undefined => 1u8.hash(hasher),
@@ -504,7 +501,7 @@ fn hash_render_value<H: Hasher>(value: &FlowValue, hasher: &mut H, depth: usize)
             len.hash(hasher);
             for index in 0..len {
                 if let Some(child) = value.index(index) {
-                    hash_render_value(&child, hasher, depth + 1);
+                    hash_render_value(&child, hasher);
                 }
             }
         }
@@ -513,7 +510,7 @@ fn hash_render_value<H: Hasher>(value: &FlowValue, hasher: &mut H, depth: usize)
             len.hash(hasher);
             for (key, child) in value.fields() {
                 key.hash(hasher);
-                hash_render_value(&child, hasher, depth + 1);
+                hash_render_value(&child, hasher);
             }
         }
     }
@@ -1175,5 +1172,20 @@ mod bound_variable_tests {
         let a_idx = s.find("- `a` = 1").expect("a row");
         let b_idx = s.find("- `b` = 2").expect("b row");
         assert!(a_idx < b_idx, "{s}");
+    }
+
+    #[test]
+    fn preview_cache_hash_includes_changes_below_depth_sixty_four() {
+        let mut first = json!("before");
+        let mut second = json!("after");
+        for _ in 0..65 {
+            first = json!([first]);
+            second = json!([second]);
+        }
+        let params = RenderParams::preview();
+        assert_ne!(
+            value_hash(&lashlang::from_json(first), &params, "lash.ax.v1"),
+            value_hash(&lashlang::from_json(second), &params, "lash.ax.v1")
+        );
     }
 }

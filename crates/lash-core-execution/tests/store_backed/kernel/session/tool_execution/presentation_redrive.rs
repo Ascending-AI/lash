@@ -65,7 +65,14 @@ async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
             let live_return = Arc::clone(&live_return);
             Box::pin(async move {
                 let live = turn_context(&backend, scoped)
-                    .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 46)
+                    .complete_tool_call(
+                        CALL_ID.to_string(),
+                        crate::ToolId::new("timed"),
+                        None,
+                        settled(),
+                        "test:call",
+                        46,
+                    )
                     .await
                     .expect("the live call presents");
                 *live_return.lock().expect("the live-return cell") =
@@ -84,7 +91,14 @@ async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
             let live_return = Arc::clone(&live_return);
             Box::pin(async move {
                 let redriven = turn_context(&backend, scoped)
-                    .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 2)
+                    .complete_tool_call(
+                        CALL_ID.to_string(),
+                        crate::ToolId::new("timed"),
+                        None,
+                        settled(),
+                        "test:call",
+                        2,
+                    )
                     .await
                     .expect("the redriven call is served its recorded presentation");
                 assert_eq!(

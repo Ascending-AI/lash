@@ -256,7 +256,14 @@ impl PossessionWorld {
         let (possessed, presented) = self
             .step_with(&session, &possessed, async |context| {
                 context
-                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .complete_tool_call(
+                        call_id.clone(),
+                        lash_core::ToolId::new("sim-tool"),
+                        None,
+                        outcome,
+                        &call_id,
+                        0,
+                    )
                     .await
             })
             .await;
@@ -296,7 +303,14 @@ impl PossessionWorld {
         let (possessed, presented) = self
             .step_with(&session, &possessed, async |context| {
                 context
-                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .complete_tool_call(
+                        call_id.clone(),
+                        lash_core::ToolId::new("sim-tool"),
+                        None,
+                        outcome,
+                        &call_id,
+                        0,
+                    )
                     .await
             })
             .await;
@@ -331,7 +345,14 @@ impl PossessionWorld {
         let (possessed, presented) = self
             .step_with(&session, &possessed, async |context| {
                 context
-                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .complete_tool_call(
+                        call_id.clone(),
+                        lash_core::ToolId::new("sim-tool"),
+                        None,
+                        outcome,
+                        &call_id,
+                        0,
+                    )
                     .await
             })
             .await;
@@ -377,7 +398,14 @@ impl PossessionWorld {
         let (possessed, presented) = self
             .step_with(&session, &possessed, async |context| {
                 context
-                    .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
+                    .complete_tool_call(
+                        call_id.clone(),
+                        lash_core::ToolId::new("sim-tool"),
+                        None,
+                        outcome,
+                        &call_id,
+                        0,
+                    )
                     .await
             })
             .await;

@@ -1447,6 +1447,7 @@ async fn tool_result_from_rmcp(
     let mut text_parts = Vec::new();
     let mut content_items = Vec::new();
     let mut view_blocks = Vec::new();
+    let mut view_only_json_copy = true;
 
     for content in result.content {
         if content
@@ -1460,13 +1461,10 @@ async fn tool_result_from_rmcp(
             last_modified: content.timestamp().map(|timestamp| timestamp.to_rfc3339()),
         };
         let Content { raw, .. } = content;
-        if let RawContent::Text(text) = &raw
-            && structured.as_ref().is_some_and(|value| {
-                serde_json::from_str::<Value>(&text.text).ok().as_ref() == Some(value)
-            })
-        {
-            continue;
-        }
+        let json_copy = matches!(&raw, RawContent::Text(text) if structured.as_ref().is_some_and(|value| {
+            serde_json::from_str::<Value>(&text.text).ok().as_ref() == Some(value)
+        }));
+        view_only_json_copy &= json_copy;
         match raw {
             RawContent::Text(text) => {
                 text_parts.push(text.text.clone());
@@ -1474,7 +1472,9 @@ async fn tool_result_from_rmcp(
                     text: text.text.clone(),
                     meta,
                 });
-                content_items.push(mcp_block("text", [("text", ToolValue::String(text.text))]));
+                if !json_copy {
+                    content_items.push(mcp_block("text", [("text", ToolValue::String(text.text))]));
+                }
             }
             RawContent::Image(image) => {
                 let reference =
@@ -1622,7 +1622,9 @@ async fn tool_result_from_rmcp(
     } else {
         let output = ToolCallOutput::success_tool_value(value);
         ToolOutcome::from_output(
-            if let Some(structured) = structured_projection.filter(|_| view_blocks.is_empty()) {
+            if let Some(structured) =
+                structured_projection.filter(|_| view_blocks.is_empty() || view_only_json_copy)
+            {
                 output.with_projection_value(structured)
             } else {
                 output.with_view(ToolView {

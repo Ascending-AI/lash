@@ -1186,6 +1186,7 @@ mod tests {
         context
             .complete_tool_call(
                 "start-child".to_string(),
+                crate::ToolId::new("start_process"),
                 None,
                 crate::tool_dispatch::ToolDispatchOutcome {
                     record: crate::ToolCallRecord {

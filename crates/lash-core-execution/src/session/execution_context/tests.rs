@@ -221,6 +221,47 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
 }
 
 #[test]
+fn detached_child_start_carries_the_parents_recorded_render() {
+    let render = crate::RecordedRender {
+        renderer_id: "parent.renderer".to_string(),
+        params: serde_json::json!({"print": {"max_chars": 37}}),
+    };
+    let context = test_execution_context_with_env_store(Arc::new(
+        crate::testing::UnavailableProcessExecutionEnvStore,
+    ))
+    .with_recorded_render(render.clone());
+    let child = crate::ProcessRegistration::new(
+        crate::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::json!({"program": "child"}),
+        },
+        crate::ProcessProvenance::host(),
+        crate::Lifetime::Detached,
+    );
+    let (prepared, spec) = context.process_start_execution_env(child);
+    assert!(
+        prepared.env_ref.is_none(),
+        "the start must publish an environment"
+    );
+    let spec = spec.expect("the child start carries its parent's environment");
+    assert_eq!(spec.render, Some(render.clone()));
+    let child_env = crate::ProcessExecutionEnvSpec::from_store_bytes(
+        &spec
+            .to_store_bytes()
+            .expect("persist the child's environment"),
+    )
+    .expect("load the child's environment");
+    assert_eq!(
+        crate::RecordedRender::require_available(child_env.render.as_ref(), "parent.renderer"),
+        Ok(&render)
+    );
+    assert_eq!(
+        crate::RecordedRender::require_available(child_env.render.as_ref(), "another.renderer"),
+        Err(crate::RuntimeErrorCode::RecordedRendererUnavailable)
+    );
+}
+
+#[test]
 fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
     let envelope = |context: &RuntimeExecutionContext<'_>, effect_id: &str| {
         crate::RuntimeEffectEnvelope::new(

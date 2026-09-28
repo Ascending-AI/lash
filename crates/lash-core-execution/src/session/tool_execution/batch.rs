@@ -88,7 +88,7 @@ impl RuntimeExecutionContext<'_> {
             // preparation window it actually spent in.
             let completed = context
                 .complete_language_tool_call(
-                    call.id,
+                    AdmittedCallIdentity(call.id, authorization.tool_id().clone()),
                     None,
                     outcome,
                     true,
@@ -131,7 +131,7 @@ impl RuntimeExecutionContext<'_> {
             ToolPreparationOutcome::Completed(outcome) => {
                 let completed = context
                     .complete_language_tool_call(
-                        call.id,
+                        AdmittedCallIdentity(call.id, authorization.tool_id().clone()),
                         None,
                         *outcome,
                         true,

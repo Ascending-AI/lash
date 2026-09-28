@@ -420,7 +420,7 @@ pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_ser
             .await
             .expect("open the cell's handler");
         // The session re-supplies only `healthy`; `dead` stays a placeholder.
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -1064,7 +1064,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
         let ctx = lash_core::testing::code_execution_context(crate::testing::double_ports(
             &double, &handler,
         ));
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut state,
             ctx,
             ExecRequest {
@@ -1128,7 +1128,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
                   big_notes = [...big_notes, `note ${i}: observation`];
                 }"#
         .to_string();
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut state,
             ctx,
             ExecRequest {

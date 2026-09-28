@@ -92,7 +92,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
 }
 
 #[tokio::test]
-async fn mcp_json_copy_is_deduplicated_among_other_blocks() {
+async fn mcp_json_copy_stays_in_mixed_view_but_not_code_envelope() {
     let result = serde_json::from_value(json!({
         "content":[
             {"type":"text","text":"before"},
@@ -113,7 +113,13 @@ async fn mcp_json_copy_is_deduplicated_among_other_blocks() {
             "content":[{"type":"text","text":"before"},{"type":"text","text":"after"}]
         })
     );
-    assert_eq!(output.view.expect("view").blocks.len(), 2);
+    assert_eq!(
+        output.view.expect("view").blocks,
+        ["before", "{\"answer\":42}", "after"].map(|text| lash_core::ToolViewBlock::Text {
+            text: text.into(),
+            meta: Default::default(),
+        })
+    );
 }
 
 #[tokio::test]

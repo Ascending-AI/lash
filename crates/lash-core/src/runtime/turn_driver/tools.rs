@@ -65,6 +65,11 @@ impl RuntimeTurnDriver<'_> {
             // tool where it runs and is served only from its journal
             // (FIG-3725).
             let drift = self.recorded_surface_drift(&prepare_context, &call.tool_name)?;
+            let admitted_tool_id = drift
+                .as_ref()
+                .map(|drift| drift.recorded_binding().manifest().id.clone())
+                .or_else(|| prepare_context.callable_tool_id_by_name(&call.tool_name))
+                .unwrap_or_else(|| crate::ToolId::new(call.tool_name.clone()));
             let prepare_started = prepare_context.dispatch().clock.now();
             let preparation = match &drift {
                 Some(drift) => {
@@ -82,6 +87,7 @@ impl RuntimeTurnDriver<'_> {
                     let completed = prepare_context
                         .complete_undispatched_tool_call(
                             call_id.clone(),
+                            admitted_tool_id,
                             replay,
                             *outcome,
                             &call_key,

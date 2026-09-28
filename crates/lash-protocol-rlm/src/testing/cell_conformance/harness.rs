@@ -184,7 +184,7 @@ impl Session {
             );
             let response = execute_code_with_channel_and_bounds(
                 state,
-                context,
+                context.with_recorded_render(crate::testing::recorded_test_render()),
                 request,
                 artifact_store,
                 LashlangSurface::default(),
@@ -193,6 +193,7 @@ impl Session {
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
+                crate::render::CodeRendererSlot::default(),
             )
             .await;
             handler.close().await.expect("close the cell's handler");

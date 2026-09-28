@@ -131,7 +131,7 @@ fn cell_attempt(
                 run.catalog,
                 run.invocation,
             );
-            let response = execute_code_unbounded_for_tests(
+            let response = execute_code_unbounded_with_test_render(
                 &mut RlmExecutionState::new(),
                 ctx,
                 run.request,
@@ -496,7 +496,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         );
         assert!(first_ctx.tool_catalog().tools.is_empty());
         let mut state = RlmExecutionState::new();
-        let first = execute_code_unbounded_for_tests(
+        let first = execute_code_unbounded_with_test_render(
             &mut state,
             first_ctx.clone(),
             deferred_matrix_request(),
@@ -532,7 +532,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
 
         // Same stable link: both positive and negative outcomes survive the
         // snapshot and win without another authorization decision.
-        let replay = execute_code_unbounded_for_tests(
+        let replay = execute_code_unbounded_with_test_render(
             &mut restored,
             first_ctx.clone(),
             deferred_matrix_request(),
@@ -560,7 +560,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
                 "replay:effect-2",
             ),
         );
-        let second_link = execute_code_unbounded_for_tests(
+        let second_link = execute_code_unbounded_with_test_render(
             &mut restored,
             second_ctx.clone(),
             deferred_matrix_request(),
@@ -589,7 +589,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
                 "replay:effect-3",
             ),
         );
-        let next_turn = execute_code_unbounded_for_tests(
+        let next_turn = execute_code_unbounded_with_test_render(
             &mut restored,
             next_turn_ctx.clone(),
             deferred_matrix_request(),
@@ -655,7 +655,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
         assert!(ctx.tool_catalog().tools.is_empty());
 
         let mut state = RlmExecutionState::new();
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut state,
             ctx.clone(),
             ExecRequest {
@@ -760,7 +760,7 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
                 calls: Arc::clone(&resolver_calls),
             });
 
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
@@ -1296,7 +1296,7 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
         let enumerations_after_catalog = enumerations.load(Ordering::SeqCst);
 
         let mut state = RlmExecutionState::for_engine("typescript");
-        let response = execute_code_with_channel_and_bounds(
+        let response = execute_code_with_test_render(
                 &mut state,
                 ctx.clone(),
                 ExecRequest {
@@ -1384,7 +1384,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
                 ),
             );
 
-        let response = execute_code_unbounded_for_tests(
+        let response = execute_code_unbounded_with_test_render(
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
@@ -1498,7 +1498,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let first = execute_code_unbounded_for_tests(
+        let first = execute_code_unbounded_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -1521,7 +1521,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let second = execute_code_unbounded_for_tests(
+        let second = execute_code_unbounded_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -1554,7 +1554,7 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let response = execute_code_with_channel_and_bounds(
+        let response = execute_code_with_test_render(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
                 &double, &handler,
@@ -2175,7 +2175,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         ),
     );
     let mut state = RlmExecutionState::for_engine("typescript");
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         ctx.clone(),
         ExecRequest {
@@ -2309,7 +2309,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         ),
     );
     let mut state = RlmExecutionState::for_engine("typescript");
-    let turn_n = execute_code_with_channel_and_bounds(
+    let turn_n = execute_code_with_test_render(
         &mut state,
         ctx.clone(),
         ExecRequest {
@@ -2337,7 +2337,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         std::time::Duration::from_secs(5),
         async {
             tokio::join!(
-                execute_code_with_channel_and_bounds(
+                execute_code_with_test_render(
                     &mut state,
                     // Turn N+1's cell is its own code-execution effect: its
                     // nested effects are keyed under its own replay key.
@@ -2427,7 +2427,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
             session_policy,
         ),
     );
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut RlmExecutionState::for_engine("typescript"),
         ctx,
         ExecRequest {

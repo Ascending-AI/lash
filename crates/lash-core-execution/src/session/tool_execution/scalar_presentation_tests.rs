@@ -91,6 +91,7 @@ impl crate::ToolProvider for EchoTool {
 
 struct RecordingStepFactory {
     runs: Arc<AtomicUsize>,
+    seen_ids: Arc<std::sync::Mutex<Vec<crate::ToolId>>>,
 }
 
 impl crate::plugin::PluginFactory for RecordingStepFactory {
@@ -104,12 +105,14 @@ impl crate::plugin::PluginFactory for RecordingStepFactory {
     ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
         Ok(Arc::new(RecordingStep {
             runs: Arc::clone(&self.runs),
+            seen_ids: Arc::clone(&self.seen_ids),
         }))
     }
 }
 
 struct RecordingStep {
     runs: Arc<AtomicUsize>,
+    seen_ids: Arc<std::sync::Mutex<Vec<crate::ToolId>>>,
 }
 
 impl crate::plugin::SessionPlugin for RecordingStep {
@@ -119,8 +122,10 @@ impl crate::plugin::SessionPlugin for RecordingStep {
 
     fn register(&self, reg: &mut crate::plugin::PluginRegistrar) -> Result<(), crate::PluginError> {
         let runs = Arc::clone(&self.runs);
+        let seen_ids = Arc::clone(&self.seen_ids);
         reg.tool_results().presentation_step(Arc::new(move |input| {
             runs.fetch_add(1, Ordering::SeqCst);
+            seen_ids.lock_recover().push(input.context.tool_id.clone());
             let mut next = input.previous;
             next.parts
                 .push(crate::ModelToolReturnPart::text("[recorded]"));
@@ -141,6 +146,7 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
     );
     let journal = Arc::new(JournalByEffectId::default());
     let runs = Arc::new(AtomicUsize::new(0));
+    let seen_ids = Arc::new(std::sync::Mutex::new(Vec::new()));
     let execute = || {
         let context = crate::testing::TestExecutionContextBuilder::over_controller(
             crate::ScopedEffectController::shared(
@@ -151,6 +157,7 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
         )
         .plugin_factories(vec![Arc::new(RecordingStepFactory {
             runs: Arc::clone(&runs),
+            seen_ids: Arc::clone(&seen_ids),
         })])
         .provider(Arc::new(EchoTool {
             definition: definition.clone(),
@@ -187,6 +194,11 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
     let first = execute().await;
     assert!(presented(&first), "the first run presents through the step");
     assert_eq!(runs.load(Ordering::SeqCst), 1, "the step ran once");
+    assert_eq!(
+        seen_ids.lock_recover().as_slice(),
+        &[crate::ToolId::new("tool:scalar-echo")],
+        "presentation receives the admitted id, not the display name"
+    );
 
     // The redrive: a fresh execution context over the same journal serves
     // every journaled effect, `PresentToolResult` included, from its record.
@@ -199,6 +211,52 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
         runs.load(Ordering::SeqCst),
         1,
         "replay served the recorded presentation; the step did not re-run"
+    );
+}
+
+#[tokio::test]
+async fn presentation_uses_the_admitted_id_when_the_display_name_is_not_in_the_catalog() {
+    let seen_ids = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let context = crate::testing::TestExecutionContextBuilder::over_controller(
+        crate::ScopedEffectController::shared(
+            Arc::new(JournalByEffectId::default()),
+            crate::AdmittedScope::turn("root", "admitted-id-presentation"),
+        )
+        .expect("valid turn scope"),
+    )
+    .plugin_factories(vec![Arc::new(RecordingStepFactory {
+        runs: Arc::new(AtomicUsize::new(0)),
+        seen_ids: Arc::clone(&seen_ids),
+    })])
+    .build()
+    .into_runtime();
+    let outcome = crate::tool_dispatch::ToolDispatchOutcome {
+        record: crate::ToolCallRecord {
+            call_id: Some("drifted-call".to_string()),
+            tool: "display_name".to_string(),
+            args: serde_json::json!({}),
+            output: crate::ToolCallOutput::success(serde_json::json!({"answer": 42})),
+        },
+        attempts: Vec::new(),
+        intents: crate::ToolIntents::default(),
+        intent_outcomes: Vec::new(),
+        captures: Vec::new(),
+        triggers: Vec::new(),
+    };
+    context
+        .complete_tool_call(
+            "drifted-call".to_string(),
+            crate::ToolId::new("admitted:fixture"),
+            None,
+            outcome,
+            "drifted-call",
+            0,
+        )
+        .await
+        .expect("present the admitted call");
+    assert_eq!(
+        seen_ids.lock_recover().as_slice(),
+        &[crate::ToolId::new("admitted:fixture")]
     );
 }
 
@@ -279,6 +337,7 @@ async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
         context
             .complete_tool_call(
                 "timed-call".to_string(),
+                crate::ToolId::new("timed"),
                 None,
                 crate::tool_dispatch::ToolDispatchOutcome {
                     record: crate::ToolCallRecord {

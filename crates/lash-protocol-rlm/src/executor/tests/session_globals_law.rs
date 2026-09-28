@@ -60,7 +60,7 @@ async fn run_in(
     context: lash_core::RuntimeExecutionContext<'_>,
     code: &str,
 ) -> lash_core::ExecResponse {
-    execute_code_with_channel_and_bounds(
+    execute_code_with_test_render(
         state,
         context,
         ExecRequest {

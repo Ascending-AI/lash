@@ -123,7 +123,7 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
             ),
         );
     let mut state = RlmExecutionState::for_engine("typescript");
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         context,
         ExecRequest {
@@ -481,7 +481,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         ),
     );
     let mut state = RlmExecutionState::for_engine("typescript");
-    let response = execute_code_with_channel_and_bounds(
+    let response = execute_code_with_test_render(
         &mut state,
         ctx,
         ExecRequest {
