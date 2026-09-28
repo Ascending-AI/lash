@@ -128,6 +128,11 @@ pub(super) enum SurfaceMethod {
     EnqueueTurnInputBatch {
         conflicting: bool,
     },
+    /// [`TurnInputStore::admit_pending_turn_inputs`] of a batch under the
+    /// sweep's run spec that resends the batch-added input and adds a new
+    /// one (FIG-3975). A backend may fold the follow-ups or not, so only the
+    /// admitted rows are compared.
+    AdmitTurnInputBatch,
     /// [`TurnInputStore::load_run_spec`] of the spec the sweep interned
     /// (`known`), or of a hash no input names.
     LoadRunSpec {
@@ -240,6 +245,7 @@ impl SurfaceMethod {
             Self::EnqueueTurnInputBatch { conflicting: true } => {
                 "surface:enqueue_turn_input_batch_conflicting"
             }
+            Self::AdmitTurnInputBatch => "surface:admit_turn_input_batch",
             Self::LoadRunSpec { known: true } => "surface:load_run_spec",
             Self::LoadRunSpec { known: false } => "surface:load_run_spec_unknown",
             Self::BindRootInputs { conflicting: false } => "surface:bind_root_inputs",
@@ -303,6 +309,9 @@ fn surface(method: SurfaceMethod) -> StoreOperation {
 const UNKNOWN_BATCH_ID: &str = "fig-2841-unknown-batch";
 /// A run-spec hash no input names.
 const UNKNOWN_RUN_SPEC_HASH: &str = "run-spec:v1:blake3:unknown";
+/// The ingress-claim TTL the sweep admits under; no relay runs, so any
+/// positive TTL serves.
+const SURFACE_INGRESS_CLAIM_TTL_MS: u64 = 60_000;
 
 /// The run spec the sweep's spec input carries (FIG-3838).
 fn surface_run_spec() -> lash_core::RunSpec {
@@ -522,6 +531,10 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::EnqueueTurnInputBatch { conflicting: false }),
             surface(SurfaceMethod::EnqueueTurnInputBatch { conflicting: false }),
             surface(SurfaceMethod::EnqueueTurnInputBatch { conflicting: true }),
+            // Admission of a batch resending the added input and adding one;
+            // resending it admits nothing new.
+            surface(SurfaceMethod::AdmitTurnInputBatch),
+            surface(SurfaceMethod::AdmitTurnInputBatch),
             surface(SurfaceMethod::LoadRunSpec { known: true }),
             surface(SurfaceMethod::LoadRunSpec { known: false }),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
@@ -1409,6 +1422,42 @@ impl BackendRunner {
                         ],
                     )?)
                     .await?;
+                format!(
+                    "keys={:?} run_specs_interned={}",
+                    rows.iter()
+                        .map(|row| row.source_key.as_deref())
+                        .collect::<Vec<_>>(),
+                    rows.iter()
+                        .all(|row| row.run_spec == surface_run_spec_hash())
+                )
+            }
+            SurfaceMethod::AdmitTurnInputBatch => {
+                let draft = |key: &str, text: &str| {
+                    PendingTurnInputDraft::new(
+                        &session_id,
+                        TurnInputIngress::NextTurn,
+                        TurnInput::text(text),
+                    )
+                    .with_source_key(key)
+                    .with_input_id(format!("{session_id}:{key}"))
+                    .with_run_spec(surface_run_spec())
+                };
+                let admission = store
+                    .admit_pending_turn_inputs(
+                        lash_core::PendingTurnInputBatch::new(
+                            session_id.clone(),
+                            vec![
+                                draft("surface:batch-input", "input added by a batch"),
+                                draft("surface:admitted-input", "input added by an admission"),
+                            ],
+                        )?,
+                        SURFACE_INGRESS_CLAIM_TTL_MS,
+                    )
+                    .await?;
+                let rows = match admission {
+                    lash_core::TurnInputAdmission::Fused { rows, .. }
+                    | lash_core::TurnInputAdmission::Enqueued(rows) => rows,
+                };
                 format!(
                     "keys={:?} run_specs_interned={}",
                     rows.iter()
