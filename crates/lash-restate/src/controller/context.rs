@@ -32,9 +32,10 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline,
     RestateDurableWaitEffectRequest, RestateDurableWaitGroupChildMembershipRequest,
-    RestateDurableWaitGroupRequest, RestateDurableWaitResolveRefusal,
-    RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateTurnCancelGate,
-    RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
+    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest,
+    RestateDurableWaitResolveRefusal, RestateDurableWaitResolveRequest,
+    RestateDurableWaitResolveResponse, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
+    RestateTurnCancelWake, RestateTurnGatePeek, durable_wait_index_object_key,
     register_turn_cancel_gate, restate_await_event_key_for_authority, restate_durable_wait_request,
     retire_turn_cancel_gate,
 };
@@ -53,6 +54,8 @@ use crate::process_attach::RestateProcessAttachRequest;
 
 #[macro_use]
 mod child_cancel;
+#[macro_use]
+mod index_calls;
 #[macro_use]
 mod segment_wait;
 mod wake;
@@ -466,6 +469,37 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     where
         'ctx: 'run;
 
+    /// A turn cancellation gate's journaled peek: the session's revocation
+    /// and the gate's terminal (FIG-3978). A context with a durable-wait
+    /// index reads both from the index's shared `peek_turn_gate` in one
+    /// call; this default composes the two separate reads.
+    fn peek_turn_gate<'run>(
+        &'run self,
+        namespace: &'run crate::RestateNamespace,
+        key: lash_core::AwaitEventKey,
+    ) -> crate::JournaledFuture<'run, RestateTurnGatePeek>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async move {
+            if let Some(session_id) = key.scope.session_id()
+                && self
+                    .session_is_revoked(namespace, SessionId::from(session_id.to_string()))
+                    .await?
+            {
+                return Ok(RestateTurnGatePeek::Revoked);
+            }
+            let resolution = self
+                .peek_event(
+                    namespace,
+                    RestateDurableWaitAddress::for_key(&key),
+                    key.key_id.clone(),
+                )
+                .await?;
+            Ok(RestateTurnGatePeek::Open(resolution))
+        })
+    }
+
     fn await_process_terminal<'run>(
         &'run self,
         namespace: &'run crate::RestateNamespace,
@@ -494,6 +528,23 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     ) -> ResolveEventFuture<'run>
     where
         'ctx: 'run;
+
+    /// Send one resolve to the key's index and return without waiting for it
+    /// (FIG-3978). This default resolves in place; a context that can send
+    /// journals the resolve as a one-way call instead.
+    fn publish_event<'run>(
+        &'run self,
+        namespace: &'run crate::RestateNamespace,
+        request: RestateDurableWaitResolveRequest,
+    ) -> crate::JournaledFuture<'run, ()>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async move {
+            self.resolve_event(namespace, request).await?;
+            Ok(())
+        })
+    }
 
     /// Hand one process terminal wait to the attach workflow and return without
     /// waiting for it.
@@ -1179,23 +1230,7 @@ macro_rules! impl_restate_controller_context {
 
                 process_signal_wait_method!($promises, $context, 'ctx);
 
-                fn peek_event<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    address: RestateDurableWaitAddress,
-                    replay_key: String,
-                ) -> crate::JournaledFuture<'run, Option<Resolution>>
-                where
-                    'ctx: 'run,
-                {
-                    let request = namespace.durable_wait_workflow(self, address.workflow_key)
-                        .peek()
-                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                    Box::pin(async move {
-                        let Json(resolution) = request.call().await?;
-                        Ok(resolution)
-                    })
-                }
+                durable_wait_index_methods!('ctx);
 
                 fn attach_process_terminal<'run>(
                     &'run self,
@@ -1314,65 +1349,6 @@ macro_rules! impl_restate_controller_context {
                     })
                 }
 
-                fn resolve_event<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    request: RestateDurableWaitResolveRequest,
-                ) -> ResolveEventFuture<'run>
-                where
-                    'ctx: 'run,
-                {
-                    Box::pin(async move {
-                        let replay_key = request.key.key_id.clone();
-                        let address = RestateDurableWaitAddress::for_key(&request.key);
-                        let resolve = namespace.durable_wait_registry(self,
-                                durable_wait_index_object_key(&address),
-                            )
-                            .resolve(Json(request))
-                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                        let Json(outcome) = resolve.call().await?;
-                        Ok(outcome)
-                    })
-                }
-
-                fn update_session_waits<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    session_id: SessionId,
-                    revoke: bool,
-                ) -> crate::JournaledFuture<'run, ()>
-                where
-                    'ctx: 'run,
-                {
-                    let client = namespace.durable_wait_registry(self, session_id);
-                    let request = if revoke {
-                        client.revoke_all()
-                    } else {
-                        client.cancel_all()
-                    };
-                    let call = request.call();
-                    Box::pin(async move {
-                        let Json(()) = call.await?;
-                        Ok(())
-                    })
-                }
-
-                fn session_is_revoked<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    session_id: SessionId,
-                ) -> crate::JournaledFuture<'run, bool>
-                where
-                    'ctx: 'run,
-                {
-                    let request = namespace.durable_wait_registry(self, session_id)
-                        .is_revoked(Json(()));
-                    let call = request.call();
-                    Box::pin(async move {
-                        let Json(revoked) = call.await?;
-                        Ok(revoked)
-                    })
-                }
                 fn scope_effect_begin<'run>(
                     &'run self,
                     namespace: &'run crate::RestateNamespace,

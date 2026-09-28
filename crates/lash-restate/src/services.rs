@@ -496,6 +496,8 @@ lash_clients! {
     DurableWaitRegistryCalls, durable_wait_registry: DurableWaitRegistry object,
     pinned to crate::durable_wait::LashDurableWaitRegistryClient {
         is_revoked(Json<()>) -> Json<bool>;
+        peek_turn_gate(Json<crate::durable_wait::RestateDurableWaitIndexRequest>)
+            -> Json<crate::durable_wait::RestateTurnGatePeek>;
         register(Json<crate::durable_wait::RestateDurableWaitIndexRequest>)
             -> Json<crate::durable_wait::RestateDurableWaitRegistration>;
         settle(Json<crate::durable_wait::RestateDurableWaitSettleRequest>) -> Json<()>;

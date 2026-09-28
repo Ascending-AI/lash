@@ -144,6 +144,35 @@ where
     Ok(None)
 }
 
+/// [`gate_marked_object_state`] for a shared handler's read-only context: the
+/// same refusals, read without taking the object's exclusive lock.
+pub(crate) async fn gate_marked_object_state_shared<T>(
+    ctx: &SharedObjectContext<'_>,
+    formats: &StoredValueFormats,
+    retired_keys: &[&'static str],
+    marker: &'static str,
+) -> Result<Option<T>, TerminalError>
+where
+    T: DeserializeOwned + 'static,
+{
+    for key in retired_keys {
+        if ctx.get::<Vec<u8>>(key).await?.is_some() {
+            return Err(stored_format_terminal(key, None, formats));
+        }
+    }
+    if let Some(marker) = get_stamped_shared::<T>(ctx, marker, formats).await? {
+        return Ok(Some(marker));
+    }
+    for key in ctx.get_keys().await? {
+        if let Some(bytes) = ctx.get::<Vec<u8>>(&key).await?
+            && !carries_format_stamp(&bytes)
+        {
+            return Err(stored_format_terminal(&key, None, formats));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether `bytes` carry a format stamp at all. The version dispatch that
 /// follows decides whether the stamp is one this build reads.
 fn carries_format_stamp(bytes: &[u8]) -> bool {

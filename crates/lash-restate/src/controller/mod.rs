@@ -20,6 +20,7 @@ mod live_frontier;
 mod scope_recording;
 mod scoped;
 mod turn_cancel_request;
+mod turn_gate;
 pub(crate) use turn_cancel_request::{
     restate_await_event_turn_cancel_wait_request, restate_timer_turn_cancel_wait_request,
 };
@@ -461,32 +462,6 @@ impl<C> fmt::Debug for RestateRuntimeEffectController<'_, C> {
     }
 }
 
-impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
-where
-    C: RestateControllerContext<'ctx>,
-{
-    async fn require_active_session(
-        &self,
-        session_id: Option<&SessionId>,
-    ) -> Result<(), RuntimeError> {
-        if let Some(session_id) = session_id
-            && self
-                .context
-                .session_is_revoked(&self.namespace, SessionId::from(session_id.to_string()))
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        lash_core::RuntimeErrorCode::EngineEffectController,
-                        err.to_string(),
-                    )
-                })?
-        {
-            return Err(restate_unknown_or_revoked());
-        }
-        Ok(())
-    }
-}
-
 #[async_trait::async_trait]
 impl<'ctx, C> AwaitEventResolver for RestateRuntimeEffectController<'ctx, C>
 where
@@ -530,6 +505,14 @@ where
         resolve_restate_await_event(&self.context, &self.namespace, key, resolution).await
     }
 
+    async fn publish_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
+        self.publish_resolve(key, resolution).await
+    }
+
     async fn peek_await_event(
         &self,
         key: &AwaitEventKey,
@@ -537,7 +520,13 @@ where
         if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Err(restate_unknown_or_revoked());
         }
-        self.require_active_session(key.scope.session_id()).await?;
+        if turn_gate::is_turn_cancel_gate(key) {
+            if let Some(resolution) = self.mirrored_turn_gate(key).await? {
+                return Ok(Some(resolution));
+            }
+        } else {
+            self.require_active_session(key.scope.session_id()).await?;
+        }
         self.context
             .peek_event(
                 &self.namespace,
@@ -1546,7 +1535,7 @@ where
                 }
             }
             RestateEffectExecution::PeekAwaitEvent { key, .. } => self
-                .peek_await_event(&key)
+                .peek_turn_gate(&key)
                 .await
                 .map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })
                 .map_err(RuntimeEffectControllerError::from),

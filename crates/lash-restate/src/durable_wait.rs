@@ -31,7 +31,7 @@ use lash_core::{
 };
 use restate_sdk::context::{
     ContextAwakeables, ContextClient, ContextPromises, ContextReadState, ContextWriteState,
-    ObjectContext, SharedWorkflowContext,
+    ObjectContext, SharedObjectContext, SharedWorkflowContext,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -515,6 +515,16 @@ pub enum RestateDurableWaitRegistration {
     Revoked,
 }
 
+/// What a turn cancellation gate's peek reads from its session's index
+/// (FIG-3978).
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub enum RestateTurnGatePeek {
+    /// The session was revoked: the gate has nothing left to read.
+    Revoked,
+    /// The gate's terminal, or `None` while the gate is open.
+    Open(Option<Resolution>),
+}
+
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 pub(crate) struct RestateDurableWaitIndexMetadata {
     revoked: bool,
@@ -856,6 +866,15 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 #[name = "LashDurableWaitIndex"]
 pub trait LashDurableWaitRegistry {
     async fn is_revoked(request: Json<()>) -> HandlerResult<Json<bool>>;
+    /// A turn cancellation gate's peek: the session's revocation and the
+    /// gate's terminal in one read that never queues on the exclusive
+    /// handlers (FIG-3978). Every write to a gate goes through this object's
+    /// `resolve`, and every workflow waiter reaches its terminal only after
+    /// `settle` mirrored it here, so the index's copy is the gate's answer.
+    #[shared]
+    async fn peek_turn_gate(
+        request: Json<RestateDurableWaitIndexRequest>,
+    ) -> HandlerResult<Json<RestateTurnGatePeek>>;
     /// Read registered waits that have no retained terminal.
     async fn outstanding() -> HandlerResult<Json<Vec<AwaitEventKey>>>;
     async fn register(
@@ -1320,6 +1339,40 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         ))
     }
 
+    async fn peek_turn_gate(
+        &self,
+        ctx: SharedObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitIndexRequest>,
+    ) -> HandlerResult<Json<RestateTurnGatePeek>> {
+        if !matches!(
+            request.key.wait,
+            AwaitEventWaitIdentity::TurnCancelGate | AwaitEventWaitIdentity::TurnCancelEscalation
+        ) {
+            return Err(TerminalError::new(format!(
+                "peek_turn_gate reads a turn cancellation gate, not a {:?} wait",
+                request.key.wait
+            ))
+            .into());
+        }
+        let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
+        let metadata =
+            object_state::gate_marked_object_state_shared::<RestateDurableWaitIndexMetadata>(
+                &ctx,
+                &DURABLE_WAIT_REGISTRY_FORMATS,
+                RETIRED_DURABLE_WAIT_STATE_KEYS,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+            )
+            .await?;
+        if metadata.is_some_and(|metadata| metadata.revoked) {
+            return Ok(Json(RestateTurnGatePeek::Revoked));
+        }
+        let resolution_key = durable_wait_index_resolution_key(&address);
+        Ok(Json(RestateTurnGatePeek::Open(
+            object_state::get_stamped_shared(&ctx, &resolution_key, &DURABLE_WAIT_REGISTRY_FORMATS)
+                .await?,
+        )))
+    }
+
     async fn outstanding(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<AwaitEventKey>>> {
         Ok(Json(read_outstanding_waits(&ctx).await?))
     }
@@ -1528,7 +1581,13 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             ResolveOutcome::AlreadyResolved { terminal } => terminal.clone(),
             ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => resolution.clone(),
         };
-        mirror_resolve_outcome(&ctx, &request.key, &address, resolution, &outcome);
+        // A turn's terminal is published one-way after its commit, so it can
+        // land after CloseRootScope retired the root. Its workflow promise
+        // owns the terminal, as in `settle`; mirroring it would restore a
+        // session-lifetime row (FIG-3978).
+        if !matches!(request.key.wait, AwaitEventWaitIdentity::TurnTerminal) {
+            mirror_resolve_outcome(&ctx, &request.key, &address, resolution, &outcome);
+        }
         if outcome == ResolveOutcome::UnknownOrRevoked {
             return Ok(Json(RestateDurableWaitResolveResponse::Outcome(outcome)));
         }

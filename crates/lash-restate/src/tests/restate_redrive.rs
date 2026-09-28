@@ -1999,7 +1999,7 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run_redrives_without_cancellati
         "Fig793LlmGateRedrive",
         "run",
         replay,
-        vec![serde_json::json!(false), serde_json::Value::Null],
+        vec![serde_json::json!({ "Open": null })],
     )
     .await
     .expect("new cancellation observation must extend the deployed LLM prefix");
@@ -2010,7 +2010,7 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run_redrives_without_cancellati
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec!["is_revoked", "peek"]
+        vec!["peek_turn_gate"]
     );
     assert_eq!(restate_output_json::<bool>(&output), Some(false));
 }
@@ -2038,10 +2038,9 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run_redrives_to_cancelled_bound
         "Fig793LlmGateRedrive",
         "run",
         replay,
-        vec![
-            serde_json::json!(false),
-            serde_json::to_value(Some(cancellation)).expect("serialize durable cancellation"),
-        ],
+        vec![serde_json::json!({
+            "Open": serde_json::to_value(cancellation).expect("serialize durable cancellation"),
+        })],
     )
     .await
     .expect("cancelled redrive must extend the deployed LLM prefix");
@@ -2052,7 +2051,7 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run_redrives_to_cancelled_bound
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec!["is_revoked", "peek"]
+        vec!["peek_turn_gate"]
     );
     assert_eq!(restate_output_json::<bool>(&output), Some(true));
 }

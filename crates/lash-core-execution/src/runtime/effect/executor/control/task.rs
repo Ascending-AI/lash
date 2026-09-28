@@ -27,6 +27,11 @@ pub enum EffectControllerTaskRequest {
         resolution: Resolution,
         response: oneshot::Sender<Result<ResolveOutcome, RuntimeError>>,
     },
+    PublishAwaitEvent {
+        key: AwaitEventKey,
+        resolution: Resolution,
+        response: oneshot::Sender<Result<Option<ResolveOutcome>, RuntimeError>>,
+    },
     PrepareCompletionKey {
         scope: ExecutionScope,
         wait: AwaitEventWaitIdentity,
@@ -119,6 +124,13 @@ impl EffectControllerTaskRequest {
                 response,
             } => Box::pin(async move {
                 let _ = response.send(controller.resolve_await_event(&key, resolution).await);
+            }),
+            Self::PublishAwaitEvent {
+                key,
+                resolution,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.publish_await_event(&key, resolution).await);
             }),
             Self::PrepareCompletionKey {
                 scope,
@@ -314,6 +326,32 @@ impl AwaitEventResolver for EffectTaskController {
             RuntimeError::new(
                 crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "await-event resolution controller response was dropped",
+            )
+        })?
+    }
+
+    async fn publish_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::PublishAwaitEvent {
+                key: key.clone(),
+                resolution,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "await-event publication controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "await-event publication controller response was dropped",
             )
         })?
     }

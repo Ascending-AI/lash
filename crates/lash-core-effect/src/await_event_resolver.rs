@@ -61,6 +61,19 @@ pub trait AwaitEventResolver: Send + Sync {
         Ok(ResolveOutcome::UnknownOrRevoked)
     }
 
+    /// [`resolve_await_event`](Self::resolve_await_event) for a write nobody
+    /// waits on, such as a committed turn's terminal publication (FIG-3978).
+    /// A resolver that can hand the write to its engine durably returns
+    /// `None` without waiting for the outcome; the default resolves in place
+    /// and answers the outcome.
+    async fn publish_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
+        self.resolve_await_event(key, resolution).await.map(Some)
+    }
+
     /// Turn owners use this as a synchronous start gate before beginning a
     /// new effect. Durable owners must perform that read through their
     /// handler-scoped, replay-aware controller: its result affects subsequent

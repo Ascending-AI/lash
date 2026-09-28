@@ -1522,11 +1522,13 @@ impl ActiveTurnControl {
         terminal: &TurnTerminal,
     ) -> Result<(), RuntimeError> {
         match resolver
-            .resolve_await_event(&self.terminal_key, terminal_resolution(terminal)?)
+            .publish_await_event(&self.terminal_key, terminal_resolution(terminal)?)
             .await?
         {
-            ResolveOutcome::Accepted | ResolveOutcome::AlreadyResolved { .. } => Ok(()),
-            ResolveOutcome::UnknownOrRevoked => Err(RuntimeError::new(
+            None | Some(ResolveOutcome::Accepted | ResolveOutcome::AlreadyResolved { .. }) => {
+                Ok(())
+            }
+            Some(ResolveOutcome::UnknownOrRevoked) => Err(RuntimeError::new(
                 crate::RuntimeErrorCode::TurnTerminalUnknownOrRevoked,
                 format!(
                     "terminal promise for turn `{}` in session `{}` was revoked",

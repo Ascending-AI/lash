@@ -98,6 +98,15 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.resolve_await_event(key, resolution).await
     }
 
+    async fn publish_await_event(
+        &self,
+        inner: &dyn AwaitEventResolver,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
+        inner.publish_await_event(key, resolution).await
+    }
+
     async fn peek_await_event(
         &self,
         inner: &dyn AwaitEventResolver,
@@ -247,6 +256,16 @@ impl AwaitEventResolver for LayeredEffectHost {
     ) -> Result<ResolveOutcome, RuntimeError> {
         self.layer
             .resolve_await_event(self.inner.await_event_resolver(), key, resolution)
+            .await
+    }
+
+    async fn publish_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
+        self.layer
+            .publish_await_event(self.inner.await_event_resolver(), key, resolution)
             .await
     }
 
@@ -540,6 +559,16 @@ impl AwaitEventResolver for LayeredController<'_> {
     ) -> Result<ResolveOutcome, RuntimeError> {
         self.layer
             .resolve_await_event(self.inner.as_ref(), key, resolution)
+            .await
+    }
+
+    async fn publish_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
+        self.layer
+            .publish_await_event(self.inner.as_ref(), key, resolution)
             .await
     }
 
