@@ -198,7 +198,7 @@ impl LashRuntime {
         }
         if state.checkpoint_ref.is_none() && state.head_revision == 0 {
             state.authority.tool_access = services.plugins.tool_access();
-            state.authority.subagent = services.plugins.subagent_context().cloned();
+            state.authority.subagent = services.plugins.subagent_context();
         }
         state.ensure_agent_frame_initialized();
         if state.effective_policy().model.id.trim().is_empty() {

@@ -865,7 +865,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // context has its opener's own, which is what the request recorded; a
     // built one is built from the request. A context that disagrees serves
     // nothing (FIG-3712).
-    if lent.plugins.subagent_context() != request.session.subagent.as_ref() {
+    if lent.plugins.subagent_context() != request.session.subagent {
         return Err(
             super::ToolChildRebuildRefusal::SubagentContext.into_error(&request.call.call_id)
         );

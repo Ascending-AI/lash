@@ -412,7 +412,7 @@ async fn commit_initialized_session(
     .map_err(|err| crate::PluginError::Session(err.to_string()))?;
     persisted_state.apply_persisted_commit_result(result);
     persisted_state.mark_node_ids_persisted(persisted_node_ids);
-    materialized.runtime.state = persisted_state;
+    materialized.runtime.install_resident_state(persisted_state);
     materialized.runtime.materialized_protocol_config_dirty = false;
     let observed_processes = settle_session_observer_intents(
         current,

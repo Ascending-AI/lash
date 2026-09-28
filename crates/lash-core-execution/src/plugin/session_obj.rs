@@ -181,6 +181,14 @@ where
     Ok(out)
 }
 
+/// The two inputs of the plugin catalog projection, held under one lock so a
+/// catalog resolution never observes one without the other.
+#[derive(Clone)]
+pub(super) struct LiveSessionAuthority {
+    pub(super) tool_access: SessionToolAccess,
+    pub(super) subagent: Option<SubagentSessionContext>,
+}
+
 #[derive(Clone)]
 pub struct PluginSession {
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
@@ -190,8 +198,7 @@ pub struct PluginSession {
     pub(super) tools: Arc<dyn ToolProvider>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
     pub(super) tool_catalog_overlay: ToolCatalogContribution,
-    pub(super) tool_access: Arc<std::sync::RwLock<SessionToolAccess>>,
-    pub(super) subagent: Option<SubagentSessionContext>,
+    pub(super) authority: Arc<std::sync::RwLock<LiveSessionAuthority>>,
     pub(super) extensions: PluginExtensions,
     /// Extensions contributed by this session's plugins. Distinct from
     /// `extensions` (the host-static contributions every session inherits).
@@ -213,22 +220,33 @@ impl PluginSession {
 
     /// Returns a snapshot of the session's current resident tool authority.
     pub fn tool_access(&self) -> SessionToolAccess {
-        self.tool_access.read_recover().clone()
+        self.authority.read_recover().tool_access.clone()
     }
 
-    /// Replaces resident tool authority after the corresponding durable state has been
-    /// adopted.
-    pub fn replace_tool_access(&self, access: SessionToolAccess) -> bool {
-        let mut current = self.tool_access.write_recover();
-        if *current == access {
+    /// Returns a snapshot of the session's current resident subagent context.
+    pub fn subagent_context(&self) -> Option<SubagentSessionContext> {
+        self.authority.read_recover().subagent.clone()
+    }
+
+    pub(super) fn live_authority(&self) -> LiveSessionAuthority {
+        self.authority.read_recover().clone()
+    }
+
+    /// Replaces the whole resident authority (tool access and subagent
+    /// context) after the corresponding durable state has been adopted.
+    /// Returns whether it changed.
+    pub fn replace_authority(
+        &self,
+        tool_access: &SessionToolAccess,
+        subagent: Option<&SubagentSessionContext>,
+    ) -> bool {
+        let mut current = self.authority.write_recover();
+        if current.tool_access == *tool_access && current.subagent.as_ref() == subagent {
             return false;
         }
-        *current = access;
+        current.tool_access = tool_access.clone();
+        current.subagent = subagent.cloned();
         true
-    }
-
-    pub fn subagent_context(&self) -> Option<&SubagentSessionContext> {
-        self.subagent.as_ref()
     }
 
     /// Whether this session's plugins hold mutable session state: a plugin

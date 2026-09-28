@@ -25,12 +25,13 @@ impl PluginSession {
             Arc::new(move |manifest: &ToolManifest| {
                 contract_provider.resolve_contract_by_id(&manifest.id)
             });
+        let authority = self.live_authority();
         let catalog = self.resolve_tool_catalog(ToolCatalogContext {
             session_id: SessionId::from(session_id.to_string()),
             tools,
             resolve_contract: Some(Arc::clone(&resolve_contract)),
-            tool_access: self.tool_access(),
-            subagent: self.subagent.clone(),
+            tool_access: authority.tool_access,
+            subagent: authority.subagent,
             extensions: self.extensions.clone(),
         })?;
         registry.validate_resident_catalog_routes(&catalog)?;

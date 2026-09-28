@@ -941,7 +941,7 @@ impl RuntimeExecutionContext<'_> {
                 })
                 .collect(),
             tool_access: plugins.tool_access(),
-            subagent: plugins.subagent_context().cloned(),
+            subagent: plugins.subagent_context(),
             unrecorded: self.unrecorded_sources.union(
                 crate::runtime::effect::UnrecordedSessionSources {
                     fork_plugins: plugins.forked_plugins(),

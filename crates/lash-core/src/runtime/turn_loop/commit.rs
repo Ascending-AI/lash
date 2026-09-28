@@ -281,7 +281,7 @@ impl CommittedTurn {
         runtime
             .resident_session
             .retain_committed_lease_continuity(self.retained_lease_continuity);
-        runtime.state = self.resident_state;
+        runtime.install_resident_state(self.resident_state);
         let observation_revision =
             crate::runtime::observation::observation_revision(&runtime.state);
         runtime

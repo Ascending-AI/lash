@@ -112,12 +112,10 @@ impl LashRuntime {
         if installed_tool_restore.is_some() {
             self.tool_restore_report = installed_tool_restore;
         }
-        self.state = state;
-        // Whole-state adoption rebuilds the marker field; reassert the
-        // per-open `PreservePersisted` claim from host configuration
-        // (FIG-3353).
-        self.reapply_tool_state_preservation_marker();
-        self.publish_plugin_tool_access();
+        // Whole-state adoption rebuilds the marker field; the install
+        // reasserts the per-open `PreservePersisted` claim from host
+        // configuration (FIG-3353).
+        self.install_resident_state(state);
         Ok(())
     }
 
@@ -407,12 +405,10 @@ impl LashRuntime {
         state: RuntimeSessionState,
         execution_before_append: Option<crate::plugin::HydratedExecutionState>,
     ) -> Result<(), SessionError> {
-        self.state = state;
         // Receipt replay and append rollback adopt a whole replacement state;
-        // reassert the per-open `PreservePersisted` claim so the stamp below
-        // cannot export the unreconciled registry (FIG-3353).
-        self.reapply_tool_state_preservation_marker();
-        self.publish_plugin_tool_access();
+        // the install reasserts the per-open `PreservePersisted` claim so the
+        // stamp below cannot export the unreconciled registry (FIG-3353).
+        self.install_resident_state(state);
         let state_for_restore = self.state.clone();
         let mut restored_capture = None;
         if let Some(session) = self.session.as_mut() {

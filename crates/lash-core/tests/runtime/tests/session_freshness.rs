@@ -348,6 +348,50 @@ async fn resident_refresh_adopts_the_durable_head_model() {
     );
 }
 
+/// FIG-2987: the subagent context is the second input of the plugin catalog
+/// projection, so adopting a durable head that changes it must publish it to
+/// the live plugin session along with tool access.
+#[tokio::test(flavor = "multi_thread")]
+async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_plugins() {
+    let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
+    let (mut runtime, store) = freshness_runtime(&double).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
+    let live_subagent = |runtime: &LashRuntime| {
+        runtime
+            .plugin_session()
+            .expect("live plugin session")
+            .subagent_context()
+    };
+    assert_eq!(runtime.state.authority.subagent, None);
+    assert_eq!(live_subagent(&runtime), None);
+
+    let head_subagent = lash_core::SubagentSessionContext {
+        parent_session_id: SessionId::from("durable-parent"),
+        capability: "durable-capability".to_string(),
+        depth: 1,
+        max_depth: 3,
+    };
+    advance_session_head(store.as_ref(), &[], |state| {
+        state.authority.subagent = Some(head_subagent.clone());
+    })
+    .await;
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("refresh resident graph");
+
+    assert_eq!(
+        runtime.state.authority.subagent.as_ref(),
+        Some(&head_subagent),
+        "adoption is head-authoritative: the durable head's subagent context wins"
+    );
+    assert_eq!(
+        live_subagent(&runtime),
+        Some(head_subagent),
+        "the live plugin session must see the adopted subagent context"
+    );
+}
+
 /// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
 /// durable head's provider id. The provider *resolver* stays live-owned — it
 /// is not part of the durable head — but the recorded provider id is a

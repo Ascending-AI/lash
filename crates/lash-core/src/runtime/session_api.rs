@@ -65,16 +65,29 @@ impl LashRuntime {
         }
     }
 
-    /// Publish the already-adopted runtime authority to the live plugin
-    /// session, invalidating discovery caches only when it changed.
-    pub(super) fn publish_plugin_tool_access(&self) {
+    /// Make `state` the resident runtime state. Every whole-state swap goes
+    /// through here (durable adoption and reload, append rollback and receipt
+    /// replay, settled config commands, turn commits, session creation), so
+    /// none can skip what a replacement owes the live session:
+    ///
+    /// - the replacement rebuilds the marker field, so the per-open
+    ///   `PreservePersisted` claim is reasserted from host configuration
+    ///   before any later stamp consults it (FIG-3353);
+    /// - the whole resident authority, tool access and subagent context (the
+    ///   two inputs of the plugin catalog projection), is published to the
+    ///   live plugin session, invalidating discovery caches only when it
+    ///   changed, so live discovery always reflects the settled authority
+    ///   (FIG-2415, FIG-2987).
+    pub(in crate::runtime) fn install_resident_state(&mut self, state: crate::RuntimeSessionState) {
+        self.state = state;
+        self.reapply_tool_state_preservation_marker();
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        if session
-            .plugins()
-            .replace_tool_access(self.state.authority.tool_access.clone())
-        {
+        if session.plugins().replace_authority(
+            &self.state.authority.tool_access,
+            self.state.authority.subagent.as_ref(),
+        ) {
             session.invalidate_runtime_caches();
         }
     }
@@ -538,9 +551,7 @@ impl LashRuntime {
                 "failed to restore the adopted session head: {error}"
             ))
         })?;
-        self.state = adopted;
-        self.reapply_tool_state_preservation_marker();
-        self.publish_plugin_tool_access();
+        self.install_resident_state(adopted);
         if tool_restore.is_some() {
             self.tool_restore_report = tool_restore;
         }
@@ -1494,8 +1505,7 @@ impl LashRuntime {
             .and_then(|session| session.history_store())
         else {
             if let Some(next_state) = next_config_state {
-                self.state = next_state;
-                self.publish_plugin_tool_access();
+                self.install_resident_state(next_state);
             }
             return Ok(());
         };
@@ -1551,8 +1561,7 @@ impl LashRuntime {
         commit_state.apply_persisted_commit_result(result);
         commit_state.mark_node_ids_persisted(persisted_node_ids);
         if let Some(next_state) = next_config_state {
-            self.state = next_state;
-            self.publish_plugin_tool_access();
+            self.install_resident_state(next_state);
         }
         Ok(())
     }
