@@ -846,8 +846,8 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
         )
         .await;
         // The first process's drive outlives its answer while it closes the
-        // root's scope, and holds that process's driver until it ends
-        // (FIG-3979).
+        // root's scope (FIG-3979), and would admit an input sent meanwhile on
+        // that process's driver.
         double.settle_session_drive(&session_id).await;
         session_id
     };

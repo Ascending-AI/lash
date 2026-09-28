@@ -89,8 +89,10 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
     let session = core_v1.session("core-prompt-redeploy").open().await?;
     session.send(TurnInput::text("commit V1")).output().await?;
     drop(session);
-    // V1's drive outlives the answer while it closes the root's scope, and
-    // holds V1's driver on the engine until it ends (FIG-3979).
+    // V1's drive outlives the answer while it closes the root's scope
+    // (FIG-3979), and an input sent to the session meanwhile is admitted by
+    // that drive, on V1's driver: V2's own driver (FIG-4017) serves only the
+    // drives that start after it is installed.
     settle_session_drive(&core_v1, "core-prompt-redeploy").await;
     drop(core_v1);
 

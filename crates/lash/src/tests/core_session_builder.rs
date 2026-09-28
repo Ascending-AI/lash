@@ -12,6 +12,8 @@ mod commit_budget;
 #[cfg(test)]
 mod config_settlement;
 #[cfg(test)]
+mod driver_install;
+#[cfg(test)]
 mod prompt_reopen_authority;
 #[cfg(all(test, feature = "rlm"))]
 mod rlm_session_facts;

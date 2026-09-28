@@ -289,7 +289,15 @@ impl SessionDriver for ScriptedDriver {
 // Fixture
 // ---------------------------------------------------------------------------
 
-async fn fixture(seed: u64) -> (RestateTestBackend, Arc<ScriptedDriver>) {
+/// The backend, its scripted driver, and the engine's installation of that
+/// driver, which the test keeps for as long as the driver serves drives.
+async fn fixture(
+    seed: u64,
+) -> (
+    RestateTestBackend,
+    Arc<ScriptedDriver>,
+    Arc<dyn SessionDriver>,
+) {
     let backend = lash_restate_test::backend(seed, ServerConfig::default())
         .await
         .expect("build the Restate test backend");
@@ -299,10 +307,10 @@ async fn fixture(seed: u64) -> (RestateTestBackend, Arc<ScriptedDriver>) {
         .session_work_engine()
         .install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>);
     assert!(
-        Arc::ptr_eq(&installed, &(Arc::clone(&driver) as Arc<dyn SessionDriver>)),
+        installed.runs_on(driver.as_ref()),
         "the first install is the engine's driver"
     );
-    (backend, driver)
+    (backend, driver, installed)
 }
 
 fn request(id: &str) -> DriveRequestId {
@@ -394,7 +402,7 @@ async fn settle(backend: &RestateTestBackend) {
 /// `LashTurn` per root, and stops `Idle` once admission finds nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_scheduled_drive_runs_every_open_item_in_arrival_order() {
-    let (backend, driver) = fixture(11).await;
+    let (backend, driver, _installation) = fixture(11).await;
     let session = SessionId::from("drive-order");
     driver.accept(&session, "a");
     driver.accept(&session, "b");
@@ -430,7 +438,7 @@ async fn a_scheduled_drive_runs_every_open_item_in_arrival_order() {
 /// rest under a fresh request. The first invocation cannot grow forever.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_busy_session_drive_hands_off_before_its_journal_grows_without_bound() {
-    let (backend, driver) = fixture(0x517).await;
+    let (backend, driver, _installation) = fixture(0x517).await;
     let session = SessionId::from("drive-bounded");
     for index in 0..65 {
         driver.accept(&session, &format!("item-{index}"));
@@ -460,7 +468,7 @@ async fn a_busy_session_drive_hands_off_before_its_journal_grows_without_bound()
 /// of deduplicating it into that drive (FIG-3600 ruling on O2).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_schedule_committed_while_a_drive_runs_is_admitted_by_the_next_invocation() {
-    let (backend, driver) = fixture(12).await;
+    let (backend, driver, _installation) = fixture(12).await;
     let engine = Arc::clone(backend.restate().session_work_engine());
     let session = SessionId::from("drive-behind");
     driver.accept(&session, "a");
@@ -493,7 +501,7 @@ async fn a_schedule_committed_while_a_drive_runs_is_admitted_by_the_next_invocat
 /// schedule names its own request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_repeated_request_id_is_one_drive() {
-    let (backend, driver) = fixture(13).await;
+    let (backend, driver, _installation) = fixture(13).await;
     let engine = Arc::clone(backend.restate().session_work_engine());
     let session = SessionId::from("drive-dedupe");
     driver.accept(&session, "a");
@@ -522,7 +530,7 @@ async fn a_repeated_request_id_is_one_drive() {
 /// session never overlap.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn one_session_drives_one_request_at_a_time() {
-    let (backend, driver) = fixture(14).await;
+    let (backend, driver, _installation) = fixture(14).await;
     let engine = Arc::clone(backend.restate().session_work_engine());
     let held = SessionId::from("drive-held");
     let free = SessionId::from("drive-free");
@@ -553,7 +561,7 @@ async fn one_session_drives_one_request_at_a_time() {
 /// handler journals anything.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_request_of_another_generation_is_refused_before_any_journal_command() {
-    let (backend, driver) = fixture(15).await;
+    let (backend, driver, _installation) = fixture(15).await;
     let session = SessionId::from("drive-generation");
     driver.accept(&session, "a");
     let ingress = backend.ingress();
@@ -631,7 +639,7 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
 /// drive fails and the root runs once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_root_whose_turn_already_ended_is_readmitted_without_a_second_run() {
-    let (backend, driver) = fixture(18).await;
+    let (backend, driver, _installation) = fixture(18).await;
     let session = SessionId::from("drive-ended-root");
     driver.accept(&session, "a");
     driver.script("a", RootScript::Refuse);
@@ -662,7 +670,7 @@ async fn a_root_whose_turn_already_ended_is_readmitted_without_a_second_run() {
 /// ordinal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_queued_root_that_cedes_stops_the_drive() {
-    let (backend, driver) = fixture(19).await;
+    let (backend, driver, _installation) = fixture(19).await;
     let session = SessionId::from("drive-ceded-root");
     driver.accept(&session, "q");
     driver.script("q", RootScript::Cede);
@@ -686,7 +694,7 @@ async fn a_queued_root_that_cedes_stops_the_drive() {
 /// the other driver answered the item, the session's next drive is idle.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_drive_whose_seal_another_driver_superseded_stops_cleanly() {
-    let (backend, driver) = fixture(20).await;
+    let (backend, driver, _installation) = fixture(20).await;
     let session = SessionId::from("drive-superseded");
     driver.accept(&session, "a");
     driver.script("a", RootScript::Supersede);
@@ -739,7 +747,8 @@ async fn a_drive_scheduled_before_the_install_runs_once_a_driver_is_installed() 
         .expect("the early drive ran and failed");
     let driver = Arc::new(ScriptedDriver::default());
     driver.accept(&session, "a");
-    engine.install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>);
+    let _installation =
+        engine.install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>);
     let outcome = attach(&backend, &session, "r1").await;
     assert_eq!(committed_roots(&outcome), ["a"]);
 }
@@ -750,7 +759,7 @@ async fn a_drive_scheduled_before_the_install_runs_once_a_driver_is_installed() 
 /// attacher never reads back a refusal for what is a retry (FIG-3831).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_retryable_refusal_of_a_root_run_redelivers_instead_of_releasing() {
-    let (backend, driver) = fixture(22).await;
+    let (backend, driver, _installation) = fixture(22).await;
     let session = SessionId::from("drive-busy-lane");
     driver.accept(&session, "a");
     driver.script("a", RootScript::RefusedRetryable);
@@ -829,7 +838,7 @@ async fn a_drive_crashed_at_any_journal_point_of_either_handler_consumes_each_it
     let seed = 17;
     let session = SessionId::from("drive-crash");
     let reference = {
-        let (backend, driver) = fixture(seed).await;
+        let (backend, driver, _installation) = fixture(seed).await;
         driver.accept(&session, "a");
         driver.accept(&session, "b");
         backend
@@ -849,7 +858,7 @@ async fn a_drive_crashed_at_any_journal_point_of_either_handler_consumes_each_it
     for (service, service_points) in points {
         assert!(!service_points.is_empty(), "{service} has journal points");
         for point in service_points {
-            let (backend, driver) = fixture(seed).await;
+            let (backend, driver, _installation) = fixture(seed).await;
             if service == SESSION_DRIVER_SERVICE {
                 backend.crash_session_drive(point.clone());
             } else {

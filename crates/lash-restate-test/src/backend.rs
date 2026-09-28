@@ -497,8 +497,9 @@ impl RestateTestBackend {
     /// awaited. A send's handle answers at its root's final commit, before
     /// the drive closes the root's scope and answers its next admission
     /// (FIG-3979), so a test that reads what the drive leaves behind, or
-    /// builds another core over this engine, settles the drive first: while
-    /// a drive runs it holds the driver of the core that installed it.
+    /// sends the session's next input from another core, settles the drive
+    /// first: while a drive runs it admits what the session is sent, on the
+    /// driver it started on.
     pub async fn settle_session_drive(&self, session: &lash_core::SessionId) {
         let prefix = format!(
             "{}/{}/",

@@ -57,8 +57,10 @@ pub struct LashCore {
     /// Shared across core clones so the work ports are resolved at most once.
     pub(crate) substrate_slot: Arc<CoreWorkSlot>,
     /// The session driver this core installed on its backend's session-work
-    /// engine (FIG-3600). The engine may hold it weakly, so the core keeps it
-    /// for its whole life.
+    /// engine (FIG-3600), as the engine returned it. The engine may hold it
+    /// weakly, so the core keeps it for its whole life, and no longer: a drive
+    /// still running on this core's driver after the core is dropped does not
+    /// keep the install live (FIG-4017).
     pub(crate) _session_driver: Arc<dyn lash_core::SessionDriver>,
     /// The sessions this core has open in this process: the driver runs a
     /// drive on the open session's runtime (FIG-3600 S5b).
@@ -1322,7 +1324,7 @@ fn install_session_driver(
     owner: &lash_core::LeaseOwnerIdentity,
 ) -> Arc<dyn lash_core::SessionDriver> {
     let installed = port.install_session_driver(Arc::clone(&driver));
-    if !Arc::ptr_eq(&installed, &driver) {
+    if !installed.runs_on(driver.as_ref()) {
         tracing::warn!(
             event = "session_driver.install_ignored",
             owner_id = %owner.owner_id,

@@ -203,19 +203,66 @@ pub(crate) fn parse_turn_workflow_key(key: &str) -> Option<(SessionId, lash_core
 /// backend exists, so they read the driver from this slot when a drive runs.
 /// The core fills it through the engine's
 /// [`install_session_driver`](SessionWorkEngine::install_session_driver), a
-/// get-or-init: while an installed driver is alive, one engine has one
+/// get-or-init: while a core keeps its installation, one engine has one
 /// answer to what runs its drives, whichever core was built first.
 ///
-/// The slot holds the driver **weakly**. The driver belongs to the core,
-/// which owns the backend this slot lives in; a strong reference back would
-/// make the three a cycle no drop ever breaks. The core keeps the driver the
-/// install returns for as long as it serves drives. A drive that runs while
-/// no live driver is installed (before the core is built, or after it was
-/// dropped) fails its attempt retryably, naming the empty slot, and a later
-/// install serves it. Clones share one slot.
+/// The slot holds the installation **weakly**. The driver belongs to the
+/// core, which owns the backend this slot lives in; a strong reference back
+/// would make the three a cycle no drop ever breaks. An install wraps the
+/// driver in an installation, and the core keeps the installation the
+/// install returns for as long as it serves drives. A drive holds the driver
+/// it runs on, never the installation, so a drive still in flight when its
+/// core is dropped runs to its end on that core's driver without keeping the
+/// install live: a core built meanwhile installs its own driver (FIG-4017).
+/// A drive that runs while no live installation is held (before the core is
+/// built, or after it was dropped) fails its attempt retryably, naming the
+/// empty slot, and a later install serves it. Clones share one slot.
 #[derive(Clone, Default)]
 pub struct RestateSessionDriverSlot {
-    driver: Arc<Mutex<Option<Weak<dyn SessionDriver>>>>,
+    installation: Arc<Mutex<Option<Weak<InstalledSessionDriver>>>>,
+}
+
+/// A driver as a [`RestateSessionDriverSlot`] installed it: what its core
+/// keeps, and whose life decides whether the install is live. It answers
+/// every call with the driver it wraps.
+struct InstalledSessionDriver {
+    driver: Arc<dyn SessionDriver>,
+}
+
+#[async_trait::async_trait]
+impl SessionDriver for InstalledSessionDriver {
+    fn owns_reconciliation(&self) -> bool {
+        self.driver.owns_reconciliation()
+    }
+
+    fn runs_on(&self, driver: &dyn SessionDriver) -> bool {
+        self.driver.runs_on(driver)
+    }
+
+    async fn reconcile(
+        &self,
+        cursor: &lash_core::engine::ReconcileCursor,
+        page: std::num::NonZeroUsize,
+    ) -> Result<lash_core::engine::ReconcileCursor, lash_core::StoreError> {
+        self.driver.reconcile(cursor, page).await
+    }
+
+    async fn admit(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        request: &DriveRequest,
+        ordinal: u32,
+    ) -> Result<AdmitVerdict, DriveAbort> {
+        self.driver.admit(controller, request, ordinal).await
+    }
+
+    async fn run_root(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        admitted: Admitted,
+    ) -> Result<RootOutcome, DriveAbort> {
+        self.driver.run_root(controller, admitted).await
+    }
 }
 
 impl RestateSessionDriverSlot {
@@ -224,33 +271,37 @@ impl RestateSessionDriverSlot {
         Self::default()
     }
 
-    /// Install `driver` unless a live one is installed already; returns the
-    /// driver the slot now serves, which the caller keeps alive.
+    /// Install `driver` unless a live installation is held already; returns
+    /// the installation the slot now serves, which the caller keeps alive for
+    /// as long as it serves drives.
     pub fn install(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
         self.install_new(driver).0
     }
 
     /// [`Self::install`], also answering whether the slot took `driver` —
-    /// false when a live driver was already installed and is kept.
+    /// false when a live installation was already held and is kept.
     fn install_new(&self, driver: Arc<dyn SessionDriver>) -> (Arc<dyn SessionDriver>, bool) {
         let mut slot = self
-            .driver
+            .installation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(live) = slot.as_ref().and_then(Weak::upgrade) {
             return (live, false);
         }
-        *slot = Some(Arc::downgrade(&driver));
-        (driver, true)
+        let installation = Arc::new(InstalledSessionDriver { driver });
+        *slot = Some(Arc::downgrade(&installation));
+        (installation, true)
     }
 
-    /// The installed driver, if one is installed and still alive.
+    /// The installed driver, if its installation is still held. The driver
+    /// returned does not keep the installation live.
     pub fn installed(&self) -> Option<Arc<dyn SessionDriver>> {
-        self.driver
+        self.installation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .and_then(Weak::upgrade)
+            .map(|installation| Arc::clone(&installation.driver))
     }
 
     /// The installed driver, or the retryable failure of a drive that ran
@@ -1107,6 +1158,62 @@ async fn run_root_journal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct IdleDriver;
+
+    #[async_trait::async_trait]
+    impl SessionDriver for IdleDriver {
+        async fn admit(
+            &self,
+            _controller: lash_core::ScopedEffectController<'_>,
+            _request: &DriveRequest,
+            _ordinal: u32,
+        ) -> Result<AdmitVerdict, DriveAbort> {
+            unreachable!("the slot law runs no drive")
+        }
+
+        async fn run_root(
+            &self,
+            _controller: lash_core::ScopedEffectController<'_>,
+            _admitted: Admitted,
+        ) -> Result<RootOutcome, DriveAbort> {
+            unreachable!("the slot law runs no drive")
+        }
+    }
+
+    /// FIG-4017: the installation a core keeps decides whether an install
+    /// holds, not the driver a drive still runs on. While the first core
+    /// keeps its installation, a second install is served the first driver;
+    /// once the first core drops it, a drive still holding the first driver
+    /// does not stop the next install from taking its own.
+    #[test]
+    fn a_driver_a_drive_still_holds_does_not_keep_its_dropped_installation() {
+        let slot = RestateSessionDriverSlot::new();
+        let first: Arc<dyn SessionDriver> = Arc::new(IdleDriver);
+        let second: Arc<dyn SessionDriver> = Arc::new(IdleDriver);
+        let first_installation = slot.install(Arc::clone(&first));
+        assert!(first_installation.runs_on(first.as_ref()));
+        let in_flight = slot.driver_for("drive").expect("the first driver serves");
+        assert!(
+            Arc::ptr_eq(&in_flight, &first),
+            "a drive runs on the driver"
+        );
+        let kept = slot.install(Arc::clone(&second));
+        assert!(
+            kept.runs_on(first.as_ref()),
+            "a live installation keeps serving the first driver"
+        );
+        drop((kept, first_installation));
+
+        let second_installation = slot.install(Arc::clone(&second));
+        assert!(
+            second_installation.runs_on(second.as_ref()),
+            "the second install takes its own driver while a drive still holds the first"
+        );
+        let next = slot.driver_for("drive").expect("the second driver serves");
+        assert!(Arc::ptr_eq(&next, &second));
+        drop(in_flight);
+    }
 
     /// W5: the `LashTurn` key parses back to exactly the session and root
     /// it was built from, whatever either id contains.

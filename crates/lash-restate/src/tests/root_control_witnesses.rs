@@ -148,6 +148,8 @@ impl SessionDriver for Driver {
 struct Fixture {
     harness: LiveConformanceHarness,
     driver: Arc<Driver>,
+    /// The engine's installation of `driver`, kept for the fixture's life.
+    _installation: Arc<dyn SessionDriver>,
     work: crate::RestateSessionWork,
     factory: Arc<dyn lash_core::SessionStoreFactory>,
     /// The law stores' `ControlIntent` obligation ledger.
@@ -248,7 +250,7 @@ impl Fixture {
             commits: AtomicUsize::new(0),
         });
         let work = harness.session_work();
-        work.install_session_driver(driver.clone());
+        let installation = work.install_session_driver(driver.clone());
         work.send_drive(&driver.session, DriveRequestId::new("initial"))
             .await
             .expect("send");
@@ -258,6 +260,7 @@ impl Fixture {
         Self {
             harness,
             driver,
+            _installation: installation,
             work,
             factory,
             intents,

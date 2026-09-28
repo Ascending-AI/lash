@@ -191,8 +191,8 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     assert_eq!(committed.turn_index(), 2);
     first_session.close().await.expect("close first session");
     // The first process's last drive outlives its answer while it closes the
-    // root's scope, and holds that process's driver until it ends
-    // (FIG-3979).
+    // root's scope (FIG-3979), and would admit an input sent meanwhile on
+    // that process's driver.
     double.settle_session_drive(&session_id).await;
     drop(first_core);
     drop(first_registry);

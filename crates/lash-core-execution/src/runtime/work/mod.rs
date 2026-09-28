@@ -59,6 +59,12 @@ pub trait SessionWorkEngine: Send + Sync {
     /// cores, and exactly one driver serves it, so a caller hands in a
     /// candidate and uses whatever comes back (the precedent is
     /// [`EffectHost::install_tool_child_host`](crate::EffectHost::install_tool_child_host)).
+    ///
+    /// The caller keeps what comes back for as long as it serves drives. It
+    /// may be an installation wrapping the driver
+    /// ([`SessionDriver::runs_on`] tells whose), whose life, not that of a
+    /// drive still running on the driver, decides whether the install holds
+    /// (FIG-4017).
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver>;
 
     /// The engine half of the control verbs over this engine's executions
@@ -116,6 +122,13 @@ pub trait SessionDriver: Send + Sync {
     /// Whether this driver owns the deployment recovery pass.
     fn owns_reconciliation(&self) -> bool {
         false
+    }
+
+    /// Whether the drives this driver serves run on `driver`: it is `driver`
+    /// itself, or an engine's installation of it
+    /// ([`SessionWorkEngine::install_session_driver`]).
+    fn runs_on(&self, driver: &dyn SessionDriver) -> bool {
+        std::ptr::addr_eq(self, driver)
     }
 
     /// One bounded recovery pass, invoked on the engine's own schedule.

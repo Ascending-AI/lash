@@ -350,7 +350,9 @@ pub struct CrashSessionWork {
     inner: Arc<dyn SessionWorkEngine>,
     proxy: Arc<DriverProxy>,
     faults: Arc<HostFaults>,
-    installed: std::sync::Once,
+    /// The engine's installation of the proxy, installed once and kept for
+    /// the world's life.
+    installed: std::sync::OnceLock<Arc<dyn SessionDriver>>,
     /// Every drive request a waiter awaited, and every ask the engine
     /// accepted, in order.
     drives: Arc<DriveLog>,
@@ -398,7 +400,7 @@ impl CrashSessionWork {
             inner,
             proxy,
             faults,
-            installed: std::sync::Once::new(),
+            installed: std::sync::OnceLock::new(),
             drives,
         }
     }
@@ -425,10 +427,9 @@ impl SessionWorkEngine for CrashSessionWork {
     /// holds; the core keeps its own driver alive.
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
         self.proxy.serve(Arc::clone(&driver));
-        self.installed.call_once(|| {
-            let _ = self
-                .inner
-                .install_session_driver(Arc::clone(&self.proxy) as Arc<dyn SessionDriver>);
+        self.installed.get_or_init(|| {
+            self.inner
+                .install_session_driver(Arc::clone(&self.proxy) as Arc<dyn SessionDriver>)
         });
         driver
     }

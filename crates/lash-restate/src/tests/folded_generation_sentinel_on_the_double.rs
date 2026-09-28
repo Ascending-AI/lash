@@ -136,6 +136,8 @@ struct Swap<S> {
     server: RestateTestServer,
     ingress: RestateIngressClient,
     driver: Arc<HeldDriver>,
+    /// The slot's installation of `driver`, kept for the swap's life.
+    _installation: Arc<dyn SessionDriver>,
     current: Arc<Mutex<Arc<S>>>,
     recorded: Arc<S>,
     swapped: Arc<S>,
@@ -157,7 +159,7 @@ where
         let ingress = RestateIngressClient::new(connection);
         let driver = Arc::new(HeldDriver::default());
         let slot = RestateSessionDriverSlot::new();
-        slot.install(Arc::clone(&driver) as Arc<dyn SessionDriver>);
+        let installation = slot.install(Arc::clone(&driver) as Arc<dyn SessionDriver>);
         let generation = lash_core::engine::BuildGeneration::for_test;
         let recorded = Arc::new(build(slot.clone(), generation("G_a")));
         let swapped = Arc::new(build(slot, generation("G_b")));
@@ -184,6 +186,7 @@ where
             server,
             ingress,
             driver,
+            _installation: installation,
             current,
             recorded,
             swapped,

@@ -279,6 +279,8 @@ struct SessionRoll {
     server: RestateTestServer,
     ingress: RestateIngressClient,
     driver: Arc<RollDriver>,
+    /// The slot's installation of `driver`, kept for the roll's life.
+    _installation: Arc<dyn SessionDriver>,
     endpoint_next: Mutex<Option<Endpoint>>,
     deployment_n: DeploymentId,
     deployment_next: Mutex<Option<DeploymentId>>,
@@ -306,7 +308,7 @@ impl SessionRoll {
         // `LashSession`/`LashTurn` finds the same driver, as both builds of
         // a deployment family drive the same sessions' store.
         let slot = RestateSessionDriverSlot::new();
-        slot.install(Arc::clone(&driver) as Arc<dyn SessionDriver>);
+        let installation = slot.install(Arc::clone(&driver) as Arc<dyn SessionDriver>);
         let endpoint = |build: &'static str| {
             crate::services::bind_lash_services(
                 Endpoint::builder(),
@@ -340,6 +342,7 @@ impl SessionRoll {
             server,
             ingress,
             driver,
+            _installation: installation,
             endpoint_next: Mutex::new(Some(endpoint_next)),
             deployment_n,
             deployment_next: Mutex::default(),
