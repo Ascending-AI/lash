@@ -209,6 +209,14 @@ impl AwaitEventResolver for RestateEffectHost {
         self.controller.resolve_await_event(key, resolution).await
     }
 
+    async fn publish_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
+        self.controller.publish_await_event(key, resolution).await
+    }
+
     async fn peek_await_event(
         &self,
         key: &AwaitEventKey,

@@ -233,6 +233,7 @@ impl LashRuntime {
             events: opts.events_or_noop(),
             turn_events: opts.turn_events_or_noop(),
             local_stop: opts.local_stop().clone(),
+            settled: &crate::runtime::drive::NoopRootSettledSink,
         };
         let accepted_id = accepted.input_id.clone();
         // A follow-on the head owes is recovered by the session's drive, not

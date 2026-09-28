@@ -110,6 +110,7 @@ impl TestTurnDrive for LashRuntime {
                 events: opts.events_or_noop(),
                 turn_events: opts.turn_events_or_noop(),
                 local_stop: opts.local_stop().clone(),
+                settled: &crate::runtime::drive::NoopRootSettledSink,
             };
             let report =
                 crate::drive::run_admitted_root_reporting(self, &controller, admitted, sinks)
@@ -166,6 +167,7 @@ impl TestTurnDrive for LashRuntime {
             events: opts.events_or_noop(),
             turn_events: opts.turn_events_or_noop(),
             local_stop: opts.local_stop().clone(),
+            settled: &crate::runtime::drive::NoopRootSettledSink,
         };
         let mut rules = DriveLoop::new();
         let mut ordinal = 0_u32;
@@ -278,6 +280,7 @@ impl TestTurnDrive for LashRuntime {
             events: opts.events_or_noop(),
             turn_events: opts.turn_events_or_noop(),
             local_stop: opts.local_stop().clone(),
+            settled: &crate::runtime::drive::NoopRootSettledSink,
         };
         let report = crate::drive::run_admitted_root_reporting(self, &controller, admitted, sinks)
             .await

@@ -405,16 +405,18 @@ pub(super) async fn follow(
             // for every input it drove: the report as it ran, and the
             // evidence that the input settled.
             if let Subject::Input(receipt) = subject
-                && let Some((root, turn)) = mailbox::take_settled_root(
+                && let Some(settled) = mailbox::take_settled_root(
                     ctx.parts.work.store_binding(),
                     &ctx.parts.session_id,
                     &receipt.input_id,
                 )
             {
+                let root = settled.root.clone();
                 adoption.adopt(root.clone(), tap).await;
                 drain(ctx, &mut adoption, &mut observation, tap).await;
-                ctx.refresh().await?;
-                let outcome = turn.outcome.clone();
+                ctx.refresh_unless_ran_on(Some(&settled)).await?;
+                let outcome = settled.turn.outcome.clone();
+                let turn = settled.turn;
                 let observed = observed_before || !adoption.collected.is_empty();
                 return finish_settled(
                     ctx,
@@ -431,7 +433,17 @@ pub(super) async fn follow(
                 .map(|outcome| Followed::Answered(Box::new(outcome)));
             }
             let resolution = match subject {
-                Subject::Input(receipt) => resolve::resolve_input(&ctx.parts, receipt).await?,
+                // The input's report landing answers at once, whatever the
+                // store read is waiting on: a settled root's terminal read
+                // waits for its publication (FIG-3979).
+                Subject::Input(receipt) => tokio::select! {
+                    resolution = resolve::resolve_input(&ctx.parts, receipt) => resolution?,
+                    () = mailbox::settled_root_held(
+                        ctx.parts.work.store_binding(),
+                        &ctx.parts.session_id,
+                        &receipt.input_id,
+                    ) => continue,
+                },
                 Subject::Root(root) => resolve::resolve_root(&ctx.parts, root).await?,
             };
             match resolution {
@@ -450,7 +462,8 @@ pub(super) async fn follow(
                         && settled_since.elapsed() < LIVE_REPORT_GRACE;
                     if !waiting_for_live {
                         drain(ctx, &mut adoption, &mut observation, tap).await;
-                        ctx.refresh().await?;
+                        ctx.refresh_unless_ran_on(live.as_ref()).await?;
+                        let live = live.map(|settled| settled.turn);
                         let observed = observed_before || !adoption.collected.is_empty();
                         return finish_settled(
                             ctx,
@@ -688,7 +701,7 @@ async fn live_report(
     ctx: &SendContext,
     subject: &Subject,
     root: &TurnId,
-) -> Result<Option<std::sync::Arc<lash_core::facade_support::AssembledTurn>>> {
+) -> Result<Option<mailbox::SettledRoot>> {
     let inputs = match subject {
         Subject::Input(receipt) => vec![receipt.input_id.clone()],
         Subject::Root(_) => resolve::inputs_of_root(&ctx.parts, root).await?,
@@ -699,7 +712,6 @@ async fn live_report(
             &ctx.parts.session_id,
             &input,
         )
-        .map(|(_, turn)| turn)
     }))
 }
 
