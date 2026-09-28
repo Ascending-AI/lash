@@ -3,11 +3,11 @@
 
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::{ProcessId, ScopeId, SessionId, TurnId};
+use lash_core::{ProcessId, ScopeId, SessionId};
 use lash_restate_test::{CrashPoint as EngineCut, CrashRule};
 
 use super::host;
@@ -148,7 +148,7 @@ pub(super) fn soak_core(reached: Reached, rank: Arc<AtomicI64>) -> CoreBuild {
 /// The held roots that reached their model call, by root: a held step
 /// waits for its own root, not for any held root, since a cancelled root a
 /// restart replays reaches the model again.
-pub(super) type Reached = Arc<Mutex<BTreeSet<String>>>;
+pub(super) type Reached = Arc<tokio::sync::watch::Sender<BTreeSet<String>>>;
 
 /// The crash matrix's scripted model, recording which held root reached it:
 /// a held root's call never answers, and every other root is answered from
@@ -174,10 +174,7 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
                     .cloned()
                     .collect();
                 if !held.is_empty() {
-                    reached
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .extend(held);
+                    reached.send_modify(|seen| seen.extend(held));
                     std::future::pending::<()>().await;
                 }
                 Ok::<_, lash_core::llm::transport::LlmTransportError>(
@@ -296,7 +293,7 @@ pub(super) struct Driver {
 
 impl Driver {
     pub async fn new(seed: u64) -> Result<Self, String> {
-        let reached = Reached::default();
+        let reached = Arc::new(tokio::sync::watch::channel(BTreeSet::new()).0);
         let rank = Arc::new(AtomicI64::new(0));
         // Time moves only when the soak moves it, and a retry waits out its
         // backoff in virtual time under Restate's default policy: a replay
@@ -631,10 +628,25 @@ impl Driver {
 
     /// Whether the held root `root` reached its model call.
     fn reached(&self, root: &str) -> bool {
-        self.reached
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(root)
+        self.reached.borrow().contains(root)
+    }
+
+    /// Wait for the model to observe an input, without advancing the engine.
+    #[cfg(test)]
+    pub(super) async fn wait_reached(&self, root: &str) -> bool {
+        let mut observed = self.reached.subscribe();
+        let deadline = tokio::time::Instant::now() + HELD_WAIT;
+        loop {
+            if observed.borrow_and_update().contains(root) {
+                return true;
+            }
+            if tokio::time::timeout_at(deadline, observed.changed())
+                .await
+                .is_err()
+            {
+                return false;
+            }
+        }
     }
 
     /// Send the held root `root` on `session` (with a child that lives until
@@ -673,17 +685,42 @@ impl Driver {
         // The root runs: a child it registers lives until it ends, as a
         // tool call's child process would.
         if child {
-            let scope = ScopeId::turn(session.clone(), TurnId::from(root.as_str()));
-            let registered = register_child(&self.world, session, &scope).await?;
-            self.ledger
-                .children
-                .push(crate::crash_matrix::invariants::ChildOf {
-                    child: registered,
-                    parent: scope.clone(),
-                });
-            self.ledger.child_scopes.push(scope);
+            self.register_held_child(session, &root).await?;
         }
         Ok(admission)
+    }
+
+    /// Register a child under the root that actually claimed `input`.
+    pub(super) async fn register_held_child(
+        &mut self,
+        session: &SessionId,
+        input: &str,
+    ) -> Result<ScopeId, String> {
+        let store = self
+            .world
+            .backend()
+            .session_store_factory()
+            .open_existing_store_by_id(session)
+            .await
+            .map_err(|error| format!("open `{session}` to resolve `{input}`: {error}"))?
+            .ok_or_else(|| {
+                format!("`{session}` disappeared before `{input}` registered a child")
+            })?;
+        let owner = store
+            .root_of_input(session, &input_id(session, input))
+            .await
+            .map_err(|error| format!("resolve root of `{input}`: {error}"))?
+            .ok_or_else(|| format!("`{input}` reached the model without a durable root"))?;
+        let scope = ScopeId::turn(session.clone(), owner);
+        let registered = register_child(&self.world, session, &scope).await?;
+        self.ledger
+            .children
+            .push(crate::crash_matrix::invariants::ChildOf {
+                child: registered,
+                parent: scope.clone(),
+            });
+        self.ledger.child_scopes.push(scope.clone());
+        Ok(scope)
     }
 
     /// Cancel the held root `root` of `session` until the host sees the
@@ -695,11 +732,23 @@ impl Driver {
         root: &str,
     ) -> Result<String, String> {
         let root = root.to_owned();
+        let target = self
+            .world
+            .backend()
+            .session_store_factory()
+            .open_existing_store_by_id(session)
+            .await
+            .map_err(|error| format!("open `{session}` to cancel `{root}`: {error}"))?
+            .ok_or_else(|| format!("`{session}` disappeared before cancelling `{root}`"))?
+            .root_of_input(session, &input_id(session, &root))
+            .await
+            .map_err(|error| format!("resolve root to cancel `{root}`: {error}"))?
+            .unwrap_or_else(|| lash_core::TurnId::from(root.as_str()));
         let mut last = String::new();
         for _ in 0..20 {
             let core = self.world.core()?;
             let id = session.clone();
-            let target = TurnId::from(root.as_str());
+            let target = target.clone();
             let cancelled = self
                 .host(async move {
                     let session = core.session(id).durable().await?;
@@ -1037,6 +1086,12 @@ async fn register_child(
         .await
         .map(|registered| registered.id)
         .map_err(|error| format!("register a child of `{parent}`: {error}"))
+}
+
+fn input_id(session: &SessionId, key: &str) -> lash_core::InputId {
+    lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
+        session, key,
+    ))
 }
 
 fn wall_ms() -> i64 {

@@ -449,6 +449,87 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_second_held_input_uses_and_closes_its_admitted_root_scope() {
+        let seed = 0x3943;
+        let mut driver = driver::Driver::new(seed).await.expect("world");
+        driver
+            .step(
+                seed,
+                &plan::Step::Open {
+                    session: 0,
+                    lane: plan::Lane::Held,
+                    parent: None,
+                },
+            )
+            .await
+            .expect("open held session");
+        let session = driver.ledger.sessions[0].id.clone();
+        let hold = driver.world.hold_session_drive(&session).await;
+        let durable = driver
+            .world
+            .core()
+            .expect("core")
+            .session(session.clone())
+            .durable()
+            .await
+            .expect("durable session");
+        for input in ["held-first", "held-second"] {
+            durable
+                .send(lash::TurnInput::text(
+                    crate::crash_matrix::invariants::input_text(input),
+                ))
+                .id(input)
+                .await
+                .expect("accept held input");
+            driver.ledger.held.push(driver::HeldRoot {
+                session: session.clone(),
+                root: input.to_owned(),
+                admission: driver::Admission::Known,
+            });
+        }
+        hold.release();
+        assert!(
+            driver.wait_reached("held-second").await,
+            "both inputs reach the model under the held root"
+        );
+        let factory = driver.world.backend().session_store_factory();
+        let store = factory
+            .open_existing_store_by_id(&session)
+            .await
+            .expect("open store")
+            .expect("existing store");
+        let second = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
+            &session,
+            "held-second",
+        ));
+        let root = store
+            .root_of_input(&session, &second)
+            .await
+            .expect("resolve second input");
+        assert_eq!(root, Some(lash_core::TurnId::from("held-first")));
+        let scope = driver
+            .register_held_child(&session, "held-second")
+            .await
+            .expect("register child");
+        assert_eq!(
+            scope,
+            lash_core::ScopeId::turn(session.clone(), root.expect("root"))
+        );
+        let receipt = driver
+            .cancel(&session, "held-second")
+            .await
+            .expect("cancel second input's root");
+        assert_eq!(receipt, "requested");
+        let mut report = EpochReport {
+            seed,
+            ..EpochReport::default()
+        };
+        finish(&mut driver, &mut report).await;
+        assert!(report.passed(), "{}", report.evidence());
+        driver.world.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn cancelled_child_root_closes_after_engine_loss() {
         let seed = 0x3942;
         let mut driver = driver::Driver::new(seed).await.expect("world");
