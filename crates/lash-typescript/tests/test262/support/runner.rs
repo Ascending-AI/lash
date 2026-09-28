@@ -461,7 +461,7 @@ pub(crate) fn sample_paths() -> Vec<String> {
         .collect()
 }
 
-/// `LASH_QUICK` (AGENTS.md): the opt-in iteration knob for the heavy lanes.
+/// `LASH_QUICK`: the opt-in iteration knob for the heavy lanes.
 /// Set -- any value but `0` -- `quick_selection` narrows the full run to a
 /// deterministic subset. CI never sets it; the full selection stays the
 /// default and the release gate.

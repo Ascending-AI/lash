@@ -84,7 +84,7 @@ pub use runner::{
 };
 pub use stack_policy::{PRODUCT_STACK_BUDGET_BYTES, SIM_HARNESS_STACK_LIMIT_BYTES};
 
-/// `LASH_QUICK` (AGENTS.md): the opt-in iteration knob for the heavy
+/// `LASH_QUICK`: the opt-in iteration knob for the heavy
 /// generated-world lanes. When set -- any value but `0` -- every
 /// count-based seed sweep in this crate shrinks to a quarter of its seeds,
 /// at least one. An explicit `--seeds`/`--seed` or a named `LASH_*_SEEDS`

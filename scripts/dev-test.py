@@ -28,7 +28,7 @@ LIVE_STORES = (
     "LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES", "LASH_S3_ENDPOINT",
     "LASH_REQUIRE_S3",
 )
-# `LASH_QUICK` (AGENTS.md): the opt-in iteration knob for the heavy lanes.
+# `LASH_QUICK`: the opt-in iteration knob for the heavy lanes.
 QUICK = "LASH_QUICK"
 # Comma-separated shards/paths the quick test262 selection keeps whole.
 QUICK_TEST262_INCLUDE = "LASH_TEST262_QUICK_INCLUDE"

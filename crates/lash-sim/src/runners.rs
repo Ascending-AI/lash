@@ -153,7 +153,7 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     }
     let seeds = match seeds {
         Some(seeds) => seeds,
-        // The profile default answers to `LASH_QUICK` (AGENTS.md), floored at
+        // The profile default answers to `LASH_QUICK`, floored at
         // two seeds so an evidence lane still exercises more than one world.
         None => lash_sim::quick_seed_sweep(
             lash_sim::generator::default_seed_count(&profile).map_err(|err| err.to_string())?,
