@@ -100,7 +100,7 @@ enum CaseName {
     SettleClaimBeforeSuccessorReclaim,
     TurnInputClaimSupersededAfterReclaim,
     QueuedWorkClaimSupersededAfterReclaim,
-    SameGenerationExactClaimDeferral,
+    SameGenerationHeldClaimDeferral,
     CheckpointBodiesThenRefOnly,
     CheckpointBodiesThenCleared,
     MissingCheckpointComponentRef,
@@ -156,7 +156,7 @@ impl CaseName {
             Self::QueuedWorkClaimSupersededAfterReclaim => {
                 "queued_work_claim_superseded_after_successor_reclaim"
             }
-            Self::SameGenerationExactClaimDeferral => "same_generation_exact_claim_defers",
+            Self::SameGenerationHeldClaimDeferral => "same_generation_held_claim_defers",
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
             Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
@@ -250,10 +250,10 @@ enum StoreOperation {
         lease: LeaseSlot,
     },
     AbandonQueuedWorkClaim,
-    /// Re-claim, by exact batch id, work this generation already holds. Every
-    /// backend must report no newly claimed rows — the shared claim planner's
-    /// deferral agreement check (FIG-1065).
-    ClaimHeldBatchById {
+    /// Re-claim the ready lane while this generation holds its only row.
+    /// Every backend must report no newly claimed rows — the shared claim
+    /// planner's deferral agreement check (FIG-1065).
+    ClaimWhileHeld {
         lease: LeaseSlot,
     },
     /// Snapshots the claims a successor-generation reclaim will supersede, so
@@ -336,7 +336,7 @@ impl StoreOperation {
             Self::ClaimNextTurnInput { .. } => "claim_next_turn_input",
             Self::ClaimQueuedWork { .. } => "claim_queued_work",
             Self::AbandonQueuedWorkClaim => "abandon_queued_work_claim",
-            Self::ClaimHeldBatchById { .. } => "claim_held_batch_by_id",
+            Self::ClaimWhileHeld { .. } => "claim_while_held",
             Self::RetainStaleClaims => "retain_stale_claims",
             Self::ReleaseSessionLease { .. } => "release_first_session_lease_generation",
             Self::CommitStaleTurnInputClaim { .. } => {
@@ -635,7 +635,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
         fork_cases::rewind_case(),
         session_lifecycle_cases::attachment_adoption_case(),
         claim_cases::queued_work_claim_and_abandon(),
-        claim_cases::same_generation_exact_claim_deferral(),
+        claim_cases::same_generation_held_claim_deferral(),
         claim_cases::queued_work_claim_superseded_after_reclaim(),
         claim_cases::turn_input_claim_superseded_after_reclaim(),
         session_lifecycle_cases::delete_then_attempt_admission_case(),
@@ -1452,33 +1452,23 @@ impl BackendRunner {
                     .await
                     .map(|_| None)
             }
-            StoreOperation::ClaimHeldBatchById { lease } => {
+            StoreOperation::ClaimWhileHeld { lease } => {
                 let lease = self.lease(*lease);
                 let owner = lease.owner.clone();
-                let held_batch_ids = self
-                    .queued_work_claim
-                    .as_ref()
-                    .expect("generated sequence claimed queued work before the held re-claim")
-                    .data
-                    .batches
-                    .iter()
-                    .map(|batch| batch.batch_id.clone())
-                    .collect::<Vec<_>>();
                 let outcome = self
                     .store()
-                    .claim_ready_queued_work_by_batch_ids(
+                    .claim_ready_queued_work(
                         &self.session_id,
                         &lease.fence(),
                         &owner,
                         QueuedWorkClaimBoundary::Idle,
-                        &held_batch_ids,
                         lash_core::testing::queued_work_claim_policy(1),
                     )
                     .await?;
                 assert!(
-                    outcome.claim.is_none() && outcome.already_satisfied_batch_ids.is_empty(),
+                    outcome.claim().is_none(),
                     "{} must report no newly claimed rows when this generation \
-                     exact-claims a batch it already holds",
+                     re-claims while it holds the lane's only row",
                     self.name
                 );
                 Ok(None)
@@ -2343,7 +2333,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "rewind_fork_delete_source_refork",
             "attachment_intent_adopted_by_commit",
             "queued_work_claim_abandon_preserves_fencing_token",
-            "same_generation_exact_claim_defers",
+            "same_generation_held_claim_defers",
             "queued_work_claim_superseded_after_successor_reclaim",
             "turn_input_claim_superseded_after_successor_reclaim",
             "delete_then_attempt_admission",

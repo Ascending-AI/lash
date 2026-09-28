@@ -1,5 +1,5 @@
 //! The recorded outcomes of a session drive's steps (FIG-3600): its
-//! admission, root start and seal, a root's input claim, its turn-config
+//! admission, root start and seal, a root's admission, its turn-config
 //! resolution (S6), its scope close (S7) and a session's close.
 
 use super::{RuntimeEffectControllerError, RuntimeEffectOutcome};
@@ -18,13 +18,13 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_accepted_turn_input_drive(
+    pub fn into_root_admission(
         self,
-    ) -> Result<crate::AcceptedTurnInputDrive, RuntimeEffectControllerError> {
+    ) -> Result<crate::store::RootAdmissionAnswer, RuntimeEffectControllerError> {
         match self {
-            Self::ClaimAcceptedTurnInput { drive } => Ok(drive),
+            Self::AdmitRoot { answer } => Ok(answer),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::ClaimAcceptedTurnInput,
+                RuntimeEffectKind::AdmitRoot,
                 other.kind(),
             )),
         }

@@ -230,8 +230,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_core::runtime::{
-    QueuedWorkClaimBoundary, QueuedWorkPayload, load_process_execution_env,
-    process_wake_batch_draft, publish_process_execution_env,
+    QueuedWorkPayload, load_process_execution_env, process_wake_batch_draft,
+    publish_process_execution_env,
 };
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentManifest, BoundaryReason, Clock, ExecutionScope,
@@ -1102,7 +1102,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .drive_epoch(&SessionId::from(SESSION_ID))
         .await
         .expect("read fixture drive epoch");
-    let queue_fence = match handles
+    match handles
         .runtime
         .seal_drive_epoch(
             &SessionId::from(SESSION_ID),
@@ -1113,23 +1113,18 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("seal fixture queue drive")
     {
-        lash_core::store::DriveEpochSeal::Sealed(fence) => fence,
+        lash_core::store::DriveEpochSeal::Sealed(_) => {}
         other => panic!("fixture queue drive did not seal: {other:?}"),
-    };
-    let queue_lease = lash_core::ClaimAuthority::from_drive_fence(&queue_fence);
-    let wake_claim = handles
+    }
+    // The receiver wake sits behind the fixture's queued work, which stays
+    // pending, so the turn lane never reaches it: its host cancel is the
+    // terminal transition that persists the redelivery fence (FIG-3545).
+    handles
         .runtime
-        .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
-            &queue_lease.fence(),
-            &queue_lease.owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&wake_batch.batch_id),
-            lash_core::testing::queued_work_claim_policy(1),
-        )
+        .cancel_queued_work_batch(&SessionId::from(SESSION_ID), &wake_batch.batch_id)
         .await
-        .expect("claim fixture receiver wake")
-        .expect("fixture receiver wake is claimable");
+        .expect("cancel fixture receiver wake")
+        .expect("fixture receiver wake is open");
     let wake_state = lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
         .await
         .expect("load fixture state before wake settlement")
@@ -1139,13 +1134,12 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         "commit",
     );
     let wake_commit =
-        RuntimeCommit::persisted_state_with_operation_for_testing(&wake_state, &[], wake_operation)
-            .completing_queue_claim(wake_claim.completion());
+        RuntimeCommit::persisted_state_with_operation_for_testing(&wake_state, &[], wake_operation);
     handles
         .runtime
         .commit_runtime_state(wake_commit)
         .await
-        .expect("settle fixture receiver wake and persist redelivery fence");
+        .expect("commit the fixture head after the receiver wake's cancel");
     let retained_admission = lash_core::store::AdmissionId::new("durable-read-retained-admission");
     let retained_epoch = handles
         .runtime

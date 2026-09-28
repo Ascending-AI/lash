@@ -524,39 +524,6 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
 
 
 --
--- Name: lash_queued_run_members; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_queued_run_members (
-    session_id text NOT NULL,
-    scope_id text NOT NULL,
-    collection_kind text NOT NULL,
-    ordinal bigint NOT NULL,
-    member_kind text NOT NULL,
-    member_id text NOT NULL,
-    CONSTRAINT ck_queued_run_members_collection_kind CHECK ((collection_kind = ANY (ARRAY['initial'::text, 'current'::text, 'withheld'::text, 'assigned'::text]))),
-    CONSTRAINT ck_queued_run_members_member_kind CHECK ((member_kind = ANY (ARRAY['input'::text, 'batch'::text]))),
-    CONSTRAINT ck_queued_run_members_ordinal CHECK ((ordinal >= 0))
-);
-
-
---
--- Name: lash_queued_runs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_queued_runs (
-    session_id text NOT NULL,
-    scope_id text NOT NULL,
-    status text NOT NULL,
-    revision bigint NOT NULL,
-    admission_json text NOT NULL,
-    admitted_generation text NOT NULL,
-    CONSTRAINT ck_queued_runs_revision CHECK ((revision >= 0)),
-    CONSTRAINT ck_queued_runs_status CHECK ((status = ANY (ARRAY['pending'::text, 'settled'::text])))
-);
-
-
---
 -- Name: lash_queued_work_batches; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1270,18 +1237,6 @@ INSERT INTO lash_durable_read_fixture.lash_process_park_clock VALUES (true, 0, 0
 
 
 --
--- Data for Name: lash_queued_run_members; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
--- Data for Name: lash_queued_runs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
 -- Data for Name: lash_queued_work_batches; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1743,30 +1698,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_wake_deliveries
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_processes
     ADD CONSTRAINT lash_processes_pkey PRIMARY KEY (process_id);
-
-
---
--- Name: lash_queued_run_members lash_queued_run_members_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_run_members
-    ADD CONSTRAINT lash_queued_run_members_pkey PRIMARY KEY (session_id, scope_id, collection_kind, ordinal);
-
-
---
--- Name: lash_queued_run_members lash_queued_run_members_session_id_scope_id_collection_kind_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_run_members
-    ADD CONSTRAINT lash_queued_run_members_session_id_scope_id_collection_kind_key UNIQUE (session_id, scope_id, collection_kind, member_kind, member_id);
-
-
---
--- Name: lash_queued_runs lash_queued_runs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_runs
-    ADD CONSTRAINT lash_queued_runs_pkey PRIMARY KEY (session_id, scope_id);
 
 
 --
@@ -2394,13 +2325,6 @@ CREATE INDEX idx_lash_processes_wake_session ON lash_durable_read_fixture.lash_p
 
 
 --
--- Name: idx_lash_queued_runs_admitted_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_queued_runs_admitted_generation ON lash_durable_read_fixture.lash_queued_runs USING btree (admitted_generation) WHERE (status = 'pending'::text);
-
-
---
 -- Name: idx_lash_queued_work_batches_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2604,13 +2528,6 @@ CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_
 
 
 --
--- Name: lash_queued_runs_pending; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE UNIQUE INDEX lash_queued_runs_pending ON lash_durable_read_fixture.lash_queued_runs USING btree (session_id) WHERE (status = 'pending'::text);
-
-
---
 -- Name: ux_lash_session_roots_unfinished; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2679,14 +2596,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_segment_handovers
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_wake_deliveries
     ADD CONSTRAINT lash_process_wake_deliveries_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
-
-
---
--- Name: lash_queued_run_members lash_queued_run_members_session_id_scope_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_run_members
-    ADD CONSTRAINT lash_queued_run_members_session_id_scope_id_fkey FOREIGN KEY (session_id, scope_id) REFERENCES lash_durable_read_fixture.lash_queued_runs(session_id, scope_id);
 
 
 --

@@ -959,55 +959,6 @@ pub(crate) fn source_key_display_id(source: &str) -> String {
         .to_string()
 }
 
-/// The initial drive set of an accepted turn input, as the
-/// `ClaimAcceptedTurnInput` runtime effect journals it (ADR 0069 §6).
-///
-/// It is a self-contained authority snapshot: a claimed drive carries the rows
-/// with their content and claim token, and a refusal names why the root cedes.
-/// A drive admits the head of the queue, so the claim always reaches its row
-/// or refuses it (FIG-3600).
-/// Replay returns this value and never reconstructs it from pending rows, so
-/// `vacuum()` pruning terminal rows cannot change what a replayed turn does.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "drive", rename_all = "snake_case")]
-pub enum AcceptedTurnInputDrive {
-    /// The claim reached the accepted row: drive every claimed row and settle
-    /// them under the claim predicate.
-    ///
-    /// This is the turn's admission, so it also records what the turn was
-    /// admitted on: the session head (`base`) and the turn index. A replay
-    /// rebuilds the turn's input state from `base` and addresses its effects
-    /// under `turn_index`, never re-reading either from the live head, which
-    /// the turn's own commit may already have advanced (FIG-3682). It also
-    /// records the executable generation the turn runs under (FIG-3571). The
-    /// session drive runs this claim as its root's recorded claim step.
-    Claimed {
-        claim: Box<TurnInputClaim>,
-        base: crate::store::SessionHeadRef,
-        turn_index: u64,
-        /// The executable generation the turn was admitted under (FIG-3571):
-        /// a redrive under another one is refused before any effect.
-        generation: Option<crate::executable_generation::ExecutableGeneration>,
-    },
-    /// The accepted row cannot be driven by this turn.
-    Refused { refusal: AcceptedTurnInputRefusal },
-}
-
-/// Why an accepted turn input's first execution ceded instead of driving it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AcceptedTurnInputRefusal {
-    /// The accepted row is held by a claim of the live lease generation that
-    /// is not this drive's. The drive's turn holds that lease, so the holder is
-    /// another claim of the same lane: an earlier run of this drive body, or a
-    /// claim whose hand-back failed. The row stays claim-pinned until that
-    /// claim settles or the generation turns over, and is then drained.
-    HeldByLiveClaim,
-    /// The accepted row is no longer open: another driver settled it, the host
-    /// cancelled it, or `vacuum()` pruned it after either.
-    SettledOrRemoved,
-}
-
 fn initial_turn_applications(
     inputs: &[PendingTurnInput],
     turn_id: &crate::TurnId,

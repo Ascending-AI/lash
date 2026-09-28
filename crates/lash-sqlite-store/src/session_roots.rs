@@ -2,8 +2,8 @@
 //!
 //! `lash-store-sql`'s `session_roots` module owns every statement: the family
 //! forks nothing. This module renders them once and holds the in-transaction
-//! reads and writes the commit path, the queued-run settlement, the claim
-//! step, session deletion and the factory's catalog reads share, plus
+//! reads and writes the commit path, the root admission, session deletion
+//! and the factory's catalog reads share, plus
 //! [`RootStore`] for the bound store.
 
 use std::sync::LazyLock;
@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootStore, RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWriteDecision,
-    close_admission, decide_root_terminal_write, root_binding_conflict, scope_close_obligation_id,
-    stored_intent_kind, stored_intent_state,
+    RootAdmission, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWriteDecision, UnfinishedRoot, close_admission, decide_root_terminal_write,
+    root_binding_conflict, scope_close_obligation_id, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
@@ -36,7 +36,7 @@ pub(crate) struct SessionRootsSql {
 }
 
 static SESSION_ROOTS_SQL: LazyLock<SessionRootsSql> = LazyLock::new(|| {
-    // The claim-result read names the head input's lifecycle (FIG-3840).
+    // The root verbs name the turn-input lifecycle.
     let dialect = Schema::Main
         .dialect()
         .with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE);
@@ -228,26 +228,7 @@ pub(crate) fn end_lost_root_conn(
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite_error)?
     };
-    let mut run = crate::persistence::queued_run::load_run_conn(tx, session, None)?
-        .filter(|run| run.scope.id() == root.as_str());
-    let mut batches = Vec::new();
-    if let Some(run) = run.as_ref() {
-        for member in run
-            .members
-            .iter()
-            .flatten()
-            .chain(run.withheld_members.iter())
-        {
-            match member {
-                lash_core_execution::store::QueuedRunMember::Input(id) => {
-                    inputs.push(id.to_string())
-                }
-                lash_core_execution::store::QueuedRunMember::Batch(id) => {
-                    batches.push(id.to_string())
-                }
-            }
-        }
-    }
+    let batches = admitted_batches_conn(tx, session, root)?;
     inputs.sort();
     inputs.dedup();
     for input in inputs {
@@ -267,15 +248,60 @@ pub(crate) fn end_lost_root_conn(
         tx.execute(statement, params![session.as_str()])
             .map_err(sqlite_error)?;
     }
-    if let Some(run) = run.as_mut() {
-        run.revision += 1;
-        run.terminal = Some(lash_core_execution::store::QueuedRunTerminal::Failed {
-            code: lash_core_execution::RuntimeErrorCode::EngineRootSubstrateLost,
-            message: format!("root `{root}` lost its engine execution"),
-        });
-        crate::persistence::queued_run::write_run_conn(tx, run, false)?;
-    }
     Ok(Some(terminal))
+}
+
+/// Decode a root's recorded admission (`session_roots.admission_json`).
+pub(crate) fn decode_root_admission(json: &str) -> Result<RootAdmission, StoreError> {
+    serde_json::from_str(json).map_err(|error| stored_data_corrupt("RootAdmission", error))
+}
+
+/// The session's unfinished root, with the head its admission recorded,
+/// read on `conn`.
+pub(crate) fn unfinished_root_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> Result<Option<UnfinishedRoot>, StoreError> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            session_roots_sql().roots.select_unfinished.sql(),
+            [session_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    row.map(|(root, json)| {
+        Ok(UnfinishedRoot {
+            root: TurnId::from(root),
+            head: decode_root_admission(&json)?.head,
+        })
+    })
+    .transpose()
+}
+
+/// The queued-work batches `root`'s recorded admission took, read on `conn`:
+/// none for a root with no admission or an input-headed one.
+pub(crate) fn admitted_batches_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Result<Vec<String>, StoreError> {
+    let json: Option<Option<String>> = conn
+        .query_row(
+            session_roots_sql().roots.select_admission.sql(),
+            params![session_id.as_str(), root.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some(Some(json)) = json else {
+        return Ok(Vec::new());
+    };
+    Ok(decode_root_admission(&json)?
+        .queued
+        .iter()
+        .flat_map(|claim| claim.batches.iter().map(|batch| batch.batch_id.to_string()))
+        .collect())
 }
 
 /// Write the terminal evidence `commit` carries, if any, in its transaction
@@ -645,9 +671,6 @@ pub(crate) fn begin_session_close_conn(
         )?;
         roots.insert(TurnId::from(parked_root));
     }
-    roots.extend(crate::persistence::pending_queued_root_conn(
-        tx, session_id,
-    )?);
     let verbs = open_verbs_by_session_conn(tx, session_id)?;
     for verb in &verbs {
         match &verb.kind {
@@ -736,32 +759,24 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
 
 #[async_trait::async_trait]
 impl RootStore for crate::Store {
-    async fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<TurnId>, StoreError> {
+    async fn unfinished_root(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<UnfinishedRoot>, StoreError> {
         self.bind_session(session_id)?;
         let session_id = session_id.clone();
         self.conn
-            .call(move |conn| {
-                let sql = session_roots_sql();
-                Ok(conn
-                    .query_row(
-                        sql.roots.select_unfinished.sql(),
-                        [session_id.as_str()],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                    .map(|root| root.map(TurnId::from))
-                    .map_err(sqlite_error))
-            })
+            .call(move |conn| Ok(unfinished_root_conn(conn, &session_id)))
             .await
             .map_err(sqlite_error)?
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &lash_core_execution::store::RootInputClaimRequest,
-    ) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+        request: &lash_core_execution::store::AdmitRootRequest,
+    ) -> Result<Option<RootAdmission>, StoreError> {
         self.bind_session(&request.session_id)?;
-        crate::persistence::claim_root_inputs_sqlite(self, request).await
+        crate::persistence::admit_root_sqlite(self, request).await
     }
     async fn root_terminal(
         &self,

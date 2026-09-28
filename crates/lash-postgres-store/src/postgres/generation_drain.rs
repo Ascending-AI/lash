@@ -124,9 +124,9 @@ impl GenerationDrainStore for PostgresGenerationDrain {
                 .await?,
             in_flight_turns: self
                 .count_of(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .queued_runs
-                        .count_pending_by_admitted_generation
+                    crate::session_roots::session_roots_sql()
+                        .roots
+                        .count_unfinished_by_admitted_generation
                         .sql(),
                     generation,
                 )

@@ -527,31 +527,6 @@ impl TurnLaneStop {
     }
 }
 
-/// Which admission table an idle claim of the turn lane takes from: the one
-/// whose earliest unclaimed row came first, given the earliest next-turn
-/// input and the earliest queued turn work. `None` when both are empty.
-/// Whichever it names, the claim stops at the other table's head
-/// ([`TurnLaneStop`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IdleTurnLaneHead {
-    /// Host input came first.
-    Input,
-    /// Queued turn work came first.
-    Queued,
-}
-
-impl IdleTurnLaneHead {
-    pub fn of(earliest_input: Option<u64>, earliest_queued: Option<u64>) -> Option<Self> {
-        match (earliest_input, earliest_queued) {
-            (Some(input), queued) if queued.is_none_or(|queued| input < queued) => {
-                Some(Self::Input)
-            }
-            (_, Some(_)) => Some(Self::Queued),
-            (_, None) => None,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Settlement
 // ---------------------------------------------------------------------------

@@ -10,34 +10,40 @@ impl lash_core::store::RootStore for SnapshotStore {
     async fn unfinished_root(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::TurnId>, lash_core::StoreError> {
-        Ok(self
-            .root_claim_results
-            .lock_recover()
-            .keys()
-            .find_map(|(session, root)| {
-                (session == session_id && self.roots.terminal(session, root).is_none())
-                    .then(|| root.clone())
-            }))
+    ) -> std::result::Result<Option<lash_core::store::UnfinishedRoot>, lash_core::StoreError> {
+        Ok(self.root_claim_results.lock_recover().iter().find_map(
+            |((session, root), admission)| {
+                (session == session_id && self.roots.terminal(session, root).is_none()).then(|| {
+                    lash_core::store::UnfinishedRoot {
+                        root: root.clone(),
+                        head: admission.head.clone(),
+                    }
+                })
+            },
+        ))
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &lash_core::store::RootInputClaimRequest,
-    ) -> std::result::Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
+        request: &lash_core::store::AdmitRootRequest,
+    ) -> std::result::Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
         let key = (request.session_id.clone(), request.root.clone());
         let recorded = self.root_claim_results.lock_recover().get(&key).cloned();
-        if let Some(result) = recorded {
-            return Ok(Some(result));
+        if let Some(admission) = recorded {
+            return Ok(Some(admission));
         }
-        if let Some(root) =
+        if let Some(unfinished) =
             lash_core::store::RootStore::unfinished_root(self, &request.session_id).await?
         {
             return Err(lash_core::StoreError::UnfinishedRootConflict {
                 session_id: request.session_id.clone(),
-                root,
+                root: unfinished.root,
             });
         }
+        // The double keeps no queued work, so only an input head is ever open.
+        let lash_core::store::AdmittedHead::Input(head) = &request.head else {
+            return Ok(None);
+        };
         let Some(claim) = lash_core::TurnInputStore::claim_next_turn_inputs(
             self,
             &request.session_id,
@@ -49,11 +55,7 @@ impl lash_core::store::RootStore for SnapshotStore {
         else {
             return Ok(None);
         };
-        if !claim
-            .inputs
-            .iter()
-            .any(|input| input.input_id == request.head)
-        {
+        if !claim.inputs.iter().any(|input| input.input_id == *head) {
             lash_core::TurnInputStore::abandon_turn_input_claim(self, &claim).await?;
             return Ok(None);
         }
@@ -67,16 +69,18 @@ impl lash_core::store::RootStore for SnapshotStore {
             .collect::<Vec<_>>();
         self.roots
             .bind(&request.session_id, &request.root, &input_ids)?;
-        let result = lash_core::AcceptedTurnInputDrive::Claimed {
-            claim: Box::new(claim),
+        let admission = lash_core::store::RootAdmission {
+            head: request.head.clone(),
+            inputs: Some(Box::new(claim)),
+            queued: None,
             base,
             turn_index: request.turn_index,
             generation: request.generation.clone(),
         };
         self.root_claim_results
             .lock_recover()
-            .insert(key, result.clone());
-        Ok(Some(result))
+            .insert(key, admission.clone());
+        Ok(Some(admission))
     }
 
     async fn root_terminal(
@@ -119,15 +123,15 @@ impl lash_core::store::RootStore for BoundSessionStore {
     async fn unfinished_root(
         &self,
         _session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+    ) -> std::result::Result<Option<lash_core::store::UnfinishedRoot>, lash_core::StoreError> {
         unreachable!("test should fail before reading unfinished roots")
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        _request: &lash_core::store::RootInputClaimRequest,
-    ) -> std::result::Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
-        unreachable!("test should fail before a root claims input on the reused child store")
+        _request: &lash_core::store::AdmitRootRequest,
+    ) -> std::result::Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
+        unreachable!("test should fail before a root is admitted on the reused child store")
     }
 
     async fn root_terminal(

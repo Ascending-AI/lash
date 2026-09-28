@@ -806,7 +806,7 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
         "sha256:6056583b23117ff129cf39d93b9407bb95b0d06bf6e495f633b147662da1ed79"
     ),
-    # FIG-3484: RuntimeCommit's exhaustive destructure adds queued_run: _,
+    # FIG-3484: RuntimeCommit's exhaustive destructure adds the queued-run field,
     # which semantic-boundary purity validation refuses before encoding.
     # SemanticBoundaryRequestIntent and the encoded fields/hash are unchanged.
     # Preserve the record-config/create-session/usage-ledger versions 3/3/5;

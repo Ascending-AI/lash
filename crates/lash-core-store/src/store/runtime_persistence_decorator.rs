@@ -86,18 +86,12 @@ macro_rules! persistence_operations {
                 fn repair_orphaned_active_turn_inputs(&self, session_id: &SessionId, session_execution_lease: &ClaimAuthority, turn_id: &crate::TurnId, observed: &crate::TurnCancelIntentSnapshot, settlement: Option<&crate::TurnCancelClosureSettlement>) -> Result<crate::store::TurnCancelRepairResult, StoreError>;
             }
             QueuedWorkStore {
-                fn select_queued_run(&self, fence: &ClaimAuthority, scope: &crate::ExecutionScope, owner: &LeaseOwnerIdentity, max_inputs: usize, configuration: &crate::PersistedSessionConfig, policy: crate::QueuedWorkClaimPolicy) -> Result<SelectedQueuedRun, StoreError>;
-                fn pending_queued_run(&self, session_id: &SessionId) -> Result<Option<QueuedRunAdmission>, StoreError>;
-                fn queued_run(&self, scope: &crate::ExecutionScope) -> Result<Option<QueuedRunAdmission>, StoreError>;
-                fn settle_queued_run(&self, fence: &ClaimAuthority, settlement: QueuedRunCommit) -> Result<QueuedRunAdmission, StoreError>;
-                fn begin_or_resume_queued_run(&self, fence: &ClaimAuthority, request: BeginQueuedRun) -> Result<QueuedRunAdmission, StoreError>;
                 fn enqueue_queued_work(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkBatch, StoreError>;
                 fn enqueue_queued_work_with_outcome(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError>;
                 fn claim_leading_ready_session_command(&self, session_id: &SessionId, session_execution_lease: &ClaimAuthority, owner: &LeaseOwnerIdentity) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
                 fn claim_ready_queued_work(&self, session_id: &SessionId, session_execution_lease: &ClaimAuthority, owner: &LeaseOwnerIdentity, boundary: crate::QueuedWorkClaimBoundary, policy: crate::QueuedWorkClaimPolicy) -> Result<crate::QueuedWorkClaimOutcome, StoreError>;
                 #[allow(clippy::too_many_arguments)]
                 fn claim_checkpoint_work(&self, session_id: &SessionId, session_execution_lease: &ClaimAuthority, owner: &LeaseOwnerIdentity, turn_id: &crate::TurnId, checkpoint: crate::CheckpointKind, max_inputs: usize, policy: crate::QueuedWorkClaimPolicy) -> Result< ( Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, ), StoreError, >;
-                fn claim_ready_queued_work_by_batch_ids(&self, session_id: &SessionId, session_execution_lease: &ClaimAuthority, owner: &LeaseOwnerIdentity, boundary: crate::QueuedWorkClaimBoundary, batch_ids: &[crate::BatchId], policy: crate::QueuedWorkClaimPolicy) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError>;
                 fn abandon_queued_work_claim(&self, claim: &crate::WorkClaim<crate::runtime::QueuedWorkClaimData>) -> Result<(), StoreError>;
                 fn abandon_queued_work_claims(&self, claims: &[crate::WorkClaim<crate::runtime::QueuedWorkClaimData>]) -> Result<(), StoreError>;
                 fn cancel_queued_work_batch(&self, session_id: &SessionId, batch_id: &str) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
@@ -111,8 +105,8 @@ macro_rules! persistence_operations {
                 fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
             }
             RootStore {
-                fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<crate::TurnId>, StoreError>;
-                fn claim_root_inputs(&self, request: &RootInputClaimRequest) -> Result<Option<crate::turn_input_vocabulary::AcceptedTurnInputDrive>, StoreError>;
+                fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<UnfinishedRoot>, StoreError>;
+                fn admit_root(&self, request: &AdmitRootRequest) -> Result<Option<RootAdmission>, StoreError>;
                 fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
                 fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;

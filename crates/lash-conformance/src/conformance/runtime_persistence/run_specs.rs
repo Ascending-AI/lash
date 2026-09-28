@@ -314,7 +314,7 @@ async fn commit_switch_owing(
     };
     state.ensure_agent_frame_initialized();
     let owed = crate::store::PendingFollowOn {
-        follow_on_turn_id: crate::store::QueuedRunPosition::derive_turn_id(
+        follow_on_turn_id: crate::store::PhysicalTurn::derive_turn_id(
             &TurnId::from(switching_turn),
             1,
         ),
@@ -457,73 +457,39 @@ pub async fn a_steering_spec_must_match_a_legacy_follow_ons_parent_shape(
         .expect("the parent input's spec matches a legacy fact");
 }
 
-/// A queued run's current position is a running root under the spec its
-/// member inputs carry (FIG-3877): an input steered into the position's turn
-/// joins that shape, and a position whose selection has committed no input
-/// members — or has not committed at all — runs under the default spec.
+/// A queued-headed root runs under the default spec (FIG-3877): its members
+/// are queued work, which carries none, so an input steered into its physical
+/// turn joins the default shape and any other spec is refused.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_steering_spec_must_match_a_queued_run_positions_shape(
+pub async fn a_steering_spec_must_match_a_queued_headed_roots_default_shape(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = SessionId::from("run-spec-queued-steering");
-    let member_shape = spec_with_prompt("the member's shape");
-    store
-        .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&session_id, "the run's work")
-                .with_run_spec(member_shape.clone()),
-        )
+    let batch = store
+        .enqueue_queued_work(checkpoint_claims::queued_draft(
+            &session_id,
+            "the root's work",
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
         .await
-        .expect("admit the member input");
-    let state = RuntimeSessionState {
-        session_id: session_id.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let configuration = RuntimeCommit::persisted_state_for_test(&state, &[]).config;
+        .expect("enqueue the head batch");
     let lease = seal_claim_authority_for_test(&store, &session_id, "queued-owner").await;
-    let admitted = store
-        .begin_or_resume_queued_run(
-            &lease.authority(),
-            crate::store::BeginQueuedRun {
-                session_id: session_id.clone(),
-                identity: None,
-                request: crate::store::QueuedRunRequest::Automatic,
-                configuration: configuration.clone(),
-                expected_head_revision: 0,
-                initial_turn_index: 0,
-                generation: None,
-                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
-            },
-        )
-        .await
-        .expect("begin the queued run");
-    let selected = store
-        .select_queued_run(
-            &lease.authority(),
-            &admitted.scope,
-            &lease.owner,
-            8,
-            &configuration,
-            crate::testing::queued_work_claim_policy(8),
-        )
-        .await
-        .expect("select the run's members");
-    assert_eq!(
-        selected.admission.members.as_deref(),
-        Some(
-            &[crate::store::QueuedRunMember::Input(
-                selected.inputs[0].inputs[0].input_id.clone()
-            )][..]
-        ),
-        "the selection committed the spec'd input as the run's member"
-    );
-    let position = selected.admission.position.turn_id.clone();
+    super::root_admissions::admitted_on(
+        &store,
+        &lease,
+        &session_id,
+        "queued-root",
+        crate::store::AdmittedHead::Batch(batch.batch_id),
+    )
+    .await;
+    let turn = crate::store::PhysicalTurn::derive_turn_id(&TurnId::from("queued-root"), 0);
     let steer = |text: &str, spec: crate::RunSpec| {
         pending_active_turn_input_draft(
             &session_id,
-            &position,
+            &turn,
             crate::TurnInputCheckpointBoundary::AfterWork,
             text,
         )
@@ -535,54 +501,10 @@ pub async fn a_steering_spec_must_match_a_queued_run_positions_shape(
             .enqueue_pending_turn_input(steer("another shape", spec_with_prompt("skim")))
             .await,
         Err(StoreError::PendingTurnInputRunSpecMismatch { turn_id, .. })
-            if turn_id == position
+            if turn_id == turn
     ));
-    store
-        .enqueue_pending_turn_input(steer("same shape", member_shape))
-        .await
-        .expect("the member's spec matches");
     store
         .enqueue_pending_turn_input(steer("inherit", crate::RunSpec::default()))
         .await
-        .expect("an omitted spec inherits the position's shape");
-
-    // A position whose selection committed no input members runs under the
-    // default spec: a non-default spec is refused.
-    let second_session = SessionId::from("run-spec-queued-default");
-    let second_lease = seal_claim_authority_for_test(&store, &second_session, "queued-owner").await;
-    let second = store
-        .begin_or_resume_queued_run(
-            &second_lease.authority(),
-            crate::store::BeginQueuedRun {
-                session_id: second_session.clone(),
-                identity: None,
-                request: crate::store::QueuedRunRequest::Automatic,
-                configuration,
-                expected_head_revision: 0,
-                initial_turn_index: 0,
-                generation: None,
-                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
-            },
-        )
-        .await
-        .expect("begin the empty run");
-    assert!(
-        second.members.is_none(),
-        "no selection has committed for the new position"
-    );
-    assert!(matches!(
-        store
-            .enqueue_pending_turn_input(
-                pending_active_turn_input_draft(
-                    &second_session,
-                    &second.position.turn_id,
-                    crate::TurnInputCheckpointBoundary::AfterWork,
-                    "steer the unselected position",
-                )
-                .with_run_spec(spec_with_prompt("skim"))
-            )
-            .await,
-        Err(StoreError::PendingTurnInputRunSpecMismatch { turn_id, .. })
-            if turn_id == second.position.turn_id
-    ));
+        .expect("the default spec matches the root's shape");
 }

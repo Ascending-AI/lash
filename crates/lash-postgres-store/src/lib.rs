@@ -48,8 +48,8 @@ use lash_core_execution::runtime::{
 };
 use lash_core_execution::store::queued_work::{
     ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_exact_turn_work_claim_prefix,
-    select_leading_session_command, select_turn_work_claim_prefix,
+    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_leading_session_command,
+    select_turn_work_claim_prefix,
 };
 use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
@@ -621,9 +621,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // recorded the writer's generation, and a missing stamp is never derived)
 // and `route` (non-null: every write names the route its send took — a
 // pre-lane build could only send under the stable workflow name); and
-// `lash_queued_runs` gains `admitted_generation` — the drain generation of
-// the drive whose admission began the run — plus the drain's in-flight
-// count index over it (FIG-3795 S9). A catalog provisioned before the change
+// `lash_session_roots` records each root's admission (`admission_json`) and
+// `admitted_generation` — the drain generation of the drive that admitted
+// it — plus the drain's in-flight count index over it (FIG-3795 S9) and at
+// most one unfinished root per session; the queued-run ledger is gone and a
+// queued-work head is admitted as an ordinary root (FIG-3927, changed in
+// place under the version freeze). A catalog provisioned before the change
 // fails the open-time shape check and is recreated.
 const SCHEMA_VERSION: i32 = 141;
 

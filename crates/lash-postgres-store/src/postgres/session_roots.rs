@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootStore, RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWriteDecision,
-    close_admission, decide_root_terminal_write, root_binding_conflict, stored_intent_kind,
-    stored_intent_state,
+    RootAdmission, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWriteDecision, UnfinishedRoot, close_admission, decide_root_terminal_write,
+    root_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
@@ -222,27 +222,7 @@ pub(crate) async fn end_lost_root_tx(
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    let mut run = crate::runtime_persistence::queued_run::load_run_tx(tx, session, None)
-        .await?
-        .filter(|run| run.scope.id() == root.as_str());
-    let mut batches = Vec::new();
-    if let Some(run) = run.as_ref() {
-        for member in run
-            .members
-            .iter()
-            .flatten()
-            .chain(run.withheld_members.iter())
-        {
-            match member {
-                lash_core_execution::store::QueuedRunMember::Input(id) => {
-                    inputs.push(id.to_string())
-                }
-                lash_core_execution::store::QueuedRunMember::Batch(id) => {
-                    batches.push(id.to_string())
-                }
-            }
-        }
-    }
+    let batches = admitted_batches_conn(tx, session, root).await?;
     inputs.sort();
     inputs.dedup();
     for input in inputs {
@@ -274,15 +254,60 @@ pub(crate) async fn end_lost_root_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    if let Some(run) = run.as_mut() {
-        run.revision += 1;
-        run.terminal = Some(lash_core_execution::store::QueuedRunTerminal::Failed {
-            code: lash_core_execution::RuntimeErrorCode::EngineRootSubstrateLost,
-            message: format!("root `{root}` lost its engine execution"),
-        });
-        crate::runtime_persistence::queued_run::write_run_tx(tx, run, false).await?;
-    }
     Ok(Some(terminal))
+}
+
+/// Decode a root's recorded admission (`session_roots.admission_json`).
+pub(crate) fn decode_root_admission(json: &str) -> Result<RootAdmission, StoreError> {
+    serde_json::from_str(json).map_err(|error| StoreError::StoredDataCorrupt {
+        record_kind: "RootAdmission",
+        message: error.to_string(),
+    })
+}
+
+/// The session's unfinished root, with the head its admission recorded,
+/// read on `conn`.
+pub(crate) async fn unfinished_root_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+) -> Result<Option<UnfinishedRoot>, StoreError> {
+    let row: Option<(String, String)> =
+        sqlx::query_as(session_roots_sql().roots.select_unfinished.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(store_sqlx_error)?;
+    row.map(|(root, json)| {
+        Ok(UnfinishedRoot {
+            root: TurnId::from(root),
+            head: decode_root_admission(&json)?.head,
+        })
+    })
+    .transpose()
+}
+
+/// The queued-work batches `root`'s recorded admission took, read on `conn`:
+/// none for a root with no admission or an input-headed one.
+pub(crate) async fn admitted_batches_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Result<Vec<String>, StoreError> {
+    let json: Option<Option<String>> =
+        sqlx::query_scalar(session_roots_sql().roots.select_admission.sql())
+            .bind(session_id.as_str())
+            .bind(root.as_str())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(store_sqlx_error)?;
+    let Some(Some(json)) = json else {
+        return Ok(Vec::new());
+    };
+    Ok(decode_root_admission(&json)?
+        .queued
+        .iter()
+        .flat_map(|claim| claim.batches.iter().map(|batch| batch.batch_id.to_string()))
+        .collect())
 }
 
 /// The root input `input` of `session_id` is bound to, read on `conn`.
@@ -605,7 +630,6 @@ pub(crate) async fn begin_session_close_tx(
         .await?;
         roots.insert(TurnId::from(parked_root));
     }
-    roots.extend(crate::runtime_persistence::pending_queued_root_tx(tx, session_id).await?);
     let verbs = open_verbs_by_session_conn(tx, session_id).await?;
     for verb in &verbs {
         match &verb.kind {
@@ -690,23 +714,21 @@ pub(crate) async fn delete_session_roots_conn(
 
 #[async_trait::async_trait]
 impl RootStore for PostgresSessionStore {
-    async fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<TurnId>, StoreError> {
+    async fn unfinished_root(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<UnfinishedRoot>, StoreError> {
         self.bind_session_id(session_id)?;
-        let sql = session_roots_sql();
-        let root: Option<String> = sqlx::query_scalar(sql.roots.select_unfinished.sql())
-            .bind(session_id.as_str())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?;
-        Ok(root.map(TurnId::from))
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        unfinished_root_conn(&mut connection, session_id).await
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &lash_core_execution::store::RootInputClaimRequest,
-    ) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+        request: &lash_core_execution::store::AdmitRootRequest,
+    ) -> Result<Option<RootAdmission>, StoreError> {
         self.bind_session_id(&request.session_id)?;
-        crate::runtime_persistence::claim_root_inputs_postgres(self, request).await
+        crate::runtime_persistence::admit_root_postgres(self, request).await
     }
     async fn root_terminal(
         &self,

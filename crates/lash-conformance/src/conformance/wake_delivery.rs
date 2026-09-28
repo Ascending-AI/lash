@@ -1330,6 +1330,25 @@ async fn settle_queued_batch(
     session_id: &SessionId,
     batch_id: &str,
 ) {
+    // The turn lane is claimed in enqueue order: only the head wake is
+    // settled through a claim. A wake behind it leaves through the other
+    // terminal transition, a host cancel, which raises the same redelivery
+    // floor (FIG-3545).
+    let head = target
+        .list_pending_queued_work(session_id)
+        .await
+        .expect("list the target lane")
+        .into_iter()
+        .min_by_key(|batch| batch.enqueue_seq)
+        .expect("the target lane holds the wake");
+    if head.batch_id != batch_id {
+        target
+            .cancel_queued_work_batch(session_id, batch_id)
+            .await
+            .expect("cancel target wake batch")
+            .expect("target wake batch remains live");
+        return;
+    }
     let owner = crate::LeaseOwnerIdentity::opaque(
         format!("{batch_id}:owner"),
         format!("{batch_id}:incarnation"),
@@ -1341,17 +1360,22 @@ async fn settle_queued_batch(
         .acquired()
         .expect("target session lease available");
     let claim = target
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             session_id,
             &lease.fence(),
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            &[batch_id.to_string().into()],
-            crate::testing::queued_work_claim_policy(64),
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .expect("claim target wake batch")
         .expect("target wake batch remains live");
+    assert_eq!(
+        claim.batches.len(),
+        1,
+        "the claim takes the head wake alone"
+    );
     let head_revision = target
         .load_session()
         .await

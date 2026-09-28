@@ -80,7 +80,7 @@ pub fn turn_acceptance_effect_invocation(
 pub fn turn_input_drive_effect_invocation(
     acceptance: &RuntimeEffectInvocation,
 ) -> RuntimeEffectInvocation {
-    let kind = RuntimeEffectKind::ClaimAcceptedTurnInput.as_str();
+    let kind = RuntimeEffectKind::AdmitRoot.as_str();
     child_effect_invocation_from_effect(
         acceptance.execution_scope(),
         acceptance,
@@ -712,12 +712,9 @@ mod tests {
         assert_eq!(drive.attribution, acceptance.attribution);
         assert_eq!(
             drive.replay_key(),
-            "session:subagent:call:process:subagent:call:accept_turn_input:claim_accepted_turn_input"
+            "session:subagent:call:process:subagent:call:accept_turn_input:admit_root"
         );
-        assert_eq!(
-            drive.effect_id(),
-            "process:subagent:call.accept.claim_accepted_turn_input"
-        );
+        assert_eq!(drive.effect_id(), "process:subagent:call.accept.admit_root");
         assert_eq!(drive.caused_by, Some(acceptance.causal_ref()));
     }
 

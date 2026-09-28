@@ -121,10 +121,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.queued_batches.select_head_candidate.sql(),
         sql.queued_batches_sqlite.claim_candidates_idle.sql(),
         sql.queued_batches_sqlite.claim_candidates_boundary.sql(),
-        sql.queued_batches_sqlite.select_present_ids.sql(),
-        sql.queued_batches_sqlite.select_by_ids.sql(),
-        sql.queued_batches_sqlite.select_by_claim_ids.sql(),
-        sql.queued_batches.select_span.sql(),
         sql.queued_items.insert_new.sql(),
         sql.queued_items.list_by_batch.sql(),
         sql.queued_items_sqlite.list_by_batches.sql(),
@@ -202,27 +198,6 @@ fn abandoning_a_batch_of_claims_seeks_the_claim_index() {
         &turn_ingress_sql().pending_inputs_sqlite.abandon_claims,
         "idx_pending_turn_inputs_claim",
     );
-}
-
-#[test]
-fn a_json_array_list_bind_still_seeks_the_primary_key() {
-    // The three exact-claim reads bound their batch ids as `IN (?, ?, …)` and
-    // now bind one JSON array. A `json_each` list that the planner cannot turn
-    // into a seek would make an exact claim scan the session's whole queue.
-    let conn = catalog();
-    let statements = &turn_ingress_sql().queued_batches_sqlite;
-    for statement in [
-        &statements.select_present_ids,
-        &statements.select_by_ids,
-        &statements.select_by_claim_ids,
-    ] {
-        let plan = plan(&conn, statement.sql());
-        assert!(
-            plan.contains("USING INDEX") || plan.contains("USING PRIMARY KEY"),
-            "`{}` no longer seeks an index:\n{plan}",
-            statement.name(),
-        );
-    }
 }
 
 #[test]

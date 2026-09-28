@@ -1,18 +1,5 @@
 use super::*;
 
-/// The persisted configuration a queued-run admission carries.
-fn queued_run_configuration(
-    session_id: &lash_core::SessionId,
-) -> lash_core::PersistedSessionConfig {
-    let state = lash_core::RuntimeSessionState {
-        session_id: session_id.clone(),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]).config
-}
-
 #[tokio::test]
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     let backend = memory_store_backend().await;
@@ -492,8 +479,8 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         .await
         .expect("start the process under the retired generation");
 
-    // FIG-3884: a queued run the retired generation's drive admitted counts
-    // as its in-flight turn until the run settles.
+    // FIG-3884, FIG-3927 N8: a root the retired generation's drive admitted
+    // counts as its in-flight turn until the root ends.
     let turn_session = lash_core::SessionId::from("generation-drain-status-turn");
     let session_store = core
         .backend()
@@ -507,37 +494,44 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         })
         .await
         .expect("create the in-flight turn's session");
+    let head = session_store
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+            &turn_session,
+            lash_core::TurnInputIngress::NextTurn,
+            TurnInput::text("in flight"),
+        ))
+        .await
+        .expect("accept the root's input")
+        .input_id;
     let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
         &(session_store.clone() as Arc<dyn lash_core::RuntimePersistence>),
         &turn_session,
         "generation-drain-status",
     )
     .await;
-    let expected_head_revision = session_store
-        .load_session_head_meta()
-        .await
-        .expect("read the head")
-        .map_or(0, |head| head.head_revision);
-    let drain_scope = lash_core::ExecutionScope::queue_drain(
-        turn_session.clone(),
-        "generation-drain-status-drain",
-    );
+    let root = lash_core::TurnId::from("generation-drain-status-root");
     let admission = session_store
-        .begin_or_resume_queued_run(
-            &lease.fence(),
-            lash_core::store::BeginQueuedRun {
-                session_id: turn_session.clone(),
-                identity: Some(drain_scope.clone()),
-                request: lash_core::store::QueuedRunRequest::Automatic,
-                configuration: queued_run_configuration(&turn_session),
-                expected_head_revision,
-                initial_turn_index: 1,
-                generation: None,
-                admitted_generation: retired.clone(),
+        .admit_root(&lash_core::store::AdmitRootRequest {
+            session_id: turn_session.clone(),
+            lease: lease.fence(),
+            owner: lease.owner.clone(),
+            root: root.clone(),
+            head: lash_core::store::AdmittedHead::Input(head),
+            max_inputs: 1,
+            policy: lash_core::testing::queued_work_claim_policy(1),
+            base: lash_core::store::SessionHeadRef {
+                generation: 0,
+                revision: 0,
+                leaf: None,
+                checkpoint: None,
             },
-        )
+            turn_index: 1,
+            generation: None,
+            admitted_generation: retired.clone(),
+        })
         .await
-        .expect("begin the queued run");
+        .expect("admit the root")
+        .expect("the root reaches its head");
 
     let unmarked = core
         .generation_drain_status(&retired)
@@ -583,30 +577,31 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     assert_eq!(wire["live_processes"], serde_json::json!(1));
     assert_eq!(wire["in_flight_turns"], serde_json::json!(1));
 
-    let selected = session_store
-        .select_queued_run(
-            &lease.fence(),
-            &drain_scope,
-            &lease.owner,
-            64,
-            &admission.configuration,
-            lash_core::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("freeze the empty selection");
+    let mut state = lash_core::RuntimeSessionState {
+        session_id: turn_session.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    state.ensure_agent_frame_initialized();
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.session_execution_lease_fence = Some(lease.authority());
+    commit.drive_fence = Some(Box::new(lease.drive_fence()));
+    commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
+        commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
+        turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
+        root,
+        stop: None,
+    }));
+    commit.completed_turn_input_claims = admission
+        .inputs
+        .iter()
+        .map(|claim| claim.completion())
+        .collect();
     session_store
-        .settle_queued_run(
-            &lease.fence(),
-            lash_core::store::QueuedRunCommit {
-                scope: drain_scope,
-                expected_revision: selected.admission.revision,
-                progress: lash_core::store::QueuedRunProgress::Settle {
-                    terminal: lash_core::store::QueuedRunTerminal::Empty,
-                },
-            },
-        )
+        .commit_runtime_state(commit)
         .await
-        .expect("settle the queued run");
+        .expect("the root's final commit ends it");
     let still_held = core
         .generation_drain_status(&retired)
         .await

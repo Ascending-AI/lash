@@ -172,36 +172,6 @@ lash_store_sql::statements! {
              ), 0)
              FOR UPDATE OF queued_work_batches SKIP LOCKED";
 
-        /// Which of the batch ids in the array `?2` session `?1` still holds.
-        select_present_ids = "SELECT batch_id FROM queued_work_batches
-             WHERE session_id = ?1 AND batch_id = ANY(?2)";
-
-        /// Session `?1`'s unclaimed batches for generation `?2` among the ids
-        /// in the array `?3`.
-        select_by_ids = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4)
-               AND batch_id = ANY(?3)
-             ORDER BY enqueue_seq ASC";
-
-        /// The same rows keyed by the claim ids in the array `?3`: an exact
-        /// claim must validate every batch the interrupted claim it recomposes
-        /// covered, not only the ones it was asked for.
-        select_by_claim_ids = "SELECT enqueue_seq, batch_id, session_id, source_key,
-                    delivery_policy, work_kind, authority_json, merge_key,
-                    enqueued_at_ms, claim_fencing_token, claim_token,
-                    claim_session_lease_generation, claim_id, claim_owner_incarnation_id
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4)
-               AND claim_id = ANY(?3)
-             ORDER BY enqueue_seq ASC";
-
         /// The batch form of the shared `abandon_claim`, over the claims bound
         /// as the five parallel arrays `?1` to `?5`.
         ///

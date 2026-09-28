@@ -138,12 +138,6 @@ crate::statements! {
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
-        /// The run spec of input `?2` of session `?1`: one member of the
-        /// queued-run position a steering input addresses (FIG-3877).
-        select_run_spec_by_input_id = "SELECT run_spec_hash
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND input_id = ?2";
-
         /// The `enqueue_seq` of session `?1`'s earliest next-turn input that
         /// generation `?2` has not claimed, or `NULL`: where a claim of
         /// queued work stops, at idle and at a checkpoint alike, because the
@@ -296,13 +290,6 @@ crate::statements! {
                  SELECT 1 FROM session_root_inputs binding
                  WHERE binding.session_id = pending_turn_inputs.session_id
                    AND binding.input_id = pending_turn_inputs.input_id
-               )
-               AND NOT EXISTS (
-                 SELECT 1 FROM queued_run_members m
-                 JOIN queued_runs r ON r.session_id = m.session_id AND r.scope_id = m.scope_id
-                 WHERE m.session_id = pending_turn_inputs.session_id
-                   AND m.member_kind = 'input' AND m.member_id = pending_turn_inputs.input_id
-                   AND r.status = 'pending'
                )";
 
         delete_by_session = "DELETE FROM pending_turn_inputs WHERE session_id = ?1";

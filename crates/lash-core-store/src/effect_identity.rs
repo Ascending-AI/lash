@@ -55,11 +55,11 @@ pub enum RuntimeEffectKind {
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
     AcceptTurnInput,
-    /// The journaled initial drive set of an accepted turn input: the rows the
-    /// turn claimed right after acceptance, with their settlement authority
-    /// (ADR 0069 section 6). Replay returns it and never re-reads pending rows.
-    ClaimAcceptedTurnInput,
-    /// The recorded decision about a claimed root's admitted head.
+    /// A root's recorded admission (FIG-3927): the turn-lane rows it drives,
+    /// with the base and turn index it was admitted on. Replay returns it and
+    /// never re-reads pending rows.
+    AdmitRoot,
+    /// The recorded decision about an admitted root's head.
     InspectAdmittedHead,
     /// A session drive's recorded admission (ADR 0105 §2, FIG-3600): the root
     /// it admitted, with its base and turn index, or why it admitted none.
@@ -110,7 +110,7 @@ impl RuntimeEffectKind {
             Self::Process => "process",
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
-            Self::ClaimAcceptedTurnInput => "claim_accepted_turn_input",
+            Self::AdmitRoot => "admit_root",
             Self::InspectAdmittedHead => "inspect_admitted_head",
             Self::AdmitDrive => "admit_drive",
             Self::DrawRootStart => "draw_root_start",

@@ -91,10 +91,6 @@ pub enum RuntimeErrorCode {
     StoreCommitContended,
     /// A physical queued attempt yielded with a durable continuation.
     QueuedRunPending,
-    /// An exact queued request re-presented a failed terminal receipt.
-    QueuedRunFailed,
-    /// Restore the admitted configuration or explicitly abandon this run.
-    QueuedRunConfigurationChanged,
     /// A pending follow-on owns the session (ADR 0101 §3): the commit or
     /// frame change is refused until the follow-on's own terminal commit.
     FollowOnPending,
@@ -551,14 +547,6 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
         | crate::store::StoreError::FollowOnNotPending { .. }) => {
             RuntimeError::new(RuntimeErrorCode::FollowOnPending, err.to_string())
         }
-        crate::store::StoreError::QueuedRunConfigurationChanged { session_id } => {
-            RuntimeError::new(
-                RuntimeErrorCode::QueuedRunConfigurationChanged,
-                format!(
-                    "session {session_id} has a pending queued run with different execution configuration; restore that configuration or explicitly abandon the admission"
-                ),
-            )
-        }
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
@@ -586,8 +574,6 @@ impl RuntimeErrorCode {
             }
             Self::StoreCommitContended => "store_commit_contended",
             Self::QueuedRunPending => "queued_run_pending",
-            Self::QueuedRunFailed => "queued_run_failed",
-            Self::QueuedRunConfigurationChanged => "queued_run_configuration_changed",
             Self::FollowOnPending => "follow_on_pending",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
@@ -838,8 +824,6 @@ impl RuntimeErrorCode {
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
         Self::QueuedRunPending,
-        Self::QueuedRunFailed,
-        Self::QueuedRunConfigurationChanged,
         Self::FollowOnPending,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
@@ -1024,8 +1008,6 @@ impl RuntimeErrorCode {
             }
             "store_commit_contended" => Self::StoreCommitContended,
             "queued_run_pending" => Self::QueuedRunPending,
-            "queued_run_failed" => Self::QueuedRunFailed,
-            "queued_run_configuration_changed" => Self::QueuedRunConfigurationChanged,
             "follow_on_pending" => Self::FollowOnPending,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
@@ -1660,7 +1642,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::PresentToolResult
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
-                | RuntimeEffectKind::ClaimAcceptedTurnInput
+                | RuntimeEffectKind::AdmitRoot
                 | RuntimeEffectKind::InspectAdmittedHead
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::CloseRootScope

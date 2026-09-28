@@ -62,7 +62,7 @@ pub(super) struct TurnClaimSettlement {
     /// They are released and recorded as deferred, never completed and never
     /// dropped (FIG-3543, ADR 0101 §10).
     pub(super) undelivered_queue_claims: Vec<crate::QueuedWorkClaim>,
-    /// The claims of the journaled initial drive set (ADR 0069 §6). They cede
+    /// The claims of the root's journaled admission (ADR 0069 §6). They cede
     /// on supersession whatever generation the turn commits under: a first
     /// execution holds them under its own generation, and a redrive restores
     /// them from the journal.
@@ -106,9 +106,7 @@ impl TurnClaimSettlement {
     /// A claim the turn restored from an earlier execution (its generation
     /// predates `current`, the generation the turn commits under) or a
     /// journaled drive claim carries authority the turn already spent: the
-    /// journal holds the words it answered them with. A resumed queued run
-    /// retakes its own assigned rows under the committing generation before
-    /// the replay and settles them under those claims, so supersession here
+    /// journal holds the words it answered them with. Supersession here
     /// proves another driver took the rows through the claim CAS: committing
     /// the turn would answer them a second time. The turn cedes and commits
     /// nothing (FIG-3552).
@@ -122,7 +120,8 @@ impl TurnClaimSettlement {
                     || self.turn_inputs.is_restored(claim_id, current)
             }
             crate::StoreError::QueuedWorkClaimSuperseded { claim_id, .. } => {
-                self.queued.is_restored(claim_id, current)
+                self.journaled_drive_claims.contains(claim_id.as_str())
+                    || self.queued.is_restored(claim_id, current)
             }
             _ => false,
         }

@@ -72,8 +72,9 @@ pub trait TestTurnDrive {
     ) -> Result<Option<AgentFrameRun>, RuntimeError>;
 
     /// Run one queue root through recorded engine admission for tests that
-    /// formerly called the direct queued drain. A command-only root has no
-    /// physical turn.
+    /// formerly called the direct queued drain. The command lane applies
+    /// first as roots of its own that run no turn (ADR 0101 §4), so the
+    /// drain answers the first root admitted on turn-lane work.
     async fn drive_one_admitted_queued_root(
         &mut self,
         opts: TurnOptions<'_>,
@@ -86,17 +87,47 @@ impl TestTurnDrive for LashRuntime {
         &mut self,
         opts: TurnOptions<'_>,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
-        let request = opts.execution_scope_id().to_owned();
-        let turn = self
-            .drive_next_root(&request, opts)
-            .await?
-            .and_then(AgentFrameRun::into_final_turn);
-        Ok(match turn {
-            Some(turn) => QueuedTurnDrain::Ran(turn),
-            None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
-                crate::QueuedWorkClaimRefusal::Empty,
-            )),
-        })
+        let controller = opts.scoped_effect_controller();
+        let request = DriveRequest {
+            session: self.state.session_id.clone(),
+            request: DriveRequestId::new(opts.execution_scope_id()),
+            build_generation: self.host.core.backend().build_generation().clone(),
+        };
+        let mut ordinal = 0_u32;
+        let mut rules = DriveLoop::new();
+        loop {
+            let AdmitVerdict::Admit(admitted) =
+                crate::drive::admit_drive(self, &controller, &request, ordinal)
+                    .await
+                    .map_err(crate::engine::DriveAbort::into_error)?
+            else {
+                return Ok(QueuedTurnDrain::Empty(
+                    EmptyQueuedDrainReason::ClaimRefused(crate::QueuedWorkClaimRefusal::Empty),
+                ));
+            };
+            let work = admitted.work().clone();
+            let sinks = crate::drive::DriveSinks {
+                events: opts.events_or_noop(),
+                turn_events: opts.turn_events_or_noop(),
+                local_stop: opts.local_stop().clone(),
+            };
+            let report =
+                crate::drive::run_admitted_root_reporting(self, &controller, admitted, sinks)
+                    .await
+                    .map_err(crate::engine::DriveAbort::into_error)?;
+            if matches!(work, crate::engine::AdmittedWork::Commands { .. })
+                && rules.after(&work, &report.outcome).is_none()
+            {
+                ordinal += 1;
+                continue;
+            }
+            return Ok(match report.run.and_then(AgentFrameRun::into_final_turn) {
+                Some(turn) => QueuedTurnDrain::Ran(turn),
+                None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
+                    crate::QueuedWorkClaimRefusal::Empty,
+                )),
+            });
+        }
     }
 
     async fn drive_turn_frames(

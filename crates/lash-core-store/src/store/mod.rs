@@ -31,14 +31,11 @@ mod maintenance;
 pub mod obligation;
 mod park;
 pub mod pending_follow_on;
+mod physical_turn;
 mod preflight;
-mod queued_run;
 pub mod queued_work;
 mod record_schema_version;
-pub use queued_run::{
-    BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunOrigin,
-    QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
-};
+pub use physical_turn::PhysicalTurn;
 mod control_intent;
 mod drive_fence;
 mod realization;
@@ -149,8 +146,7 @@ pub use preflight::{
 };
 pub use queued_work::{
     PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, QueuedWorkClass, SelectedQueuedWorkClaimOutcome, TurnWorkClaimPrefix,
-    TurnWorkClaimSelection,
+    QueuedWorkClaimRefusal, QueuedWorkClass, TurnWorkClaimPrefix, TurnWorkClaimSelection,
 };
 pub use realization::commit_runtime_state_verified;
 pub use recovery_leader::*;
@@ -160,10 +156,10 @@ pub use retention::{
     is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
 };
 pub use root::{
-    InMemoryRootLedger, RootInputClaimRequest, RootStore, RootTerminal, RootTerminalCause,
-    RootTerminalKind, RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal,
-    TurnCommitId, decide_root_terminal_write, root_binding_conflict, settled_queued_root_cause,
-    settled_queued_root_terminal,
+    AdmitRootRequest, AdmittedHead, InMemoryRootLedger, RootAdmission, RootAdmissionAnswer,
+    RootAdmissionRefusal, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId, UnfinishedRoot,
+    decide_root_terminal_write, root_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
@@ -620,7 +616,6 @@ impl RuntimeCommit {
             turn_cancel_closure_settlement,
             adopted_intent_rows,
             committed_attachment_ids,
-            queued_run: _,
         } = self;
         debug_assert!(
             completed_queue_claims.is_empty()
@@ -810,7 +805,6 @@ impl RuntimeCommit {
             usage_deltas: usage_deltas.to_vec(),
             failure_evidence: Vec::new(),
             turn_commit: RuntimeTurnCommitStamp::new(operation),
-            queued_run: None,
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
             undelivered_turn_input_claims: Vec::new(),
@@ -1733,53 +1727,6 @@ pub enum OrphanedTurnInputScope<'a> {
 /// [`SessionCommitStore::commit_runtime_state`].
 #[async_trait::async_trait]
 pub trait QueuedWorkStore: Send + Sync {
-    /// Acquire or resume the session's sole unfinished queued run under the
-    /// current lane fence. Retry preserves identity and physical position.
-    async fn begin_or_resume_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        request: BeginQueuedRun,
-    ) -> Result<QueuedRunAdmission, StoreError>;
-
-    /// Select and claim the initial work, or reclaim exactly the recorded
-    /// membership under the successor lane. Selection and claims are atomic.
-    async fn select_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        scope: &crate::ExecutionScope,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-        configuration: &crate::PersistedSessionConfig,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<SelectedQueuedRun, StoreError>;
-
-    /// Pending-run discovery remains available after original members settle.
-    async fn pending_queued_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<QueuedRunAdmission>, StoreError>;
-
-    /// The admission recorded for the drain `scope`, pending or settled, or
-    /// `None` when that drain never admitted a run (or forgot an unworked
-    /// one).
-    ///
-    /// A read, never a claim: it takes no lane and admits nothing. A settled
-    /// run is a drain end (ADR 0094, FIG-3419/3559), so this is how the
-    /// parent-end recovery sweep tells a drain whose end is owed — `terminal`
-    /// is recorded but the end receipt is not — from one that is merely
-    /// interrupted and ends through its own retry (FIG-3563).
-    async fn queued_run(
-        &self,
-        scope: &crate::ExecutionScope,
-    ) -> Result<Option<QueuedRunAdmission>, StoreError>;
-
-    /// Fenced disposition for an empty run or a failure before physical commit.
-    async fn settle_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        settlement: QueuedRunCommit,
-    ) -> Result<QueuedRunAdmission, StoreError>;
-
     /// Persist a queued-work batch for later claiming.
     async fn enqueue_queued_work(
         &self,
@@ -1858,30 +1805,6 @@ pub trait QueuedWorkStore: Send + Sync {
         ),
         StoreError,
     >;
-
-    /// Claim a specific ready batch set selected from the durable queue.
-    ///
-    /// This is the host-facing counterpart to
-    /// [`claim_ready_queued_work`](Self::claim_ready_queued_work): callers that
-    /// project queued work into a UI can claim the exact batch ids they
-    /// rendered instead of reconstructing authority from local draft state.
-    ///
-    /// This selection is intentionally allowed to bypass earlier unrelated
-    /// ready work. The logical-turn driver uses it to reclaim an atomic outbox
-    /// handoff immediately, preserving foreground frame-chain ordering.
-    /// Requested ids are interpreted in durable `enqueue_seq` order. A claim
-    /// returns their maximal physically contiguous prefix that satisfies the
-    /// ordinary key/boundary/budget law; an unrequested physical row is a
-    /// barrier, and requested rows after it remain queued.
-    async fn claim_ready_queued_work_by_batch_ids(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: crate::QueuedWorkClaimBoundary,
-        batch_ids: &[crate::BatchId],
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError>;
 
     /// Release a held queued-work claim without completing it.
     async fn abandon_queued_work_claim(

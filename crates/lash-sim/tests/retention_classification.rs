@@ -155,18 +155,6 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
-        "queued_runs",
-        LifecycleOwned {
-            scope: "session deletion; pending ownership and terminal receipts survive queue settlement",
-        },
-    ),
-    (
-        "queued_run_members",
-        LifecycleOwned {
-            scope: "owning queued run; ordered membership survives source-row settlement",
-        },
-    ),
-    (
         "queued_work_batches",
         LifecycleOwned {
             scope: "claim settlement, acknowledgement, session deletion",
@@ -442,7 +430,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 56, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 54, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

@@ -70,7 +70,7 @@ pub const FIXED: &[Finding] = &[
     // whether this execution wrote the root's evidence rather than on the
     // durable evidence its replayed run carries. Later fixes moved this
     // seed's schedule off the cut that exposed it; the drive-admission law
-    // `a_settled_queued_roots_redrive_replays_its_scope_close` pins the
+    // `a_command_roots_redrive_replays_its_recorded_outcome` pins the
     // redelivery itself.
     Finding {
         id: "FIG-3873 S2",

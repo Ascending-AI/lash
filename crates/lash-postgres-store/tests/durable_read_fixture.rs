@@ -745,24 +745,6 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .await
         .expect("refresh refusal fixture session-meta contract from the current schema");
     }
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS lash_queued_run_members; DROP TABLE IF EXISTS lash_queued_runs;",
-    )
-    .execute(&pool)
-    .await
-    .expect("replace author-time queued run catalog");
-    let schema = include_str!("../schema.sql");
-    let queued_start = schema
-        .find("CREATE TABLE IF NOT EXISTS lash_queued_runs (")
-        .expect("queued run schema");
-    let queued_end = schema[queued_start..]
-        .find("CREATE TABLE IF NOT EXISTS lash_turn_cancel_closure_authorizations (")
-        .expect("queued run schema end")
-        + queued_start;
-    sqlx::raw_sql(&schema[queued_start..queued_end])
-        .execute(&pool)
-        .await
-        .expect("refresh queued run catalog");
     // Component 134 (FIG-3816) adds the migration ledger. `schema.sql`
     // declares it creation-only, so the authoritative block drops straight in.
     sqlx::raw_sql(schema_table_ddl("lash_migrations"))

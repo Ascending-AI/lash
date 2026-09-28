@@ -10,15 +10,9 @@ use std::sync::Arc;
 pub(super) enum Entry {
     Leading,
     Automatic,
-    Exact,
     Checkpoint,
 }
-pub(super) const ENTRIES: [Entry; 4] = [
-    Entry::Leading,
-    Entry::Automatic,
-    Entry::Exact,
-    Entry::Checkpoint,
-];
+pub(super) const ENTRIES: [Entry; 3] = [Entry::Leading, Entry::Automatic, Entry::Checkpoint];
 
 pub(super) struct Case {
     pub(super) store: Arc<dyn RuntimePersistence>,
@@ -117,20 +111,6 @@ impl Case {
                 .await
                 .expect("automatic claim")
                 .claim(),
-            Entry::Exact => {
-                self.store
-                    .claim_ready_queued_work_by_batch_ids(
-                        &SessionId::from("root"),
-                        &self.lease.fence(),
-                        &self.owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        &self.ids,
-                        policy,
-                    )
-                    .await
-                    .expect("exact claim")
-                    .claim
-            }
             Entry::Checkpoint => {
                 self.store
                     .claim_checkpoint_work(

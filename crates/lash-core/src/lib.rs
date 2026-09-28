@@ -143,11 +143,7 @@ pub mod facade_support {
         crate::trace::trace_context_for_effect_invocation(context, invocation)
     }
     pub use crate::runtime::run_head_advancing_commit_attempt;
-    pub use crate::runtime::turn_loop::{
-        EmptyQueuedDrainReason, QueuedTurnDrain, SelectedQueuedWorkBatchSatisfaction,
-        SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainOutcome,
-        SelectedQueuedWorkDrainRefusalCause,
-    };
+    pub use crate::runtime::turn_loop::{EmptyQueuedDrainReason, QueuedTurnDrain};
     pub use crate::tool_provider::orchestration::{
         OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
     };
@@ -682,14 +678,13 @@ pub use process_registry::{
     ProcessDefinitionRegistration, ProcessDefinitionRegistry,
 };
 pub use runtime::{
-    AbandonEvidence, AbandonWriter, AcceptedTurnInputDrive, AcceptedTurnInputRefusal,
-    ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope, Ancestry, ArtifactOwner,
-    AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey, AwaitEventResolver,
-    AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef, CausalRef,
-    ChargeSafetyRefusalEvidence, CheckpointClaimSet, Clock, ClockWallTime, CommandJournalGuard,
-    CommandReplayKey, CompletionKeyPreparation, ContractRef, DeclaredProcessIdentity,
-    DefinitionRef, DeliveryPolicy, DrainMode, DrainModePolicy, EffectAddress,
-    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
+    Ancestry, ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
+    AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef,
+    CausalRef, ChargeSafetyRefusalEvidence, CheckpointClaimSet, Clock, ClockWallTime,
+    CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
+    DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DrainMode, DrainModePolicy,
+    EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
     EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
     ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope, ForkPoint,
     ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupChildCancelWatch,
@@ -816,13 +811,13 @@ pub use store::{
     MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
     QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore, RetentionBound,
     RetentionReport, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-    RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome,
-    SemanticBoundaryOperation, SessionAdmission, SessionBinding, SessionBlobReclaimReport,
-    SessionCommitStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreComponentVersion,
-    StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp, StoreReleaseState,
-    StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat,
-    TurnCancelRepairDecision, TurnCancelRepairResult, TurnInputStore, VacuumReport, WorkClaim,
-    WorkCompletion, WriterPin, compare_releases, release_stamp_advances,
+    RuntimeUsageDeltaIdentity, ScanCoverage, SemanticBoundaryOperation, SessionAdmission,
+    SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionMeta,
+    SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
+    StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnCancelRepairDecision,
+    TurnCancelRepairResult, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion, WriterPin,
+    compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

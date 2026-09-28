@@ -87,7 +87,6 @@ struct TurnCommitRequest<'commit> {
     session: Option<&'commit mut Session>,
     staged_usage: session_manager::StagedTokenLedger,
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
-    queued_run: Option<Box<crate::store::QueuedRunCommit>>,
     session_execution_lease: Option<&'commit DriveClaimGuard>,
     release_session_execution_lease: bool,
     trace_turn_id: &'commit TurnId,
@@ -167,7 +166,6 @@ impl PreparedTurn {
             session,
             staged_usage,
             commit_effects,
-            queued_run,
             session_execution_lease,
             release_session_execution_lease,
             trace_turn_id,
@@ -189,7 +187,6 @@ impl PreparedTurn {
             commit_effects.claim_settlement,
             session_execution_lease.map(DriveClaimGuard::fence),
             commit_effects.pending_follow_on,
-            queued_run,
             // Any active-turn input that missed the turn's final
             // checkpoint must become the next ordinary user turn.
             Some(trace_turn_id.clone()),
@@ -667,97 +664,18 @@ impl LashRuntime {
         let commit_effects = claims.commit_effects(
             prepared.outcome(),
             &self.journaled_drive_claims,
-            &self.queued_run_reacquired,
             pending_follow_on,
         );
-        let queued_run = self
-            .queued_run
-            .as_ref()
-            .map(|run| {
-                use crate::store::{
-                    QueuedRunCommit, QueuedRunMember, QueuedRunProgress, QueuedRunTerminal,
-                };
-                let mut withheld = run.withheld_members.clone();
-                if let Some(work) = &claims.withheld_terminal_work {
-                    withheld.extend(work.queued.iter().flat_map(|claim| {
-                        claim
-                            .batches
-                            .iter()
-                            .map(|batch| QueuedRunMember::Batch(batch.batch_id.clone()))
-                    }));
-                    withheld.extend(work.turn_inputs.iter().flat_map(|drive| {
-                        drive
-                            .completion()
-                            .input_ids
-                            .clone()
-                            .into_iter()
-                            .map(QueuedRunMember::Input)
-                    }));
-                }
-                let mut seen = std::collections::BTreeSet::new();
-                withheld.retain(|member| seen.insert(member.clone()));
-                let switched = matches!(prepared.outcome(), TurnOutcome::AgentFrameSwitch { .. });
-                let cancelled = matches!(
-                    prepared.outcome(),
-                    TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })
-                );
-                let progress = if switched || (!cancelled && !withheld.is_empty()) {
-                    // A switch advances the run to its follow-on, whose input
-                    // is the head's pending follow-on, not a member row.
-                    QueuedRunProgress::Advance {
-                        position: run.position.next(&run.scope)?,
-                        members: if switched {
-                            Vec::new()
-                        } else {
-                            withheld.clone()
-                        },
-                        withheld_members: if switched { withheld } else { Vec::new() },
-                    }
-                } else {
-                    QueuedRunProgress::Settle {
-                        terminal: QueuedRunTerminal::Completed {
-                            turn_id: trace_turn_id.clone(),
-                            outcome: prepared.outcome().clone(),
-                        },
-                    }
-                };
-                Ok::<_, crate::StoreError>(QueuedRunCommit {
-                    scope: run.scope.clone(),
-                    expected_revision: run.revision,
-                    progress,
-                })
-            })
-            .transpose()
-            .map_err(runtime_error_from_store_commit)?
-            .map(Box::new);
-        let release_session_execution_lease =
-            release_session_execution_lease && queued_run.is_none();
         // Under an admitted root, the commit presents the root's drive fence
         // and, when this turn ends the root, writes its terminal evidence
         // (FIG-3600 S7).
         let drive_commit = self.drive_root.as_ref().and_then(|root| {
-            let ends = match queued_run.as_deref() {
-                Some(run) => {
-                    if matches!(
-                        run.progress,
-                        crate::store::QueuedRunProgress::Settle {
-                            terminal: crate::store::QueuedRunTerminal::Completed { .. }
-                        }
-                    ) {
-                        crate::runtime::drive::RootEnd::Settles
-                    } else {
-                        crate::runtime::drive::RootEnd::Continues
-                    }
-                }
-                None => crate::runtime::drive::RootEnd::Unless {
-                    owes_follow_on: commit_effects.pending_follow_on.is_some()
-                        || claims.carries_follow_on_work(matches!(
-                            prepared.outcome(),
-                            TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-                        )),
-                },
-            };
-            root.commit_facts(&trace_turn_id, prepared.outcome(), ends)
+            let owes_follow_on = commit_effects.pending_follow_on.is_some()
+                || claims.carries_follow_on_work(matches!(
+                    prepared.outcome(),
+                    TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+                ));
+            root.commit_facts(&trace_turn_id, prepared.outcome(), owes_follow_on)
         });
         let writes_root_terminal = drive_commit
             .as_ref()
@@ -793,7 +711,6 @@ impl LashRuntime {
                     session: self.session.as_mut(),
                     staged_usage,
                     commit_effects,
-                    queued_run,
                     session_execution_lease,
                     release_session_execution_lease,
                     trace_turn_id: &trace_turn_id,
@@ -1170,9 +1087,7 @@ impl LashRuntime {
             observer,
         }))
         .await;
-        if let Err(err) = &finish_result
-            && self.queued_run.is_none()
-        {
+        if let Err(err) = &finish_result {
             self.abandon_queued_work_claims_after_local_abort(err, &claims.queued)
                 .await;
             self.abandon_turn_input_claims_after_local_abort(err, &claims.turn_inputs)

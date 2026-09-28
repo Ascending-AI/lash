@@ -21,19 +21,6 @@ const T0: u64 = 2_000_000;
 /// One backend's answers to the script, with ids replaced by their aliases.
 type Transcript = Vec<String>;
 
-/// The persisted configuration a queued-run admission carries; identical to
-/// the surface sweep's shape, built here so this case does not reach into a
-/// sibling's private helpers.
-fn queued_run_configuration(session_id: &SessionId) -> lash_core::PersistedSessionConfig {
-    let state = RuntimeSessionState {
-        session_id: session_id.clone(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    RuntimeCommit::persisted_state_for_test(&state, &[]).config
-}
-
 /// A generation unique to this run: the Postgres database outlives it.
 fn generation(nonce: &str, alias: &str) -> BuildGeneration {
     let mut hasher = DefaultHasher::new();
@@ -123,11 +110,16 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
         }
         aliases.insert(process_id, name);
     }
-    // The in-flight turn count (FIG-3884): a queued run admits under the
-    // generation its drive carried, and stays in-flight until it settles. qa
-    // stays pending under a, qb settles under a before the read, qc stays
-    // pending under b.
-    for (name, stamp, settle) in [("qa", &a, false), ("qb", &a, true), ("qc", &b, false)] {
+    // The in-flight turn count (FIG-3884, FIG-3927 N8): a root admits under
+    // the generation its drive carried and stays in flight until it ends.
+    // ia (input-headed) and qa (queued-headed) stay unfinished under a, qb
+    // ends under a before the read, qc stays unfinished under b.
+    for (name, stamp, batch_head, end) in [
+        ("ia", &a, false, false),
+        ("qa", &a, true, false),
+        ("qb", &a, true, true),
+        ("qc", &b, true, false),
+    ] {
         let session_id = SessionId::from(format!("{nonce}-drain-{name}"));
         let store = stores
             .session_store_factory()
@@ -139,7 +131,30 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await
-            .expect("create the queued-run session");
+            .expect("create the root's session");
+        let head = if batch_head {
+            lash_core::store::AdmittedHead::Batch(
+                store
+                    .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(
+                        claim_observability_wake(&session_id),
+                    ))
+                    .await
+                    .expect("enqueue the head batch")
+                    .batch_id,
+            )
+        } else {
+            lash_core::store::AdmittedHead::Input(
+                store
+                    .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+                        &session_id,
+                        TurnInputIngress::NextTurn,
+                        TurnInput::text(name),
+                    ))
+                    .await
+                    .expect("enqueue the head input")
+                    .input_id,
+            )
+        };
         let owner = LeaseOwnerIdentity::opaque(
             format!("{nonce}-{name}"),
             format!("{nonce}-{name}:incarnation"),
@@ -152,57 +167,45 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("seal queued-run drive epoch")
+            .expect("seal the root's drive epoch")
             .acquired()
             .expect("drive seal");
-        let expected_head_revision = store
-            .load_session_head_meta()
-            .await
-            .expect("read the head")
-            .map_or(0, |head| head.head_revision);
-        let scope =
-            lash_core::ExecutionScope::queue_drain(session_id.clone(), format!("{nonce}-{name}"));
-        let admission = store
-            .begin_or_resume_queued_run(
-                &lease.fence(),
-                lash_core::store::BeginQueuedRun {
-                    session_id: session_id.clone(),
-                    identity: Some(scope.clone()),
-                    request: lash_core::store::QueuedRunRequest::Automatic,
-                    configuration: queued_run_configuration(&session_id),
-                    expected_head_revision,
-                    initial_turn_index: 1,
-                    generation: None,
-                    admitted_generation: stamp.clone(),
+        let root = lash_core::TurnId::from(format!("{nonce}-{name}"));
+        store
+            .admit_root(&lash_core::store::AdmitRootRequest {
+                session_id: session_id.clone(),
+                lease: lease.fence(),
+                owner: lease.owner.clone(),
+                root: root.clone(),
+                head,
+                max_inputs: 64,
+                policy: lash_core::testing::queued_work_claim_policy(64),
+                base: lash_core::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 0,
+                    leaf: None,
+                    checkpoint: None,
                 },
-            )
+                turn_index: 1,
+                generation: None,
+                admitted_generation: stamp.clone(),
+            })
             .await
-            .expect("begin the queued run");
-        if settle {
-            let selected = store
-                .select_queued_run(
-                    &lease.fence(),
-                    &scope,
-                    &lease.owner,
-                    64,
-                    &admission.configuration,
-                    lash_core::testing::queued_work_claim_policy(64),
-                )
-                .await
-                .expect("freeze the empty selection");
-            store
-                .settle_queued_run(
-                    &lease.fence(),
-                    lash_core::store::QueuedRunCommit {
-                        scope,
-                        expected_revision: selected.admission.revision,
-                        progress: lash_core::store::QueuedRunProgress::Settle {
-                            terminal: lash_core::store::QueuedRunTerminal::Empty,
-                        },
+            .expect("admit the root")
+            .expect("the root reaches its head");
+        if end {
+            stores
+                .session_store_factory()
+                .end_lost_root(
+                    &lash_core::engine::RootRef {
+                        session: session_id.clone(),
+                        root,
                     },
+                    T0,
                 )
                 .await
-                .expect("settle the queued run");
+                .expect("end the root")
+                .expect("the root had no terminal");
         }
     }
     for (name, stamp) in [("a", &a), ("b", &b)] {
@@ -335,7 +338,7 @@ pub(super) async fn compare_generation_drains(
             "mark a again -> false",
             "mark b -> true",
             &format!("marks -> [\"a@{T0}\", \"b@{}\"]", T0 + 1),
-            "work a -> GenerationWork { live_processes: 2, parked_processes: 0, parked_turns: 0, in_flight_turns: 1 }",
+            "work a -> GenerationWork { live_processes: 2, parked_processes: 0, parked_turns: 0, in_flight_turns: 2 }",
             "work b -> GenerationWork { live_processes: 1, parked_processes: 0, parked_turns: 0, in_flight_turns: 1 }",
             "page of a -> 1",
             "page of a -> 1",

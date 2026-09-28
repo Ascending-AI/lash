@@ -93,8 +93,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("process_tombstones", "lash_process_tombstones"),
     pair("process_wake_deliveries", "lash_process_wake_deliveries"),
     pair("processes", "lash_processes"),
-    pair("queued_runs", "lash_queued_runs"),
-    pair("queued_run_members", "lash_queued_run_members"),
     pair("queued_work_batches", "lash_queued_work_batches"),
     pair("queued_work_items", "lash_queued_work_items"),
     pair("runtime_turn_commits", "lash_runtime_turn_commits"),
@@ -975,15 +973,15 @@ fn schema_congruence_rejects_a_dropped_registered_foreign_key() {
             "SQLite",
             SQLITE_SCHEMA_SOURCE,
             &sqlite_registry[..],
-            "    FOREIGN KEY (session_id, scope_id) REFERENCES queued_runs(session_id, scope_id)\n",
-            "missing registered foreign key (session_id, scope_id) REFERENCES",
+            "    FOREIGN KEY (batch_id) REFERENCES queued_work_batches(batch_id) ON DELETE CASCADE\n",
+            "missing registered foreign key (batch_id) REFERENCES",
         ),
         (
             "Postgres",
             POSTGRES_SCHEMA_SOURCE,
             &postgres_registry[..],
-            "    FOREIGN KEY (session_id, scope_id) REFERENCES lash_queued_runs(session_id, scope_id)\n",
-            "missing registered foreign key (session_id, scope_id) REFERENCES",
+            " REFERENCES lash_queued_work_batches(batch_id) ON DELETE CASCADE",
+            "missing registered foreign key (batch_id) REFERENCES",
         ),
     ] {
         let dropped = source.replacen(declaration, "", 1);

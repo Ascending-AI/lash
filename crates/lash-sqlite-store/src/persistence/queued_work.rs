@@ -2,45 +2,6 @@ use super::*;
 
 #[async_trait::async_trait]
 impl QueuedWorkStore for Store {
-    async fn begin_or_resume_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        request: lash_core_execution::store::BeginQueuedRun,
-    ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
-        self.begin_run(fence, request).await
-    }
-    async fn select_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        scope: &lash_core_execution::ExecutionScope,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-        configuration: &lash_core_execution::PersistedSessionConfig,
-        policy: QueuedWorkClaimPolicy,
-    ) -> Result<lash_core_execution::store::SelectedQueuedRun, StoreError> {
-        self.select_run(fence, scope, owner, max_inputs, configuration, policy)
-            .await
-    }
-    async fn pending_queued_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<lash_core_execution::store::QueuedRunAdmission>, StoreError> {
-        self.pending_run(session_id).await
-    }
-    async fn queued_run(
-        &self,
-        scope: &lash_core_execution::ExecutionScope,
-    ) -> Result<Option<lash_core_execution::store::QueuedRunAdmission>, StoreError> {
-        self.run_by_scope(scope).await
-    }
-    async fn settle_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        settlement: lash_core_execution::store::QueuedRunCommit,
-    ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
-        self.settle_run(fence, settlement).await
-    }
-
     async fn enqueue_queued_work(
         &self,
         batch: QueuedWorkBatchDraft,
@@ -354,71 +315,13 @@ impl QueuedWorkStore for Store {
                         policy,
                     )?;
                     match queued {
-                        TxOutcome::Commit(queued) => {
-                            super::queued_run_assignment::assign_checkpoint_members_conn(
-                                tx,
-                                &session_id,
-                                &turn_id,
-                                input.as_ref(),
-                                queued.as_ref(),
-                            )?;
-                            Ok(TxOutcome::Commit((input, queued)))
-                        }
+                        TxOutcome::Commit(queued) => Ok(TxOutcome::Commit((input, queued))),
                         TxOutcome::Rollback(queued) => Ok(TxOutcome::Rollback((None, queued))),
                     }
                 })();
                 match outcome {
                     Ok(TxOutcome::Commit(value)) => Ok(TxOutcome::Commit(Ok(value))),
                     Ok(TxOutcome::Rollback(value)) => Ok(TxOutcome::Rollback(Ok(value))),
-                    Err(err) => Ok(TxOutcome::Rollback(Err(err))),
-                }
-            })
-            .await
-            .map_err(sqlite_error)?
-    }
-
-    async fn claim_ready_queued_work_by_batch_ids(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: QueuedWorkClaimBoundary,
-        batch_ids: &[lash_core_execution::BatchId],
-        policy: QueuedWorkClaimPolicy,
-    ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
-        if batch_ids.is_empty() {
-            return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
-        }
-        let session_id = SessionId::from(session_id.to_string());
-        let fence = session_execution_lease.clone();
-        let owner = owner.clone();
-        let batch_ids = batch_ids.to_vec();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let outcome = super::claim_support::follow_on_blocks_claim_conn(
-                    tx,
-                    &session_id,
-                    lash_core_execution::store::FollowOnClaim::Idle,
-                )
-                .and_then(|blocked| {
-                    if blocked {
-                        return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
-                    }
-                    claim_selected_queued_work_sqlite_conn(
-                        tx,
-                        now,
-                        &session_id,
-                        &fence,
-                        &owner,
-                        boundary,
-                        &batch_ids,
-                        policy,
-                    )
-                });
-                match outcome {
-                    Ok(value) if value.claim.is_some() => Ok(TxOutcome::Commit(Ok(value))),
-                    Ok(value) => Ok(TxOutcome::Rollback(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
                 }
             })
@@ -518,14 +421,12 @@ impl QueuedWorkStore for Store {
                     let Some(row) = row else {
                         return Ok(None);
                     };
-                    let run_owns_batch: bool = tx
-                        .query_row(
-                            sql.queued_runs.pending_member.sql(),
-                            params![session_id.as_str(), "batch", batch_id.as_str()],
-                            |row| row.get(0),
-                        )
-                        .map_err(sqlite_error)?;
-                    if run_owns_batch {
+                    // A claimed row of the session's unfinished root is its
+                    // own to settle or release, whichever drive epoch
+                    // claimed it.
+                    if row.claim_token.is_some()
+                        && crate::session_roots::unfinished_root_conn(tx, &session_id)?.is_some()
+                    {
                         return Ok(None);
                     }
                     let batch = queued_work_batch_from_conn(tx, row)?;

@@ -605,21 +605,6 @@ impl SessionCommitStore for Store {
                             None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
                         },
                     };
-                    if let Some(pending) = load_run_conn(tx, &commit.session_id, None)? {
-                        let own_initial_command = pending.members.is_none()
-                            && commit.session_execution_lease_fence.is_some()
-                            && commit.turn_commit.operation.key == "session-command";
-                        if commit.queued_run.as_ref().is_none_or(|progress| progress.scope != pending.scope) && !own_initial_command {
-                            return Err(StoreError::QueuedRunConflict { session_id: commit.session_id.clone() });
-                        }
-                    }
-                                        let queued_admission = if let Some(progress) = &commit.queued_run {
-                        let admission = load_run_conn(tx, &commit.session_id, Some(&progress.scope))?.ok_or_else(|| StoreError::QueuedRunConflict { session_id: commit.session_id.clone() })?;
-                        admission.advance(progress)?;
-                        let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
-                        validate_run_members_conn(tx, fence, progress)?;
-                        Some(admission)
-                    } else { None };
                     let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
                         actual_head_revision: actual_revision,
                         published_leaf,
@@ -1052,13 +1037,6 @@ impl SessionCommitStore for Store {
                             ],
                         )
                         .map_err(sqlite_error)?;
-                    }
-                    if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
-                        if matches!(progress.progress, lash_core_execution::store::QueuedRunProgress::Settle { .. }) {
-                    let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
-                    settle_run_members_conn(tx, fence, &progress.scope)?;
-                }
-                write_run_conn(tx, &admission.advance(progress)?, false)?;
                     }
                     crate::session_roots::write_commit_root_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
                     let mut result = plan.result(

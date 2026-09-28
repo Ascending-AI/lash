@@ -35,120 +35,6 @@ impl WithheldTerminalWork {
     }
 }
 
-/// Rows a resumed queued run retook under its resuming generation because
-/// its checkpoints had been assigned them (FIG-3552).
-///
-/// They are not the run's input. A replayed checkpoint restores the first
-/// execution's claim to such a row, and that claim is superseded by this one;
-/// the turn settles the row under this claim instead, so ownership moves only
-/// through the claim CAS and a superseded restored claim can only mean another
-/// driver took the row.
-#[derive(Default)]
-pub(crate) struct ReacquiredClaims {
-    pub(crate) queued: Vec<crate::QueuedWorkClaim>,
-    pub(crate) turn_inputs: Vec<crate::TurnInputClaim>,
-}
-
-fn claim_authority<C>(claim: &crate::WorkClaim<C>) -> (u64, u64) {
-    (claim.session_lease_generation, claim.fencing_token)
-}
-
-/// The reacquired claim that outranks `claim` and holds the row `holds` names.
-fn outranking<C>(
-    reacquired: &[crate::WorkClaim<C>],
-    claim: &crate::WorkClaim<C>,
-    holds: impl Fn(&crate::WorkClaim<C>) -> bool,
-) -> Option<usize> {
-    reacquired.iter().position(|candidate| {
-        claim_authority(candidate) > claim_authority(claim) && holds(candidate)
-    })
-}
-
-/// Settle every queued-work row this turn holds, moving each row a
-/// reacquired claim outranks onto that claim.
-fn queued_work_completions(
-    held: &[crate::QueuedWorkClaim],
-    reacquired: &[crate::QueuedWorkClaim],
-) -> Vec<crate::QueuedWorkCompletion> {
-    let mut moved: Vec<Vec<crate::BatchId>> = vec![Vec::new(); reacquired.len()];
-    let mut completions = Vec::new();
-    for claim in held {
-        let mut completion = claim.completion();
-        completion.batch_ids.retain(|id| {
-            let Some(index) = outranking(reacquired, claim, |candidate| {
-                candidate.batches.iter().any(|batch| batch.batch_id == *id)
-            }) else {
-                return true;
-            };
-            if !moved[index].contains(id) {
-                moved[index].push(id.clone());
-            }
-            false
-        });
-        if !completion.batch_ids.is_empty() {
-            completions.push(completion);
-        }
-    }
-    for (claim, batch_ids) in reacquired.iter().zip(moved) {
-        if !batch_ids.is_empty() {
-            let mut completion = claim.completion();
-            completion.batch_ids = batch_ids;
-            completions.push(completion);
-        }
-    }
-    completions
-}
-
-/// [`queued_work_completions`] for turn input: a moved row carries its
-/// delivery record with it.
-fn turn_input_completions(
-    held: &[crate::TurnInputClaim],
-    reacquired: &[crate::TurnInputClaim],
-) -> Vec<crate::TurnInputCompletion> {
-    let mut moved: Vec<(Vec<crate::InputId>, Vec<crate::TurnInputApplication>)> =
-        vec![(Vec::new(), Vec::new()); reacquired.len()];
-    let mut completions = Vec::new();
-    for claim in held {
-        let mut completion = claim.completion();
-        let mut kept = Vec::new();
-        for id in std::mem::take(&mut completion.input_ids) {
-            let Some(index) = outranking(reacquired, claim, |candidate| {
-                candidate.inputs.iter().any(|input| input.input_id == id)
-            }) else {
-                kept.push(id);
-                continue;
-            };
-            let (ids, applications) = &mut moved[index];
-            if !ids.contains(&id) {
-                applications.extend(
-                    completion
-                        .applications
-                        .iter()
-                        .filter(|application| application.input_id == id)
-                        .cloned(),
-                );
-                ids.push(id);
-            }
-        }
-        completion
-            .applications
-            .retain(|application| kept.contains(&application.input_id));
-        completion.input_ids = kept;
-        if !completion.input_ids.is_empty() {
-            completions.push(completion);
-        }
-    }
-    for (claim, (input_ids, applications)) in reacquired.iter().zip(moved) {
-        if !input_ids.is_empty() {
-            let mut completion = claim.completion();
-            completion.input_ids = input_ids;
-            completion.applications = applications;
-            completions.push(completion);
-        }
-    }
-    completions
-}
-
 pub(super) struct PhysicalTurnExecution {
     pub(super) turn: AssembledTurn,
     pub(super) post_commit_delivery_failed: bool,
@@ -227,28 +113,30 @@ impl LogicalTurnClaims {
     /// drive set: a superseded one cedes the turn whatever generation it was
     /// taken under (ADR 0069 §6). Every other claim cedes when it is
     /// superseded after being restored from an earlier execution (FIG-3552).
-    /// `reacquired` names the rows a resumed queued run retook under its
-    /// resuming generation: they settle under those claims.
     pub(super) fn commit_effects(
         &self,
         outcome: &TurnOutcome,
         journaled_drive_claims: &std::collections::BTreeSet<String>,
-        reacquired: &ReacquiredClaims,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
     ) -> LogicalTurnCommitEffects {
-        let completed_queue_claims = queued_work_completions(&self.queued, &reacquired.queued);
-        let completed_turn_input_claims =
-            turn_input_completions(&self.turn_inputs, &reacquired.turn_inputs);
+        let completed_queue_claims = self
+            .queued
+            .iter()
+            .map(crate::QueuedWorkClaim::completion)
+            .collect();
+        let completed_turn_input_claims = self
+            .turn_inputs
+            .iter()
+            .map(crate::TurnInputClaim::completion)
+            .collect();
         let queue_claim_generations = self
             .queued
             .iter()
-            .chain(&reacquired.queued)
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
         let turn_input_claim_generations = self
             .turn_inputs
             .iter()
-            .chain(&reacquired.turn_inputs)
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
         // A cancelled turn never delivers the work it withheld from its
@@ -522,9 +410,7 @@ impl LashRuntime {
         // counts on from it: a follow-on takes the id its committed switch
         // wrote on the head, and a terminal-checkpoint follow-on takes the next
         // physical index (ADR 0101 §3).
-        let mut turn_trace_turn_id = if let Some(run) = &self.queued_run {
-            run.position.turn_id.clone()
-        } else if supplied_trace_turn_id.is_empty() {
+        let mut turn_trace_turn_id = if supplied_trace_turn_id.is_empty() {
             TurnId::from(scoped_effect_controller.scope_id())
         } else {
             supplied_trace_turn_id
@@ -559,9 +445,6 @@ impl LashRuntime {
         let mut follow_on_turns = 0usize;
 
         loop {
-            if let Some(run) = &self.queued_run {
-                turn_trace_turn_id = run.position.turn_id.clone();
-            }
             // A frame switch creates a new physical turn identity, but it does
             // not create new effect authority. Every frame in this admitted
             // run therefore keeps the controller's exact execution scope.
@@ -630,7 +513,7 @@ impl LashRuntime {
                 }
                 let mut terminal = match terminal {
                     Ok(terminal) => terminal,
-                    Err(error) if turns.is_empty() || self.queued_run.is_some() => {
+                    Err(error) if turns.is_empty() => {
                         self.invalidate_resident_session_state();
                         return Err(error);
                     }
@@ -644,22 +527,6 @@ impl LashRuntime {
                 };
                 frame_stopwatch.stamp(&mut terminal.turn, self.host.core.clock.as_ref());
                 turns.push(terminal.turn);
-                if let Some(store) = self
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.history_store())
-                    && store
-                        .pending_queued_run(&self.state.session_id)
-                        .await
-                        .map_err(super::runtime_error_from_store_commit)?
-                        .is_some()
-                {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::QueuedRunPending,
-                        "frame-switch limit committed; withheld queued work awaits the next drain",
-                    ));
-                }
-                self.queued_run = None;
                 return Ok(AgentFrameRun {
                     turns,
                     acceptance: None,
@@ -698,10 +565,6 @@ impl LashRuntime {
             };
             let execution = match execution_result {
                 Ok(execution) => execution,
-                Err(err) if self.queued_run.is_some() => {
-                    self.invalidate_resident_session_state();
-                    return Err(err);
-                }
                 // FIG-1573: this frame ended without reaching a commit, so the
                 // commit-time re-defer never ran. Inputs routed into it while it
                 // was live are pinned to a turn id no later turn will ever carry
@@ -782,91 +645,6 @@ impl LashRuntime {
             }
             frame_stopwatch.stamp(&mut turn, self.host.core.clock.as_ref());
             turns.push(turn);
-            if self.queued_run.is_some() {
-                let store = self
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.history_store())
-                    .ok_or_else(|| {
-                        RuntimeError::new(
-                            RuntimeErrorCode::QueuedRunPending,
-                            "queued continuation requires persistence",
-                        )
-                    })?;
-                let pending = store
-                    .pending_queued_run(&self.state.session_id)
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?;
-                let Some(pending) = pending else {
-                    self.queued_run = None;
-                    return Ok(AgentFrameRun {
-                        turns,
-                        acceptance: None,
-                    });
-                };
-                self.queued_run = Some(Box::new(pending.clone()));
-                let lease = session_execution_lease
-                    .as_ref()
-                    .filter(|lease| !lease.is_lost())
-                    .ok_or_else(|| {
-                        RuntimeError::new(
-                            RuntimeErrorCode::QueuedRunPending,
-                            "queued continuation awaits a live execution lane",
-                        )
-                    })?;
-                let frame_limit_due = self.state.pending_follow_on.as_ref().is_some_and(|owed| {
-                    owed.is_turn(&pending.position.turn_id)
-                        && owed.chain_depth as usize >= MAX_AGENT_FRAME_SWITCHES
-                });
-                if post_commit_delivery_failed
-                    || (turns.len() >= MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS && !frame_limit_due)
-                {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::QueuedRunPending,
-                        "committed queued continuation awaits the next drain",
-                    ));
-                }
-                let fence = lease.fence();
-                let selection = store
-                    .select_queued_run(
-                        &fence,
-                        &pending.scope,
-                        &fence.owner,
-                        self.host
-                            .core
-                            .durability
-                            .queued_work_batching
-                            .max_turn_input_claim(),
-                        &crate::store::root_snapshot_config_from_state(&self.state),
-                        self.host
-                            .core
-                            .durability
-                            .queued_work_batching
-                            .claim_policy(self.max_context_tokens()),
-                    )
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?;
-                // Work withheld from a terminal checkpoint already announced
-                // its start at the boundary that claimed it (FIG-3157), and a
-                // follow-on claims nothing.
-                announce_queued_work = false;
-                let (mut input, mut options, next_claims) =
-                    self.queued_run_input(selection, false)?;
-                // A follow-on runs under the options its switch recorded.
-                if !self
-                    .state
-                    .pending_follow_on
-                    .as_ref()
-                    .is_some_and(|owed| owed.is_turn(&pending.position.turn_id))
-                {
-                    options = follow_protocol_turn_options.clone();
-                }
-                input.turn_context = follow_turn_context.clone();
-                claims = next_claims;
-                start = LogicalTurnStart::Input(input, options);
-                carried_withheld = None;
-                continue;
-            }
             if post_commit_delivery_failed {
                 if let Some(withheld) = carried_withheld.take() {
                     self.abandon_withheld_terminal_work(withheld).await;
@@ -995,9 +773,9 @@ pub(super) fn follow_on_input(
 
 /// The next physical turn of the logical run `current` belongs to.
 pub(super) fn next_physical_turn_id(current: &TurnId) -> Result<TurnId, crate::StoreError> {
-    let (root, index) = crate::store::QueuedRunPosition::split_turn_id(current);
+    let (root, index) = crate::store::PhysicalTurn::split_turn_id(current);
     let next = crate::StoreError::checked_monotonic_increment("physical_turn_index", index)?;
-    Ok(crate::store::QueuedRunPosition::derive_turn_id(&root, next))
+    Ok(crate::store::PhysicalTurn::derive_turn_id(&root, next))
 }
 
 impl LashRuntime {

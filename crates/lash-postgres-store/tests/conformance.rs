@@ -932,17 +932,21 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .acquired()
         .expect("drive sealed");
     let claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&first.batch_id),
             lash_core_execution::testing::queued_work_claim_policy(1),
         )
         .await
+        .map(lash_core_execution::QueuedWorkClaimOutcome::claim)
         .expect("claim source-lock wake")
         .expect("source-lock wake claim");
+    assert_eq!(
+        claim.batches[0].batch_id, first.batch_id,
+        "the original wake heads the lane"
+    );
 
     let source_key = draft.source_key.as_deref().expect("wake source key");
     let mut source_blocker = storage.pool().begin().await.expect("begin source blocker");
@@ -1127,17 +1131,21 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .acquired()
         .expect("second-sequence target lease");
     let second_claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &SessionId::from(session_id),
             &second_lease.fence(),
             &second_owner,
             lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&second.batch_id),
             lash_core_execution::testing::queued_work_claim_policy(1),
         )
         .await
+        .map(lash_core_execution::QueuedWorkClaimOutcome::claim)
         .expect("claim second wake sequence")
         .expect("second wake sequence claim");
+    assert_eq!(
+        second_claim.batches[0].batch_id, second.batch_id,
+        "the second sequence heads the lane"
+    );
     let state = lash_core_execution::store::load_persisted_session_state(store.as_ref())
         .await
         .expect("load target state before second wake settlement")
@@ -1857,6 +1865,6 @@ mod root_control {
     (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
     (a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary, "drive-command-after-admission"),
     (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
-    (a_settled_queued_roots_redrive_replays_its_scope_close, "drive-root-settled-close-redrive"),
+    (a_command_roots_redrive_replays_its_recorded_outcome, "drive-command-root-redrive"),
     ]);
 }

@@ -2473,8 +2473,8 @@ fn drive_envelope() -> RuntimeEffectEnvelope {
     );
     RuntimeEffectEnvelope::new(
         lash_core::runtime::causal::turn_input_drive_effect_invocation(&acceptance),
-        RuntimeEffectCommand::ClaimAcceptedTurnInput {
-            input_id: lash_core::InputId::from("in_7"),
+        RuntimeEffectCommand::AdmitRoot {
+            head: lash_core::store::AdmittedHead::Input(lash_core::InputId::from("in_7")),
         },
     )
 }
@@ -2483,32 +2483,38 @@ async fn execute_drive(
     context: &Arc<ReplayableRecordingContext>,
     live_generation: u64,
     local_runs: &Arc<AtomicUsize>,
-) -> lash_core::AcceptedTurnInputDrive {
+) -> lash_core::store::RootAdmission {
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(context));
-    controller
+    match controller
         .execute_effect(
             drive_envelope(),
             RuntimeEffectLocalExecutor::testing({
                 let local_runs = Arc::clone(local_runs);
                 move |_envelope| async move {
                     local_runs.fetch_add(1, Ordering::SeqCst);
-                    Ok(RuntimeEffectOutcome::ClaimAcceptedTurnInput {
-                        drive: lash_core::AcceptedTurnInputDrive::Claimed {
-                            claim: Box::new(journaled_drive_claim(live_generation)),
-                            // What this execution would read from the live
-                            // head: a replay must not see it (FIG-3682).
-                            base: lash_core::store::SessionHeadRef {
-                                generation: 1,
-                                revision: live_generation,
-                                leaf: None,
-                                checkpoint: None,
-                            },
-                            turn_index: live_generation + 1,
-                            // Likewise the generation: a replay keeps the one
-                            // the first execution admitted under (FIG-3571).
-                            generation: Some(lash_core::ExecutableGeneration::new(format!(
-                                "blake3:live-{live_generation}"
-                            ))),
+                    Ok(RuntimeEffectOutcome::AdmitRoot {
+                        answer: lash_core::store::RootAdmissionAnswer::Admitted {
+                            admission: Box::new(lash_core::store::RootAdmission {
+                                head: lash_core::store::AdmittedHead::Input(
+                                    lash_core::InputId::from("in_7"),
+                                ),
+                                inputs: Some(Box::new(journaled_drive_claim(live_generation))),
+                                queued: None,
+                                // What this execution would read from the live
+                                // head: a replay must not see it (FIG-3682).
+                                base: lash_core::store::SessionHeadRef {
+                                    generation: 1,
+                                    revision: live_generation,
+                                    leaf: None,
+                                    checkpoint: None,
+                                },
+                                turn_index: live_generation + 1,
+                                // Likewise the generation: a replay keeps the one
+                                // the first execution admitted under (FIG-3571).
+                                generation: Some(lash_core::ExecutableGeneration::new(format!(
+                                    "blake3:live-{live_generation}"
+                                ))),
+                            }),
                         },
                     })
                 }
@@ -2516,8 +2522,12 @@ async fn execute_drive(
         )
         .await
         .expect("the drive effect runs as a journaled Restate run")
-        .into_accepted_turn_input_drive()
-        .expect("the drive effect returns a drive")
+        .into_root_admission()
+        .expect("the drive effect returns an admission")
+    {
+        lash_core::store::RootAdmissionAnswer::Admitted { admission } => *admission,
+        refused => panic!("the drive effect admits its head: {refused:?}"),
+    }
 }
 
 /// FIG-3532: the initial drive set of an accepted turn input is a journaled
@@ -2538,33 +2548,19 @@ async fn accepted_turn_input_drive_replays_the_journaled_claim() {
         1,
         "replay returns the journaled drive without claiming live rows"
     );
-    let (
-        lash_core::AcceptedTurnInputDrive::Claimed {
-            claim: first,
-            base: first_base,
-            turn_index: first_turn_index,
-            generation: first_generation,
-        },
-        lash_core::AcceptedTurnInputDrive::Claimed {
-            claim: replayed,
-            base: replayed_base,
-            turn_index: replayed_turn_index,
-            generation: replayed_generation,
-        },
-    ) = (first, replayed)
-    else {
-        panic!("both executions drive a claim");
-    };
     // The admission's base head and turn index are the first execution's,
     // never re-read from the replaying execution's live head (FIG-3682).
-    assert_eq!(replayed_base, first_base);
-    assert_eq!(replayed_base.revision, 3);
-    assert_eq!((first_turn_index, replayed_turn_index), (4, 4));
-    assert_eq!(replayed_generation, first_generation);
+    assert_eq!(replayed.base, first.base);
+    assert_eq!(replayed.base.revision, 3);
+    assert_eq!((first.turn_index, replayed.turn_index), (4, 4));
+    assert_eq!(replayed.generation, first.generation);
     assert_eq!(
-        replayed_generation,
+        replayed.generation,
         Some(lash_core::ExecutableGeneration::new("blake3:live-3"))
     );
+    let (Some(first), Some(replayed)) = (first.inputs, replayed.inputs) else {
+        panic!("both executions admit their input");
+    };
     assert_eq!(replayed.session_lease_generation, 3);
     assert_eq!(replayed.lease_token, first.lease_token);
     assert_eq!(replayed.inputs[0].input_id, first.inputs[0].input_id);

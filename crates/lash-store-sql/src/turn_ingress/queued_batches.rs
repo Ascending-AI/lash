@@ -110,33 +110,6 @@ crate::statements! {
              ORDER BY enqueue_seq ASC
              LIMIT 1";
 
-        /// The `enqueue_seq` of session `?1`'s earliest turn-lane batch that
-        /// generation `?2` has not claimed, or `NULL`: where a claim of host
-        /// input stops, because the turn lane is one FIFO over both admission
-        /// tables (ADR 0101 §5). A session command is the command lane and
-        /// stops nothing.
-        earliest_turn_candidate_seq = "SELECT MIN(enqueue_seq) FROM queued_work_batches
-             WHERE session_id = ?1
-               AND work_kind = 'turn'
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?2
-                    OR claim_owner_incarnation_id <> ?3
-               )";
-
-        /// Session `?1`'s unclaimed batches for generation `?2` whose
-        /// `enqueue_seq` lies between `?3` and `?4`: the span an exact claim
-        /// must be contiguous over.
-        select_span = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
-                    OR claim_owner_incarnation_id <> ?5)
-               AND enqueue_seq BETWEEN ?3 AND ?4
-             ORDER BY enqueue_seq ASC";
-
         /// Claim batch `?2` of session `?1` for claim `?3`, lease token `?4`,
         /// generation `?5`, fencing token `?6`, at `?7`.
         ///

@@ -246,20 +246,20 @@ impl StoreParkRecovery<'_> {
 }
 
 /// The root the session's next admission names, when its next work carries
-/// one: an unfinished queued run, then an owed follow-on's recovery, then the
-/// head turn input — unless an open session command or earlier queued work
-/// comes first, whose queued run is named by the admission that mints it.
-/// Mirrors the drive's own admission order (ADR 0101 §4, §5), so a park
-/// written here is cleared by the commit of the root the resumed drive runs.
+/// one: an owed follow-on's recovery, then the unfinished root, then the head
+/// turn input — unless an open session command or earlier queued work comes
+/// first, whose root is named by the admission that mints it. Mirrors the
+/// drive's own admission order (ADR 0101 §4, §5), so a park written here is
+/// cleared by the commit of the root the resumed drive runs.
 async fn next_admission_root(
     store: &dyn crate::store::RuntimePersistence,
     session: &crate::SessionId,
 ) -> Result<Option<crate::TurnId>, StoreError> {
-    if let Some(run) = store.pending_queued_run(session).await? {
-        return Ok(Some(crate::TurnId::from(run.scope.id())));
-    }
     if let Some(owed) = store.load_pending_follow_on().await? {
         return Ok(Some(owed.recovery_root()));
+    }
+    if let Some(unfinished) = store.unfinished_root(session).await? {
+        return Ok(Some(unfinished.root));
     }
     if store
         .pending_session_work_ordering(session)
@@ -281,27 +281,33 @@ async fn next_admission_root(
 /// (ADR 0101 §5, as the FIG-3540 close-out amends it): the host input and
 /// the queued work pending in the two admission tables take one per-session
 /// `enqueue_seq`, and the earlier of the head next-turn input and the
-/// earliest pending queued batch goes first. There is no kind priority.
+/// earliest pending queued turn work goes first. There is no kind priority.
 #[derive(Clone, Copy, Debug)]
 pub enum TurnLaneHead<'a> {
     /// The head of the accepted next-turn input.
     Input(&'a crate::PendingTurnInputRead),
-    /// The session's pending queued work, which a queued run drains.
-    Queued,
+    /// The earliest pending queued turn work, which heads a queued root.
+    Queued(&'a crate::QueuedWorkBatch),
 }
 
 /// The turn lane's next item among the session's `open` inputs and pending
-/// `queued` batches (see [`TurnLaneHead`]); `None` when both are empty.
+/// `queued` batches (see [`TurnLaneHead`]); `None` when both are empty. Only
+/// turn work heads the lane: session commands drain before it (ADR 0101 §4).
 #[must_use]
 pub fn turn_lane_head<'a>(
     open: &'a [crate::PendingTurnInputRead],
-    queued: &[crate::QueuedWorkBatch],
+    queued: &'a [crate::QueuedWorkBatch],
 ) -> Option<TurnLaneHead<'a>> {
-    let earliest_queued = queued.iter().map(|batch| batch.enqueue_seq).min();
+    let earliest_queued = queued
+        .iter()
+        .filter(|batch| batch.work_class() == crate::store::QueuedWorkClass::TurnWork)
+        .min_by_key(|batch| batch.enqueue_seq);
     match (head_input(open), earliest_queued) {
-        (Some(head), Some(queued)) if queued < head.input.enqueue_seq => Some(TurnLaneHead::Queued),
+        (Some(head), Some(queued)) if queued.enqueue_seq < head.input.enqueue_seq => {
+            Some(TurnLaneHead::Queued(queued))
+        }
         (Some(head), _) => Some(TurnLaneHead::Input(head)),
-        (None, Some(_)) => Some(TurnLaneHead::Queued),
+        (None, Some(queued)) => Some(TurnLaneHead::Queued(queued)),
         (None, None) => None,
     }
 }

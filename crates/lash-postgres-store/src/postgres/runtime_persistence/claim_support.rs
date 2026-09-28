@@ -1,10 +1,14 @@
 use super::*;
 
-/// Commit the root's exact claim result in the claim transaction.
-pub(crate) async fn claim_root_inputs_postgres(
+/// Admit the root's turn-lane run and record it with its rows, bindings and
+/// base, in one transaction ([`RootStore::admit_root`]).
+///
+/// [`RootStore::admit_root`]: lash_core_execution::store::RootStore::admit_root
+pub(crate) async fn admit_root_postgres(
     store: &crate::PostgresSessionStore,
-    request: &lash_core_execution::store::RootInputClaimRequest,
-) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+    request: &lash_core_execution::store::AdmitRootRequest,
+) -> Result<Option<lash_core_execution::store::RootAdmission>, StoreError> {
+    use lash_core_execution::store::{AdmittedHead, RootAdmission};
     let mut connection = acquire_runtime_connection(&store.pool).await?;
     let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
     #[cfg(any(test, feature = "testing"))]
@@ -20,53 +24,60 @@ pub(crate) async fn claim_root_inputs_postgres(
         .await
         .map_err(store_sqlx_error)?;
     if let Some(Some(json)) = existing {
-        let drive = serde_json::from_str(&json).map_err(|error| StoreError::StoredDataCorrupt {
-            record_kind: "RootClaimResult",
-            message: error.to_string(),
-        })?;
+        let admission = crate::session_roots::decode_root_admission(&json)?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        return Ok(Some(drive));
+        return Ok(Some(admission));
     }
-    let unfinished: Option<String> = sqlx::query_scalar(roots.roots.select_unfinished.sql())
-        .bind(request.session_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    if let Some(unfinished) = unfinished {
+    if let Some(unfinished) =
+        crate::session_roots::unfinished_root_conn(&mut tx, &request.session_id).await?
+    {
         return Err(StoreError::UnfinishedRootConflict {
             session_id: request.session_id.clone(),
-            root: unfinished.into(),
+            root: unfinished.root,
         });
     }
-    let claim = match claim_pending_turn_inputs_postgres_tx(
-        &mut tx,
-        &request.session_id,
-        &request.lease,
-        &request.owner,
-        request.max_inputs,
-        lash_core_execution::TurnInputClaimMode::NextTurn,
-        CommandLaneGate::AdmittedRoot,
-    )
-    .await?
-    {
-        ClaimTransactionOutcome::Commit(Some(claim)) => claim,
-        ClaimTransactionOutcome::Commit(None) => {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        }
-        ClaimTransactionOutcome::Rollback(_) => {
-            tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        }
+    let composed = match &request.head {
+        AdmittedHead::Input(head) => match claim_pending_turn_inputs_postgres_tx(
+            &mut tx,
+            &request.session_id,
+            &request.lease,
+            &request.owner,
+            request.max_inputs,
+            lash_core_execution::TurnInputClaimMode::NextTurn,
+            CommandLaneGate::AdmittedRoot,
+        )
+        .await?
+        {
+            ClaimTransactionOutcome::Commit(Some(claim))
+                if claim.inputs.iter().any(|input| input.input_id == *head) =>
+            {
+                Some((Some(Box::new(claim)), None))
+            }
+            _ => None,
+        },
+        AdmittedHead::Batch(head) => match claim_ready_queued_work_postgres_tx(
+            &mut tx,
+            &request.session_id,
+            &request.lease,
+            &request.owner,
+            QueuedWorkClaimBoundary::Idle,
+            request.policy.clone(),
+        )
+        .await?
+        {
+            ClaimTransactionOutcome::Commit(Some(claim))
+                if claim.batches.iter().any(|batch| batch.batch_id == *head) =>
+            {
+                Some((None, Some(Box::new(claim))))
+            }
+            _ => None,
+        },
     };
-    if !claim
-        .inputs
-        .iter()
-        .any(|input| input.input_id == request.head)
-    {
+    // A composition that misses the head takes nothing.
+    let Some((inputs, queued)) = composed else {
         tx.rollback().await.map_err(store_sqlx_error)?;
         return Ok(None);
-    }
+    };
     let mut base = request.base.clone();
     base.generation =
         read_session_state_version_tx(&mut tx, &request.session_id, true, store.fleet_format)
@@ -77,26 +88,23 @@ pub(crate) async fn claim_root_inputs_postgres(
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-    let inputs = claim
-        .inputs
-        .iter()
-        .map(|input| input.input_id.clone())
-        .collect::<Vec<_>>();
-    crate::session_roots::bind_root_inputs_conn(
-        &mut tx,
-        &request.session_id,
-        &request.root,
-        &inputs,
-    )
-    .await?;
-    let drive = lash_core_execution::AcceptedTurnInputDrive::Claimed {
-        claim: Box::new(claim),
+    let admission = RootAdmission {
+        head: request.head.clone(),
+        inputs,
+        queued,
         base,
         turn_index: request.turn_index,
         generation: request.generation.clone(),
     };
-    let json =
-        serde_json::to_string(&drive).map_err(|error| StoreError::Backend(error.to_string()))?;
+    crate::session_roots::bind_root_inputs_conn(
+        &mut tx,
+        &request.session_id,
+        &request.root,
+        &admission.input_ids(),
+    )
+    .await?;
+    let json = serde_json::to_string(&admission)
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
     let changed = sqlx::query(roots.roots.write_admission.sql())
         .bind(request.session_id.as_str())
         .bind(request.root.as_str())
@@ -108,11 +116,11 @@ pub(crate) async fn claim_root_inputs_postgres(
         .rows_affected();
     if changed != 1 {
         return Err(StoreError::Backend(
-            "root claim result was already recorded".into(),
+            "root admission was already recorded".into(),
         ));
     }
     tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(Some(drive))
+    Ok(Some(admission))
 }
 
 pub(super) enum ClaimTransactionOutcome<T> {
@@ -357,27 +365,6 @@ pub(super) async fn earliest_next_turn_candidate_seq_tx(
         crate::turn_ingress::turn_ingress_sql()
             .pending_inputs
             .earliest_next_turn_candidate_seq
-            .sql(),
-        session_id,
-        generation,
-        owner,
-    )
-    .await
-}
-
-/// The `enqueue_seq` of session `session_id`'s earliest queued turn work that
-/// `generation` has not claimed: the turn-lane head of the queued table.
-pub(super) async fn earliest_turn_candidate_seq_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-    generation: u64,
-    owner: &LeaseOwnerIdentity,
-) -> Result<Option<u64>, StoreError> {
-    earliest_candidate_seq_tx(
-        tx,
-        crate::turn_ingress::turn_ingress_sql()
-            .queued_batches
-            .earliest_turn_candidate_seq
             .sql(),
         session_id,
         generation,
@@ -1167,22 +1154,12 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
         session_execution_lease,
         owner,
         max_inputs,
-        mode.clone(),
+        mode,
         CommandLaneGate::Boundary,
     )
     .await?
     {
         ClaimTransactionOutcome::Commit(value) => {
-            if let lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
-                super::queued_run_assignment::assign_checkpoint_members_tx(
-                    &mut tx,
-                    session_id,
-                    turn_id,
-                    value.as_ref(),
-                    None,
-                )
-                .await?;
-            }
             tx.commit().await.map_err(store_sqlx_error)?;
             Ok(value)
         }

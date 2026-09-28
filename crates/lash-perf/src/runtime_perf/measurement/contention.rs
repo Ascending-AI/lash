@@ -939,26 +939,20 @@ async fn run_durable_contention_worker(
         }
 
         if sequence.is_multiple_of(2) {
-            let batch_ids = claim
-                .batches
-                .iter()
-                .map(|batch| batch.batch_id.clone())
-                .collect::<Vec<_>>();
             store.abandon_queued_work_claim(&claim).await?;
             counters
                 .abandons
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let reclaimed = store
-                .claim_ready_queued_work_by_batch_ids(
+                .claim_ready_queued_work(
                     &session_id,
                     &session_fence,
                     &owner,
                     QueuedWorkClaimBoundary::Idle,
-                    &batch_ids,
                     lash_core::testing::queued_work_claim_policy(1),
                 )
                 .await?;
-            let Some(reclaimed) = reclaimed.claim else {
+            let Some(reclaimed) = reclaimed.claim() else {
                 counters
                     .reclaim_conflicts
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

@@ -368,7 +368,6 @@ impl TurnBoundary {
         claim_settlement: TurnClaimSettlement,
         current_session_lease_fence: Option<crate::ClaimAuthority>,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
-        queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
@@ -414,7 +413,6 @@ impl TurnBoundary {
                 claim_settlement,
                 current_session_lease_fence,
                 pending_follow_on,
-                queued_run,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
@@ -554,7 +552,6 @@ impl TurnBoundary {
             claim_settlement,
             current_session_lease_fence,
             pending_follow_on,
-            queued_run,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
             interrupted_turn_cancel_intent,
@@ -652,7 +649,6 @@ impl TurnBoundary {
                 operation,
                 claim_settlement,
                 current_session_lease_fence,
-                queued_run,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
@@ -694,7 +690,6 @@ impl TurnBoundary {
         operation: crate::OperationId,
         mut claim_settlement: TurnClaimSettlement,
         current_session_lease_fence: Option<crate::ClaimAuthority>,
-        queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
@@ -746,10 +741,6 @@ impl TurnBoundary {
             std::mem::take(&mut claim_settlement.undelivered_turn_inputs);
         commit.undelivered_queue_claims =
             std::mem::take(&mut claim_settlement.undelivered_queue_claims);
-        if queued_run.is_some() {
-            commit.session_execution_lease_fence = current_session_lease_fence.clone();
-        }
-        commit.queued_run = queued_run;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
         commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
         commit.interrupted_turn_cancel_intent = interrupted_turn_cancel_intent;

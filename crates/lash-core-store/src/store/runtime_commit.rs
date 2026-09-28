@@ -164,9 +164,6 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub turn_commit: RuntimeTurnCommitStamp,
-    /// Durable queued-run progress accepted atomically with this physical turn.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queued_run: Option<Box<super::QueuedRunCommit>>,
     pub completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
     pub completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
     /// Turn input the interrupted turn claimed at its terminal checkpoint and

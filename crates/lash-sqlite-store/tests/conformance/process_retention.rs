@@ -214,7 +214,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     );
     // The process-status DDL constraint is this law's subject.
     const VOCABULARY_SITE: &str = "CONSTRAINT ck_processes_status CHECK (";
-    const QUEUED_RUN_VOCABULARY_SITE: &str = "CONSTRAINT ck_queued_runs_status CHECK (";
     // FIG-3384 moved every process-family statement into the family's own
     // owner module, so that is where the query-site half of this inventory
     // now lives; the two modules it came from keep only call sites. The law
@@ -251,7 +250,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     let mut live_sites = 0usize;
     let mut parameterized_sites = 0usize;
     let mut vocabulary_sites = 0usize;
-    let mut queued_run_sites = 0usize;
     for (name, source) in sources {
         for delimiter in ["status IN ", "status NOT IN "] {
             for (offset, _) in source.match_indices(delimiter) {
@@ -270,11 +268,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
                     continue;
                 }
                 let prefix = &source[..offset];
-                if delimiter == "status IN " && prefix.ends_with(QUEUED_RUN_VOCABULARY_SITE) {
-                    assert!(site.starts_with("('pending', 'settled')"));
-                    queued_run_sites += 1;
-                    continue;
-                }
                 let is_vocabulary = delimiter == "status IN " && prefix.ends_with(VOCABULARY_SITE);
                 let (expected, constant) = if is_vocabulary {
                     (&vocabulary, "the live-plus-retired vocabulary")
@@ -325,10 +318,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         "expected exactly four live-status list literal sites in the SQLite backend, \
          all partial indexes in schema.rs; a query-site literal belongs in a \
          generated fragment, not here"
-    );
-    assert_eq!(
-        queued_run_sites, 1,
-        "expected one queued-run status vocabulary literal"
     );
     assert_eq!(
         vocabulary_sites, 1,

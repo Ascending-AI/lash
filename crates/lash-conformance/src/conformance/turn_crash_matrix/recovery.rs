@@ -175,11 +175,11 @@ pub(super) async fn run_crash_matrix_case(
 
     assert!(
         reader
-            .pending_queued_run(&identity.session_id)
+            .unfinished_root(&identity.session_id)
             .await
-            .expect("read recovered queued admission")
+            .expect("read the recovered unfinished root")
             .is_none(),
-        "{scenario} ({entry:?}): recovery settles durable queued-run ownership"
+        "{scenario} ({entry:?}): recovery ends every admitted root"
     );
     let effect_count = executions.load(std::sync::atomic::Ordering::SeqCst);
     // The successor replays every effect its predecessor completed from the

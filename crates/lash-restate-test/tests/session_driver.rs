@@ -180,7 +180,9 @@ impl ScriptedDriver {
                 )),
                 0,
                 request.build_generation.clone(),
-                lash_core::engine::AdmittedWork::Queued,
+                lash_core::engine::AdmittedWork::Queued {
+                    head: lash_core::BatchId::from("scripted-batch"),
+                },
             )),
             None => AdmitVerdict::Idle,
         })
@@ -327,6 +329,7 @@ fn committed_roots(outcome: &DriveOutcome) -> Vec<String> {
                 panic!("root {root} was refused: {verdict:?}")
             }
             RootOutcome::Ceded { root } => panic!("root {root} ceded"),
+            RootOutcome::Applied { root } => panic!("root {root} ran no turn"),
             RootOutcome::Released { root } => panic!("root {root} was released"),
         })
         .collect()
@@ -586,7 +589,9 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
                         lash_core::engine::AdmissionId::new("generation"),
                         0,
                         lash_core::engine::BuildGeneration::for_test("any"),
-                        lash_core::engine::AdmittedWork::Queued,
+                        lash_core::engine::AdmittedWork::Queued {
+                            head: lash_core::BatchId::from("scripted-batch"),
+                        },
                     ),
                 },
             )

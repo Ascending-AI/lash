@@ -46,14 +46,14 @@ impl lash_core::store::RuntimePersistenceDecorator for OneHeldClaimStore {
         self.inner.as_ref()
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &lash_core::store::RootInputClaimRequest,
-    ) -> Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
+        request: &lash_core::store::AdmitRootRequest,
+    ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
         if !self.held_once.swap(true, Ordering::SeqCst) {
             return Ok(None);
         }
-        lash_core::store::RootStore::claim_root_inputs(self.inner.as_ref(), request).await
+        lash_core::store::RootStore::admit_root(self.inner.as_ref(), request).await
     }
 }
 
@@ -1333,7 +1333,7 @@ pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
     let mut runtime = standard_runtime_with_transport(&backend, mock_provider(Vec::new())).await;
     let handler = open_drain(&double, sid("root"), "storeless-drain").await;
     let drain = runtime
-        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("a storeless drain still answers");
     handler.close().await.expect("close the drain's handler");

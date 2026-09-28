@@ -434,21 +434,20 @@ pub enum RuntimeEffectCommand {
     AcceptTurnInput {
         draft: Box<crate::PendingTurnInputDraft>,
     },
-    /// Claim the initial drive set of the input `AcceptTurnInput` just admitted
-    /// (ADR 0069 §6). The outcome journals the claimed rows with their content
-    /// and claim token, exactly as a checkpoint journals its claim set, so a
-    /// replaying turn drives the same rows under the same authority and never
-    /// reads pending rows. The envelope names only the accepted input: the
-    /// lease fence and owner are captured by the local executor, so the
-    /// envelope hashes the same under every lease generation.
-    ClaimAcceptedTurnInput {
-        input_id: crate::InputId,
+    /// Admit the turn-lane run a root is headed by (FIG-3927). The outcome
+    /// journals the admitted rows with their content and settlement
+    /// authority, and the base the root was admitted on, so a replaying root
+    /// drives the same rows from the same head and never reads pending rows.
+    /// The envelope names only the head: the drive fence is captured by the
+    /// local executor, so the envelope hashes the same under every epoch.
+    AdmitRoot {
+        head: crate::store::AdmittedHead,
     },
-    /// Inspect the claimed root's head before executing its turn. The body
+    /// Inspect the admitted root's head before executing its turn. The body
     /// reads live store state once; replay uses its recorded verdict.
     InspectAdmittedHead {
         root: crate::TurnId,
-        head: crate::InputId,
+        head: crate::store::AdmittedHead,
     },
     /// Admit the next root of a session drive (ADR 0105 §2, FIG-3600); every
     /// replay decodes the recorded verdict instead of re-reading the store.
@@ -584,7 +583,7 @@ impl RuntimeEffectCommand {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
+            Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
@@ -1241,10 +1240,10 @@ pub enum RuntimeEffectOutcome {
     AcceptTurnInput {
         accepted: Box<crate::PendingTurnInput>,
     },
-    /// The accepted input's initial drive set, journaled so replay drives the
-    /// same rows under the same settlement authority (ADR 0069 §6).
-    ClaimAcceptedTurnInput {
-        drive: crate::AcceptedTurnInputDrive,
+    /// The root's recorded admission, journaled so replay drives the same
+    /// rows under the same settlement authority (FIG-3927).
+    AdmitRoot {
+        answer: crate::store::RootAdmissionAnswer,
     },
     InspectAdmittedHead {
         verdict: AdmittedHeadVerdict,
@@ -1731,7 +1730,7 @@ impl RuntimeEffectOutcome {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
+            Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,

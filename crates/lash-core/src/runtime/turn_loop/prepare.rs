@@ -60,17 +60,11 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// The physical turn's index: the one its admission recorded, else its
-    /// queued run's pinned position, else the resident head's next.
+    /// The physical turn's index: the one its admission recorded, else the
+    /// resident head's next.
     fn physical_turn_index(&self, admitted_turn_index: Option<usize>) -> usize {
-        admitted_turn_index.unwrap_or_else(|| {
-            // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-            self.queued_run
-                .as_ref()
-                .map_or(self.state.turn_index + 1, |run| {
-                    run.position.turn_index as usize
-                })
-        })
+        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+        admitted_turn_index.unwrap_or(self.state.turn_index + 1)
     }
 
     #[expect(

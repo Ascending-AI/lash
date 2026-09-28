@@ -1032,7 +1032,7 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
 // Boundary: Runtime Scenarios own the idle queue claim and completion
 // invariant. This full runtime test stays here because it verifies the
 // app-facing queued-work turn event, prompt projection, and blank-history
-// suppression produced by `stream_next_queued_work`.
+// suppression produced by `drive_next_queued_root`.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
     let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;

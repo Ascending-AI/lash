@@ -634,152 +634,6 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
     );
 }
 
-#[tokio::test]
-async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping selected-drain plan proof: database URL is not set");
-        return;
-    };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(isolated_database.url())
-        .await
-        .expect("connect selected-drain plan storage");
-    sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
-        .execute(storage.pool())
-        .await
-        .expect("enable pg_stat_statements for selected-drain plan proof");
-    let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let session_id = SessionId::from(format!("selected-plan-session:{nonce}"));
-    let batch_prefix = format!("selected-plan-batch:{nonce}:");
-    let source_prefix = format!("selected-plan-source:{nonce}:");
-    sqlx::query(
-        "INSERT INTO lash_queued_work_batches
-         (enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-          authority_json, merge_key, enqueued_at_ms)
-         SELECT value, $1 || value::text, $2, $3 || value::text,
-                'earliest_safe_boundary', 'turn', '{}', NULL, 1
-         FROM generate_series(1, 10000) AS value",
-    )
-    .bind(&batch_prefix)
-    .bind(session_id.as_str())
-    .bind(&source_prefix)
-    .execute(storage.pool())
-    .await
-    .expect("seed 10,000 ready selected-drain batches");
-    // Every seeded row carries the same process-wake payload: the proof is
-    // about how many queue rows the selected claim touches, not their content.
-    let process_id = || lash_core_execution::ProcessId::fixture("selected-plan-process");
-    let wake = lash_core_execution::ProcessWakeDelivery {
-        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: "selected-plan-wake".to_string(),
-        target_session_id: session_id.clone(),
-        process_id: process_id(),
-        sequence: 1,
-        event_type: "process.wake".to_string(),
-        event_invocation: lash_core_execution::RuntimeInvocation {
-            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id.as_str()),
-            subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
-                process_id: process_id(),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
-        process_caused_by: None,
-        authority: lash_core_execution::QueuedWorkAuthority::default(),
-        input: "selected plan row".to_string(),
-        created_at_ms: 1,
-    };
-    let payload_json =
-        serde_json::to_string(&lash_core_execution::runtime::QueuedWorkPayload::process_wake(wake))
-            .expect("encode selected-drain payload");
-    sqlx::query(
-        "INSERT INTO lash_queued_work_items (batch_id, item_index, item_id, payload_json)
-         SELECT $1 || value::text, 0, $1 || value::text || ':item:0', $2
-         FROM generate_series(1, 10000) AS value",
-    )
-    .bind(&batch_prefix)
-    .bind(&payload_json)
-    .execute(storage.pool())
-    .await
-    .expect("seed selected-drain batch payloads");
-    sqlx::query("ANALYZE lash_queued_work_batches")
-        .execute(storage.pool())
-        .await
-        .expect("analyze selected-drain plan fixture");
-
-    let store = storage.session_store(&session_id);
-    let lease = store
-        .seal_claim_epoch_for_test(
-            &session_id,
-            &LeaseOwnerIdentity::opaque(
-                "selected-plan-owner",
-                format!("selected-plan-owner:{nonce}"),
-            ),
-            "schema-congruence-test-executor",
-            60_000,
-        )
-        .await
-        .expect("seal selected-drain plan drive")
-        .acquired()
-        .expect("selected-drain plan drive sealed");
-    let owner = lease.owner.clone();
-    sqlx::query(
-        "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
-    )
-        .execute(storage.pool())
-        .await
-        .expect("reset selected-drain statement statistics");
-    let selected_batch_id = lash_core_execution::BatchId::new(format!("{batch_prefix}5000"));
-    let claim = store
-        .claim_ready_queued_work_by_batch_ids(
-            &session_id,
-            &lease.fence(),
-            &owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&selected_batch_id),
-            lash_core_execution::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("claim one selected row from 10,000")
-        .expect("selected row is claimable");
-    let selected_source_key = format!("{source_prefix}5000");
-    assert_eq!(
-        claim
-            .batches
-            .iter()
-            .map(|batch| batch.source_key.as_deref())
-            .collect::<Vec<_>>(),
-        vec![Some(selected_source_key.as_str())]
-    );
-    let measured_queue_rows: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(rows), 0)::bigint
-         FROM pg_stat_statements
-         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
-           AND query LIKE '%lash_queued_work_batches%'
-           AND query NOT LIKE '%pg_stat_statements%'",
-    )
-    .fetch_one(storage.pool())
-    .await
-    .expect("measure selected-drain queue rows");
-    assert!(
-        measured_queue_rows <= 4,
-        "one-ID selected drain may return or lock at most 4 queue rows, measured {measured_queue_rows}"
-    );
-
-    store
-        .abandon_queued_work_claim(&claim)
-        .await
-        .expect("abandon selected-drain plan claim");
-    sqlx::query("DELETE FROM lash_queued_work_batches WHERE session_id = $1")
-        .bind(session_id.as_str())
-        .execute(storage.pool())
-        .await
-        .expect("remove selected-drain plan fixture");
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
     let Some(database_url) = postgres_test_support::database_url() else {
@@ -1643,11 +1497,6 @@ fn postgres_statement_name(query: &str) -> &'static str {
         {
             "deleted-session-check"
         }
-        q if q.starts_with("SELECT admission_json, status, revision FROM lash_queued_runs")
-            && q.contains("AND status =") =>
-        {
-            "queued-run-pending-load"
-        }
         q if q.starts_with("SELECT pending_follow_on_json FROM lash_sessions") => {
             "pending-follow-on-read"
         }
@@ -1809,10 +1658,9 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         .await
         .expect("measured statement-pin commit");
     let commit_statements = postgres_statement_calls_by_name(storage.pool()).await;
-    // The pending queued-run guard adds one read to the previous 16-round-trip
-    // head commit. It excludes unowned commits while a queued run is pending.
-    // The pending follow-on read (ADR 0101 §3, FIG-3542) adds one more: the
-    // head-write invariant decides against the locked fact.
+    // The pending follow-on read (ADR 0101 §3, FIG-3542) adds one read to the
+    // previous 16-round-trip head commit: the head-write invariant decides
+    // against the locked fact.
     // This fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
@@ -1822,7 +1670,6 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
             ("deleted-session-check", 1),
             ("head-lock", 1),
             ("head-load", 1),
-            ("queued-run-pending-load", 1),
             ("pending-follow-on-read", 1),
             ("turn-commit-load", 1),
             ("graph-nodes-exist", 1),

@@ -60,7 +60,7 @@ use serde::{Deserialize, Serialize};
 /// `lash:{replay_key}:frontier` before it acts, recording the start's process
 /// id, so a drifted binding's recorded start or sleep is served and only one
 /// at the live frontier refuses (FIG-3779).
-/// 10: a direct turn's journaled admission (`ClaimAcceptedTurnInput`) records
+/// 10: a direct turn's journaled admission (now `AdmitRoot`) records
 /// the executable generation it runs under, and an execution-environment sync
 /// no longer journals a cell replay-key grammar (FIG-3571): the turn's one
 /// generation is checked at its admission.

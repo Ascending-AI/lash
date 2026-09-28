@@ -4,7 +4,6 @@
 //! statement whose text both backends issue verbatim; this module owns the
 //! statements that genuinely fork and renders both sets once, at startup.
 
-use lash_store_sql::turn_ingress::queued_runs::QueuedRunStatements;
 use std::sync::LazyLock;
 
 use lash_core_execution::store_backend_support as vocabulary;
@@ -84,7 +83,6 @@ pub(crate) const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 
 /// Every turn-ingress statement this store issues.
 pub(crate) struct TurnIngressSql {
-    pub(crate) queued_runs: QueuedRunStatements,
     /// Cross-table statements both backends issue verbatim.
     pub(crate) family: TurnIngressStatements,
     /// Cross-table statements only PostgreSQL issues.
@@ -138,7 +136,6 @@ pub(crate) struct TurnIngressSql {
 static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres().with_vocabulary(TURN_INPUT_LIFECYCLE);
     TurnIngressSql {
-        queued_runs: QueuedRunStatements::render(dialect),
         family: TurnIngressStatements::render(dialect),
         family_postgres: TurnIngressPostgresStatements::render(dialect),
         pending_inputs: PendingInputStatements::render(dialect),

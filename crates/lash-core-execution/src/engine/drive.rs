@@ -100,6 +100,9 @@ pub fn drive_close_root_replay_key(root: &TurnId) -> String {
 pub enum RootOutcome {
     /// The root's turns ran and its terminal commit landed.
     Committed { root: TurnId, outcome: TurnOutcome },
+    /// The root applied the session's open command run (ADR 0101 §4); it ran
+    /// no turn.
+    Applied { root: TurnId },
     /// The seal refused the admission (another admission superseded it, or
     /// the root started under a history this execution cannot read), so
     /// nothing ran.
@@ -118,6 +121,7 @@ impl RootOutcome {
     pub fn root(&self) -> &TurnId {
         match self {
             Self::Committed { root, .. }
+            | Self::Applied { root }
             | Self::Refused { root, .. }
             | Self::Ceded { root }
             | Self::Released { root } => root,
@@ -168,13 +172,18 @@ pub enum DriveStop {
 /// - A root whose execution the engine released is consumed, and the drive
 ///   goes on; if admission names it again the drive stops
 ///   ([`DriveStop::RootAborted`]) instead of calling it a second time.
-/// - A root that ran nothing (a superseded seal, or a queued run that ceded)
-///   stops the drive: another driver holds the session, or the queue has
-///   nothing this drive can claim now ([`DriveStop::Yielded`]).
+/// - A root that ran nothing (a superseded seal, a queued-headed root that
+///   ceded, or a command root admitted on the same leading command as the
+///   command root before it, which applied nothing) stops the drive: another
+///   driver holds the session, or the lane has nothing this drive can admit
+///   now ([`DriveStop::Yielded`]). Both are read from recorded admissions,
+///   so a redrive stops where its first execution stopped.
 #[derive(Clone, Debug, Default)]
 pub struct DriveLoop {
     ran: BTreeSet<TurnId>,
     released: BTreeSet<TurnId>,
+    /// The leading command the last command root was admitted on.
+    commands_head: Option<u64>,
 }
 
 impl DriveLoop {
@@ -201,6 +210,16 @@ impl DriveLoop {
     pub fn after(&mut self, work: &AdmittedWork, outcome: &RootOutcome) -> Option<DriveStop> {
         match outcome {
             RootOutcome::Committed { .. } => None,
+            RootOutcome::Applied { root } => match work {
+                AdmittedWork::Commands { head } if self.commands_head == Some(*head) => {
+                    Some(DriveStop::Yielded { root: root.clone() })
+                }
+                AdmittedWork::Commands { head } => {
+                    self.commands_head = Some(*head);
+                    None
+                }
+                _ => None,
+            },
             RootOutcome::Ceded { root } => (!matches!(work, AdmittedWork::Input { .. }))
                 .then(|| DriveStop::Yielded { root: root.clone() }),
             RootOutcome::Refused { root, .. } => Some(DriveStop::Yielded { root: root.clone() }),

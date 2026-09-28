@@ -117,8 +117,8 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             // FIG-3532: the initial drive set is journaled like acceptance.
-            RuntimeEffectCommand::ClaimAcceptedTurnInput {
-                input_id: lash_core::InputId::from("in_7"),
+            RuntimeEffectCommand::AdmitRoot {
+                head: lash_core::store::AdmittedHead::Input(lash_core::InputId::from("in_7")),
             },
             "journaled_run",
         ),

@@ -397,7 +397,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
 
 /// L3: every park transition writes exactly one feed event — the first park,
 /// the parked turn's own commit, an input withdrawal that releases its held
-/// work, a queued-run settlement, and the session's deletion — while a
+/// work, and the session's deletion — while a
 /// different turn's commit writes none. Sequences are strictly increasing and
 /// a mid-feed cursor resumes with exactly the suffix.
 #[expect(
@@ -577,59 +577,6 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         "the suffix cancel runs: {suffix_outcome:?}"
     );
 
-    // A queued-run settlement unparks the turn it held.
-    let run_session = SessionId::from("park-feed-run-settled");
-    let run_store = create_bound_store(&factory, &run_session).await;
-    run_store
-        .record_turn_park(&park_write(&run_session, "turn-4", divergence("four"), 40))
-        .await
-        .expect("park turn-4");
-    let run_lease = crate::testing::store_fixtures::seal_claim_authority_for_test(
-        &run_store,
-        &run_session,
-        "run-owner",
-    )
-    .await;
-    let state = RuntimeSessionState {
-        session_id: run_session.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let admission = run_store
-        .begin_or_resume_queued_run(
-            &run_lease.authority(),
-            crate::store::BeginQueuedRun {
-                session_id: run_session.clone(),
-                identity: Some(crate::ExecutionScope::queue_drain(
-                    &run_session,
-                    "park-feed-run",
-                )),
-                request: crate::store::QueuedRunRequest::Automatic,
-                configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
-                expected_head_revision: 0,
-                initial_turn_index: 1,
-                generation: None,
-                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
-            },
-        )
-        .await
-        .expect("admit the queued run");
-    run_store
-        .settle_queued_run(
-            &run_lease.authority(),
-            crate::store::QueuedRunCommit {
-                scope: admission.scope.clone(),
-                expected_revision: admission.revision,
-                progress: crate::store::QueuedRunProgress::Settle {
-                    terminal: crate::store::QueuedRunTerminal::Failed {
-                        code: crate::RuntimeErrorCode::QueuedWork,
-                        message: "host abandoned the submission".to_string(),
-                    },
-                },
-            },
-        )
-        .await
-        .expect("settle the queued run");
-
     // The session's deletion cancels its park; the ledger row survives it.
     let delete_session = SessionId::from("park-feed-deleted");
     let delete_store = create_bound_store(&factory, &delete_session).await;
@@ -679,12 +626,6 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
             cause: Cancel::InputWithdrawn,
         },
         Kind::Parked {
-            reason: divergence("four"),
-        },
-        Kind::Unparked {
-            cause: Unpark::RunSettled,
-        },
-        Kind::Parked {
             reason: divergence("five"),
         },
         Kind::Cancelled {
@@ -715,8 +656,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     assert_eq!(named(1), (commit_session.clone(), TurnId::from("turn-1")));
     assert_eq!(named(4), (withdraw_session.clone(), TurnId::from("turn-3")));
     assert_eq!(named(6), (suffix_session.clone(), TurnId::from("turn-3s")));
-    assert_eq!(named(8), (run_session.clone(), TurnId::from("turn-4")));
-    assert_eq!(named(10), (delete_session.clone(), TurnId::from("turn-5")));
+    assert_eq!(named(8), (delete_session.clone(), TurnId::from("turn-5")));
 
     // A resume from a mid-feed cursor returns exactly the suffix.
     let mid = crate::store::ParkFeedCursor::from_store_sequence(page.events[4].seq);

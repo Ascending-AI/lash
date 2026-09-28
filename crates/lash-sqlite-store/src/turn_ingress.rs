@@ -12,7 +12,6 @@
 //! * the process registry's database, [`tool_intent_sql`], a one-connection
 //!   family addressed unqualified the way it always has been;
 
-use lash_store_sql::turn_ingress::queued_runs::QueuedRunStatements;
 use std::sync::LazyLock;
 
 use lash_core_execution::store_backend_support as vocabulary;
@@ -91,7 +90,6 @@ pub(crate) const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 
 /// Every turn-ingress statement the session catalog issues.
 pub(crate) struct TurnIngressSql {
-    pub(crate) queued_runs: QueuedRunStatements,
     /// Cross-table statements both backends issue verbatim.
     pub(crate) family: TurnIngressStatements,
     /// Cross-table statements only SQLite issues.
@@ -140,7 +138,6 @@ impl TurnIngressSql {
     fn render() -> Self {
         let dialect = Schema::Main.dialect().with_vocabulary(TURN_INPUT_LIFECYCLE);
         Self {
-            queued_runs: QueuedRunStatements::render(dialect),
             family: TurnIngressStatements::render(dialect),
             family_sqlite: TurnIngressSqliteStatements::render(dialect),
             pending_inputs: PendingInputStatements::render(dialect),

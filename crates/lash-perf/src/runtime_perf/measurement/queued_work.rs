@@ -161,19 +161,19 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 phase_profile.insert(phase.0, phase.1);
 
                 let (join_claim, phase) =
-                    measure_runtime_perf_async_phase("queued_work.reclaim_by_batch_ids", async {
+                    measure_runtime_perf_async_phase("queued_work.reclaim_ready", async {
                         store
-                            .claim_ready_queued_work_by_batch_ids(
+                            .claim_ready_queued_work(
                                 &session_id,
                                 &lease.fence(),
                                 &owner,
                                 QueuedWorkClaimBoundary::Idle,
-                                &join_batch_ids,
                                 lash_core::testing::queued_work_claim_policy(64),
                             )
                             .await?
+                            .claim()
                             .ok_or_else(|| {
-                                anyhow::anyhow!("queued-work stress expected exact reclaim")
+                                anyhow::anyhow!("queued-work stress expected the join reclaim")
                             })
                     })
                     .await?;
@@ -184,7 +184,7 @@ pub(super) async fn run_once_queued_work_claim_stress(
                     .map(|batch| batch.batch_id.as_str())
                     .ne(join_batch_ids.iter().map(lash_core::BatchId::as_str))
                 {
-                    anyhow::bail!("queued-work stress exact reclaim returned different batches");
+                    anyhow::bail!("queued-work stress reclaim returned different batches");
                 }
 
                 let (_, phase) = measure_runtime_perf_async_phase(

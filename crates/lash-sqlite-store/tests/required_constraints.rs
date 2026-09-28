@@ -183,14 +183,14 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
     let bracket = rusqlite::Connection::open(&bracket_path).expect("open bracket fixture");
     bracket
         .execute_batch(
-            "CREATE TABLE queued_runs (
-                status TEXT,
-                [CONSTRAINT ck_queued_runs_status
-                    CHECK (status IN ('pending', 'settled'))] TEXT
+            "CREATE TABLE session_ingress_sequence (
+                enqueue_seq INTEGER,
+                [CONSTRAINT ck_session_ingress_sequence_positive
+                    CHECK (enqueue_seq > 0)] TEXT
             );
-            INSERT INTO queued_runs(status) VALUES ('invalid');",
+            INSERT INTO session_ingress_sequence(enqueue_seq) VALUES (0);",
         )
-        .expect("a quoted column name does not constrain status");
+        .expect("a quoted column name does not constrain the sequence");
     drop(bracket);
 
     let report = inspect_required_constraints_at(&bracket_path, SqliteDatabase::DurableCore)
@@ -199,18 +199,18 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
     assert!(report.findings().iter().any(|finding| matches!(
         finding,
         RequiredConstraintFinding::Missing { table, name, .. }
-            if table == "queued_runs"
-                && name == "ck_queued_runs_status"
+            if table == "session_ingress_sequence"
+                && name == "ck_session_ingress_sequence_positive"
     )));
 
     let quoted_keyword_path = directory.path().join("quoted-keyword.db");
     rusqlite::Connection::open(&quoted_keyword_path)
         .expect("open quoted-keyword fixture")
         .execute_batch(
-            "CREATE TABLE queued_runs (
-                status TEXT,
-                \"constraint\" ck_queued_runs_status
-                    CHECK (status IN ('pending', 'settled'))
+            "CREATE TABLE session_ingress_sequence (
+                enqueue_seq INTEGER,
+                \"constraint\" ck_session_ingress_sequence_positive
+                    CHECK (enqueue_seq > 0)
             );",
         )
         .expect("create a column named like the declaration keyword");
@@ -220,31 +220,24 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
     assert!(report.findings().iter().any(|finding| matches!(
         finding,
         RequiredConstraintFinding::Missing { name, .. }
-            if name == "ck_queued_runs_status"
+            if name == "ck_session_ingress_sequence_positive"
     )));
 
     let genuine_path = directory.path().join("genuine.db");
     let genuine = rusqlite::Connection::open(&genuine_path).expect("open genuine fixture");
     genuine
         .execute_batch(
-            "CREATE TABLE queued_runs (
-                \"SESSION_ID\" TEXT,
-                \"SCOPE_ID\" TEXT,
-                \"STATUS\" TEXT,
-                \"REVISION\" INTEGER,
-                \"ADMISSION_JSON\" TEXT,
-                \"ADMITTED_GENERATION\" TEXT,
-                CONSTRAINT \"CK_QUEUED_RUNS_STATUS\"
-                    CHECK ([STATUS] IN ('pending', 'settled')),
-                CONSTRAINT \"CK_QUEUED_RUNS_REVISION\"
-                    CHECK ([REVISION] >= 0)
+            "CREATE TABLE session_ingress_sequence (
+                \"SESSION_ID\" TEXT NOT NULL PRIMARY KEY,
+                \"ENQUEUE_SEQ\" INTEGER NOT NULL,
+                CONSTRAINT \"CK_SESSION_INGRESS_SEQUENCE_POSITIVE\"
+                    CHECK ([ENQUEUE_SEQ] > 0)
             );",
         )
         .expect("create genuinely quoted lowercase identifiers");
     // The custom table shadows the schema's own declaration; the rest of the
-    // catalog — including the `queued_run_members` key that references it —
-    // comes straight out of the provisioning text so the fragment-carried
-    // tables complete.
+    // catalog comes straight out of the provisioning text so the
+    // fragment-carried tables complete.
     for statement in
         lash_sqlite_store::testing::database_provisioning_statements(SqliteDatabase::DurableCore)
     {
@@ -254,9 +247,12 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
     }
     assert!(
         genuine
-            .execute("INSERT INTO queued_runs(status) VALUES ('invalid')", [])
+            .execute(
+                "INSERT INTO session_ingress_sequence(session_id, enqueue_seq) VALUES ('s', 0)",
+                [],
+            )
             .is_err(),
-        "the genuine named check must reject invalid status"
+        "the genuine named check must reject a non-positive sequence"
     );
     drop(genuine);
     let report = inspect_required_constraints_at(&genuine_path, SqliteDatabase::DurableCore)
@@ -272,12 +268,12 @@ async fn fig2837_sqlite_virtual_table_arguments_cannot_forge_a_named_check() {
     let connection = rusqlite::Connection::open(&path).expect("open virtual-table fixture");
     connection
         .execute_batch(
-            "CREATE VIRTUAL TABLE queued_runs USING rtree(
+            "CREATE VIRTUAL TABLE session_ingress_sequence USING rtree(
                 id, min, max,
-                +status CONSTRAINT ck_queued_runs_status
-                    CHECK(status IN ('pending', 'settled'))
+                +enqueue_seq CONSTRAINT ck_session_ingress_sequence_positive
+                    CHECK(enqueue_seq > 0)
             );
-            INSERT INTO queued_runs VALUES (1, 0, 1, 'invalid');",
+            INSERT INTO session_ingress_sequence VALUES (1, 0, 1, 0);",
         )
         .expect("rtree module arguments do not declare a table CHECK");
     drop(connection);
@@ -292,8 +288,8 @@ async fn fig2837_sqlite_virtual_table_arguments_cannot_forge_a_named_check() {
             table,
             constraint,
             detail,
-        } if table == "queued_runs"
-            && constraint == "ck_queued_runs_status"
+        } if table == "session_ingress_sequence"
+            && constraint == "ck_session_ingress_sequence_positive"
             && detail.contains("virtual tables")
     ));
 }
@@ -308,17 +304,11 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
         .execute_batch(&format!(
             "PRAGMA journal_mode = WAL;
              PRAGMA user_version = {};
-             CREATE TABLE queued_runs (
-                 session_id TEXT,
-                 scope_id TEXT,
-                 status TEXT,
-                 revision INTEGER,
-                 admission_json TEXT,
-                 admitted_generation TEXT,
-                 CONSTRAINT ck_queued_runs_status
-                     CHECK (status IN ('pending', 'settled')),
-                 CONSTRAINT ck_queued_runs_revision
-                     CHECK (revision >= 0)
+             CREATE TABLE session_ingress_sequence (
+                 session_id TEXT NOT NULL PRIMARY KEY,
+                 enqueue_seq INTEGER NOT NULL,
+                 CONSTRAINT ck_session_ingress_sequence_positive
+                     CHECK (enqueue_seq > 0)
              );",
             SqliteDatabase::DurableCore.expected_version()
         ))
@@ -332,10 +322,10 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
     }
     checkpointed
         .execute_batch(
-            "INSERT INTO queued_runs(session_id, scope_id, status, revision, admission_json, admitted_generation)
-                 VALUES ('session', 'scope', 'settled', 0, '{}', 'gen-0');",
+            "INSERT INTO session_ingress_sequence(session_id, enqueue_seq)
+                 VALUES ('session', 1);",
         )
-        .expect("seed a conforming queued-runs row");
+        .expect("seed a conforming ingress-sequence row");
     checkpointed
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
         .expect("checkpoint the completed fixture");
@@ -369,11 +359,13 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
     );
     assert_eq!(
         checkpointed
-            .query_row("SELECT status FROM queued_runs", [], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_row(
+                "SELECT enqueue_seq FROM session_ingress_sequence",
+                [],
+                |row| { row.get::<_, i64>(0) }
+            )
             .expect("read stored row"),
-        "settled"
+        1
     );
     drop(checkpointed);
 
@@ -382,17 +374,11 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
     live.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA wal_autocheckpoint = 0;
-         CREATE TABLE queued_runs (
-             session_id TEXT,
-             scope_id TEXT,
-             status TEXT,
-             revision INTEGER,
-             admission_json TEXT,
-             admitted_generation TEXT,
-             CONSTRAINT ck_queued_runs_status
-                 CHECK (status IN ('pending', 'settled')),
-             CONSTRAINT ck_queued_runs_revision
-                 CHECK (revision >= 0)
+         CREATE TABLE session_ingress_sequence (
+             session_id TEXT NOT NULL PRIMARY KEY,
+             enqueue_seq INTEGER NOT NULL,
+             CONSTRAINT ck_session_ingress_sequence_positive
+                 CHECK (enqueue_seq > 0)
          );",
     )
     .expect("commit schema to the live WAL");
@@ -403,10 +389,10 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
             .expect("apply the shared provisioning statements");
     }
     live.execute_batch(
-        "INSERT INTO queued_runs(session_id, scope_id, status, revision, admission_json, admitted_generation)
-             VALUES ('session', 'scope', 'settled', 0, '{}', 'gen-0');",
+        "INSERT INTO session_ingress_sequence(session_id, enqueue_seq)
+             VALUES ('session', 1);",
     )
-    .expect("commit a conforming queued-runs row to the WAL");
+    .expect("commit a conforming ingress-sequence row to the WAL");
     let wal_path = sqlite_sidecar(&live_path, "wal");
     assert!(wal_path.exists(), "fixture must retain a committed WAL");
     let main_before = std::fs::read(&live_path).expect("read live main database");
@@ -418,10 +404,12 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
     assert_eq!(main_before, std::fs::read(&live_path).expect("reread main"));
     assert_eq!(wal_before, std::fs::read(&wal_path).expect("reread WAL"));
     assert_eq!(
-        live.query_row("SELECT status FROM queued_runs", [], |row| {
-            row.get::<_, String>(0)
-        })
+        live.query_row(
+            "SELECT enqueue_seq FROM session_ingress_sequence",
+            [],
+            |row| { row.get::<_, i64>(0) }
+        )
         .expect("read row committed in WAL"),
-        "settled"
+        1
     );
 }

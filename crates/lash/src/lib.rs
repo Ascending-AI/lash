@@ -357,12 +357,12 @@ pub mod direct {
 /// Session persistence types and services.
 pub mod persistence {
     pub use lash_core::CheckpointKind;
+    pub use lash_core::QueuedWorkClaimOutcome;
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
-        AcceptedTurnInputDrive, AcceptedTurnInputRefusal, ActiveTurnIngress, DeliveryPolicy,
-        ForkPoint, ForkSessionReceipt, ForkSessionRequest, LiveReplayOutcome,
-        LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputBatch,
+        ActiveTurnIngress, DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
+        LiveReplayOutcome, LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputBatch,
         PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, ProcessWakeSource,
         QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
         QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkClaim, QueuedWorkClaimBoundary,
@@ -393,14 +393,12 @@ pub mod persistence {
     pub use lash_core::{
         AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     };
-    pub use lash_core::{QueuedWorkClaimOutcome, SelectedQueuedWorkClaimOutcome};
     /// Queued-work state, leases, and execution types.
     pub mod queued_work {
         /// Stable queued-work ordering values and selection helpers for store implementations.
         pub use lash_core::store::queued_work::{
             PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass, claim_scan_limit,
-            derive_batch_id, select_exact_turn_work_claim_prefix, select_leading_session_command,
-            select_turn_work_claim_prefix,
+            derive_batch_id, select_leading_session_command, select_turn_work_claim_prefix,
         };
     }
     /// The drive epoch a session drive's seal raises (FIG-3600): one segment
@@ -408,18 +406,23 @@ pub mod persistence {
     pub use lash_core::store::{
         AdmissionId, DriveEpochSeal, DriveEpochStore, RootStartNonce, StoredDriveEpoch,
     };
+    /// A root's recorded admission of the turn-lane run it drives, and the
+    /// session's one unfinished root (FIG-3927).
     pub use lash_core::store::{
-        AppendRequestIdentity, BeginQueuedRun, CheckpointComponentDescriptor, GraphAppend,
+        AdmitRootRequest, AdmittedHead, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal,
+        UnfinishedRoot,
+    };
+    pub use lash_core::store::{
+        AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
         OrphanedTurnInputScope, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
         ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkSummary, PendingFollowOn,
-        PersistedSessionRead, ProcessPark, ProcessParkKey, ProcessParkQuery, QueuedRunAdmission,
-        QueuedRunCommit, QueuedRunMember, QueuedRunPosition, QueuedRunProgress, QueuedRunRequest,
-        QueuedRunTerminal, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistenceDecorator,
-        RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SelectedQueuedRun,
-        SemanticBoundaryOperation, SessionCheckpoint, SessionHead, SessionHeadMeta,
-        SessionHeadPayload, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause,
-        UnsettledTurnCounts, commit_runtime_state_verified, load_persisted_session_state,
+        PersistedSessionRead, PhysicalTurn, ProcessPark, ProcessParkKey, ProcessParkQuery,
+        RuntimeCommit, RuntimeCommitReceipt, RuntimePersistenceDecorator, RuntimeTurnCommitStamp,
+        RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation, SessionCheckpoint,
+        SessionHead, SessionHeadMeta, SessionHeadPayload, TurnPark, TurnParkQuery, TurnParkTarget,
+        TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
+        load_persisted_session_state,
     };
     /// A logical root's durable terminal evidence and the store segment that
     /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the

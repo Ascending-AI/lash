@@ -150,12 +150,9 @@ impl TurnSeamOperation {
         matches!(
             self,
             Self::Store(
-                StoreOperation::BeginQueuedRun
-                    | StoreOperation::SelectQueuedRun
-                    | StoreOperation::SettleQueuedRun
+                StoreOperation::AdmitRoot
                     | StoreOperation::ClaimNextTurnInputs
                     | StoreOperation::ClaimReadyQueuedWork { .. }
-                    | StoreOperation::ClaimSelectedQueuedWork { .. }
                     | StoreOperation::ClaimCheckpointWork { .. }
                     | StoreOperation::CommitFinalHead { .. }
                     | StoreOperation::AuthorizeTurnCancelClosure
@@ -171,18 +168,12 @@ impl TurnSeamOperation {
 enum StoreOperation {
     LoadSession,
     LoadSessionHeadMeta,
-    LoadQueuedRunAdmissionHead,
     ClaimLeadingSessionCommand,
+    UnfinishedRoot,
+    AdmitRoot,
     ClaimNextTurnInputs,
-    BeginQueuedRun,
-    SelectQueuedRun,
-    PendingQueuedRun,
-    SettleQueuedRun,
     DeferOrphanedActiveTurnInputs,
     ClaimReadyQueuedWork {
-        boundary: String,
-    },
-    ClaimSelectedQueuedWork {
         boundary: String,
     },
     ClaimCheckpointWork {
@@ -369,7 +360,6 @@ impl DurableEndState {
 #[derive(Debug, Default)]
 struct SeamState {
     trace: Vec<TurnSeamOperation>,
-    completed: Vec<TurnSeamOperation>,
     armed: Option<TurnCrashPoint>,
     /// The armed error-return placement (FIG-3524), independent of `armed`:
     /// a crash point and an error return are never armed on the same run.
@@ -402,7 +392,6 @@ impl SeamControl {
     fn arm(&self, point: TurnCrashPoint) {
         let mut state = self.state.lock_recover();
         state.trace.clear();
-        state.completed.clear();
         state.armed = Some(point);
         state.error_return = None;
         state.error_return_taken = false;
@@ -413,7 +402,6 @@ impl SeamControl {
     fn clear(&self) {
         let mut state = self.state.lock_recover();
         state.trace.clear();
-        state.completed.clear();
         state.armed = None;
         state.error_return = None;
         state.error_return_taken = false;
@@ -425,7 +413,6 @@ impl SeamControl {
     fn arm_error_return(&self, placement: ErrorReturnPlacement) {
         let mut state = self.state.lock_recover();
         state.trace.clear();
-        state.completed.clear();
         state.armed = None;
         state.error_return = Some(placement);
         state.error_return_taken = false;
@@ -490,19 +477,6 @@ impl SeamControl {
             .unwrap_or_else(|_| panic!("armed semantic seam operation was not reached: {armed:?}"));
     }
 
-    fn completed_count(&self, operation: &TurnSeamOperation) -> usize {
-        self.state
-            .lock_recover()
-            .completed
-            .iter()
-            .filter(|completed| *completed == operation)
-            .count()
-    }
-
-    fn mark_completed(&self, operation: TurnSeamOperation) {
-        self.state.lock_recover().completed.push(operation);
-    }
-
     async fn around<T, F>(&self, operation: TurnSeamOperation, future: F) -> T
     where
         F: Future<Output = T>,
@@ -515,7 +489,6 @@ impl SeamControl {
         if self.matches(&operation, CrashPlacement::InsideCall) {
             self.stop_here().await;
         }
-        self.mark_completed(operation);
         output
     }
 
@@ -536,7 +509,6 @@ impl SeamControl {
         if self.matches(&operation, CrashPlacement::InsideCall) {
             self.stop_here().await;
         }
-        self.mark_completed(operation);
         output
     }
 }
@@ -557,14 +529,26 @@ impl SeamStore {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimePersistenceDecorator for SeamStore {
-    async fn claim_root_inputs(
+    async fn unfinished_root(
         &self,
-        request: &crate::store::RootInputClaimRequest,
-    ) -> Result<Option<crate::AcceptedTurnInputDrive>, StoreError> {
+        session_id: &SessionId,
+    ) -> Result<Option<crate::store::UnfinishedRoot>, StoreError> {
         self.control
             .around(
-                TurnSeamOperation::Store(StoreOperation::ClaimNextTurnInputs),
-                self.inner.claim_root_inputs(request),
+                TurnSeamOperation::Store(StoreOperation::UnfinishedRoot),
+                self.inner.unfinished_root(session_id),
+            )
+            .await
+    }
+
+    async fn admit_root(
+        &self,
+        request: &crate::store::AdmitRootRequest,
+    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::AdmitRoot),
+                self.inner.admit_root(request),
             )
             .await
     }
@@ -582,18 +566,9 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     }
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
-        let operation = if self
-            .control
-            .completed_count(&TurnSeamOperation::Store(StoreOperation::BeginQueuedRun))
-            == 0
-        {
-            StoreOperation::LoadQueuedRunAdmissionHead
-        } else {
-            StoreOperation::LoadSessionHeadMeta
-        };
         self.control
             .around(
-                TurnSeamOperation::Store(operation),
+                TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
                 self.inner.load_session_head_meta(),
             )
             .await
@@ -626,68 +601,6 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
                 TurnSeamOperation::Store(StoreOperation::AuthorizeTurnCancelClosure),
                 self.inner
                     .authorize_turn_cancel_closure(session_execution_lease, authorization),
-            )
-            .await
-    }
-
-    async fn begin_or_resume_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        request: crate::BeginQueuedRun,
-    ) -> Result<crate::QueuedRunAdmission, StoreError> {
-        self.control
-            .around(
-                TurnSeamOperation::Store(StoreOperation::BeginQueuedRun),
-                self.inner.begin_or_resume_queued_run(fence, request),
-            )
-            .await
-    }
-
-    async fn select_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        scope: &crate::ExecutionScope,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-        configuration: &crate::PersistedSessionConfig,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::SelectedQueuedRun, StoreError> {
-        self.control
-            .around(
-                TurnSeamOperation::Store(StoreOperation::SelectQueuedRun),
-                self.inner.select_queued_run(
-                    fence,
-                    scope,
-                    owner,
-                    max_inputs,
-                    configuration,
-                    policy,
-                ),
-            )
-            .await
-    }
-
-    async fn pending_queued_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<crate::QueuedRunAdmission>, StoreError> {
-        self.control
-            .around(
-                TurnSeamOperation::Store(StoreOperation::PendingQueuedRun),
-                self.inner.pending_queued_run(session_id),
-            )
-            .await
-    }
-
-    async fn settle_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        settlement: crate::QueuedRunCommit,
-    ) -> Result<crate::QueuedRunAdmission, StoreError> {
-        self.control
-            .around(
-                TurnSeamOperation::Store(StoreOperation::SettleQueuedRun),
-                self.inner.settle_queued_run(fence, settlement),
             )
             .await
     }
@@ -806,28 +719,6 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
                 operation,
                 self.inner.claim_checkpoint_work(
                     session_id, fence, owner, turn_id, checkpoint, max_inputs, policy,
-                ),
-            )
-            .await
-    }
-
-    async fn claim_ready_queued_work_by_batch_ids(
-        &self,
-        session_id: &SessionId,
-        fence: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: QueuedWorkClaimBoundary,
-        ids: &[crate::BatchId],
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::ClaimSelectedQueuedWork {
-            boundary: format!("{boundary:?}").to_ascii_lowercase(),
-        });
-        self.control
-            .around(
-                operation,
-                self.inner.claim_ready_queued_work_by_batch_ids(
-                    session_id, fence, owner, boundary, ids, policy,
                 ),
             )
             .await

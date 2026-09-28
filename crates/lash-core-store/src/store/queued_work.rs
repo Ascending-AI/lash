@@ -16,73 +16,6 @@ use crate::{
     QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkPayload, StoreError, TurnCause,
 };
 
-/// Result of resolving a host-selected queued-work set against durable rows.
-///
-/// IDs with no remaining row are already satisfied. Any returned claim covers
-/// only rows acquired by this call; present rows that could not join that claim
-/// remain visible to the runtime as a selected-drain refusal.
-#[derive(Clone, Debug)]
-pub struct SelectedQueuedWorkClaimOutcome {
-    /// Newly acquired rows, if the present selection was claimable.
-    pub claim: Option<QueuedWorkClaim>,
-    /// Requested IDs for which no durable queue row remained.
-    pub already_satisfied_batch_ids: Vec<crate::BatchId>,
-}
-
-impl SelectedQueuedWorkClaimOutcome {
-    /// Builds an exact-claim resolution from newly acquired rows and requested
-    /// IDs whose durable rows were already gone.
-    ///
-    /// Store implementations must not classify a present but unclaimable row
-    /// as already satisfied. The runtime turns that case into a selected-drain
-    /// refusal rather than reporting idempotent success.
-    pub fn new(
-        claim: Option<QueuedWorkClaim>,
-        already_satisfied_batch_ids: Vec<crate::BatchId>,
-    ) -> Self {
-        Self {
-            claim,
-            already_satisfied_batch_ids,
-        }
-    }
-
-    /// Reports whether this store resolution acquired no new durable rows.
-    ///
-    /// At this layer, `true` does not by itself prove that the complete drain
-    /// was satisfied: callers must also distinguish IDs in
-    /// [`Self::already_satisfied_batch_ids`] from present IDs that could not be
-    /// claimed. The facade's selected-drain outcome carries the stronger
-    /// successful, fully-satisfied meaning.
-    pub fn acquired_no_rows(&self) -> bool {
-        self.claim.is_none()
-    }
-
-    /// Transforms only newly acquired rows, preserving `None` when no claim was
-    /// created; this projection discards the already-satisfied ID evidence.
-    pub fn map<U>(self, f: impl FnOnce(QueuedWorkClaim) -> U) -> Option<U> {
-        self.claim.map(f)
-    }
-
-    /// Returns the newly acquired claim or constructs an error when no rows
-    /// were acquired; this projection discards the already-satisfied ID
-    /// evidence.
-    pub fn ok_or_else<E>(self, f: impl FnOnce() -> E) -> Result<QueuedWorkClaim, E> {
-        self.claim.ok_or_else(f)
-    }
-
-    /// Returns the newly acquired claim or panics with `message` when no rows
-    /// were acquired; this projection discards the already-satisfied ID
-    /// evidence.
-    #[track_caller]
-    #[expect(
-        clippy::expect_used,
-        reason = "this is the panicking accessor itself: callers opt into the panic by choosing `expect` over the fallible projection"
-    )]
-    pub fn expect(self, message: &str) -> QueuedWorkClaim {
-        self.claim.expect(message)
-    }
-}
-
 /// Why a turn-work claim attempt acquired no rows.
 ///
 /// These are the refusal facts the claim state machine already computes while
@@ -206,9 +139,8 @@ impl TurnWorkEmptyScanDiagnostic {
 
 /// Whether a claim acquired rows, or why it did not.
 ///
-/// This is the automatic counterpart to [`SelectedQueuedWorkClaimOutcome`]: an
-/// automatic drain names no batch ids, so the refusal itself is the answer the
-/// runtime hands back to the host.
+/// An automatic drain names no batch ids, so the refusal itself is the answer
+/// the runtime hands back to the host.
 #[derive(Clone, Debug)]
 pub enum QueuedWorkClaimOutcome {
     Claimed(QueuedWorkClaim),
@@ -697,94 +629,6 @@ pub fn select_turn_work_claim_prefix(
             })
         }
     }
-}
-
-/// Size an exact, host-named drain composition.
-///
-/// The host already chose which rows travel together, so the configured
-/// [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) is not consulted here: an
-/// automatic policy that drains one row per wake would otherwise shrink an
-/// exact two-row selection to one, and the caller — which requires the whole
-/// requested composition or none of it — would abandon the partial claim as
-/// unclaimable, permanently and deterministically. The policy answers *how much
-/// of the pending queue to take*, a question an exact selection has already
-/// answered.
-///
-/// `max_rows` is exempt for the same reason: it is a coalescing bound on how
-/// many *pending* rows Lash gathers on its own, and truncating a host-named
-/// composition with it wedges the claim on a second axis. Interrupted redrive
-/// already exempts a committed composition from a successor's row limit.
-///
-/// The genuine claim laws still apply: the head class, the delivery boundary,
-/// merge-key/authority/kind compatibility, the pending-age bound, and the
-/// oversized-row refusal all bound an exact request as they bound an automatic
-/// one.
-pub fn select_exact_turn_work_claim_prefix(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
-    now_epoch_ms: u64,
-) -> Result<TurnWorkClaimPrefix, StoreError> {
-    let policy = QueuedWorkClaimPolicy {
-        drain_policy: crate::queued_drain_policy::exact_selection_drain_policy(),
-        max_rows: policy.max_rows.max(candidates.len()),
-        ..policy.clone()
-    };
-    select_turn_work_claim_prefix(candidates, boundary, &policy, now_epoch_ms)
-}
-
-/// `candidate_batch_claims` must contain every requested ready row plus every
-/// member of each interrupted claim touched by the request, in durable enqueue
-/// order. Every touched interrupted identity is validated before one is
-/// selected. If any identity is only partially covered, the physically earliest
-/// incomplete claim's literal composition is returned without selecting rows.
-/// When every touched identity is complete, one selected drain reclaims exactly
-/// the physically earliest interrupted composition; later complete identities
-/// remain queued for a later drain.
-pub fn select_interrupted_exact_claim_indices(
-    candidate_batch_claims: &[(crate::BatchId, Option<String>)],
-    requested_batch_ids: &[crate::BatchId],
-) -> Result<Option<Vec<usize>>, Vec<crate::BatchId>> {
-    let requested = requested_batch_ids
-        .iter()
-        .map(crate::BatchId::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut involved_claim_ids = Vec::new();
-    for (batch_id, prior_claim_id) in candidate_batch_claims {
-        let Some(prior_claim_id) = prior_claim_id.as_deref() else {
-            continue;
-        };
-        if requested.contains(batch_id.as_str()) && !involved_claim_ids.contains(&prior_claim_id) {
-            involved_claim_ids.push(prior_claim_id);
-        }
-    }
-    let Some(earliest_claim_id) = involved_claim_ids.first().copied() else {
-        return Ok(None);
-    };
-
-    for prior_claim_id in involved_claim_ids {
-        let required_batch_ids = candidate_batch_claims
-            .iter()
-            .filter(|(_, candidate_claim_id)| candidate_claim_id.as_deref() == Some(prior_claim_id))
-            .map(|(batch_id, _)| batch_id.clone())
-            .collect::<Vec<_>>();
-        if !required_batch_ids
-            .iter()
-            .all(|batch_id| requested.contains(batch_id.as_str()))
-        {
-            return Err(required_batch_ids);
-        }
-    }
-
-    Ok(Some(
-        candidate_batch_claims
-            .iter()
-            .enumerate()
-            .filter_map(|(index, (_, candidate_claim_id))| {
-                (candidate_claim_id.as_deref() == Some(earliest_claim_id)).then_some(index)
-            })
-            .collect(),
-    ))
 }
 
 /// Conservative upper bound for the exact model-visible queued-work render.

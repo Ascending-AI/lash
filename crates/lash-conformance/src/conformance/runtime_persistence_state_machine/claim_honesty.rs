@@ -18,7 +18,7 @@ where
     // makes supersession reclaim-mediated, so both pre-reclaim commit shapes
     // share authorization on current backends.
     async fn run(store: Arc<dyn RuntimePersistence>, carrying_claim: bool) -> Result<u64, String> {
-        let batch = store
+        store
             .enqueue_queued_work(queued_draft(0, 0, false))
             .await
             .map_err(|error| error.to_string())?;
@@ -35,15 +35,15 @@ where
             .acquired()
             .ok_or_else(|| "stale-owner lease busy".to_string())?;
         let claim = store
-            .claim_ready_queued_work_by_batch_ids(
+            .claim_ready_queued_work(
                 &SessionId::from(SESSION_ID),
                 &stale_lease.fence(),
                 &stale_owner,
                 QueuedWorkClaimBoundary::Idle,
-                std::slice::from_ref(&batch.batch_id),
                 crate::testing::queued_work_claim_policy(64),
             )
             .await
+            .map(crate::QueuedWorkClaimOutcome::claim)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "queued work absent".to_string())?;
         store
@@ -129,7 +129,7 @@ where
 pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_advance(
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {
-    let batch = store
+    store
         .enqueue_queued_work(queued_draft(0, 0, false))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
@@ -146,15 +146,15 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .acquired()
         .ok_or_else(|| TestCaseError::fail("predecessor lease busy"))?;
     let predecessor_claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &SessionId::from(SESSION_ID),
             &predecessor_lease.fence(),
             &predecessor_owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&batch.batch_id),
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("predecessor queued work absent"))?;
     store
@@ -175,15 +175,15 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .acquired()
         .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
     let successor_claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &SessionId::from(SESSION_ID),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&batch.batch_id),
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("successor did not reclaim queued work"))?;
     let mut successor_state = RuntimeSessionState {

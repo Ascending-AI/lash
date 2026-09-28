@@ -1160,7 +1160,6 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-    let queued_runs = &turn_ingress.queued_runs;
     // A deleted session's parked turn is cancelled, and its feed event
     // outlives the session row: the ledger is the only place the park
     // transition stays durable (FIG-3659).
@@ -1199,8 +1198,6 @@ pub(crate) async fn delete_session_tx(
             .floor
             .delete_by_session
             .sql(),
-        queued_runs.delete_members.sql(),
-        queued_runs.delete_runs.sql(),
         turn_ingress.pending_inputs.delete_by_session.sql(),
         turn_ingress.run_specs.delete_session.sql(),
         crate::session_ingress::session_ingress_sql()

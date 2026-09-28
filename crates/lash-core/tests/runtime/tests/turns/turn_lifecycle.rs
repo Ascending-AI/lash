@@ -1773,10 +1773,10 @@ impl lash_core::store::RuntimePersistenceDecorator for HeldClaimBeforeDriveStore
         self.inner.as_ref()
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &lash_core::store::RootInputClaimRequest,
-    ) -> Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
+        request: &lash_core::store::AdmitRootRequest,
+    ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
         lash_core::store::TurnInputStore::claim_next_turn_inputs(
             self.inner.as_ref(),
             &request.session_id,
@@ -1785,7 +1785,7 @@ impl lash_core::store::RuntimePersistenceDecorator for HeldClaimBeforeDriveStore
             request.max_inputs,
         )
         .await?;
-        self.inner.claim_root_inputs(request).await
+        self.inner.admit_root(request).await
     }
 
     async fn claim_next_turn_inputs(

@@ -142,14 +142,12 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
             .copied()
             .collect::<Vec<_>>(),
     );
-    // Three DDL constraints spell a `status IN` list. `ck_processes_status` is this
-    // law's subject. `ck_runtime_effect_replay_status` is a different column's
-    // vocabulary (`EffectRowStatus`). `ck_queued_runs_status` belongs to run
-    // admission. Both are pinned by the lash-sim congruence registry
-    // and its writer-vocabulary law, so it is counted and skipped here rather
-    // than silently swept into the process-status expectation.
+    // `ck_processes_status` is this law's subject: the one DDL constraint that
+    // spells the process-status vocabulary as a `status IN` list.
+    // `ck_runtime_effect_replay_status` is a different column's vocabulary
+    // (`EffectRowStatus`), pinned by the lash-sim congruence registry and its
+    // writer-vocabulary law.
     const VOCABULARY_SITE: &str = "CONSTRAINT ck_processes_status CHECK (";
-    const FOREIGN_VOCABULARY_SITES: &[&str] = &["CONSTRAINT ck_queued_runs_status CHECK ("];
     let sources = [
         (
             "process_registry.rs",
@@ -177,7 +175,6 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     let mut nonterminal_sites = 0usize;
     let mut live_sites = 0usize;
     let mut vocabulary_sites = 0usize;
-    let mut foreign_sites = 0usize;
     for (name, source) in sources {
         for delimiter in ["status IN ", "status NOT IN "] {
             for (offset, _) in source.match_indices(delimiter) {
@@ -187,14 +184,6 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
                     continue;
                 }
                 let prefix = &source[..offset];
-                if delimiter == "status IN "
-                    && FOREIGN_VOCABULARY_SITES
-                        .iter()
-                        .any(|site| prefix.ends_with(site))
-                {
-                    foreign_sites += 1;
-                    continue;
-                }
                 let is_vocabulary = delimiter == "status IN " && prefix.ends_with(VOCABULARY_SITE);
                 let (expected, constant) = if is_vocabulary {
                     (&vocabulary, "the live-plus-retired vocabulary")
@@ -228,12 +217,6 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         "expected exactly three live-status list literal sites in the PostgreSQL backend, \
          all partial process indexes in schema.sql; a query-site literal belongs in a \
          generated fragment, not here"
-    );
-    assert_eq!(
-        foreign_sites,
-        FOREIGN_VOCABULARY_SITES.len(),
-        "expected exactly the queued-run vocabulary literal, which the lash-sim \
-         congruence registry owns"
     );
     assert_eq!(
         vocabulary_sites, 1,

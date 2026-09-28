@@ -69,9 +69,11 @@ impl LashRuntime {
         err: &RuntimeError,
         claims: &[crate::QueuedWorkClaim],
     ) {
-        if self.queued_run.is_some() {
-            return;
-        }
+        let claims = claims
+            .iter()
+            .filter(|claim| !self.journaled_drive_claims.contains(&claim.claim_id))
+            .cloned()
+            .collect::<Vec<_>>();
         if !matches!(
             err.code,
             RuntimeErrorCode::SessionExecutionLeaseLost
@@ -89,7 +91,7 @@ impl LashRuntime {
         else {
             return;
         };
-        if let Err(abandon_err) = store.abandon_queued_work_claims(claims).await {
+        if let Err(abandon_err) = store.abandon_queued_work_claims(&claims).await {
             tracing::warn!(
                 error = %abandon_err,
                 claim_count = claims.len(),
@@ -100,7 +102,7 @@ impl LashRuntime {
 
     /// Hand claimed rows back after a local abort.
     ///
-    /// A root's recorded claim is never handed back: its redrive settles with
+    /// A root's recorded admission is never handed back: its redrive settles with
     /// the recorded claim token, so a handed-back row would cede the redrive.
     /// The row stays claimed, and the session's next drive admits the same
     /// root first (FIG-3600).
@@ -109,9 +111,6 @@ impl LashRuntime {
         err: &RuntimeError,
         claims: &[crate::TurnInputClaim],
     ) {
-        if self.queued_run.is_some() {
-            return;
-        }
         let claims = claims
             .iter()
             .filter(|claim| !self.journaled_drive_claims.contains(&claim.claim_id))

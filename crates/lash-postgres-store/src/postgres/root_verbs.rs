@@ -81,10 +81,10 @@ pub(crate) async fn open_root_intent_tx(
         return Ok(intent);
     }
     let sql = &crate::session_roots::session_roots_sql().verbs;
-    let mut run = crate::runtime_persistence::queued_run::load_run_tx(tx, session, None)
-        .await?
-        .filter(|run| run.scope.id() == request.root.as_str());
-    let new_root = (request.verb == RootVerb::Fork && run.is_none())
+    // A queued-headed root's batches are its own: a cancel removes them, and
+    // a fork leaves them queued with no new root to drive them.
+    let batches = crate::session_roots::admitted_batches_conn(tx, session, &request.root).await?;
+    let new_root = (request.verb == RootVerb::Fork && batches.is_empty())
         .then(|| forked_root(&request.root, intent.id));
     if request.verb == RootVerb::Fork {
         intent.kind = ControlIntentKind::Fork {
@@ -135,20 +135,6 @@ pub(crate) async fn open_root_intent_tx(
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    let mut batches = Vec::new();
-    if let Some(run) = run.as_ref() {
-        for member in run
-            .members
-            .iter()
-            .flatten()
-            .chain(run.withheld_members.iter())
-        {
-            match member {
-                QueuedRunMember::Input(id) => inputs.push(id.to_string()),
-                QueuedRunMember::Batch(id) => batches.push(id.to_string()),
-            }
-        }
-    }
     inputs.sort();
     inputs.dedup();
     for input in inputs {
@@ -202,19 +188,6 @@ pub(crate) async fn open_root_intent_tx(
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-    }
-    if let Some(run) = run.as_mut() {
-        run.revision += 1;
-        run.terminal = Some(QueuedRunTerminal::Completed {
-            turn_id: run.position.turn_id.clone(),
-            outcome: lash_sansio::TurnOutcome::Stopped(lash_sansio::TurnStop::Cancelled {
-                evidence: lash_sansio::TurnCancellationEvidence::internal(format!(
-                    "intent:{}",
-                    intent.id
-                )),
-            }),
-        });
-        crate::runtime_persistence::queued_run::write_run_tx(tx, run, false).await?;
     }
     for prior in plan.supersede {
         let mut next = prior.clone();

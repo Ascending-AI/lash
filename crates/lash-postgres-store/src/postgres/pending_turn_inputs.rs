@@ -24,14 +24,6 @@ pub(crate) struct PendingTurnInputRow {
 }
 
 impl PendingTurnInputRow {
-    pub(crate) fn claim_identity(&self) -> Option<(&str, &str, &LeaseOwnerIdentity)> {
-        Some((
-            self.claim_id.as_deref()?,
-            self.claim_token.as_deref()?,
-            self.claim_owner.as_ref()?,
-        ))
-    }
-
     /// The claim columns the shared claimability verdict consults.
     ///
     /// Exposed as one value rather than two fields so a call site cannot pass
@@ -284,19 +276,13 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                     },
                 );
             }
-            let run_owns_input: bool = sqlx::query_scalar(
-                crate::turn_ingress::turn_ingress_sql()
-                    .queued_runs
-                    .pending_member
-                    .sql(),
-            )
-            .bind(row.session_id.as_str())
-            .bind("input")
-            .bind(row.input_id.as_str())
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            if run_owns_input {
+            // A claimed row of the session's unfinished root is its own to
+            // settle or release, whichever drive epoch claimed it.
+            let root_holds_input = row.claim_token.is_some()
+                && crate::session_roots::unfinished_root_conn(tx, &row.session_id)
+                    .await?
+                    .is_some();
+            if root_holds_input {
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {
                         input,

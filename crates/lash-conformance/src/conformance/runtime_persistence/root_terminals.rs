@@ -1,14 +1,14 @@
 //! A logical root's terminal evidence and the drive fence, as store laws
 //! (FIG-3600 S7, ADR 0105 §2): the head commit of a root's final physical
-//! turn writes the root's evidence in its own transaction, a queued run's
-//! failed or empty settlement writes it in the settlement's, a root keeps
+//! turn writes the root's evidence in its own transaction, whichever
+//! turn-lane family heads the root, a root keeps
 //! the first terminal it reached, and a commit sealed under an admission a
 //! successor superseded is refused before it writes anything.
 
 use super::*;
 use lash_core::store::{
-    AdmissionId, BeginQueuedRun, DriveEpochSeal, DriveFence, QueuedRunRequest, RootStartNonce,
-    RootTerminalCause, RootTerminalKind, RootTerminalWrite, TurnCommitId,
+    AdmissionId, AdmittedHead, DriveEpochSeal, DriveFence, RootStartNonce, RootTerminalKind,
+    RootTerminalWrite, TurnCommitId,
 };
 use pretty_assertions::assert_eq;
 
@@ -54,7 +54,7 @@ fn turn_commit(
 /// the root with `stop`.
 fn ends(root: &str, ordinal: u32, stop: Option<crate::TurnStop>) -> RootTerminalWrite {
     let root = TurnId::from(root);
-    let turn = lash_core::store::QueuedRunPosition::derive_turn_id(&root, u64::from(ordinal));
+    let turn = lash_core::store::PhysicalTurn::derive_turn_id(&root, u64::from(ordinal));
     RootTerminalWrite {
         commit: TurnCommitId::new(root.clone(), ordinal),
         root,
@@ -250,99 +250,83 @@ pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(
     assert!(terminal_of(&store, &session_id, "r").await.is_some());
 }
 
-/// L-T3, the settlement half: a queued run that settles failed, or empty,
-/// ends its root without a head commit, and the settlement's own
-/// transaction writes the root's evidence. The root is the run's scope.
+/// L-T3 for a queued-headed root: a root admitted on a queued-work batch
+/// ends like any root. The head commit of its final physical turn writes the
+/// root's evidence in its own transaction, settles the batch it was admitted
+/// with, and leaves the session with no unfinished root.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_settled_queued_run_writes_its_roots_terminal(store: Arc<dyn RuntimePersistence>) {
-    use lash_core::store::{QueuedRunCommit, QueuedRunProgress, QueuedRunTerminal};
-
-    // Each run is admitted in a session of its own and selects nothing (an
-    // empty session's frozen empty selection), which both settlements accept.
-    let settle = |session: &'static str, terminal: QueuedRunTerminal| {
-        let store = Arc::clone(&store);
-        let session = SessionId::from(session);
-        async move {
-            let lease = seal_claim_authority_for_test(&store, &session, "settled-run").await;
-            let authority = lease.authority();
-            let request = BeginQueuedRun {
-                session_id: session.clone(),
-                identity: None,
-                request: QueuedRunRequest::Automatic,
-                configuration: RuntimeCommit::persisted_state_for_test(&state(&session), &[])
-                    .config,
-                expected_head_revision: 0,
-                initial_turn_index: 1,
-                generation: None,
-                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
-            };
-            let run = store
-                .begin_or_resume_queued_run(&authority, request)
-                .await
-                .expect("admit the run");
-            let root = TurnId::from(run.scope.id());
-            assert_eq!(
-                store
-                    .root_terminal(&session, &root)
-                    .await
-                    .expect("read the root's terminal evidence"),
-                None,
-                "an admitted run has no evidence yet"
-            );
-            let selection = store
-                .select_queued_run(
-                    &authority,
-                    &run.scope,
-                    &lease.owner,
-                    64,
-                    &run.configuration,
-                    lash_core::testing::queued_work_claim_policy(64),
-                )
-                .await
-                .expect("select the run's members");
-            assert_eq!(selection.admission.members, Some(Vec::new()));
-            store
-                .settle_queued_run(
-                    &authority,
-                    QueuedRunCommit {
-                        scope: run.scope.clone(),
-                        expected_revision: selection.admission.revision,
-                        progress: QueuedRunProgress::Settle { terminal },
-                    },
-                )
-                .await
-                .expect("settle the run");
-            store
-                .root_terminal(&session, &root)
-                .await
-                .expect("read the root's terminal evidence")
-                .expect("the settlement wrote the root's evidence")
-        }
-    };
-
-    let failed = settle(
-        "root-terminal-settled",
-        QueuedRunTerminal::Failed {
-            code: crate::RuntimeErrorCode::QueuedWork,
-            message: "the run failed before any commit".to_string(),
-        },
+pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = SessionId::from("root-terminal-queued");
+    let batch = store
+        .enqueue_queued_work(checkpoint_claims::queued_draft(
+            &session_id,
+            "queued head",
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue the head batch");
+    let authority = seal_claim_authority_for_test(&store, &session_id, "queued-root").await;
+    let admission = root_admissions::admitted_on(
+        &store,
+        &authority,
+        &session_id,
+        "q",
+        AdmittedHead::Batch(batch.batch_id.clone()),
     )
     .await;
-    assert_eq!(failed.kind, RootTerminalKind::Failed);
     assert_eq!(
-        failed.cause,
-        RootTerminalCause::SettledFailed {
-            code: crate::RuntimeErrorCode::QueuedWork,
-            message: "the run failed before any commit".to_string(),
-        }
+        store
+            .unfinished_root(&session_id)
+            .await
+            .expect("read the unfinished root"),
+        Some(lash_core::store::UnfinishedRoot {
+            root: TurnId::from("q"),
+            head: AdmittedHead::Batch(batch.batch_id.clone()),
+        })
     );
-    assert_eq!(failed.head_revision, None, "a settlement moves no head");
-    assert_eq!(failed.commit(), None);
+    assert_eq!(terminal_of(&store, &session_id, "q").await, None);
 
-    let empty = settle("root-terminal-settled-empty", QueuedRunTerminal::Empty).await;
-    assert_eq!(empty.kind, RootTerminalKind::Answered);
-    assert_eq!(empty.cause, RootTerminalCause::SettledEmpty);
+    let mut commit = turn_commit(
+        &state(&session_id),
+        "q",
+        Some(ends("q", 0, None)),
+        Some(authority.drive_fence()),
+    );
+    commit.session_execution_lease_fence = Some(authority.authority());
+    commit.completed_queue_claims = admission
+        .queued
+        .iter()
+        .map(|claim| claim.completion())
+        .collect();
+    let receipt = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("the root's final commit lands");
+    let terminal = terminal_of(&store, &session_id, "q")
+        .await
+        .expect("the landed commit wrote the root's evidence");
+    assert_eq!(terminal.kind, RootTerminalKind::Answered);
+    assert_eq!(terminal.cause, ends("q", 0, None).cause());
+    assert_eq!(terminal.head_revision, Some(receipt.head_revision));
+    assert_eq!(
+        store
+            .unfinished_root(&session_id)
+            .await
+            .expect("read the unfinished root"),
+        None,
+        "the terminal ends the root"
+    );
+    assert!(
+        store
+            .list_pending_queued_work(&session_id)
+            .await
+            .expect("list pending queued work")
+            .is_empty(),
+        "the final commit settles the batch the root was admitted with"
+    );
 }

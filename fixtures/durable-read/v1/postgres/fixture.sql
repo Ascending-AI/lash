@@ -523,39 +523,6 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
 
 
 --
--- Name: lash_queued_run_members; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_queued_run_members (
-    session_id text NOT NULL,
-    scope_id text NOT NULL,
-    collection_kind text NOT NULL,
-    ordinal bigint NOT NULL,
-    member_kind text NOT NULL,
-    member_id text NOT NULL,
-    CONSTRAINT ck_queued_run_members_collection_kind CHECK ((collection_kind = ANY (ARRAY['initial'::text, 'current'::text, 'withheld'::text, 'assigned'::text]))),
-    CONSTRAINT ck_queued_run_members_member_kind CHECK ((member_kind = ANY (ARRAY['input'::text, 'batch'::text]))),
-    CONSTRAINT ck_queued_run_members_ordinal CHECK ((ordinal >= 0))
-);
-
-
---
--- Name: lash_queued_runs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_queued_runs (
-    session_id text NOT NULL,
-    scope_id text NOT NULL,
-    status text NOT NULL,
-    revision bigint NOT NULL,
-    admission_json text NOT NULL,
-    admitted_generation text NOT NULL,
-    CONSTRAINT ck_queued_runs_revision CHECK ((revision >= 0)),
-    CONSTRAINT ck_queued_runs_status CHECK ((status = ANY (ARRAY['pending'::text, 'settled'::text])))
-);
-
-
---
 -- Name: lash_queued_work_batches; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1278,18 +1245,6 @@ INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('p_0000000000007000
 
 
 --
--- Data for Name: lash_queued_run_members; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
--- Data for Name: lash_queued_runs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
 -- Data for Name: lash_queued_work_batches; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1323,7 +1278,7 @@ INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-de
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"append-session-nodes","scope":{"operation_id":"session:durable-read-fixture:boundary:durable-read-current-append","type":"runtime_operation"}}', 'e05f4bc4697c5903c8b2a8a31301f2f9228df0f07aa93d1a1e1b1635c7a3f242', '{"schema_version":2,"head_revision":1,"checkpoint_ref":"210ae4978f17c413088878b1bd7c77d4cc5037fbf99030bc96176da68601bacb","manifest":{"schema_version":4,"turn_state":{"turn_index":0,"token_usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_write_input_tokens":0,"reasoning_output_tokens":0},"protocol_turn_options":{"schema_version":1,"payload":{}}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[{"node_id":"frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","timestamp":"2023-11-14T22:13:20+00:00"}]}', 1700000000000, '0b9b2c454e1a432e3faba8d376e21754c887dec87bd15dd559175595bf6169be', 2, 7);
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-legacy-commit","type":"runtime_operation"}}', 'a8e546ba83930b0a8a3a8baaf8925bd8689762ef2b0720df07e83d6d256a5f11', '{"schema_version":2,"head_revision":2,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[],"committed_usage_delta_identities":[{"operation_storage_key":"{\"key\":\"commit\",\"scope\":{\"operation_id\":\"durable-read-legacy-commit\",\"type\":\"runtime_operation\"}}","entry_ordinal":0,"payload_encoding_version":4,"payload_hash":"0885a585f704e9086220f97cad28cd83905497f1ad2484f2fd1d1895945e5dba"}]}', 1700000000000, NULL, NULL, NULL);
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"record-config","scope":{"operation_id":"session:durable-read-fixture:boundary:protocol-materialization","type":"runtime_operation"}}', '77e7dd1001ceb1041bd7a5661e7e1c699bdcc927b4c60b24ff12a91c954bcc46', '{"schema_version":2,"head_revision":3,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, 'bc65c05bb2e993f4c118602bdc825c96ed78aa1d7762118c841a3f9bd98aea6e', NULL, 3);
-INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-wake-settlement","type":"runtime_operation"}}', '7d1a81af7200c71d51ff92138efc3c540ceb2e9fe950a4397c552fd59b1d6d74', '{"schema_version":2,"head_revision":4,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-wake-settlement","type":"runtime_operation"}}', '77e7dd1001ceb1041bd7a5661e7e1c699bdcc927b4c60b24ff12a91c954bcc46', '{"schema_version":2,"head_revision":4,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, NULL, NULL, NULL);
 
 
 --
@@ -1758,30 +1713,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_wake_deliveries
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_processes
     ADD CONSTRAINT lash_processes_pkey PRIMARY KEY (process_id);
-
-
---
--- Name: lash_queued_run_members lash_queued_run_members_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_run_members
-    ADD CONSTRAINT lash_queued_run_members_pkey PRIMARY KEY (session_id, scope_id, collection_kind, ordinal);
-
-
---
--- Name: lash_queued_run_members lash_queued_run_members_session_id_scope_id_collection_kind_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_run_members
-    ADD CONSTRAINT lash_queued_run_members_session_id_scope_id_collection_kind_key UNIQUE (session_id, scope_id, collection_kind, member_kind, member_id);
-
-
---
--- Name: lash_queued_runs lash_queued_runs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_runs
-    ADD CONSTRAINT lash_queued_runs_pkey PRIMARY KEY (session_id, scope_id);
 
 
 --
@@ -2409,13 +2340,6 @@ CREATE INDEX idx_lash_processes_wake_session ON lash_durable_read_fixture.lash_p
 
 
 --
--- Name: idx_lash_queued_runs_admitted_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_queued_runs_admitted_generation ON lash_durable_read_fixture.lash_queued_runs USING btree (admitted_generation) WHERE (status = 'pending'::text);
-
-
---
 -- Name: idx_lash_queued_work_batches_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2619,13 +2543,6 @@ CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_
 
 
 --
--- Name: lash_queued_runs_pending; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE UNIQUE INDEX lash_queued_runs_pending ON lash_durable_read_fixture.lash_queued_runs USING btree (session_id) WHERE (status = 'pending'::text);
-
-
---
 -- Name: ux_lash_session_roots_unfinished; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2694,14 +2611,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_segment_handovers
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_wake_deliveries
     ADD CONSTRAINT lash_process_wake_deliveries_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
-
-
---
--- Name: lash_queued_run_members lash_queued_run_members_session_id_scope_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_run_members
-    ADD CONSTRAINT lash_queued_run_members_session_id_scope_id_fkey FOREIGN KEY (session_id, scope_id) REFERENCES lash_durable_read_fixture.lash_queued_runs(session_id, scope_id);
 
 
 --

@@ -138,10 +138,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             value: 3,
             coalesce: true,
         },
-        ClaimWork {
-            selected: true,
-            selection: 1,
-        },
+        ClaimWork,
         Commit {
             component_mode: 0,
             value: 0,
@@ -149,10 +146,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
+        ClaimWork,
         Crash,
         ClaimLease { owner: 1 },
         StageUsage {
@@ -168,10 +162,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
         ConfirmUsage { selection: 0 },
         ClaimLease { owner: 0 },
         ClaimWorkWithStaleLease,
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
+        ClaimWork,
         SettleStaleWork,
         Commit {
             component_mode: 0,
@@ -180,10 +171,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
+        ClaimWork,
         Commit {
             component_mode: 0,
             value: 0,
@@ -211,10 +199,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             value: 5,
             coalesce: false,
         },
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
+        ClaimWork,
         Crash,
         ClaimLease { owner: 3 },
         SettleStaleWork,
@@ -258,7 +243,7 @@ fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
         3 => (0_u8..4).prop_map(|owner| ClaimLease { owner }),
         1 => Just(Crash),
         5 => (0_u8..8, any::<u8>(), any::<bool>()).prop_map(|(slot, value, coalesce)| EnqueueWork { slot, value, coalesce }),
-        4 => (any::<bool>(), any::<u8>()).prop_map(|(selected, selection)| ClaimWork { selected, selection }),
+        4 => Just(ClaimWork),
         1 => Just(ClaimWorkWithStaleLease),
         2 => any::<u8>().prop_map(|selection| CancelWork { selection }),
         4 => (0_u8..8, any::<u8>()).prop_map(|(slot, value)| EnqueueTurnInput { slot, value }),

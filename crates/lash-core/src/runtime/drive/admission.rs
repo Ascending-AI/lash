@@ -161,15 +161,16 @@ impl AdmitDriveRunner {
             None => false,
         };
 
-        let Some((root, work)) = self.next_root(&store).await? else {
+        let Some((root, work)) = self.next_root(&store, redrive_unsettled).await? else {
             return Ok(AdmitVerdict::Idle);
         };
-        // The command lane drains first (ADR 0101 §4): queued work and an
-        // owed follow-on are admitted while the redrive is unsettled; only a
-        // turn input waits for it. The refusal is the attempt's — never a
-        // recorded verdict — so the engine's retry re-decides admission
-        // after the redrive settles.
-        if redrive_unsettled && matches!(work, AdmittedWork::Input { .. }) {
+        // The command lane drains first (ADR 0101 §4): commands, queued work
+        // and an owed follow-on are admitted while the redrive is unsettled;
+        // a turn input and the parked root itself wait for it. The refusal is
+        // the attempt's — never a recorded verdict — so the engine's retry
+        // re-decides admission after the redrive settles.
+        let parked_root = park.as_ref().is_some_and(|park| park.turn_id == root);
+        if redrive_unsettled && (parked_root || matches!(work, AdmittedWork::Input { .. })) {
             return Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::SessionRedriveUnsettled,
                 format!(
@@ -211,29 +212,26 @@ impl AdmitDriveRunner {
 
     /// The work this admission drives next, and the root it runs under.
     ///
-    /// An unfinished queued run owns the session until it ends, so it is
-    /// resumed first; it also owns any follow-on its own switch left owed.
-    /// Then a follow-on the head owes that no run owns (ADR 0101 §3,
-    /// FIG-3542): while it is owed every other claim is blocked, so it is
-    /// recovered before anything else is admitted. Then the command lane: an
-    /// open session command is applied by the queued drain before any
-    /// turn-lane work (ADR 0101 §4). Then the turn lane in `enqueue_seq`
-    /// order across both admission tables, with no kind priority (ADR 0101
-    /// §5): the head next-turn input, or the queued work pending before it.
-    /// The root of an input is its host id (its source key) when it has one,
-    /// else its input id.
+    /// A follow-on the head owes comes first (ADR 0101 §3, FIG-3542): while
+    /// it is owed every other claim is blocked, so it is recovered before
+    /// anything else is admitted. It always belongs to the unfinished root (a
+    /// frame switch's commit ends no root), and its recovery's final commit
+    /// ends that root. Then the session's unfinished root, which owns the
+    /// session until it ends, resumed under its own id (FIG-3927). Then the
+    /// command lane: open session commands apply before any turn-lane
+    /// work (ADR 0101 §4). Then the turn lane in `enqueue_seq` order across
+    /// both admission tables, with no kind priority (ADR 0101 §5): the head
+    /// next-turn input, or the queued turn work pending before it. The root
+    /// of an input is its host id (its source key) when it has one, else its
+    /// input id; a queued-work head's root and a command root are named by
+    /// this admission. While the parked root's redrive is unsettled the
+    /// command lane drains ahead of that root, which waits for its redrive.
     async fn next_root(
         &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
+        redrive_unsettled: bool,
     ) -> Result<Option<(TurnId, AdmittedWork)>, RuntimeEffectControllerError> {
         let session_id = &self.request.session;
-        if let Some(run) = store
-            .pending_queued_run(session_id)
-            .await
-            .map_err(|error| store_fault("unfinished queued run read", error))?
-        {
-            return Ok(Some((TurnId::from(run.scope.id()), AdmittedWork::Queued)));
-        }
         if let Some(owed) = store
             .load_pending_follow_on()
             .await
@@ -247,34 +245,56 @@ impl AdmitDriveRunner {
                 },
             )));
         }
+        let unfinished = store
+            .unfinished_root(session_id)
+            .await
+            .map_err(|error| store_fault("unfinished root read", error))?
+            .map(|unfinished| {
+                let work = match unfinished.head {
+                    crate::store::AdmittedHead::Input(head) => AdmittedWork::Input { head },
+                    crate::store::AdmittedHead::Batch(head) => AdmittedWork::Queued { head },
+                };
+                (unfinished.root, work)
+            });
+        if unfinished.is_some() && !redrive_unsettled {
+            return Ok(unfinished);
+        }
+        let admission = admission_id(&self.request.request, self.ordinal);
         let ordering = store
             .pending_session_work_ordering(session_id)
             .await
             .map_err(|error| store_fault("pending work ordering read", error))?;
+        if let Some(command) = ordering.session_command {
+            return Ok(Some((
+                commands_root(&admission),
+                AdmittedWork::Commands {
+                    head: command.enqueue_seq,
+                },
+            )));
+        }
+        if unfinished.is_some() {
+            return Ok(unfinished);
+        }
         let queued = store
             .list_queued_work(session_id)
             .await
             .map_err(|error| store_fault("open queued work read", error))?;
-        let queued_run = || {
-            Some((
-                queued_root(&admission_id(&self.request.request, self.ordinal)),
-                AdmittedWork::Queued,
-            ))
-        };
-        if ordering.session_command_precedes_turn_input() && !queued.is_empty() {
-            return Ok(queued_run());
-        }
         let open = store
             .list_pending_turn_inputs(session_id)
             .await
             .map_err(|error| store_fault("pending turn input read", error))?;
         match lash_core_execution::runtime::turn_lane_head(&open, &queued) {
             None => Ok(None),
-            Some(lash_core_execution::runtime::TurnLaneHead::Queued) => Ok(queued_run()),
+            Some(lash_core_execution::runtime::TurnLaneHead::Queued(head)) => Ok(Some((
+                queued_root(&admission),
+                AdmittedWork::Queued {
+                    head: head.batch_id.clone(),
+                },
+            ))),
             Some(lash_core_execution::runtime::TurnLaneHead::Input(head)) => {
-                // A root the input is bound to drives it: the root whose claim
-                // took it, or the new root a fork bound it to (FIG-3600 S7).
-                // Then its host id.
+                // A root the input is bound to drives it: the root whose
+                // admission took it, or the new root a fork bound it to
+                // (FIG-3600 S7). Then its host id.
                 let bound = store
                     .root_binding(session_id, &head.input.input_id)
                     .await
@@ -290,10 +310,15 @@ impl AdmitDriveRunner {
     }
 }
 
-/// The root a fresh queued run is admitted under: named by its admission, so
-/// no two admissions share a run and a redrive of one names the same run.
+/// The root a queued-work head is admitted under: named by its admission, so
+/// no two admissions share a root and a redrive of one names the same root.
 fn queued_root(admission: &AdmissionId) -> TurnId {
     TurnId::from(format!("drive-run:{}", admission.as_str()))
+}
+
+/// The root an admission of the command lane applies it under.
+fn commands_root(admission: &AdmissionId) -> TurnId {
+    TurnId::from(format!("drive-commands:{}", admission.as_str()))
 }
 
 /// The first execution of one `SealDriveAdmission` step: the drive-epoch

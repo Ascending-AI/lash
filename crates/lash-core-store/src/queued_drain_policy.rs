@@ -253,16 +253,6 @@ pub fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
     shared_drain_mode_policy(DrainMode::default())
 }
 
-/// The policy used to size an exact, host-named selection: take every row the
-/// host asked for that Lash's claim laws admit.
-///
-/// Exact selections bypass the configured policy entirely (see
-/// [`select_exact_turn_work_claim_prefix`](crate::store::queued_work::select_exact_turn_work_claim_prefix)),
-/// so this stands in for it rather than competing with it.
-pub fn exact_selection_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
-    shared_drain_mode_policy(DrainMode::All)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

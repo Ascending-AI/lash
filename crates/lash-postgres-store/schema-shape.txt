@@ -376,25 +376,6 @@ table lash_processes
   unique (start_key) where start_key is not null
   unique (start_obligation_id)
   primary-key (process_id)
-table lash_queued_run_members
-  column collection_kind text not-null
-  column member_id text not-null
-  column member_kind text not-null
-  column ordinal bigint not-null
-  column scope_id text not-null
-  column session_id text not-null
-  unique (session_id, scope_id, collection_kind, member_kind, member_id)
-  primary-key (session_id, scope_id, collection_kind, ordinal)
-  foreign-key (session_id, scope_id) references lash_queued_runs (session_id, scope_id) on delete no action
-table lash_queued_runs
-  column admission_json text not-null
-  column admitted_generation text not-null
-  column revision bigint not-null
-  column scope_id text not-null
-  column session_id text not-null
-  column status text not-null
-  unique (session_id) where status = 'pending'::text
-  primary-key (session_id, scope_id)
 table lash_queued_work_batches
   column authority_json text not-null
   column batch_id text not-null

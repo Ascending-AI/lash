@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash::BatchId;
 use lash::SessionId;
 use lash::TurnId;
 use lash::direct::{
@@ -19,11 +18,10 @@ use lash::persistence::{
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
     QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RootStore, RootTerminal,
     RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState,
-    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SelectedQueuedWorkClaimOutcome, SessionCheckpoint, SessionCommitStore, SessionHeadMeta,
-    SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError, StoreMaintenance,
-    StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress,
-    TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
+    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint,
+    SessionCommitStore, SessionHeadMeta, SessionHeadPayload, SessionMeta, SessionNodeRecord,
+    StoreError, StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
     load_persisted_session_state,
 };
 use lash::plugins::{
@@ -260,7 +258,7 @@ impl RootStore for FacadeStore {
     async fn unfinished_root(
         &self,
         _session_id: &SessionId,
-    ) -> Result<Option<lash::TurnId>, StoreError> {
+    ) -> Result<Option<lash::persistence::UnfinishedRoot>, StoreError> {
         unreachable!("fixture runs no session drive")
     }
 
@@ -300,46 +298,6 @@ impl RootStore for FacadeStore {
 
 #[async_trait]
 impl QueuedWorkStore for FacadeStore {
-    async fn select_queued_run(
-        &self,
-        _fence: &lash_core::ClaimAuthority,
-        _scope: &lash_core::ExecutionScope,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _max_inputs: usize,
-        _configuration: &lash_core::PersistedSessionConfig,
-        _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<lash_core::store::SelectedQueuedRun, lash_core::StoreError> {
-        unreachable!("fixture does not serve queued runs")
-    }
-    async fn pending_queued_run(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        unreachable!("fixture does not serve queued runs")
-    }
-    async fn queued_run(
-        &self,
-        _scope: &lash_core::ExecutionScope,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        unreachable!("fixture does not serve queued runs")
-    }
-    async fn settle_queued_run(
-        &self,
-        _fence: &lash_core::ClaimAuthority,
-        _settlement: lash_core::store::QueuedRunCommit,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        unreachable!("fixture does not serve queued runs")
-    }
-    async fn begin_or_resume_queued_run(
-        &self,
-        _fence: &lash_core::ClaimAuthority,
-        _request: lash_core::store::BeginQueuedRun,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        unreachable!("FacadeStore does not serve queued runs")
-    }
-
     async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: QueuedWorkBatchDraft,
@@ -380,18 +338,6 @@ impl QueuedWorkStore for FacadeStore {
         _policy: QueuedWorkClaimPolicy,
     ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         Ok((None, None))
-    }
-
-    async fn claim_ready_queued_work_by_batch_ids(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _owner: &LeaseOwnerIdentity,
-        _boundary: QueuedWorkClaimBoundary,
-        _batch_ids: &[BatchId],
-        _policy: QueuedWorkClaimPolicy,
-    ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
-        Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()))
     }
 
     async fn abandon_queued_work_claim(&self, _claim: &QueuedWorkClaim) -> Result<(), StoreError> {
@@ -462,7 +408,6 @@ fn persistence_types_are_nameable(
     let operation = OperationId::turn("facade", "turn", "final");
     let operation_storage_key = operation.storage_key().expect("operation storage key");
     RuntimeCommit {
-        queued_run: None,
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,
         session_execution_lease_fence: None,

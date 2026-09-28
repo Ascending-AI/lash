@@ -838,7 +838,7 @@ pub async fn park_turn_of_refused_group_child(
 ///
 /// The gate refuses before any effect, so a redrive meets `refusal` before it
 /// issues its first command. A turn the refused session holds in flight for
-/// `scope` — a begun, unsettled queued run for a queue-drain scope; for a
+/// `scope` — an admitted, unfinished root for a queue-drain scope; for a
 /// direct turn scope, the open input row the turn's journaled acceptance
 /// wrote (its id is provisioned from the acceptance address) — was driven by
 /// an earlier execution, whose journal already holds commands the refused
@@ -862,9 +862,9 @@ pub async fn park_turn_refused_by_generation(
     };
     let in_flight = match scope {
         crate::ExecutionScope::QueueDrain { .. } => store
-            .queued_run(scope)
+            .unfinished_root(session_id)
             .await?
-            .is_some_and(|run| run.terminal.is_none()),
+            .is_some_and(|unfinished| unfinished.root.as_str() == scope.id()),
         crate::ExecutionScope::Turn { turn_id, .. } => {
             let accepted = super::provisioned_turn_input_id(
                 super::causal::turn_acceptance_effect_invocation(scope, session_id, turn_id)

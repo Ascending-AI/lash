@@ -375,13 +375,14 @@ impl DurableSession {
             .await?)
     }
 
-    /// Returns unfinished queued execution, including a continuation whose
-    /// initial inputs have already settled.
-    pub async fn pending_queued_run(&self) -> Result<Option<lash_core::store::QueuedRunAdmission>> {
+    /// Returns the session's admitted root that has no terminal evidence yet,
+    /// with the head its admission recorded: the one root the next drive
+    /// resumes before admitting anything else.
+    pub async fn unfinished_root(&self) -> Result<Option<lash_core::store::UnfinishedRoot>> {
         Ok(self
             .store()
             .await?
-            .pending_queued_run(&self.session_id)
+            .unfinished_root(&self.session_id)
             .await?)
     }
 

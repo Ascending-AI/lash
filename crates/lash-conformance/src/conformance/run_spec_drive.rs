@@ -179,13 +179,16 @@ async fn drive(
     .await
 }
 
+/// The roots that ran turns, in admission order. A command root applies the
+/// command lane first (ADR 0101 §4) and runs no turn, so it is skipped.
 fn committed_roots(outcome: &DriveOutcome) -> Vec<String> {
     outcome
         .ran
         .iter()
+        .filter(|run| !matches!(run, RootOutcome::Applied { .. }))
         .map(|run| match run {
             RootOutcome::Committed { root, .. } => root.to_string(),
-            other => panic!("every root commits: {other:?}"),
+            other => panic!("every turn-lane root commits: {other:?}"),
         })
         .collect()
 }
@@ -311,12 +314,16 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
         })
     })
     .await;
-    // The pending command makes the root a queued run that drains the
-    // command lane first and then answers the input.
+    // The pending command is applied by a command root first, and then one
+    // root answers the input.
+    assert!(
+        matches!(first.ran.first(), Some(RootOutcome::Applied { .. })),
+        "the command lane applies first: {first:?}"
+    );
     assert_eq!(
         committed_roots(&first).len(),
         1,
-        "one root drains the command and answers the input: {first:?}"
+        "one root answers the input after the command: {first:?}"
     );
     assert_eq!(
         recorded(&models),

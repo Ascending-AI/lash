@@ -17,6 +17,11 @@ pub const TERMINAL_COLUMNS: &str =
 /// else, so its terminal columns stay NULL until an end writes them.
 pub const KEY_COLUMNS: &str = "session_id, root";
 
+/// An unfinished root's identity and recorded admission: all the session's
+/// admission order needs to resume it (FIG-3927), and nothing of its terminal,
+/// which it does not have yet.
+pub const UNFINISHED_COLUMNS: &str = "root, admission_json";
+
 crate::statements! {
     /// `session_roots` statements both backends issue verbatim.
     pub struct SessionRootStatements @ "session_root" {
@@ -34,10 +39,18 @@ crate::statements! {
              SET admission_json = ?3, admitted_generation = ?4
              WHERE session_id = ?1 AND root = ?2 AND admission_json IS NULL";
 
-        /// The one admitted root without terminal evidence for session `?1`.
-        select_unfinished = "SELECT root FROM session_roots
+        /// The one admitted root of session `?1` without terminal evidence,
+        /// with its recorded admission.
+        select_unfinished = "SELECT root, admission_json FROM session_roots
              WHERE session_id = ?1 AND admission_json IS NOT NULL
                AND terminal_kind IS NULL";
+
+        /// The unfinished roots generation `?1` admitted, input-headed and
+        /// queued-headed alike (FIG-3884, FIG-3927). Each dialect's partial
+        /// index on `admitted_generation` serves the read.
+        count_unfinished_by_admitted_generation = "SELECT COUNT(*) FROM session_roots
+             WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
+               AND admitted_generation = ?1";
 
         /// The terminal evidence of root `?2` of session `?1`: all four
         /// columns NULL while the root has none.

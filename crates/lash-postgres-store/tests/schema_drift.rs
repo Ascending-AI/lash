@@ -977,47 +977,6 @@ async fn postgres_retained_prior_component_is_refused_at_open() {
     scratch.cleanup().await;
 }
 
-/// Component 115 has the prior effect-replay constraints, but it predates
-/// durable queued-run ownership. A Lash-managed open must refuse the hard
-/// cutover without moving the stamp or adding admission tables.
-#[tokio::test]
-async fn component_115_is_refused_at_queued_run_cutover() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping component-115 queued-run cutover: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    scratch
-        .apply(
-            "DROP TABLE lash_queued_run_members;
-             DROP TABLE lash_queued_runs;
-             UPDATE lash_schema_versions
-                SET version = 115
-              WHERE component = 'lash-postgres-store'",
-        )
-        .await;
-
-    let error = PostgresStorage::from_pool(scratch.pool.clone())
-        .await
-        .err()
-        .expect("component 115 must be refused at queued-run cutover");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("version 115")
-            && rendered.contains(&format!("expected {}", PostgresStorage::schema_version()))
-            && rendered.contains("no applicable migration"),
-        "queued-run cutover refusal must name the recreate boundary: {rendered}"
-    );
-    let version: i32 = sqlx::query_scalar(
-        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
-    )
-    .fetch_one(&scratch.pool)
-    .await
-    .expect("read refused component stamp");
-    assert_eq!(version, 115);
-    scratch.cleanup().await;
-}
-
 /// Component 114 is older than the queued-run cutover, so the current build
 /// refuses it.
 #[tokio::test]

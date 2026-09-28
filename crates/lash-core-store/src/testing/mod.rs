@@ -27,9 +27,7 @@ pub use lash_core_ids::test_clock::TestClock;
 /// coalescing laws, and a one-row drain would hide them. Tests whose subject is
 /// the drain policy itself set it explicitly — including
 /// `queued_work_redrive_ignores_a_changed_drain_policy`, which pins the shipped
-/// default on the successor. This pin cannot mask an exact-selection defect:
-/// exact claims bypass the configured policy entirely
-/// ([`select_exact_turn_work_claim_prefix`](crate::store::queued_work::select_exact_turn_work_claim_prefix)).
+/// default on the successor.
 pub fn queued_work_claim_policy(max_rows: usize) -> crate::QueuedWorkClaimPolicy {
     crate::QueuedWorkClaimPolicy {
         max_context_tokens: usize::MAX / 4,

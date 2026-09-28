@@ -1189,10 +1189,9 @@ fn admit_run_spec_conn(
 /// * `turn_id` is the follow-on the head owes: it inherits the shape its
 ///   fact recorded at the switch. A fact written before the field existed
 ///   falls back to the spec of the input that started its parent root; a
-///   queued parent leaves the queued-run evidence to decide.
-/// * `turn_id` is the pending queued run's current position: the spec its
-///   member inputs are filed under, or the default spec for a position that
-///   owns no input.
+///   queued-headed parent leaves the unfinished root to decide.
+/// * `turn_id` is a physical turn of the unfinished queued-headed root: it
+///   started from no input, so it runs the default spec.
 /// * Otherwise nothing running names `turn_id`: the steering input is a
 ///   next-turn root under its own spec.
 fn check_unsourced_steering_run_spec_conn(
@@ -1224,28 +1223,16 @@ fn check_unsourced_steering_run_spec_conn(
         };
     }
     if running.is_none()
-        && let Some(run) = load_run_conn(tx, &draft.session_id, None)?
-        && run.position.turn_id == *turn_id
+        && let Some(unfinished) = crate::session_roots::unfinished_root_conn(tx, &draft.session_id)?
+        && matches!(
+            unfinished.head,
+            lash_core_execution::store::AdmittedHead::Batch(_)
+        )
+        && lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0 == unfinished.root
     {
-        // The spec the position resolved under: the first member input's,
-        // or the default spec while selection has not committed and for a
-        // position that owns no input.
-        let mut hash = None;
-        for member in run.members.iter().flatten() {
-            if let lash_core_execution::store::QueuedRunMember::Input(input_id) = member {
-                hash = tx
-                    .query_row(
-                        sql.pending_inputs.select_run_spec_by_input_id.sql(),
-                        params![draft.session_id.as_str(), input_id.as_str()],
-                        |row| row.get::<_, Option<String>>(0),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?
-                    .flatten();
-                break;
-            }
-        }
-        running = Some(hash);
+        // A queued-headed root starts from no input, so it runs the default
+        // spec.
+        running = Some(None);
     }
     if let Some(hash) = running {
         support::check_running_root_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;

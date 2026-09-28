@@ -517,8 +517,6 @@ impl ParkReason {
 pub enum UnparkCause {
     /// The parked turn's own commit settled it.
     TurnCommitted,
-    /// The queued run the parked turn belonged to settled.
-    RunSettled,
     /// A different turn parked over it in the same session.
     Superseded,
     /// The parked process appended a lifecycle fact past its refusal: a rerun

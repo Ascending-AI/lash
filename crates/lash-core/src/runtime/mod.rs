@@ -343,13 +343,13 @@ pub use turn_input_ingress::ingress_message_id;
 #[cfg(not(feature = "testing"))]
 pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
-    AcceptedTurnInputDrive, AcceptedTurnInputRefusal, PendingTurnInput, PendingTurnInputBatch,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
-    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput,
-    TurnInputAcceptanceReceipt, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
-    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
-    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, TurnInputStateKind,
+    PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
+    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
+    PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt,
+    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
+    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
+    TurnInputSettlementClaim, TurnInputState, TurnInputStateKind,
 };
 pub use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
@@ -405,8 +405,8 @@ pub(crate) use normalized_item::NormalizedItem;
 /// Event sinks default to no-op sinks.
 /// Execution scope is explicit and required at every runtime boundary that can execute
 /// nondeterministic work.
-mod queued_run;
-pub use queued_run::{QueuedEffectSource, QueuedTurnOptions};
+mod queued_options;
+pub use queued_options::{QueuedEffectSource, QueuedTurnOptions};
 
 pub struct TurnOptions<'a> {
     events: Option<&'a dyn EventSink>,
@@ -488,14 +488,6 @@ pub struct LashRuntime {
     pub state: RuntimeSessionState,
     pub runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub runtime_lease_executor_id: String,
-    pub(crate) queued_run: Option<Box<crate::store::QueuedRunAdmission>>,
-    /// Rows the running queued run retook on resume because its checkpoints
-    /// had been assigned them (FIG-3552).
-    pub(crate) queued_run_reacquired: logical_turn::ReacquiredClaims,
-    /// The accepted inputs the last queued run this runtime drained took
-    /// into its turn: the root that ran it drove them (ADR 0101 §5), so a
-    /// waiter on one of them is answered by that root's run.
-    pub(crate) queued_run_driven_inputs: Vec<crate::InputId>,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here

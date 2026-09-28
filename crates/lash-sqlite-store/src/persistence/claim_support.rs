@@ -1,20 +1,21 @@
 use super::*;
 
-/// Commit the root's complete claim result with its rows, bindings and base.
-pub(crate) async fn claim_root_inputs_sqlite(
+/// Admit the root's turn-lane run and record it with its rows, bindings and
+/// base, in one transaction ([`RootStore::admit_root`]).
+///
+/// [`RootStore::admit_root`]: lash_core_execution::store::RootStore::admit_root
+pub(crate) async fn admit_root_sqlite(
     store: &crate::Store,
-    request: &lash_core_execution::store::RootInputClaimRequest,
-) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+    request: &lash_core_execution::store::AdmitRootRequest,
+) -> Result<Option<lash_core_execution::store::RootAdmission>, StoreError> {
+    use lash_core_execution::store::{AdmittedHead, RootAdmission};
     let request = request.clone();
     let now = store.clock.timestamp_ms();
     let fleet = store.fleet_format;
     store
         .conn
         .write_flow(move |tx| {
-            let outcome: Result<
-                TxOutcome<Option<lash_core_execution::AcceptedTurnInputDrive>>,
-                StoreError,
-            > = (|| {
+            let outcome: Result<TxOutcome<Option<RootAdmission>>, StoreError> = (|| {
                 ensure_session_execution_lease_conn(tx, &request.session_id, &request.lease, now)?;
                 let roots = crate::session_roots::session_roots_sql();
                 let existing: Option<Option<String>> = tx
@@ -26,49 +27,59 @@ pub(crate) async fn claim_root_inputs_sqlite(
                     .optional()
                     .map_err(sqlite_error)?;
                 if let Some(Some(json)) = existing {
-                    let drive = serde_json::from_str(&json).map_err(|error| {
-                        StoreError::StoredDataCorrupt {
-                            record_kind: "RootClaimResult",
-                            message: error.to_string(),
-                        }
-                    })?;
-                    return Ok(TxOutcome::Commit(Some(drive)));
+                    return Ok(TxOutcome::Commit(Some(
+                        crate::session_roots::decode_root_admission(&json)?,
+                    )));
                 }
-                let unfinished: Option<String> = tx
-                    .query_row(
-                        roots.roots.select_unfinished.sql(),
-                        [request.session_id.as_str()],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?;
-                if let Some(unfinished) = unfinished {
+                if let Some(unfinished) =
+                    crate::session_roots::unfinished_root_conn(tx, &request.session_id)?
+                {
                     return Err(StoreError::UnfinishedRootConflict {
                         session_id: request.session_id.clone(),
-                        root: unfinished.into(),
+                        root: unfinished.root,
                     });
                 }
-                let claim = match claim_pending_turn_inputs_sqlite_conn(
-                    tx,
-                    now,
-                    &request.session_id,
-                    &request.lease,
-                    &request.owner,
-                    request.max_inputs,
-                    lash_core_execution::TurnInputClaimMode::NextTurn,
-                    CommandLaneGate::AdmittedRoot,
-                )? {
-                    TxOutcome::Commit(Some(claim)) => claim,
-                    TxOutcome::Commit(None) => return Ok(TxOutcome::Commit(None)),
-                    TxOutcome::Rollback(_) => return Ok(TxOutcome::Rollback(None)),
+                let (inputs, queued) = match &request.head {
+                    AdmittedHead::Input(head) => {
+                        let claim = match claim_pending_turn_inputs_sqlite_conn(
+                            tx,
+                            now,
+                            &request.session_id,
+                            &request.lease,
+                            &request.owner,
+                            request.max_inputs,
+                            lash_core_execution::TurnInputClaimMode::NextTurn,
+                            CommandLaneGate::AdmittedRoot,
+                        )? {
+                            TxOutcome::Commit(Some(claim)) => claim,
+                            TxOutcome::Commit(None) => return Ok(TxOutcome::Commit(None)),
+                            TxOutcome::Rollback(_) => return Ok(TxOutcome::Rollback(None)),
+                        };
+                        if !claim.inputs.iter().any(|input| input.input_id == *head) {
+                            return Ok(TxOutcome::Rollback(None));
+                        }
+                        (Some(Box::new(claim)), None)
+                    }
+                    AdmittedHead::Batch(head) => {
+                        let claim = match claim_ready_queued_work_sqlite_conn(
+                            tx,
+                            now,
+                            &request.session_id,
+                            &request.lease,
+                            &request.owner,
+                            QueuedWorkClaimBoundary::Idle,
+                            request.policy.clone(),
+                        )? {
+                            TxOutcome::Commit(Some(claim)) => claim,
+                            TxOutcome::Commit(None) => return Ok(TxOutcome::Commit(None)),
+                            TxOutcome::Rollback(_) => return Ok(TxOutcome::Rollback(None)),
+                        };
+                        if !claim.batches.iter().any(|batch| batch.batch_id == *head) {
+                            return Ok(TxOutcome::Rollback(None));
+                        }
+                        (None, Some(Box::new(claim)))
+                    }
                 };
-                if !claim
-                    .inputs
-                    .iter()
-                    .any(|input| input.input_id == request.head)
-                {
-                    return Ok(TxOutcome::Rollback(None));
-                }
                 let mut base = request.base.clone();
                 base.generation = read_session_state_version_conn(tx, &request.session_id, fleet)?;
                 crate::session_meta::retain_admission_base_conn(
@@ -76,24 +87,21 @@ pub(crate) async fn claim_root_inputs_sqlite(
                     &request.session_id,
                     base.checkpoint.as_ref(),
                 )?;
-                let inputs = claim
-                    .inputs
-                    .iter()
-                    .map(|input| input.input_id.clone())
-                    .collect::<Vec<_>>();
+                let admission = RootAdmission {
+                    head: request.head.clone(),
+                    inputs,
+                    queued,
+                    base,
+                    turn_index: request.turn_index,
+                    generation: request.generation.clone(),
+                };
                 crate::session_roots::bind_root_inputs_conn(
                     tx,
                     &request.session_id,
                     &request.root,
-                    &inputs,
+                    &admission.input_ids(),
                 )?;
-                let drive = lash_core_execution::AcceptedTurnInputDrive::Claimed {
-                    claim: Box::new(claim),
-                    base,
-                    turn_index: request.turn_index,
-                    generation: request.generation,
-                };
-                let json = encode_json(&drive)?;
+                let json = encode_json(&admission)?;
                 let changed = tx
                     .execute(
                         roots.roots.write_admission.sql(),
@@ -107,10 +115,10 @@ pub(crate) async fn claim_root_inputs_sqlite(
                     .map_err(sqlite_error)?;
                 if changed != 1 {
                     return Err(StoreError::Backend(
-                        "root claim result was already recorded".into(),
+                        "root admission was already recorded".into(),
                     ));
                 }
-                Ok(TxOutcome::Commit(Some(drive)))
+                Ok(TxOutcome::Commit(Some(admission)))
             })();
             Ok(match outcome {
                 Ok(TxOutcome::Commit(value)) => TxOutcome::Commit(Ok(value)),
@@ -154,17 +162,11 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     },
                 );
             }
-            let run_owns_input: bool = conn
-                .query_row(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .queued_runs
-                        .pending_member
-                        .sql(),
-                    params![row.session_id.as_str(), "input", row.input_id.as_str()],
-                    |row| row.get(0),
-                )
-                .map_err(sqlite_error)?;
-            if run_owns_input {
+            // A claimed row of the session's unfinished root is its own to
+            // settle or release, whichever drive epoch claimed it.
+            let root_holds_input = row.claim_token.is_some()
+                && crate::session_roots::unfinished_root_conn(conn, &row.session_id)?.is_some();
+            if root_holds_input {
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {
                         claim: pending_turn_input_claim_diagnostics_from_row(
@@ -469,26 +471,6 @@ pub(super) fn earliest_next_turn_candidate_seq_conn(
     )
 }
 
-/// The `enqueue_seq` of session `session_id`'s earliest queued turn work that
-/// `generation` has not claimed: the turn-lane head of the queued table.
-pub(super) fn earliest_turn_candidate_seq_conn(
-    tx: &Connection,
-    session_id: &SessionId,
-    generation: u64,
-    owner: &LeaseOwnerIdentity,
-) -> Result<Option<u64>, StoreError> {
-    earliest_candidate_seq_conn(
-        tx,
-        crate::turn_ingress::turn_ingress_sql()
-            .queued_batches
-            .earliest_turn_candidate_seq
-            .sql(),
-        session_id,
-        generation,
-        owner,
-    )
-}
-
 fn earliest_candidate_seq_conn(
     tx: &Connection,
     sql: &str,
@@ -786,18 +768,6 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
                     mode.clone(),
                     CommandLaneGate::Boundary,
                 )?;
-                if let TxOutcome::Commit(input) = &outcome
-                    && let lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } =
-                        &mode
-                {
-                    super::queued_run_assignment::assign_checkpoint_members_conn(
-                        tx,
-                        &session_id,
-                        turn_id,
-                        input.as_ref(),
-                        None,
-                    )?;
-                }
                 Ok(outcome)
             })();
         match outcome {

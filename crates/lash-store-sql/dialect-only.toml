@@ -111,13 +111,15 @@ for tracing and rendered once, even though none of them names a table.
 [[cross_family]]
 statement = "turn_ingress.delete_released_turn_park_returning"
 owner = "crates/lash-store-sql/src/turn_ingress.rs"
-touches = ["session_root_inputs"]
+touches = ["session_root_inputs", "session_roots"]
 reason = """
-A parked root's park is released only once the root holds no unsettled input,
-and the inputs a root holds are the ones the root family bound to it. Asking
-"which inputs does the parked root hold?" in a separate statement would let a
-binding or a settlement move between the read and the delete, so the ingress
-family owns the whole predicate and reads the root family's binding inside it.
+A parked root's park is released only once the root holds no unsettled input
+and is no longer an admitted, unfinished root, and the inputs a root holds are
+the ones the root family bound to it. Asking "which inputs does the parked
+root hold?" or "is it still unfinished?" in a separate statement would let a
+binding, a settlement or the root's terminal move between the read and the
+delete, so the ingress family owns the whole predicate and reads the root
+family's binding and admission inside it (FIG-3927).
 """
 
 [[cross_family]]
@@ -135,14 +137,26 @@ reason = "The park write locks bound input rows before withdrawal can settle the
 [[cross_family]]
 statement = "turn_ingress.count_unsettled_turns"
 owner = "crates/lash-store-sql/src/turn_ingress.rs"
-touches = ["control_intents"]
+touches = ["control_intents", "session_roots"]
 reason = """
 A turn a session's close holds in flight is typed, not lost, only while that
 close's intent is stalled: its release never ran, so no physical delete is
-armed and the claimed input stays claimed (ADR 0109 §4). The count reads the
-intent's obligation state inside the one snapshot it counts in-flight turns
-from, so a close that stalls or is rearmed between two statements cannot make
-the same turn count as both held and untyped.
+armed and the claimed input stays claimed (ADR 0109 §4). The in-flight turns
+are the session's unfinished roots (FIG-3927). The count reads the roots and
+the intent's obligation state inside the one snapshot, so a close that stalls
+or is rearmed, or a root that ends, between two statements cannot make the
+same turn count as both held and untyped.
+"""
+
+[[cross_family]]
+statement = "turn_ingress.has_claimable_work"
+owner = "crates/lash-store-sql/src/turn_ingress.rs"
+touches = ["session_roots"]
+reason = """
+A session has claimable work while an admitted root is unfinished (FIG-3927):
+admission resumes that root before anything else. The probe reads the root
+family's admission beside the ingress rows in one snapshot, so a root that
+ends between two statements cannot hide work or report work that is gone.
 """
 
 [[cross_family]]
@@ -223,8 +237,6 @@ owner = "crates/lash-postgres-store/src/postgres/session_sql.rs"
 touches = [
     "pending_turn_inputs",
     "session_run_specs",
-    "queued_run_members",
-    "queued_runs",
     "queued_work_batches",
     "queued_work_items",
     "session_ingress_sequence",
@@ -709,8 +721,6 @@ tables = [
     "pending_turn_inputs",
     "queued_work_batches",
     "queued_work_items",
-    "queued_runs",
-    "queued_run_members",
     "tool_intent_submissions",
     "turn_cancel_affected_inputs",
     "turn_cancel_requests",
@@ -727,7 +737,6 @@ statement_prefixes = [
     "pending_turn_input",
     "queued_work_batch",
     "queued_work_item",
-    "queued_run",
     "tool_intent_submission",
     "turn_cancel_affected_input",
     "turn_cancel_request",
@@ -748,8 +757,6 @@ shared = [
     "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_batches.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_items.rs",
-    "crates/lash-store-sql/src/turn_ingress/queued_runs.rs",
-    "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs",
     "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs",
     "crates/lash-store-sql/src/turn_ingress/run_specs.rs",
     "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs",
@@ -809,8 +816,6 @@ release_stamp = "crates/lash-store-sql/src/session/release_stamp.rs"
 fleet_format = "crates/lash-store-sql/src/session/fleet_format.rs"
 checkpoint_blob_refs = "crates/lash-store-sql/src/session/checkpoint_blob_refs.rs"
 [families.turn_ingress.table_modules]
-queued_runs = "crates/lash-store-sql/src/turn_ingress/queued_runs.rs"
-queued_run_members = "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs"
 pending_turn_inputs = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
 queued_work_batches = "crates/lash-store-sql/src/turn_ingress/queued_batches.rs"
 queued_work_items = "crates/lash-store-sql/src/turn_ingress/queued_items.rs"
@@ -3280,28 +3285,6 @@ fork: PostgreSQL compares a claimed head with IS DISTINCT FROM, which treats a
 NULL claim as unequal, where SQLite spells the same rule as an explicit
 IS NULL OR <>.
 """
-
-[[dialect_only]]
-statement = "queued_work_batch.select_present_ids"
-backends = ["sqlite", "postgres"]
-kind = "list bind"
-reason = """
-SQLite binds a list as a JSON array and unpacks it with json_each; PostgreSQL
-binds a real array and compares with = ANY. Both seek, which
-a_json_array_list_bind_still_seeks_the_primary_key pins on the SQLite side.
-"""
-
-[[dialect_only]]
-statement = "queued_work_batch.select_by_ids"
-backends = ["sqlite", "postgres"]
-kind = "list bind"
-reason = "Same list-bind fork as queued_work_batch.select_present_ids."
-
-[[dialect_only]]
-statement = "queued_work_batch.select_by_claim_ids"
-backends = ["sqlite", "postgres"]
-kind = "list bind"
-reason = "Same list-bind fork as queued_work_batch.select_present_ids, keyed by claim id."
 
 [[dialect_only]]
 statement = "queued_work_batch.abandon_claims"

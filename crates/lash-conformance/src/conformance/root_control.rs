@@ -228,15 +228,16 @@ impl Fixture {
             .session_graph
             .leaf_node_id
             .clone();
-        let drive = parts
+        let admission = parts
             .store
-            .claim_root_inputs(&lash_core::store::RootInputClaimRequest {
+            .admit_root(&lash_core::store::AdmitRootRequest {
                 session_id: parts.session_id.clone(),
                 lease: lease.fence(),
                 owner: lease.owner.clone(),
                 root: root.clone(),
-                head: input.clone(),
+                head: lash_core::store::AdmittedHead::Input(input.clone()),
                 max_inputs: 1,
+                policy: lash_core::testing::queued_work_claim_policy(1),
                 base: lash_core::store::SessionHeadRef {
                     generation: 0,
                     revision: state.head_revision,
@@ -248,12 +249,9 @@ impl Fixture {
                 admitted_generation: lash_core::engine::BuildGeneration::for_test("root-control"),
             })
             .await
-            .expect("claim the root's input")
-            .expect("the root drive reaches its head");
-        assert!(matches!(
-            drive,
-            crate::AcceptedTurnInputDrive::Claimed { .. }
-        ));
+            .expect("admit the root")
+            .expect("the root's admission reaches its head");
+        assert_eq!(admission.input_ids(), vec![input.clone()]);
         let park = parts
             .store
             .record_turn_park(&TurnParkWrite::refusal(
@@ -1301,7 +1299,7 @@ pub async fn a_root_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
     let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
     let (work, close) = f.control(false, false);
     f.apply(&work, &close, &redrive).await;
-    let turn = QueuedRunPosition::derive_turn_id(&f.root, 1);
+    let turn = PhysicalTurn::derive_turn_id(&f.root, 1);
     f.parts
         .store
         .commit_runtime_state(root_final_commit(
@@ -1578,7 +1576,7 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
     lane.verb(RootVerb::Redrive).await.expect("redrive");
     match admit_verdict(&lane, &runner, "command-lane").await {
         Ok(AdmitVerdict::Admit(admitted)) => assert!(
-            matches!(admitted.work(), AdmittedWork::Queued),
+            matches!(admitted.work(), AdmittedWork::Commands { .. }),
             "the command lane drains while the redrive is unsettled: {:?}",
             admitted.work()
         ),

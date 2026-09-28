@@ -93,7 +93,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        176,
+        174,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -181,19 +181,6 @@ fn wire_constructor_canonicalizes_built_in_codes() {
     assert_eq!(code, RuntimeErrorCode::RuntimeStore);
     assert!(code.is_retryable());
     assert!(!code.is_terminal());
-}
-
-#[test]
-fn queued_run_refusals_require_explicit_host_disposition() {
-    let error = crate::runtime_error::runtime_error_from_store_commit(
-        crate::store::StoreError::QueuedRunConfigurationChanged {
-            session_id: "changed".into(),
-        },
-    );
-    assert_eq!(error.code, RuntimeErrorCode::QueuedRunConfigurationChanged);
-    assert!(error.is_terminal());
-    assert!(!error.is_retryable());
-    assert!(RuntimeErrorCode::QueuedRunFailed.is_terminal());
 }
 
 /// FIG-3435: a `lash:` spelling must mean exactly one thing. A collision

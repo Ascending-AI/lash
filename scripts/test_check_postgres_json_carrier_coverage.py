@@ -19,9 +19,9 @@ class PostgresJsonCarrierCoverageTest(unittest.TestCase):
         manifest = MODULE.json.loads(MODULE.MANIFEST.read_text(encoding="utf-8"))
         valid, errors = MODULE.validate(carriers, enrolled, manifest)
         self.assertTrue(valid, errors)
-        self.assertIn("lash_queued_runs.admission_json", carriers)
+        self.assertIn("lash_session_roots.admission_json", carriers)
         self.assertEqual(
-            manifest["lash_queued_runs.admission_json"]["verdict"],
+            manifest["lash_session_roots.admission_json"]["verdict"],
             "deliberately-excluded",
         )
 

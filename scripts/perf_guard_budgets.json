@@ -851,7 +851,7 @@
               "budget_ms": 2.695,
               "required": true
             },
-            "queued_work.reclaim_by_batch_ids": {
+            "queued_work.reclaim_ready": {
               "budget_ms": 11.768,
               "required": true
             }

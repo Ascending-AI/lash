@@ -1625,10 +1625,10 @@ async fn assert_enqueued_wake_high_water_safety(
 ) -> Result<(), TestCaseError> {
     let session = SessionId::from("law-high-water");
     let process = crate::ProcessId::fixture("law-high-water-process");
-    // Consumption is intentionally not required to be contiguous: the public selected-batch
-    // drain contracts safe out-of-order settlement. The production precondition is contiguous
+    // Removal is intentionally not required to be contiguous: a host cancel withdraws any open
+    // row and raises the floor like a settlement. The production precondition is contiguous
     // enqueue, and the law is that MAX floor advancement never removes an already-enqueued lower
-    // row; literal contiguous-consumption assertions would reject that supported behavior. This
+    // row; literal contiguous-removal assertions would reject that supported behavior. This
     // Sender-floor allocation keeps normal process sequences dense and makes each value unique
     // across prune/re-register lifetimes. The receiver fence remains defense in depth for a
     // sender store restored behind surviving receiver state.
@@ -1644,41 +1644,17 @@ async fn assert_enqueued_wake_high_water_safety(
         )))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let owner = LeaseOwnerIdentity::opaque("law-high-water-owner", "law-high-water-incarnation");
-    let lease = runtime
-        .seal_claim_epoch_for_test(&session, &owner, "wake-high-water-executor", 60_000)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .acquired()
-        .ok_or_else(|| {
-            TestCaseError::fail("Enqueued-wake high-water safety: lease unexpectedly busy")
-        })?;
-    let claim = runtime
-        .claim_ready_queued_work_by_batch_ids(
-            &session,
-            &lease.fence(),
-            &owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&later.batch_id),
-            crate::testing::queued_work_claim_policy(64),
-        )
+    runtime
+        .cancel_queued_work_batch(&session, &later.batch_id)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| {
-            TestCaseError::fail("Enqueued-wake high-water safety: later wake was not claimable")
+            TestCaseError::fail("Enqueued-wake high-water safety: later wake was not cancellable")
         })?;
-    let mut state = RuntimeSessionState {
+    let state = RuntimeSessionState {
         session_id: session.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let commit = runtime
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(claim.completion()),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    state.apply_persisted_commit_result(commit);
     let after_later = runtime
         .list_queued_work(&session)
         .await
@@ -1689,7 +1665,7 @@ async fn assert_enqueued_wake_high_water_safety(
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
         vec![earlier.batch_id.as_str()],
-        "Enqueued-wake high-water safety: consuming sequence 2 removed or disturbed live sequence 1"
+        "Enqueued-wake high-water safety: cancelling sequence 2 removed or disturbed live sequence 1"
     );
 
     let redelivery_error = runtime
@@ -1769,15 +1745,15 @@ async fn assert_enqueued_wake_high_water_safety(
             TestCaseError::fail("Enqueued-wake high-water safety: second lease unexpectedly busy")
         })?;
     let claim = runtime
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session,
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&earlier.batch_id),
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| {
             TestCaseError::fail(
@@ -1837,7 +1813,7 @@ async fn assert_prune_reregister_wake_fence(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .wake_delivery
         .ok_or_else(|| TestCaseError::fail("old incarnation did not materialize a wake"))?;
-    let queued = handles
+    handles
         .runtime
         .enqueue_queued_work(process_wake_batch_draft(original))
         .await
@@ -1874,15 +1850,15 @@ async fn assert_prune_reregister_wake_fence(
         .ok_or_else(|| TestCaseError::fail("prune/re-register wake lease unexpectedly busy"))?;
     let claim = handles
         .runtime
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session,
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&queued.batch_id),
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("old-incarnation wake was not claimable"))?;
     handles
@@ -2282,6 +2258,21 @@ async fn consume_wake(
     let Some(batch) = queued.iter().find(|batch| batch.items.iter().any(|item| matches!(
         &item.payload, QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id && wake.sequence == sequence
     ))) else { return Ok(false); };
+    // The turn lane is claimed in enqueue order, so only the head wake is
+    // consumed by a settled claim. A wake behind it leaves through the other
+    // terminal transition, a host cancel, which raises the same floor
+    // (FIG-3545); a stale settlement needs a claim, so it drives the head.
+    let head = queued.iter().min_by_key(|batch| batch.enqueue_seq);
+    if head.is_none_or(|head| head.batch_id != batch.batch_id) {
+        if stale {
+            return Ok(false);
+        }
+        return runtime
+            .cancel_queued_work_batch(&session, &batch.batch_id)
+            .await
+            .map(|cancelled| cancelled.is_some())
+            .map_err(|error| error.to_string());
+    }
     let owner = LeaseOwnerIdentity::opaque("property-consumer", "property-consumer-incarnation");
     let Some(lease) = runtime
         .seal_claim_epoch_for_test(&session, &owner, "consume-wake-executor", 60_000)
@@ -2292,20 +2283,25 @@ async fn consume_wake(
         return Ok(false);
     };
     let Some(claim) = runtime
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session,
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&batch.batch_id),
-            crate::testing::queued_work_claim_policy(64),
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| error.to_string())?
-        .claim
     else {
         return Ok(false);
     };
+    if claim.batches.len() != 1 || claim.batches[0].batch_id != batch.batch_id {
+        return Err(format!(
+            "the head claim took {:?}, not the head wake {}",
+            claim.batches, batch.batch_id
+        ));
+    }
     let state = crate::load_persisted_session_state(runtime)
         .await
         .map_err(|error| error.to_string())?

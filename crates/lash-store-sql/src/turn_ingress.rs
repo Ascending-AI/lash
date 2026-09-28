@@ -26,8 +26,6 @@ pub mod closure_authorizations;
 pub mod pending_inputs;
 pub mod queued_batches;
 pub mod queued_items;
-pub mod queued_run_members;
-pub mod queued_runs;
 pub mod retired_scopes;
 pub mod run_specs;
 pub mod tool_intent_submissions;
@@ -40,9 +38,10 @@ crate::statements! {
     /// backends issue verbatim.
     pub struct TurnIngressStatements @ "turn_ingress" {
         /// Clear session `?1`'s park once its turn holds no work: no
-        /// unsettled input bound to the parked root and no pending queued
-        /// run. The returning projection names the park the `Cancelled`
-        /// event logs.
+        /// unsettled input bound to the parked root, and the parked root
+        /// holds no admission without terminal evidence (only its own
+        /// terminal write ends an admitted root). The returning projection
+        /// names the park the `Cancelled` event logs.
         delete_released_turn_park_returning = "DELETE FROM turn_parks
              WHERE session_id = ?1
                AND NOT EXISTS(
@@ -55,13 +54,16 @@ crate::statements! {
                     AND {{nonterminal_turn_input_state(pti.state)}}
                )
                AND NOT EXISTS(
-                  SELECT 1 FROM queued_runs qr
-                  WHERE qr.session_id = ?1 AND qr.status = 'pending'
+                  SELECT 1 FROM session_roots sr
+                  WHERE sr.session_id = ?1
+                    AND sr.root = turn_parks.turn_id
+                    AND sr.admission_json IS NOT NULL
+                    AND sr.terminal_kind IS NULL
                )
              RETURNING turn_id, park_id";
 
         /// The deployment's parked turns, the oldest live park's instant,
-        /// its turns in flight — a session with a pending queued run, a
+        /// its turns in flight — a session with an unfinished root, a
         /// claimed turn input that is not settled, or a parked turn — and
         /// the unparked ones among them its stalled close holds: the
         /// session's `close_session` intent stalled its obligation (ADR 0109
@@ -72,14 +74,16 @@ crate::statements! {
                 (SELECT COUNT(*) FROM (
                     SELECT session_id FROM turn_parks
                     UNION
-                    SELECT session_id FROM queued_runs WHERE status = 'pending'
+                    SELECT session_id FROM session_roots
+                    WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
                     UNION
                     SELECT session_id FROM pending_turn_inputs
                     WHERE claim_id IS NOT NULL
                       AND {{nonterminal_turn_input_state(state)}}
                 ) AS unsettled) AS in_flight_turns,
                 (SELECT COUNT(*) FROM (
-                    SELECT session_id FROM queued_runs WHERE status = 'pending'
+                    SELECT session_id FROM session_roots
+                    WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
                     UNION
                     SELECT session_id FROM pending_turn_inputs
                     WHERE claim_id IS NOT NULL
@@ -106,15 +110,17 @@ crate::statements! {
              GROUP BY park_executable_generation";
 
         /// Whether session `?1` has work a runner could pick up: an unfinished
-        /// queued run, a queued batch, or an input already deferred to the
-        /// next turn.
+        /// root, a queued batch, or an input already deferred to the next
+        /// turn.
         ///
         /// One question, so one statement: asking it as two would let a
         /// session go from empty to non-empty between them and report a
         /// bound-worthy session as idle.
         has_claimable_work = "SELECT EXISTS(
-                SELECT 1 FROM queued_runs
-                WHERE session_id = ?1 AND status = 'pending'
+                SELECT 1 FROM session_roots
+                WHERE session_id = ?1
+                  AND admission_json IS NOT NULL
+                  AND terminal_kind IS NULL
              ) OR EXISTS(
                 SELECT 1
                 FROM queued_work_batches qwb

@@ -21,11 +21,10 @@
 //! accept-then-drive entry, the one a child session's turn takes
 //! ([`TestTurnDrive::drive_child_session_turn`](crate::testing::TestTurnDrive::drive_child_session_turn)).
 //!
-//! A resumed queued run is the complement: it retakes the rows its
-//! checkpoints were assigned under its own generation first, so a restored
-//! claim it settles under that retaken claim is never a peer's supersession
-//! (see `queued_run_resume_retakes_its_open_checkpoint_assignments` and the
-//! crash matrix's `peer_reclaim` scenario).
+//! A resumed root is the complement: it retakes the rows its checkpoints
+//! claimed under its own generation first, so a restored claim it settles
+//! under that retaken claim is never a peer's supersession (see the crash
+//! matrix's `peer_reclaim` scenario).
 
 use super::direct_turn_acceptance::{
     JournalLayer, acceptance_runtime_for_session, direct_input, text_response,
@@ -449,7 +448,7 @@ async fn drain(
         )))
         .expect("scope the drain");
     match drainer
-        .stream_next_queued_work(crate::TurnOptions::new(CancellationToken::new(), scope))
+        .drive_next_queued_root(crate::TurnOptions::new(CancellationToken::new(), scope))
         .await
         .expect("the drain runs")
     {
@@ -541,7 +540,7 @@ async fn redrive_after_recovery(
     recovery: Recovery,
 ) -> (String, Result<crate::AssembledTurn, crate::RuntimeError>) {
     let run = JournaledRun::new(backend, TurnId::from(format!("{prefix}-logical-run")));
-    let follow_on = crate::store::QueuedRunPosition::derive_turn_id(&run.turn_id, 1);
+    let follow_on = crate::store::PhysicalTurn::derive_turn_id(&run.turn_id, 1);
     let admitted = Arc::new(AdmittedRow::default());
     let died = Arc::new(tokio::sync::Notify::new());
     let first_requests = Arc::new(Mutex::new(Vec::new()));

@@ -4,7 +4,7 @@ use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 pub(super) async fn stale_settlement_cannot_damage_successor(
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {
-    let first = store
+    store
         .enqueue_queued_work(queued_draft(0, 0, true))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
@@ -52,45 +52,16 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
         .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
-    let before_partial_selection = session_snapshot(store.as_ref())
-        .await
-        .map_err(TestCaseError::fail)?;
-    let partial_selection = store
-        .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
-            &successor_lease.fence(),
-            &successor_owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&first.batch_id),
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await;
-    prop_assert!(
-        matches!(
-            &partial_selection,
-            Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
-                required_batch_ids,
-            }) if required_batch_ids == &[first.batch_id.clone(), second.batch_id.clone()]
-        ),
-        "partial selection did not return the literal interrupted composition: {partial_selection:?}"
-    );
-    assert_snapshot_unchanged(
-        store.as_ref(),
-        before_partial_selection,
-        "partial interrupted-composition selected claim",
-    )
-    .await
-    .map_err(TestCaseError::fail)?;
     let successor_claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &SessionId::from(SESSION_ID),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
-            &[first.batch_id.clone(), second.batch_id.clone()],
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("successor did not reclaim full composition"))?;
 

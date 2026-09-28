@@ -24,13 +24,13 @@ use serde::{Deserialize, Serialize};
 
 use super::control_intent::ControlIntentId;
 use super::{SessionHeadRef, StoreError};
-use crate::{InputId, RuntimeErrorCode, SessionId, TurnId};
+use crate::{BatchId, InputId, SessionId, TurnId};
 use lash_sansio::TurnStop;
 
 /// A turn commit's identity: the logical root and the physical ordinal of
 /// the attempt that commits it. Derived, never minted: the ordinal is the
 /// physical turn's position within its root
-/// ([`QueuedRunPosition::derive_turn_id`](super::QueuedRunPosition::derive_turn_id)).
+/// ([`PhysicalTurn::derive_turn_id`](super::PhysicalTurn::derive_turn_id)).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TurnCommitId {
     root: TurnId,
@@ -54,7 +54,7 @@ impl TurnCommitId {
     /// `turn` is one of `root`'s physical turns.
     #[must_use]
     pub fn of_physical_turn(root: &TurnId, turn: &TurnId) -> Option<Self> {
-        let ordinal = super::QueuedRunPosition::physical_ordinal_of(root, turn)?;
+        let ordinal = super::PhysicalTurn::physical_ordinal_of(root, turn)?;
         Some(Self::new(root.clone(), u32::try_from(ordinal).ok()?))
     }
 }
@@ -113,13 +113,6 @@ pub enum RootTerminalCause {
         turn: TurnId,
         stop: Option<TurnStop>,
     },
-    /// A queued run settled failed without a head commit.
-    SettledFailed {
-        code: RuntimeErrorCode,
-        message: String,
-    },
-    /// A queued run settled empty: admitted, and nothing ran.
-    SettledEmpty,
     /// An operator cancelled the parked root (its control intent).
     OperatorCancelled { intent: ControlIntentId },
     /// An operator forked the parked root; its held inputs now drive
@@ -141,8 +134,6 @@ impl RootTerminalCause {
     pub fn kind(&self) -> RootTerminalKind {
         match self {
             Self::Committed { stop, .. } => RootTerminalKind::of_stop(stop.as_ref()),
-            Self::SettledFailed { .. } => RootTerminalKind::Failed,
-            Self::SettledEmpty => RootTerminalKind::Answered,
             Self::OperatorCancelled { .. } | Self::Forked { .. } | Self::SessionDeleted { .. } => {
                 RootTerminalKind::Cancelled
             }
@@ -242,48 +233,6 @@ impl RootTerminalWrite {
     }
 }
 
-/// The evidence the settlement of queued run `root` writes, when it writes
-/// any: a failed or empty settlement ends the root without a head commit. A
-/// completed settlement rides its head commit's
-/// [`RootTerminalWrite`], and forgetting an unworked run ends nothing a host
-/// could name.
-#[must_use]
-pub fn settled_queued_root_cause(terminal: &super::QueuedRunTerminal) -> Option<RootTerminalCause> {
-    match terminal {
-        super::QueuedRunTerminal::Failed { code, message } => {
-            Some(RootTerminalCause::SettledFailed {
-                code: code.clone(),
-                message: message.clone(),
-            })
-        }
-        super::QueuedRunTerminal::Empty => Some(RootTerminalCause::SettledEmpty),
-        super::QueuedRunTerminal::Completed { .. } => None,
-    }
-}
-
-/// The evidence the settlement `settlement` of a queued run writes for the
-/// run's root in `session_id`, at `at_ms`, when it writes any: see
-/// [`settled_queued_root_cause`]. The root is the run's scope.
-#[must_use]
-pub fn settled_queued_root_terminal(
-    session_id: &SessionId,
-    settlement: &super::QueuedRunCommit,
-    at_ms: u64,
-) -> Option<RootTerminal> {
-    let super::QueuedRunProgress::Settle { terminal } = &settlement.progress else {
-        return None;
-    };
-    let cause = settled_queued_root_cause(terminal)?;
-    Some(RootTerminal {
-        session_id: session_id.clone(),
-        root: TurnId::from(settlement.scope.id()),
-        kind: cause.kind(),
-        cause,
-        head_revision: None,
-        at_ms,
-    })
-}
-
 /// Decide one terminal write against the stored evidence of its root.
 ///
 /// No stored evidence: write. The same terminal: a retried writer, answer
@@ -377,41 +326,49 @@ impl RootTerminal {
 /// bindings of accepted inputs to the roots that drive them.
 #[async_trait::async_trait]
 pub trait RootStore: Send + Sync {
-    /// The root whose admission has no terminal evidence, if one exists.
-    async fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<TurnId>, StoreError>;
+    /// The session's one admitted root without terminal evidence, and the
+    /// head its admission recorded, if there is one. Admission resumes it
+    /// before anything else (FIG-3927).
+    async fn unfinished_root(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<UnfinishedRoot>, StoreError>;
 
-    /// Claim the next-turn prefix an input root drives, in one transaction
-    /// fenced by `request.lease` (FIG-3840).
+    /// Admit the turn-lane run headed by `request.head` to `request.root`, in
+    /// one transaction fenced by `request.lease` (FIG-3840, FIG-3927).
     ///
-    /// The first call claims up to `request.max_inputs` accepted rows. When
-    /// the claim reaches `request.head`, the same transaction reads the
-    /// session's state generation into the base, retains that base, binds
-    /// the rows to `request.root` and records the resulting
-    /// [`Claimed`](crate::turn_input_vocabulary::AcceptedTurnInputDrive::Claimed)
-    /// drive with the root. A claim that misses the head takes nothing and
-    /// returns `None`, as does an empty queue.
+    /// The first call composes from the session's open rows: an input head
+    /// takes the accepted next-turn prefix (up to `request.max_inputs`), a
+    /// batch head the ready queued-work prefix under `request.policy`. When
+    /// the prefix reaches the head, the same transaction reads the session's
+    /// state generation into the base, retains that base, binds the admitted
+    /// inputs to the root and records the [`RootAdmission`] on the root
+    /// (`session_roots.admission_json`, with `admitted_generation`). A
+    /// composition that misses the head takes nothing and returns `None`, as
+    /// does an empty lane.
     ///
     /// The root's admission chose the turn lane at a boundary whose command
     /// lane was empty (ADR 0101 §4), so a session command enqueued since
-    /// never holds the head back: the claim takes the prefix enqueued before
-    /// the earliest open command, and the rows after it wait for the next
-    /// boundary, where that command applies first.
+    /// never holds the head back: the composition takes the prefix enqueued
+    /// before the earliest open command, and the rows after it wait for the
+    /// next boundary, where that command applies first.
     ///
     /// Every later call for the same root, under any lease generation,
-    /// returns the recorded drive unchanged and claims nothing: a worker
+    /// returns the recorded admission unchanged and takes nothing: a worker
     /// that dies between this commit and the journal's record of its outcome
     /// leaves its successor exactly the composition, base and generation it
-    /// committed, never a prefix recomputed over inputs that arrived since.
-    /// A different root is refused while this admission lacks terminal
-    /// evidence.
-    async fn claim_root_inputs(
+    /// committed, never a prefix recomputed over rows that arrived since. A
+    /// different root is refused ([`StoreError::UnfinishedRootConflict`])
+    /// while an admitted root lacks terminal evidence.
+    async fn admit_root(
         &self,
-        _request: &RootInputClaimRequest,
-    ) -> Result<Option<crate::turn_input_vocabulary::AcceptedTurnInputDrive>, StoreError> {
+        _request: &AdmitRootRequest,
+    ) -> Result<Option<RootAdmission>, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
-            operation: "claim_root_inputs",
+            operation: "admit_root",
         })
     }
+
     /// The terminal evidence of `root` in `session_id`, if it has any.
     async fn root_terminal(
         &self,
@@ -420,7 +377,7 @@ pub trait RootStore: Send + Sync {
     ) -> Result<Option<RootTerminal>, StoreError>;
 
     /// The root that took accepted input `input`: the root its claim bound it
-    /// to, or the queued run it is a member of. `None` while it is pending.
+    /// to. `None` while it is pending.
     async fn root_of_input(
         &self,
         session_id: &SessionId,
@@ -446,18 +403,91 @@ pub trait RootStore: Send + Sync {
     ) -> Result<(), StoreError>;
 }
 
-/// A root's claim request ([`RootStore::claim_root_inputs`]). `base` is the
+/// The turn-lane row a root's admission is headed by.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "head", content = "id", rename_all = "snake_case")]
+pub enum AdmittedHead {
+    /// An accepted next-turn input.
+    Input(InputId),
+    /// A ready queued-work batch.
+    Batch(BatchId),
+}
+
+/// The session's unfinished root ([`RootStore::unfinished_root`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnfinishedRoot {
+    pub root: TurnId,
+    pub head: AdmittedHead,
+}
+
+/// What a root's admission took ([`RootStore::admit_root`]): the rows it
+/// drives and the head it was admitted on. The store records it on the root
+/// and the root's `AdmitRoot` step journals it, so every execution of the
+/// root drives exactly this composition from exactly this base.
+///
+/// A composition is one family: an input head admits turn inputs, a batch
+/// head queued work.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RootAdmission {
+    pub head: AdmittedHead,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<Box<crate::turn_input_vocabulary::TurnInputClaim>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<Box<crate::QueuedWorkClaim>>,
+    /// The session head the root was admitted on (FIG-3682).
+    pub base: SessionHeadRef,
+    pub turn_index: u64,
+    /// The executable generation the root runs under (FIG-3571): a redrive
+    /// under another one is refused before any effect.
+    pub generation: Option<crate::executable_generation::ExecutableGeneration>,
+}
+
+impl RootAdmission {
+    /// The accepted inputs the admission drives, in `enqueue_seq` order.
+    pub fn input_ids(&self) -> Vec<InputId> {
+        self.inputs
+            .iter()
+            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
+            .collect()
+    }
+}
+
+/// The recorded outcome of a root's `AdmitRoot` step.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "answer", rename_all = "snake_case")]
+pub enum RootAdmissionAnswer {
+    /// The admission reached its head: drive it.
+    Admitted { admission: Box<RootAdmission> },
+    /// The head cannot be driven by this root, which cedes.
+    Refused { refusal: RootAdmissionRefusal },
+}
+
+/// Why a root's admission ceded instead of driving its head.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootAdmissionRefusal {
+    /// The head row is held by a claim of the live drive epoch that is not
+    /// this root's.
+    HeldByLiveClaim,
+    /// The head row is no longer open: another root settled it, the host
+    /// cancelled it, or `vacuum()` pruned it after either.
+    SettledOrRemoved,
+}
+
+/// A root's admission request ([`RootStore::admit_root`]). `base` is the
 /// resident head the root is admitted on; the store replaces its
-/// `generation` with the durable state generation it reads inside the claim
-/// transaction. `turn_index` and `generation` are recorded as given.
+/// `generation` with the durable state generation it reads inside the
+/// admission transaction. `turn_index` and `generation` are recorded as
+/// given.
 #[derive(Clone, Debug)]
-pub struct RootInputClaimRequest {
+pub struct AdmitRootRequest {
     pub session_id: SessionId,
     pub lease: crate::ClaimAuthority,
     pub owner: crate::LeaseOwnerIdentity,
     pub root: TurnId,
-    pub head: InputId,
+    pub head: AdmittedHead,
     pub max_inputs: usize,
+    pub policy: crate::QueuedWorkClaimPolicy,
     pub base: SessionHeadRef,
     pub turn_index: u64,
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
@@ -573,7 +603,7 @@ mod tests {
         RootTerminalWrite {
             root: TurnId::from(root),
             commit: TurnCommitId::new(TurnId::from(root), ordinal),
-            turn: crate::store::QueuedRunPosition::derive_turn_id(
+            turn: crate::store::PhysicalTurn::derive_turn_id(
                 &TurnId::from(root),
                 u64::from(ordinal),
             ),
@@ -638,7 +668,7 @@ mod tests {
             TurnCommitId::of_physical_turn(&root, &root),
             Some(TurnCommitId::new(root.clone(), 0))
         );
-        let follow_on = crate::store::QueuedRunPosition::derive_turn_id(&root, 2);
+        let follow_on = crate::store::PhysicalTurn::derive_turn_id(&root, 2);
         assert_eq!(
             TurnCommitId::of_physical_turn(&root, &follow_on),
             Some(TurnCommitId::new(root.clone(), 2))

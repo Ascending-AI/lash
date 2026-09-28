@@ -1,13 +1,14 @@
-//! Running one admitted root (FIG-3600): its recorded claim, the head that
-//! claim admits it on, and its turns to their terminal commit.
+//! Running one admitted root (FIG-3600, FIG-3927): its recorded admission,
+//! the head that admission is headed by, and its turns to their terminal
+//! commit.
 //!
-//! An input root claims the accepted next-turn prefix its admission named,
-//! as a recorded step keyed by the root, so every redrive of the root, under
-//! any admission, replays the same claim and never re-reads pending rows. The
-//! claim records the head the root runs on and its turn index; a redrive
-//! rebuilds the root from that head, never from the live one its own commit
-//! may have moved (FIG-3682). A queued root runs the session's queued work
-//! through the queued-run drain.
+//! A root admits the turn-lane run its admission named, input-headed or
+//! queued-headed alike, as a recorded step keyed by the root, so every
+//! redrive of the root, under any admission, replays the same admission and
+//! never re-reads pending rows. The admission records the head the root runs
+//! on and its turn index; a redrive rebuilds the root from that head, never
+//! from the live one its own commit may have moved (FIG-3682). A command
+//! root applies the session's open command run and admits no turn.
 
 use std::sync::Arc;
 
@@ -17,19 +18,21 @@ use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::runtime::logical_turn::{LogicalTurnClaims, LogicalTurnStart};
 use crate::runtime::turn_loop::TurnStopwatch;
+use crate::store::{AdmittedHead, RootAdmissionAnswer, RootAdmissionRefusal};
 use crate::{
     RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError, TurnId, TurnInput,
 };
 use lash_core_execution::runtime::effect::AdmittedHeadVerdict;
 
 impl LashRuntime {
-    /// Claim the input prefix `admitted` names and drive it as the root's
-    /// logical turn, holding the session lane the root took before its seal.
-    pub(super) async fn run_input_root(
+    /// Admit the turn-lane run `admitted` is headed by and drive it as the
+    /// root's logical turn, holding the session lane the root took before
+    /// its seal.
+    pub(super) async fn run_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
-        head: &crate::InputId,
+        head: &AdmittedHead,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &TurnInput)>,
         lease: Option<crate::runtime::DriveClaimGuard>,
@@ -42,7 +45,7 @@ impl LashRuntime {
         // releases its lane before the panic resumes, so an immediate
         // successor is not refused as busy.
         let result = std::panic::AssertUnwindSafe(
-            self.run_input_root_holding_lease(
+            self.run_root_holding_lease(
                 root_controller,
                 admitted,
                 head,
@@ -69,11 +72,11 @@ impl LashRuntime {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_input_root_holding_lease(
+    async fn run_root_holding_lease(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
-        head: &crate::InputId,
+        head: &AdmittedHead,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &TurnInput)>,
         lease: &mut Option<crate::runtime::DriveClaimGuard>,
@@ -91,40 +94,37 @@ impl LashRuntime {
                     "a store-backed root holds the session execution lease",
                 ))
             })?;
-        // The claim is the root's admission onto a head: its first execution
-        // records the head and the turn index, so the resident head is
-        // brought current under the lease first; a replay reads both from the
-        // journal instead (FIG-3682).
+        // The admission records the head and the turn index, so the resident
+        // head is brought current under the lease first; a replay reads both
+        // from the journal instead (FIG-3682).
         if let Err(error) = self.refresh_resident_head_under_lease(lease.as_ref()).await {
             self.release_root_lease(lease.as_ref()).await;
             return Err(abort(error));
         }
-        let claim_invocation = crate::RuntimeEffectInvocation::new(
+        let admit_invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 root_controller.execution_scope().clone(),
-                // Keyed by the root, never by the admission: a later
-                // admission of the same root replays the claim its first
+                // Keyed by the root, never by the drive admission: a later
+                // admission of the same root replays the admission its first
                 // execution recorded, so the root drives exactly the rows its
                 // journal was written for.
-                format!("drive-claim:{root}"),
+                format!("drive-admit:{root}"),
             )
             .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
             crate::RuntimeAttribution::for_turn_admission(
                 self.state.session_id.clone(),
                 root.clone(),
             ),
-            format!("{root}.drive-claim"),
+            format!("{root}.drive-admit"),
         );
-        let drive = root_controller
+        let answer = root_controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
-                    claim_invocation,
-                    crate::RuntimeEffectCommand::ClaimAcceptedTurnInput {
-                        input_id: head.clone(),
-                    },
+                    admit_invocation,
+                    crate::RuntimeEffectCommand::AdmitRoot { head: head.clone() },
                 ),
                 crate::RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(RootInputClaimRunner {
+                    Box::new(AdmitRootRunner {
                         store: Arc::clone(&store),
                         effect_host: Arc::clone(&self.host.core.control.effect_host),
                         scope: root_controller.admitted_scope().clone(),
@@ -139,8 +139,14 @@ impl LashRuntime {
                             .durability
                             .queued_work_batching
                             .max_turn_input_claim(),
+                        policy: self
+                            .host
+                            .core
+                            .durability
+                            .queued_work_batching
+                            .claim_policy(self.max_context_tokens()),
                         base: crate::store::SessionHeadRef {
-                            // Read by the claim body on its first execution.
+                            // Read by the admission body on its first execution.
                             generation: 0,
                             revision: self.state.head_revision,
                             leaf: self.state.session_graph.leaf_node_id.clone(),
@@ -150,7 +156,7 @@ impl LashRuntime {
                         turn_index: self.state.turn_index + 1,
                         generation: crate::runtime::turn_loop::generation_fence::current(self),
                         admitted_generation: admitted.admitted_generation().clone(),
-                        trace: ClaimTrace {
+                        trace: AdmissionTrace {
                             sink: self.host.core.tracing.trace_sink.clone(),
                             base: self.host.core.tracing.trace_context.clone(),
                             clock: Arc::clone(&self.host.core.clock),
@@ -162,18 +168,13 @@ impl LashRuntime {
                 ),
             )
             .await
-            .and_then(crate::RuntimeEffectOutcome::into_accepted_turn_input_drive)
+            .and_then(crate::RuntimeEffectOutcome::into_root_admission)
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error);
-        let claim = match drive {
-            Ok(crate::AcceptedTurnInputDrive::Claimed {
-                claim,
-                base,
-                turn_index,
-                generation,
-            }) => {
-                let head_moved = self.state.head_revision != base.revision
-                    || self.state.session_graph.leaf_node_id != base.leaf
-                    || self.state.checkpoint_ref != base.checkpoint;
+        let admission = match answer {
+            Ok(RootAdmissionAnswer::Admitted { admission }) => {
+                let head_moved = self.state.head_revision != admission.base.revision
+                    || self.state.session_graph.leaf_node_id != admission.base.leaf
+                    || self.state.checkpoint_ref != admission.base.checkpoint;
                 let inspection = crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(
                         root_controller.execution_scope().clone(),
@@ -227,9 +228,9 @@ impl LashRuntime {
                     .adopt_admitted_turn(
                         &store,
                         AdmittedTurn {
-                            base: &base,
-                            turn_index,
-                            generation: generation.as_ref(),
+                            base: &admission.base,
+                            turn_index: admission.turn_index,
+                            generation: admission.generation.as_ref(),
                             root: &root,
                             head,
                         },
@@ -241,60 +242,66 @@ impl LashRuntime {
                     self.release_root_lease(lease.as_ref()).await;
                     return Err(abort(error));
                 }
-                *claim
+                *admission
             }
-            Ok(crate::AcceptedTurnInputDrive::Refused { .. }) => {
+            Ok(RootAdmissionAnswer::Refused { .. }) => {
                 self.release_root_lease(lease.as_ref()).await;
                 return Ok(RootRun {
                     outcome: RootOutcome::Ceded { root },
                     run: None,
                     driven_inputs: Vec::new(),
-                    queued_drain: None,
+                    empty_drain: None,
                 });
             }
             Err(error) => {
-                // The claim's body may have claimed rows before its outcome
+                // The admission's body may have taken rows before its outcome
                 // was lost. They stay claimed under this generation: the next
-                // drive admits the same root first and re-takes them.
+                // drive admits the same root first and reads its admission
+                // back.
                 self.release_root_lease(lease.as_ref()).await;
                 return Err(abort(error));
             }
         };
 
-        // Drive the claimed rows. Live per-turn state that cannot cross the
+        // Drive the admitted rows. Live per-turn state that cannot cross the
         // durable boundary is re-attached from an in-process caller's input.
-        let mut driven = claim.materialize_turn_input();
-        if let Some((_, live)) = live.filter(|(input_id, _)| {
-            claim
-                .inputs
-                .iter()
-                .any(|input| input.input_id == **input_id)
-        }) {
+        let driven_inputs = admission.input_ids();
+        let inputs = admission.inputs.map(|claim| *claim);
+        let queued = admission.queued.map(|claim| *claim);
+        let mut driven = inputs.as_ref().map_or_else(
+            || TurnInput::items(Vec::new()),
+            |claim| claim.materialize_turn_input(),
+        );
+        if let Some((_, live)) =
+            live.filter(|(input_id, _)| driven_inputs.iter().any(|id| id == *input_id))
+        {
             driven.turn_context = live.turn_context.clone();
         }
         driven.trace_turn_id = Some(root.clone());
-        let driven_inputs = claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.clone())
-            .collect::<Vec<_>>();
-        let drive_claim = claim.clone();
-        // A replay carries the first execution's claim token; if another
+        // A replay carries the first execution's claim tokens; if another
         // driver reclaimed these rows meanwhile, the commit cedes instead of
         // dropping the settlement and answering them twice.
-        self.journaled_drive_claims.insert(claim.claim_id.clone());
+        let admitted_claims = inputs
+            .iter()
+            .map(|claim| claim.claim_id.clone())
+            .chain(queued.iter().map(|claim| claim.claim_id.clone()))
+            .collect::<Vec<_>>();
+        self.journaled_drive_claims
+            .extend(admitted_claims.iter().cloned());
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(driven, None),
             sinks.events,
             sinks.turn_events,
             root_controller.clone(),
             sinks.local_stop.clone(),
-            LogicalTurnClaims::new(Vec::new(), vec![claim]),
+            LogicalTurnClaims::new(queued.into_iter().collect(), inputs.into_iter().collect()),
             lease,
             stopwatch,
         ))
         .await;
-        self.journaled_drive_claims.remove(&drive_claim.claim_id);
+        for claim_id in &admitted_claims {
+            self.journaled_drive_claims.remove(claim_id);
+        }
         self.admitted_turn_index = None;
         let run = self
             .settle_drive_authority(lease.as_ref(), result)
@@ -311,34 +318,42 @@ impl LashRuntime {
             outcome,
             run: Some(run),
             driven_inputs,
-            queued_drain: None,
+            empty_drain: None,
         })
     }
 
-    /// Run the session's queued work under `admitted`'s root: the unfinished
-    /// queued run the root names, or a new one under it.
-    pub(super) async fn run_queued_root(
+    /// Apply the session's open command run under `admitted`'s root (ADR 0101
+    /// §4): every leading command, each commit fenced by the root's seal,
+    /// until the command lane is empty. The root admits no turn.
+    pub(super) async fn run_commands_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
-        sinks: &DriveSinks<'_>,
+        lease: &crate::runtime::DriveClaimGuard,
     ) -> Result<RootRun, DriveAbort> {
         let root = admitted.root().clone();
-        let host = Arc::clone(&self.host.core.control.effect_host);
-        let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
-        self.queued_run_driven_inputs.clear();
-        let drain = Box::pin(self.stream_next_queued_work(options))
-            .await
-            .map_err(|error| drive_abort(Some(&root), error))?;
-        let driven_inputs = std::mem::take(&mut self.queued_run_driven_inputs);
-        let mut run = self.root_run_of_drain(root, drain)?;
-        if run.run.is_some() {
-            // Accepted input the queued run took into its turn — the turn
-            // lane composes in `enqueue_seq` order, so input behind earlier
-            // queued work rides that work's run (ADR 0101 §5).
-            run.driven_inputs = driven_inputs;
-        }
-        Ok(run)
+        let fence = self.drive_root.as_ref().map(|run| run.fence.clone());
+        while Box::pin(self.drain_next_session_command_fenced(
+            &lease.fence(),
+            fence.as_ref(),
+            tokio_util::sync::CancellationToken::new(),
+            root_controller.controller(),
+        ))
+        .await
+        .map_err(|error| drive_abort(Some(&root), error))?
+        .is_some()
+        {}
+        // The outcome is the admission's, never what this execution found:
+        // a redelivery finds the lane its first execution already applied,
+        // and must answer the same. A lane that made no progress shows in the
+        // next admission naming the same leading command, which stops the
+        // drive ([`DriveLoop`](crate::engine::DriveLoop)).
+        Ok(RootRun {
+            outcome: RootOutcome::Applied { root },
+            run: None,
+            driven_inputs: Vec::new(),
+            empty_drain: None,
+        })
     }
 
     /// Recover the follow-on the session head owes under `admitted`'s root
@@ -361,17 +376,12 @@ impl LashRuntime {
         self.root_run_of_drain(root, drain)
     }
 
-    /// A queued-work root's outcome from how its drain ended.
+    /// A follow-on recovery root's outcome from how its drain ended.
     fn root_run_of_drain(
-        &mut self,
+        &self,
         root: TurnId,
         drain: crate::runtime::turn_loop::QueuedTurnDrain<crate::AssembledTurn>,
     ) -> Result<RootRun, DriveAbort> {
-        if let crate::runtime::turn_loop::QueuedTurnDrain::Replayed(receipt) = &drain
-            && let Some(run) = self.drive_root.as_mut()
-        {
-            run.mark_replayed(receipt);
-        }
         Ok(match drain {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => RootRun {
                 outcome: RootOutcome::Committed {
@@ -383,23 +393,7 @@ impl LashRuntime {
                     acceptance: None,
                 }),
                 driven_inputs: Vec::new(),
-                queued_drain: None,
-            },
-            crate::runtime::turn_loop::QueuedTurnDrain::Replayed(receipt) => RootRun {
-                outcome: match &receipt.terminal {
-                    Some(crate::store::QueuedRunTerminal::Completed { outcome, .. }) => {
-                        RootOutcome::Committed {
-                            root,
-                            outcome: outcome.clone(),
-                        }
-                    }
-                    _ => RootOutcome::Ceded { root },
-                },
-                run: None,
-                driven_inputs: Vec::new(),
-                queued_drain: Some(crate::runtime::turn_loop::QueuedTurnDrain::Replayed(
-                    receipt,
-                )),
+                empty_drain: None,
             },
             crate::runtime::turn_loop::QueuedTurnDrain::Empty(
                 crate::runtime::turn_loop::EmptyQueuedDrainReason::ExecutionLaneBusy,
@@ -416,7 +410,7 @@ impl LashRuntime {
                 outcome: RootOutcome::Ceded { root },
                 run: None,
                 driven_inputs: Vec::new(),
-                queued_drain: Some(crate::runtime::turn_loop::QueuedTurnDrain::Empty(reason)),
+                empty_drain: Some(reason),
             },
         })
     }
@@ -429,13 +423,13 @@ impl LashRuntime {
         }
     }
 
-    /// Adopt the head a root's claim admitted it on and pin its recorded turn
-    /// index for the prepare phase (FIG-3682).
+    /// Adopt the head a root's admission admitted it on and pin its recorded
+    /// turn index for the prepare phase (FIG-3682).
     ///
     /// The recorded inspection decides whether the resident head may be
-    /// rebuilt from the claim's base. A live revalidation may only stop a
-    /// root whose claim lost its fence while its handler was down; it cannot
-    /// select new work or alter the claim's recorded base.
+    /// rebuilt from the admission's base. A live revalidation may only stop a
+    /// root whose admission lost its fence while its handler was down; it
+    /// cannot select new work or alter the admission's recorded base.
     ///
     /// A base the store no longer retains parks the root too.
     async fn adopt_admitted_turn(
@@ -451,7 +445,7 @@ impl LashRuntime {
             root: turn_id,
             head,
         } = admitted;
-        // The root runs only under the executable generation its claim
+        // The root runs only under the executable generation its admission
         // recorded (FIG-3571), checked before anything else of it runs.
         crate::runtime::turn_loop::generation_fence::admit(self, generation)?;
         let turn_index = usize::try_from(turn_index).map_err(|_| {
@@ -470,11 +464,19 @@ impl LashRuntime {
                 .await
                 .map_err(crate::runtime::runtime_error_from_store_commit)?
         {
-            let open = store
-                .list_pending_turn_inputs(&self.state.session_id)
-                .await
-                .map_err(crate::runtime::runtime_error_from_store_commit)?;
-            if open.iter().any(|read| read.input.input_id == *head) {
+            // A queued head is claimed by this root alone (one unfinished
+            // root per session), so a head that moved without this turn's
+            // commit was moved by the verb that ended the root: it cedes.
+            let open = match head {
+                AdmittedHead::Input(input) => store
+                    .list_pending_turn_inputs(&self.state.session_id)
+                    .await
+                    .map_err(crate::runtime::runtime_error_from_store_commit)?
+                    .iter()
+                    .any(|read| read.input.input_id == *input),
+                AdmittedHead::Batch(_) => false,
+            };
+            if open {
                 AdmittedHeadVerdict::Diverged {
                     live_revision: self.state.head_revision,
                 }
@@ -490,7 +492,7 @@ impl LashRuntime {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::AcceptedTurnInputCeded,
                     format!(
-                        "accepted turn input `{head}` was answered by another driver while root \
+                        "admitted head `{head:?}` was answered by another driver while root \
                          `{turn_id}` was down, so this root cedes and commits nothing"
                     ),
                 ));
@@ -527,14 +529,35 @@ struct AdmittedTurn<'a> {
     turn_index: u64,
     generation: Option<&'a crate::ExecutableGeneration>,
     root: &'a TurnId,
-    head: &'a crate::InputId,
+    head: &'a AdmittedHead,
+}
+
+/// Whether the row `head` names is still open: an input still pending, or a
+/// batch still queued.
+async fn head_is_open(
+    store: &dyn crate::store::RuntimePersistence,
+    session_id: &crate::SessionId,
+    head: &AdmittedHead,
+) -> Result<bool, crate::StoreError> {
+    Ok(match head {
+        AdmittedHead::Input(input) => store
+            .list_pending_turn_inputs(session_id)
+            .await?
+            .iter()
+            .any(|read| read.input.input_id == *input),
+        AdmittedHead::Batch(batch) => store
+            .list_queued_work(session_id)
+            .await?
+            .iter()
+            .any(|queued| queued.batch_id == *batch),
+    })
 }
 
 struct InspectAdmittedHeadRunner {
     store: Arc<dyn crate::store::RuntimePersistence>,
     session_id: crate::SessionId,
     root: TurnId,
-    head: crate::InputId,
+    head: AdmittedHead,
     head_moved: bool,
     live_revision: u64,
 }
@@ -555,7 +578,7 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
         if *root != self.root || *head != self.head {
             return Err(crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "admitted head inspector was bound to another root or input",
+                "admitted head inspector was bound to another root or head",
             ));
         }
         let store_fault = |error| {
@@ -573,12 +596,10 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
         {
             AdmittedHeadVerdict::Ready
         } else {
-            let open = self
-                .store
-                .list_pending_turn_inputs(&self.session_id)
+            if head_is_open(self.store.as_ref(), &self.session_id, &self.head)
                 .await
-                .map_err(store_fault)?;
-            if open.iter().any(|read| read.input.input_id == self.head) {
+                .map_err(store_fault)?
+            {
                 AdmittedHeadVerdict::Diverged {
                     live_revision: self.live_revision,
                 }
@@ -590,8 +611,8 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
     }
 }
 
-/// The drain options a queued-work root runs under: its own drain scope,
-/// named by the root.
+/// The drain options a follow-on recovery root runs under: its own drain
+/// scope, named by the root.
 fn root_drain_options<'a>(
     root_controller: &ScopedEffectController<'a>,
     host: &'a dyn crate::EffectHost,
@@ -610,47 +631,49 @@ fn root_drain_options<'a>(
     )
     .with_local_stop(sinks.local_stop.clone())
     .with_events(sinks.events)
-    .with_turn_events(sinks.turn_events)
-    .with_admitted_generation(admitted.admitted_generation().clone()))
+    .with_turn_events(sinks.turn_events))
 }
 
-/// Trace attribution for the claim decisions the runner makes.
-struct ClaimTrace {
+/// Trace attribution for the admission decisions the runner makes.
+struct AdmissionTrace {
     sink: Option<Arc<dyn lash_trace::TraceSink>>,
     base: lash_trace::TraceContext,
     clock: Arc<dyn crate::Clock>,
     turn_index: usize,
 }
 
-/// What the claim probe decided for the head row: either the outcome the
-/// journal records (a claim or a refusal) or a race the step retries.
-enum RootClaimProbe {
-    /// The journaled `ClaimAcceptedTurnInput` outcome.
-    Drive(crate::AcceptedTurnInputDrive),
-    /// The claim attempt returned no claim yet the head row reads claimable
-    /// and held by nobody: claim and read raced, so the step defers to a
-    /// later admission instead of journaling a refusal over a row nothing
-    /// owns.
-    HeadMissedByClaimRace,
+/// What the admission probe decided for the head row: either the outcome
+/// the journal records (an admission or a refusal) or a race the step
+/// retries.
+enum RootAdmissionProbe {
+    /// The journaled `AdmitRoot` outcome.
+    Answer(RootAdmissionAnswer),
+    /// The admission took nothing yet the head row reads open and held by
+    /// nobody: composition and read raced, so the step defers to a later
+    /// admission instead of journaling a refusal over a row nothing owns.
+    HeadMissedByRace,
 }
 
-/// The first execution of an input root's claim.
+/// The first execution of a root's admission.
 ///
 /// Everything it needs is captured at the drive site; none of it enters the
-/// envelope, which names only the head input: the fence and owner change with
-/// every lease generation, and the envelope must not.
-struct RootInputClaimRunner {
+/// envelope, which names only the head: the fence and owner change with
+/// every drive epoch, and the envelope must not.
+struct AdmitRootRunner {
     store: Arc<dyn crate::store::RuntimePersistence>,
     effect_host: Arc<dyn crate::EffectHost>,
     scope: crate::AdmittedScope,
     fence: crate::ClaimAuthority,
     owner: crate::LeaseOwnerIdentity,
     session_id: crate::SessionId,
-    head: crate::InputId,
+    head: AdmittedHead,
     root: TurnId,
     /// The runtime's turn-input claim bound
     /// ([`QueuedWorkBatchingConfig::max_turn_input_claim`](crate::QueuedWorkBatchingConfig::max_turn_input_claim)).
     max_inputs: usize,
+    /// The turn-lane composition policy a queued-work head is admitted
+    /// under.
+    policy: crate::QueuedWorkClaimPolicy,
     /// The resident head the root is admitted on, as the drive refreshed it
     /// under the lease. Its generation is read in the body.
     base: crate::store::SessionHeadRef,
@@ -659,39 +682,39 @@ struct RootInputClaimRunner {
     /// The executable generation the root is admitted under (FIG-3571).
     generation: Option<crate::ExecutableGeneration>,
     admitted_generation: crate::engine::BuildGeneration,
-    trace: ClaimTrace,
+    trace: AdmissionTrace,
 }
 
 #[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for RootInputClaimRunner {
+impl RuntimeEffectLocalRunner for AdmitRootRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let crate::RuntimeEffectCommand::ClaimAcceptedTurnInput { input_id } = &envelope.command
-        else {
+        let crate::RuntimeEffectCommand::AdmitRoot { head } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
-                    "root claim executor cannot execute {} command",
+                    "root admission executor cannot execute {} command",
                     envelope.command.kind().as_str()
                 ),
             ));
         };
-        if *input_id != self.head {
+        if *head != self.head {
             return Err(crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
-                    "root claim executor was bound to `{}` but asked to claim `{input_id}`",
+                    "root admission executor was bound to `{:?}` but asked to admit `{head:?}`",
                     self.head
                 ),
             ));
         }
         // A store that did not answer is this attempt's fault, never the
-        // claim's recorded outcome: the admission re-admits this same root
-        // first, so a recorded fault would replay under `drive-claim:{root}`
-        // on every later drive and wedge the session. Like admission and the
-        // seal, the step runs again; only a claim or a refusal is recorded.
+        // admission's recorded outcome: the drive re-admits this same root
+        // first, so a recorded fault would replay under `drive-admit:{root}`
+        // on every later drive and wedge the session. Like the drive's
+        // admission and the seal, the step runs again; only an admission or
+        // a refusal is recorded.
         let root = self.root.clone();
         {
             let scoped = self
@@ -711,31 +734,31 @@ impl RuntimeEffectLocalRunner for RootInputClaimRunner {
                 crate::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation()
             })?;
         }
-        let drive = match self.claim().await.map_err(|err| {
+        let answer = match self.admit().await.map_err(|err| {
             let mut fault = crate::RuntimeEffectControllerError::from(
                 crate::runtime::runtime_error_from_store_commit(err),
             );
-            fault.message = format!("root input claim failed: {}", fault.message);
+            fault.message = format!("root admission failed: {}", fault.message);
             fault.retryable_uncommitted_derivation()
         })? {
-            RootClaimProbe::Drive(drive) => drive,
-            // The claim attempt missed the head yet the read shows it
-            // claimable and held by nobody: the two raced, so the step
-            // defers to a later admission rather than journal a refusal that
-            // would cede the root over a row nothing owns (review of #2290).
-            RootClaimProbe::HeadMissedByClaimRace => {
+            RootAdmissionProbe::Answer(answer) => answer,
+            // The admission missed the head yet the read shows it open and
+            // held by nobody: the two raced, so the step defers to a later
+            // admission rather than journal a refusal that would cede the
+            // root over a row nothing owns (review of #2290).
+            RootAdmissionProbe::HeadMissedByRace => {
                 return Err(crate::RuntimeEffectControllerError::new(
                     RuntimeErrorCode::SessionExecutionLaneBusy,
-                    format!("root `{root}` missed its head on a claim race"),
+                    format!("root `{root}` missed its head on an admission race"),
                 )
                 .retryable_uncommitted_derivation());
             }
         };
-        Ok(crate::RuntimeEffectOutcome::ClaimAcceptedTurnInput { drive })
+        Ok(crate::RuntimeEffectOutcome::AdmitRoot { answer })
     }
 }
 
-impl RootInputClaimRunner {
+impl AdmitRootRunner {
     fn emit(&self, name: &str, payload: serde_json::Value) {
         crate::trace::emit_trace(
             &self.trace.sink,
@@ -752,71 +775,95 @@ impl RootInputClaimRunner {
         );
     }
 
-    /// Claim the accepted next-turn prefix headed by the admitted input.
+    /// Admit the turn-lane run headed by the admitted head.
     ///
-    /// The store claims the prefix, retains the base, binds the rows to the
-    /// root and records the resulting drive in one transaction, and a later
-    /// execution of the same root reads that record back instead of claiming
-    /// again while the head is undelivered (FIG-3840). A worker that dies
-    /// after the commit but before the journal takes the outcome therefore
-    /// leaves nothing to recompute: the successor drives exactly the recorded
-    /// composition, base and executable generation, never a prefix widened by
-    /// inputs that arrived meanwhile.
+    /// The store composes the run, retains the base, binds the admitted
+    /// inputs to the root and records the admission in one transaction, and a
+    /// later execution of the same root reads that record back instead of
+    /// composing again (FIG-3840, FIG-3927). A worker that dies after the
+    /// commit but before the journal takes the outcome therefore leaves
+    /// nothing to recompute: the successor drives exactly the recorded
+    /// composition, base and executable generation, never a run widened by
+    /// rows that arrived meanwhile.
     ///
-    /// A claim that would not reach the head takes nothing, and the head row
-    /// is read without mutating it: held means another driver has it; absent
-    /// means it was settled, cancelled, or pruned; pending after a missed
-    /// claim means the claim raced, so the step asks to run again rather than
-    /// record a refusal. Nothing here ever drops, withdraws, or re-admits a
-    /// row.
-    async fn claim(self) -> Result<RootClaimProbe, crate::StoreError> {
-        let probe = |drive| RootClaimProbe::Drive(drive);
-        let request = crate::store::RootInputClaimRequest {
+    /// A composition that would not reach the head takes nothing, and the
+    /// head row is read without mutating it: held means another driver has
+    /// it; absent means it was settled, cancelled, or pruned; open after a
+    /// missed admission means the admission raced, so the step asks to run
+    /// again rather than record a refusal. Nothing here ever drops,
+    /// withdraws, or re-admits a row.
+    async fn admit(self) -> Result<RootAdmissionProbe, crate::StoreError> {
+        let request = crate::store::AdmitRootRequest {
             session_id: self.session_id.clone(),
             lease: self.fence.clone(),
             owner: self.owner.clone(),
             root: self.root.clone(),
             head: self.head.clone(),
             max_inputs: self.max_inputs,
+            policy: self.policy.clone(),
             base: self.base.clone(),
             turn_index: self.turn_index as u64,
             generation: self.generation.clone(),
             admitted_generation: self.admitted_generation.clone(),
         };
-        if let Some(drive) = self.store.claim_root_inputs(&request).await? {
-            if let crate::AcceptedTurnInputDrive::Claimed { claim, .. } = &drive {
+        if let Some(admission) = self.store.admit_root(&request).await? {
+            if let Some(claim) = &admission.inputs {
                 self.emit(
                     "turn_input.claimed",
                     serde_json::json!({
                         "claim_id": &claim.claim_id,
-                        "input_ids": claim
-                            .inputs
-                            .iter()
-                            .map(|input| input.input_id.clone())
-                            .collect::<Vec<_>>(),
+                        "input_ids": admission.input_ids(),
                     }),
                 );
             }
-            return Ok(probe(drive));
-        }
-        let open = self
-            .store
-            .list_pending_turn_inputs(&self.session_id)
-            .await?;
-        let status = open
-            .iter()
-            .find(|read| read.input.input_id == self.head)
-            .map(|read| read.status.clone());
-        Ok(probe(match status {
-            Some(crate::PendingTurnInputReadStatus::Pending) => {
-                return Ok(RootClaimProbe::HeadMissedByClaimRace);
+            if let Some(claim) = &admission.queued {
+                let materialized = claim.materialize_queued_checkpoint_work();
+                self.emit(
+                    "queued_work.claimed",
+                    crate::runtime::turn_loop::queued_work_trace_payload(
+                        crate::QueuedWorkClaimBoundary::Idle,
+                        claim,
+                        &materialized.turn_causes,
+                    ),
+                );
             }
-            Some(_) => crate::AcceptedTurnInputDrive::Refused {
-                refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim,
-            },
-            None => crate::AcceptedTurnInputDrive::Refused {
-                refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved,
-            },
-        }))
+            return Ok(RootAdmissionProbe::Answer(RootAdmissionAnswer::Admitted {
+                admission: Box::new(admission),
+            }));
+        }
+        let status = match &self.head {
+            AdmittedHead::Input(head) => self
+                .store
+                .list_pending_turn_inputs(&self.session_id)
+                .await?
+                .into_iter()
+                .find(|read| read.input.input_id == *head)
+                .map(|read| read.status == crate::PendingTurnInputReadStatus::Pending),
+            AdmittedHead::Batch(head) => {
+                let open = self
+                    .store
+                    .list_pending_queued_work(&self.session_id)
+                    .await?
+                    .iter()
+                    .any(|batch| batch.batch_id == *head);
+                let present = open
+                    || self
+                        .store
+                        .list_queued_work(&self.session_id)
+                        .await?
+                        .iter()
+                        .any(|batch| batch.batch_id == *head);
+                present.then_some(open)
+            }
+        };
+        Ok(match status {
+            Some(true) => RootAdmissionProbe::HeadMissedByRace,
+            Some(false) => RootAdmissionProbe::Answer(RootAdmissionAnswer::Refused {
+                refusal: RootAdmissionRefusal::HeldByLiveClaim,
+            }),
+            None => RootAdmissionProbe::Answer(RootAdmissionAnswer::Refused {
+                refusal: RootAdmissionRefusal::SettledOrRemoved,
+            }),
+        })
     }
 }

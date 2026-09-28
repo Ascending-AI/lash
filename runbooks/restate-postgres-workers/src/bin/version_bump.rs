@@ -57,7 +57,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// stale by a live run.
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The tables component 101 lacks: the cancellation affected-input child table
-/// component 102 installed (FIG-3263), the queued-run tables, the park-feed
+/// component 102 installed (FIG-3263), the park-feed
 /// clock and event tables component 128 installs (FIG-3659), the catalog
 /// identity component 132 installs (FIG-3667), and the fleet-format row
 /// component 136 installs (FIG-3796).
@@ -66,11 +66,9 @@ const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// so these lists now describe a catalog old enough that the supported-range
 /// gate refuses it outright rather than a source an in-open migration arm
 /// would have accepted.
-const POST_FLOOR_TABLES: [&str; 7] = [
+const POST_FLOOR_TABLES: [&str; 5] = [
     "lash_catalog_identity",
     "lash_fleet_format",
-    "lash_queued_run_members",
-    "lash_queued_runs",
     "lash_turn_cancel_affected_inputs",
     "lash_turn_park_clock",
     "lash_turn_park_events",

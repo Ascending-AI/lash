@@ -1,6 +1,6 @@
 use super::*;
 
-/// The factory stays unbound until persistence admits the queued run.
+/// The factory stays unbound until the drain names the scope it runs under.
 #[derive(Clone)]
 pub enum QueuedEffectSource<'a> {
     Host {
@@ -48,11 +48,6 @@ pub struct QueuedTurnOptions<'a> {
     pub(crate) local_stop: LocalTurnStop,
     events: Option<&'a dyn EventSink>,
     turn_events: Option<&'a dyn TurnActivitySink>,
-    /// The drain generation of the drive admission this drain runs under
-    /// (FIG-3795 S9): a queued run it begins stamps it, so the run's resume
-    /// routes by the generation that admitted it. `None` for a drain no
-    /// drive admitted (an operator's own): the executing build's stamps.
-    pub(crate) admitted_generation: Option<crate::engine::BuildGeneration>,
 }
 
 impl<'a> QueuedTurnOptions<'a> {
@@ -64,7 +59,6 @@ impl<'a> QueuedTurnOptions<'a> {
             local_stop: LocalTurnStop::from_token(cancel, None),
             events: None,
             turn_events: None,
-            admitted_generation: None,
         }
     }
     pub fn with_events(mut self, events: &'a dyn EventSink) -> Self {
@@ -79,12 +73,6 @@ impl<'a> QueuedTurnOptions<'a> {
     /// [`TurnOptions::with_local_stop`](super::TurnOptions::with_local_stop).
     pub fn with_local_stop(mut self, stop: LocalTurnStop) -> Self {
         self.local_stop = stop;
-        self
-    }
-    /// The drain generation the queued run this drain begins records
-    /// (FIG-3795 S9): the recorded `Admitted`'s stamp.
-    pub fn with_admitted_generation(mut self, generation: crate::engine::BuildGeneration) -> Self {
-        self.admitted_generation = Some(generation);
         self
     }
     pub(crate) fn bind(
@@ -107,7 +95,6 @@ impl<'a> From<TurnOptions<'a>> for QueuedTurnOptions<'a> {
             local_stop: options.local_stop,
             events: options.events,
             turn_events: options.turn_events,
-            admitted_generation: None,
         }
     }
 }

@@ -85,11 +85,6 @@ pub(super) fn require_commit_fences_conn(
             now,
         )?;
     }
-    if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none() {
-        return Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: commit.session_id.clone(),
-        });
-    }
     match commit.drive_fence.as_ref() {
         Some(fence) => require_fence_conn(conn, &commit.session_id, fence),
         None => Ok(()),

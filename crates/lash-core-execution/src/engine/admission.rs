@@ -60,9 +60,10 @@ pub enum SealVerdict {
 /// It has no public constructor: it is decoded only from a recorded
 /// [`AdmitVerdict::Admit`].
 ///
-/// It records no head. The head a root runs on, and its turn index, are
-/// recorded once, by the root's claim step, which a redrive replays (ADR 0105
-/// §2, FIG-3682): the claim is the one source of truth for the base.
+/// It records no base. The head a root runs on, and its turn index, are
+/// recorded once, by the root's `AdmitRoot` step, which a redrive replays
+/// (ADR 0105 §2, FIG-3682): the admission is the one source of truth for the
+/// base.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Admitted {
     session: SessionId,
@@ -71,8 +72,8 @@ pub struct Admitted {
     admission: AdmissionId,
     observed_epoch: u64,
     /// The sender's drain generation the drive request carried, recorded
-    /// with the admission (FIG-3795 S9): a queued run this root begins stamps
-    /// it, and the run's resume routes by it.
+    /// with the admission (FIG-3795 S9): the root's admission stamps it, and
+    /// the root's resume routes by it.
     admitted_generation: super::contracts::BuildGeneration,
     /// What the root drives.
     work: AdmittedWork,
@@ -85,13 +86,18 @@ pub struct Admitted {
 pub enum AdmittedWork {
     /// The prefix of accepted next-turn input headed by `head`.
     Input { head: crate::InputId },
-    /// The session's queued work: the unfinished queued run named by the
-    /// root, or a new one under it.
-    Queued,
-    /// The follow-on the session head owes (ADR 0101 §3), which no queued
-    /// run owns: its recovery, as recovery number `attempts + 1`. The
-    /// recorded count is what the recovery raises from, so a redrive of the
-    /// root never raises it twice.
+    /// The prefix of ready queued work headed by `head`: a root like an
+    /// input root, admitted and driven the same way (FIG-3927).
+    Queued { head: crate::BatchId },
+    /// The session's open command run, applied at this boundary before any
+    /// turn-lane work (ADR 0101 §4). It admits no turn: the root names the
+    /// application and ends when the command lane is empty. `head` is the
+    /// `enqueue_seq` of the leading open command the admission saw, so a
+    /// later admission naming the same head shows the lane made no progress.
+    Commands { head: u64 },
+    /// The follow-on the session head owes (ADR 0101 §3): its recovery, as
+    /// recovery number `attempts + 1`. The recorded count is what the
+    /// recovery raises from, so a redrive of the root never raises it twice.
     FollowOn { follow_on: TurnId, attempts: u32 },
 }
 

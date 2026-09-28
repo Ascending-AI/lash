@@ -1,6 +1,6 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_core_execution::store::claim_plan::{IdleTurnLaneHead, TurnLaneStop};
+use lash_core_execution::store::claim_plan::TurnLaneStop;
 use lash_core_execution::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -385,17 +385,11 @@ async fn read_session_state_version_tx(
 }
 
 mod claim_support;
-pub(crate) use claim_support::claim_root_inputs_postgres;
+pub(crate) use claim_support::admit_root_postgres;
 mod commit_claims;
-mod maintenance;
-pub(crate) mod queued_run;
-mod queued_run_assignment;
-mod queued_run_selection;
-mod queued_work;
-pub(crate) use queued_run::pending_queued_root_tx;
-use queued_run::*;
-use queued_run_selection::*;
 pub(crate) mod drive_epoch;
+mod maintenance;
+mod queued_work;
 #[cfg(test)]
 mod refusal_probe_tests;
 mod session_commit;

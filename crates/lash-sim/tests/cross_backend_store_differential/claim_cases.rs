@@ -46,12 +46,12 @@ pub(super) fn queued_work_claim_and_abandon() -> GeneratedCase {
     }
 }
 
-pub(super) fn same_generation_exact_claim_deferral() -> GeneratedCase {
+pub(super) fn same_generation_held_claim_deferral() -> GeneratedCase {
     GeneratedCase {
-        name: CaseName::SameGenerationExactClaimDeferral,
-        // FIG-1065: an exact re-claim of a batch this generation already
-        // holds must defer identically on every backend — no new claim,
-        // no durable mutation.
+        name: CaseName::SameGenerationHeldClaimDeferral,
+        // FIG-1065: a re-claim while this generation holds the lane's only
+        // row must defer identically on every backend — no new claim, no
+        // durable mutation.
         operations: vec![
             StoreOperation::EnqueueClaimableQueuedWork,
             StoreOperation::AcquireSessionLease {
@@ -61,7 +61,7 @@ pub(super) fn same_generation_exact_claim_deferral() -> GeneratedCase {
             StoreOperation::ClaimQueuedWork {
                 lease: LeaseSlot::First,
             },
-            StoreOperation::ClaimHeldBatchById {
+            StoreOperation::ClaimWhileHeld {
                 lease: LeaseSlot::First,
             },
         ],

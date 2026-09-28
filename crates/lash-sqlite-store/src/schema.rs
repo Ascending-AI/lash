@@ -331,31 +331,6 @@ CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (
     admitted_scope_json TEXT
 );
 
-CREATE TABLE IF NOT EXISTS queued_runs (
-    session_id TEXT NOT NULL,
-    scope_id TEXT NOT NULL,
-    status TEXT NOT NULL CONSTRAINT ck_queued_runs_status CHECK (status IN ('pending', 'settled')),
-    revision INTEGER NOT NULL CONSTRAINT ck_queued_runs_revision CHECK (revision >= 0),
-    admission_json TEXT NOT NULL,
-    admitted_generation TEXT NOT NULL,
-    PRIMARY KEY (session_id, scope_id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS queued_runs_pending ON queued_runs(session_id) WHERE status = 'pending';
--- A drain's in-flight queued runs per build generation (FIG-3795 S9).
-CREATE INDEX IF NOT EXISTS idx_queued_runs_admitted_generation
-    ON queued_runs(admitted_generation) WHERE status = 'pending';
-CREATE TABLE IF NOT EXISTS queued_run_members (
-    session_id TEXT NOT NULL,
-    scope_id TEXT NOT NULL,
-    collection_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_collection_kind CHECK (collection_kind IN ('initial', 'current', 'withheld', 'assigned')),
-    ordinal INTEGER NOT NULL CONSTRAINT ck_queued_run_members_ordinal CHECK (ordinal >= 0),
-    member_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_member_kind CHECK (member_kind IN ('input', 'batch')),
-    member_id TEXT NOT NULL,
-    PRIMARY KEY (session_id, scope_id, collection_kind, ordinal),
-    UNIQUE (session_id, scope_id, collection_kind, member_kind, member_id),
-    FOREIGN KEY (session_id, scope_id) REFERENCES queued_runs(session_id, scope_id)
-);
-
 CREATE TABLE IF NOT EXISTS turn_cancel_closure_authorizations (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
@@ -995,7 +970,7 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// leave the durable runtime-error vocabulary. No relation changes; a pre-92
 /// database is rejected at open and recreated; it is not migrated.
 /// Bumped to 93 for FIG-3571: a turn's admission records the executable
-/// generation it runs under (`queued_runs.admission_json` gains `generation`),
+/// generation it runs under (the queued-run admission gained `generation`),
 /// a redrive under another one parks with the `retired_generation` reason
 /// (replacing `key_format_cutover`, and the durable `RuntimeErrorCode`
 /// `lashlang_cell_replay_key_format_cutover` becomes `retired_generation`),
@@ -1040,11 +1015,13 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// build whose checkpoint it resumes (FIG-3795, changed in place under the
 /// pre-1.0 version freeze, FIG-3846): `turn_parks` and `turn_park_events`
 /// gain the projected `park_build_generation` column, and `turn_parks` the
-/// partial index drain status counts it by. `queued_runs` gains the
-/// `admitted_generation` column — the drain generation of the drive whose
-/// admission began the run, indexed for the drain's in-flight count per
-/// generation (FIG-3795 S9). A database written before these changes lacks
-/// the columns; recreate it.
+/// partial index drain status counts it by. `session_roots` records each
+/// root's admission (`admission_json`) and the drain generation of the drive
+/// that admitted it (`admitted_generation`, indexed for the drain's in-flight
+/// count per generation, FIG-3795 S9), with at most one unfinished root per
+/// session; the queued-run ledger is gone and a queued-work head is admitted
+/// as an ordinary root (FIG-3927). A database written before these changes
+/// has the old shape; recreate it.
 pub(crate) const SCHEMA_VERSION: i32 = 99;
 
 pub(crate) const PROCESS_SCHEMA: &str = "

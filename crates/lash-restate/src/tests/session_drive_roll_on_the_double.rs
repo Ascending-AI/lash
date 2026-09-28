@@ -167,7 +167,9 @@ impl RollDriver {
                 )),
                 0,
                 request.build_generation.clone(),
-                lash_core::engine::AdmittedWork::Queued,
+                lash_core::engine::AdmittedWork::Queued {
+                    head: lash_core::BatchId::from("scripted-batch"),
+                },
             )),
             None => AdmitVerdict::Idle,
         }
@@ -746,7 +748,9 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
                         lash_core::engine::AdmissionId::new("misroute"),
                         0,
                         gn.clone(),
-                        lash_core::engine::AdmittedWork::Queued,
+                        lash_core::engine::AdmittedWork::Queued {
+                            head: lash_core::BatchId::from("scripted-batch"),
+                        },
                     ),
                 },
             )

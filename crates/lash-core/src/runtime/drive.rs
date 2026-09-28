@@ -113,11 +113,11 @@ pub(crate) struct DriveRootRun {
     /// records it, so the drain routes the root's resume to the build its
     /// journal belongs to.
     journal_generation: crate::engine::BuildGeneration,
-    /// Whether the root's terminal evidence is durable: a commit or
-    /// settlement of this run wrote it, or the run the root replayed had
-    /// already written it. It gates the recorded scope-close step, so it is
-    /// a durable fact every execution of the root reads alike, never whether
-    /// this execution was the writer (FIG-3893).
+    /// Whether the root's terminal evidence is durable: a commit of this run
+    /// wrote it, or answered the receipt of the commit that did. It gates the
+    /// recorded scope-close step, so it is a durable fact every execution of
+    /// the root reads alike, never whether this execution was the writer
+    /// (FIG-3893).
     terminal_written: bool,
 }
 
@@ -125,11 +125,11 @@ impl DriveRootRun {
     fn sealed(admitted: &Admitted, fence: crate::store::DriveFence) -> Self {
         let root = match admitted.work() {
             crate::engine::AdmittedWork::FollowOn { follow_on, .. } => {
-                crate::store::QueuedRunPosition::split_turn_id(follow_on).0
+                crate::store::PhysicalTurn::split_turn_id(follow_on).0
             }
-            crate::engine::AdmittedWork::Input { .. } | crate::engine::AdmittedWork::Queued => {
-                admitted.root().clone()
-            }
+            crate::engine::AdmittedWork::Input { .. }
+            | crate::engine::AdmittedWork::Queued { .. }
+            | crate::engine::AdmittedWork::Commands { .. } => admitted.root().clone(),
         };
         Self {
             root,
@@ -145,12 +145,12 @@ impl DriveRootRun {
     ///
     /// A turn ends its root when it finishes or stops and leaves nothing
     /// owed: no follow-on on the head, and no withheld work a follow-on turn
-    /// drives. A queued run ends its root when this commit settles it.
+    /// drives (`owes_follow_on`).
     pub(crate) fn commit_facts(
         &self,
         turn: &TurnId,
         outcome: &crate::TurnOutcome,
-        ends: RootEnd,
+        owes_follow_on: bool,
     ) -> Option<(
         crate::store::DriveFence,
         Option<crate::store::RootTerminalWrite>,
@@ -161,14 +161,9 @@ impl DriveRootRun {
             crate::TurnOutcome::Stopped(stop) => (Some(stop.clone()), true),
             crate::TurnOutcome::AgentFrameSwitch { .. } => (None, false),
         };
-        let ends = match ends {
-            RootEnd::Settles => true,
-            RootEnd::Continues => false,
-            RootEnd::Unless { owes_follow_on } => terminal && !owes_follow_on,
-        };
         Some((
             self.fence.clone(),
-            ends.then(|| crate::store::RootTerminalWrite {
+            (terminal && !owes_follow_on).then(|| crate::store::RootTerminalWrite {
                 root: self.root.clone(),
                 commit,
                 turn: turn.clone(),
@@ -190,51 +185,6 @@ impl DriveRootRun {
     pub(crate) fn mark_terminal_written(&mut self) {
         self.terminal_written = true;
     }
-
-    /// Mark the evidence a queued run's settlement wrote for this root: a
-    /// failed or empty settlement ends the root without a head commit, and
-    /// its own transaction wrote the evidence (FIG-3600 S7).
-    pub(crate) fn mark_settled(&mut self, settlement: &crate::store::QueuedRunCommit) {
-        if self.root.as_str() == settlement.scope.id()
-            && matches!(
-                &settlement.progress,
-                crate::store::QueuedRunProgress::Settle { terminal }
-                    if crate::store::settled_queued_root_cause(terminal).is_some()
-            )
-        {
-            self.terminal_written = true;
-        }
-    }
-
-    /// Mark the evidence of the settled queued run `run` this root replayed
-    /// instead of running: a redelivered execution of a root whose run
-    /// settled reads it back, and the settlement (a head commit's included)
-    /// wrote the root's evidence. Its journal holds the scope-close step the
-    /// settling execution recorded, so the replay must reach that step too.
-    /// A run forgotten unworked wrote no evidence.
-    pub(crate) fn mark_replayed(&mut self, run: &crate::store::QueuedRunAdmission) {
-        if self.root.as_str() == run.scope.id()
-            && run.terminal.is_some()
-            && matches!(
-                run.last_commit.as_ref().map(|commit| &commit.progress),
-                Some(crate::store::QueuedRunProgress::Settle { .. })
-            )
-        {
-            self.terminal_written = true;
-        }
-    }
-}
-
-/// Whether a physical turn's commit ends its root.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum RootEnd {
-    /// The commit settles the root's queued run.
-    Settles,
-    /// The commit advances the root's queued run to another turn.
-    Continues,
-    /// A turn of an input root ends it by its outcome, unless it leaves a
-    /// follow-on owed.
-    Unless { owes_follow_on: bool },
 }
 
 /// One admitted root's run, with the physical turns it assembled.
@@ -242,11 +192,11 @@ pub(crate) struct RootRun {
     pub(crate) outcome: RootOutcome,
     /// The root's physical turns, when its turns ran in this process.
     pub(crate) run: Option<AgentFrameRun>,
-    /// The accepted inputs the root's recorded claim drove.
+    /// The accepted inputs the root's recorded admission drove.
     pub(crate) driven_inputs: Vec<crate::InputId>,
-    /// A queued root that ran no turn here: the settled run it replayed, or
-    /// why its drain ran nothing.
-    pub(crate) queued_drain: Option<crate::runtime::turn_loop::QueuedTurnDrain<()>>,
+    /// A follow-on recovery root that ran no turn here: why its drain ran
+    /// nothing.
+    pub(crate) empty_drain: Option<crate::runtime::turn_loop::EmptyQueuedDrainReason>,
 }
 
 /// Whether a drive recovers the follow-on the session head owes when
@@ -519,7 +469,7 @@ pub async fn run_admitted_root_reporting(
 
 /// The root a physical turn belongs to, and its ordinal within the root: a
 /// root's turns are the root itself, then `{root}:agent-frame:{n}`
-/// ([`QueuedRunPosition::derive_turn_id`](crate::store::QueuedRunPosition::derive_turn_id)).
+/// ([`PhysicalTurn::derive_turn_id`](crate::store::PhysicalTurn::derive_turn_id)).
 #[must_use]
 pub fn root_of_physical_turn(turn: &TurnId) -> (TurnId, u64) {
     if let Some((root, ordinal)) = turn.as_str().rsplit_once(":agent-frame:")
@@ -534,7 +484,7 @@ pub fn root_of_physical_turn(turn: &TurnId) -> (TurnId, u64) {
 /// Physical turn `ordinal` of `root`.
 #[must_use]
 pub fn physical_turn_of(root: &TurnId, ordinal: u64) -> TurnId {
-    crate::store::QueuedRunPosition::derive_turn_id(root, ordinal)
+    crate::store::PhysicalTurn::derive_turn_id(root, ordinal)
 }
 
 /// The disposition of a runtime error that ends a drive attempt, by its cause
@@ -751,7 +701,7 @@ impl LashRuntime {
                 outcome: RootOutcome::Refused { root, verdict },
                 run: None,
                 driven_inputs: Vec::new(),
-                queued_drain: None,
+                empty_drain: None,
             });
         }
         let crate::engine::SealVerdict::Sealed(fence) = verdict else {
@@ -767,18 +717,30 @@ impl LashRuntime {
         let outer = self.drive_root.replace(Box::new(run));
         let result = match admitted.work().clone() {
             crate::engine::AdmittedWork::Input { head } => {
-                Box::pin(self.run_input_root(
+                Box::pin(self.run_root(
                     &root_controller,
                     &admitted,
-                    &head,
+                    &crate::store::AdmittedHead::Input(head),
                     sinks,
                     live,
                     Some(input_authority),
                 ))
                 .await
             }
-            crate::engine::AdmittedWork::Queued => {
-                Box::pin(self.run_queued_root(&root_controller, &admitted, sinks)).await
+            crate::engine::AdmittedWork::Queued { head } => {
+                Box::pin(self.run_root(
+                    &root_controller,
+                    &admitted,
+                    &crate::store::AdmittedHead::Batch(head),
+                    sinks,
+                    None,
+                    Some(input_authority),
+                ))
+                .await
+            }
+            crate::engine::AdmittedWork::Commands { .. } => {
+                Box::pin(self.run_commands_root(&root_controller, &admitted, &input_authority))
+                    .await
             }
             crate::engine::AdmittedWork::FollowOn {
                 follow_on,
@@ -795,12 +757,9 @@ impl LashRuntime {
             }
         };
         let ran = std::mem::replace(&mut self.drive_root, outer);
-        // The root ended here: its evidence is durable, so its scope closes
-        // (FIG-3607 item 7), whether its final commit or a queued run's failed
-        // settlement wrote that evidence, in this execution or in the one
-        // whose settled run this execution replayed. A root that did not end
-        // holds its scope open, and a host that owns no scopes has nothing to
-        // close.
+        // The root ended here: its final commit wrote its evidence, so its
+        // scope closes (FIG-3607 item 7). A root that did not end holds its
+        // scope open, and a host that owns no scopes has nothing to close.
         if ran.is_some_and(|ran| ran.terminal_written)
             && self.host.core.control.scope_close.owns_scopes()
         {

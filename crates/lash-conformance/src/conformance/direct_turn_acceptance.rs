@@ -365,9 +365,6 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     .expect("the successor drain must run");
     let recovered = match drain {
         crate::QueuedTurnDrain::Ran(turn) => turn,
-        crate::QueuedTurnDrain::Replayed(_) => {
-            panic!("first successor drain cannot replay a queued receipt")
-        }
         crate::QueuedTurnDrain::Empty(reason) => panic!(
             "an orphaned direct-turn acceptance must be claimable by any worker; drain was empty: \
              {reason:?}"
@@ -695,15 +692,13 @@ impl JournalLayer {
     }
 
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
-    pub(super) fn journaled_drive(&self) -> Option<crate::AcceptedTurnInputDrive> {
+    pub(super) fn journaled_drive(&self) -> Option<crate::store::RootAdmissionAnswer> {
         self.outcomes
             .lock()
             .expect("journal lock")
             .values()
             .find_map(|outcome| match outcome {
-                crate::RuntimeEffectOutcome::ClaimAcceptedTurnInput { drive } => {
-                    Some(drive.clone())
-                }
+                crate::RuntimeEffectOutcome::AdmitRoot { answer } => Some(answer.clone()),
                 _ => None,
             })
     }
@@ -787,12 +782,12 @@ impl crate::store::RuntimePersistenceDecorator for RedriveStore {
         self.inner.as_ref()
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &crate::store::RootInputClaimRequest,
-    ) -> Result<Option<crate::AcceptedTurnInputDrive>, crate::StoreError> {
+        request: &crate::store::AdmitRootRequest,
+    ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
         self.pending_row_reads.fetch_add(1, Ordering::SeqCst);
-        self.inner.claim_root_inputs(request).await
+        self.inner.admit_root(request).await
     }
 
     async fn load_session(
@@ -1217,7 +1212,8 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     assert!(
         matches!(
             journal.controller.journaled_drive(),
-            Some(crate::AcceptedTurnInputDrive::Claimed { claim, .. }) if claim.inputs.len() == 3
+            Some(crate::store::RootAdmissionAnswer::Admitted { admission })
+                if admission.input_ids().len() == 3
         ),
         "the journaled drive carries all three rows"
     );
@@ -1258,7 +1254,7 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     let journal = Journal::new(&backend);
     journal
         .controller
-        .crash_at_next(crate::RuntimeEffectKind::ClaimAcceptedTurnInput);
+        .crash_at_next(crate::RuntimeEffectKind::AdmitRoot);
     let (provider, requests) = recording_provider("never answered");
     journal
         .run(&store, provider.clone(), &turn_id, "withdrawn later")
@@ -1291,8 +1287,8 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     assert!(
         matches!(
             journal.controller.journaled_drive(),
-            Some(crate::AcceptedTurnInputDrive::Refused {
-                refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved
+            Some(crate::store::RootAdmissionAnswer::Refused {
+                refusal: crate::store::RootAdmissionRefusal::SettledOrRemoved
             })
         ),
         "the redrive journals the refusal it ceded with"
@@ -1328,7 +1324,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
         .crash_before_commit(&store, provider.clone(), &turn_id, "the accepted words")
         .await;
     let journaled = match journal.controller.journaled_drive() {
-        Some(crate::AcceptedTurnInputDrive::Claimed { claim, .. }) => claim,
+        Some(crate::store::RootAdmissionAnswer::Admitted { admission }) => admission,
         other => panic!("the first execution claimed its accepted row: {other:?}"),
     };
     let late = enqueue_next_turn(&store, "admitted after the crash").await;
@@ -1358,11 +1354,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
             .iter()
             .map(|application| application.input_id.clone())
             .collect::<Vec<_>>(),
-        journaled
-            .inputs
-            .iter()
-            .map(|input| input.input_id.clone())
-            .collect::<Vec<_>>(),
+        journaled.input_ids(),
         "the redrive settles exactly the journaled rows"
     );
     assert!(
@@ -1418,8 +1410,8 @@ pub async fn drive_effect_refusal_is_journaled(
     assert!(
         matches!(
             journal.controller.journaled_drive(),
-            Some(crate::AcceptedTurnInputDrive::Refused {
-                refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved
+            Some(crate::store::RootAdmissionAnswer::Refused {
+                refusal: crate::store::RootAdmissionRefusal::SettledOrRemoved
             })
         ),
         "the refusal is journaled"
@@ -1455,10 +1447,10 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
         self.inner.as_ref()
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &crate::store::RootInputClaimRequest,
-    ) -> Result<Option<crate::AcceptedTurnInputDrive>, crate::StoreError> {
+        request: &crate::store::AdmitRootRequest,
+    ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
         for open in self
             .inner
             .list_pending_turn_inputs(&request.session_id)
@@ -1468,7 +1460,7 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
                 .cancel_pending_turn_input(&request.session_id, &open.input.input_id)
                 .await?;
         }
-        self.inner.claim_root_inputs(request).await
+        self.inner.admit_root(request).await
     }
 }
 
@@ -1562,10 +1554,10 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
         .crash_before_commit(&store, provider.clone(), &turn_id, "answer me once")
         .await;
     let journaled = match journal.controller.journaled_drive() {
-        Some(crate::AcceptedTurnInputDrive::Claimed { claim, .. }) => claim,
+        Some(crate::store::RootAdmissionAnswer::Admitted { admission }) => admission,
         other => panic!("the first execution claimed its accepted row: {other:?}"),
     };
-    let accepted = journaled.inputs[0].input_id.clone();
+    let accepted = journaled.input_ids()[0].clone();
 
     let mut drainer = acceptance_runtime(
         &store,

@@ -183,42 +183,6 @@ lash_store_sql::statements! {
                  SELECT CASE WHEN head_claim_id IS NULL THEN ?3 ELSE 9223372036854775807 END
                  FROM queued_work_head_candidate
              ), 0)";
-
-        /// Which of the batch ids bound as the JSON array `?2` session `?1`
-        /// still holds.
-        ///
-        /// SQLite binds a list as a JSON array and unpacks it with `json_each`;
-        /// PostgreSQL binds a real array and compares with `= ANY`.
-        select_present_ids = "SELECT batch_id FROM queued_work_batches
-             WHERE session_id = ?1
-               AND batch_id IN (SELECT value FROM json_each(?2))";
-
-        /// Session `?1`'s unclaimed batches for generation `?2` among the ids
-        /// bound as the JSON array `?3`. Same list-bind fork as
-        /// [`select_present_ids`](Self::select_present_ids).
-        select_by_ids = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4)
-               AND batch_id IN (SELECT value FROM json_each(?3))
-             ORDER BY enqueue_seq ASC";
-
-        /// The same rows keyed by the claim ids bound as the JSON array `?3`:
-        /// an exact claim must validate every batch the interrupted claim it
-        /// recomposes covered, not only the ones it was asked for.
-        select_by_claim_ids = "SELECT enqueue_seq, batch_id, session_id, source_key,
-                    delivery_policy, work_kind, authority_json, merge_key,
-                    enqueued_at_ms, claim_fencing_token, claim_token,
-                    claim_session_lease_generation, claim_id, claim_owner_incarnation_id
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND (claim_token IS NULL OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4)
-               AND claim_id IN (SELECT value FROM json_each(?3))
-             ORDER BY enqueue_seq ASC";
     }
 }
 

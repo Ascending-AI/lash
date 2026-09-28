@@ -8,95 +8,16 @@
 //! drive recovers it here, before it claims anything: every claim but the
 //! follow-on's own is blocked while it is owed anyway.
 //!
-//! Two entries recover it. The session drive's admission admits an owed
-//! follow-on no queued run owns as a root of its own, named by the recovery
-//! count it records ([`recover_admitted_follow_on`]), so every engine's drive
-//! recovers it before any other work. The queued-run drain still recovers
-//! what its own entry finds, for its callers until FIG-3668 deletes it.
-//! Nothing below is engine-specific.
+//! The session drive's admission admits an owed follow-on as a root of its
+//! own, named by the recovery count it records
+//! ([`recover_admitted_follow_on`]), so every engine's drive recovers it
+//! before any other work. Nothing below is engine-specific.
 //!
 //! [`recover_admitted_follow_on`]: LashRuntime::recover_admitted_follow_on
 
 use super::*;
 
-/// What a drive does after it looked at the head's pending follow-on.
-pub(super) enum FollowOnAdmission {
-    /// Carry on under `lease`. `exhausted` is set when the drive's own queued
-    /// run owns a follow-on whose recovery bound is spent: the run commits it
-    /// as its failed terminal instead of running it.
-    Continue {
-        lease: Box<DriveClaimGuard>,
-        exhausted: Option<crate::store::PendingFollowOn>,
-    },
-    /// The drive recovered a follow-on no queued run owns and answered it;
-    /// this drive is over.
-    Recovered(Box<QueuedTurnDrain<AssembledTurn>>),
-}
-
 impl LashRuntime {
-    /// Recover the follow-on the refreshed head owes, if any, before this
-    /// drive claims anything (ADR 0101 §3).
-    ///
-    /// * The drive's own pending queued run owns the follow-on (its switch
-    ///   advanced the run to it): the run's resume drives it, after this
-    ///   raises the recovery count.
-    /// * No queued run owns it (a direct turn's switch): it is driven here as
-    ///   a logical run of its own, continuing its chain, and the drive ends.
-    /// * Any other run, or an exact selection, meets the precedence refusal:
-    ///   it is answered after the follow-on commits.
-    pub(super) async fn admit_pending_follow_on(
-        &mut self,
-        store: &Arc<dyn crate::store::RuntimePersistence>,
-        lease: DriveClaimGuard,
-        queued_opts: &QueuedTurnOptions<'_>,
-        selected: bool,
-    ) -> Result<FollowOnAdmission, RuntimeError> {
-        let Some(owed) = self.state.pending_follow_on.as_deref().cloned() else {
-            return Ok(FollowOnAdmission::Continue {
-                lease: Box::new(lease),
-                exhausted: None,
-            });
-        };
-        let admission = async {
-            let owning_run = store
-                .pending_queued_run(&self.state.session_id)
-                .await
-                .map_err(super::runtime_error_from_store_commit)?;
-            let owned_by_run = owning_run
-                .as_ref()
-                .is_some_and(|run| owed.is_turn(&run.position.turn_id));
-            if !owned_by_run && (owning_run.is_some() || selected) {
-                return Err(super::runtime_error_from_store_commit(
-                    owed.pending_error(&self.state.session_id),
-                ));
-            }
-            let recovery = self
-                .recover_pending_follow_on(store.as_ref(), &lease.fence(), None)
-                .await?;
-            Ok((owned_by_run, recovery))
-        }
-        .await;
-        let (owned_by_run, recovery) = match admission {
-            Ok(admission) => admission,
-            Err(error) => {
-                let _ = lease.release_if_live().await;
-                return Err(error);
-            }
-        };
-        if owned_by_run {
-            return Ok(FollowOnAdmission::Continue {
-                lease: Box::new(lease),
-                exhausted: match recovery {
-                    crate::store::FollowOnRecovery::Exhausted(owed) => Some(owed),
-                    crate::store::FollowOnRecovery::Run(_) => None,
-                },
-            });
-        }
-        Box::pin(self.drive_recovered_follow_on(recovery, queued_opts, lease))
-            .await
-            .map(|drain| FollowOnAdmission::Recovered(Box::new(drain)))
-    }
-
     /// Raise the owed follow-on's recovery count in a fenced head write
     /// before its first effect, or, once the raised count would pass the
     /// host's bound, answer [`FollowOnRecovery::Exhausted`] without writing:
@@ -162,9 +83,9 @@ impl LashRuntime {
     /// (ADR 0101 §3, FIG-3542), from the recovery count `recorded` with the
     /// admission.
     ///
-    /// Admission decided that the head owes it and that no queued run owns
-    /// it. A follow-on no longer owed when the root takes the lane was
-    /// answered by another driver since: the root cedes and runs nothing.
+    /// Admission decided that the head owes it. A follow-on no longer owed
+    /// when the root takes the lane was answered by another driver since:
+    /// the root cedes and runs nothing.
     pub(in crate::runtime) async fn recover_admitted_follow_on(
         &mut self,
         opts: QueuedTurnOptions<'_>,
@@ -219,8 +140,8 @@ impl LashRuntime {
         Box::pin(self.drive_recovered_follow_on(recovery, &opts, lease)).await
     }
 
-    /// Drive a recovered follow-on no queued run owns as a logical run of its
-    /// own, continuing its chain from the recorded position.
+    /// Drive a recovered follow-on as a logical run of its own, continuing
+    /// its chain from the recorded position.
     ///
     /// It runs under the drain's own identity, or, for an anonymous drain, a
     /// drain identity named after the follow-on. The drive answers the

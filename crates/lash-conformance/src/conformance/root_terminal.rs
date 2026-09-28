@@ -12,7 +12,6 @@
 //! - L-C1: the root's scope closes after its evidence is durable, at least
 //!   once across a crash between the two, and never for a parked root.
 
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -790,86 +789,17 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
     assert_eq!(parts.calls(), 0, "the parked root ran nothing");
 }
 
-/// L-C1, the settlement half: a queued root that settles without a head
-/// commit ends at its settlement, whose transaction wrote the root's
-/// evidence, and its scope closes after that evidence like any other
-/// terminal root's.
+/// A redelivered command root replays its recorded journal (FIG-3893, ADR
+/// 0101 §4): a root that applied the session's queued command dies before
+/// the engine records its end. The redelivered execution replays the same
+/// journal and answers the same outcome; the command applied once, and the
+/// root admitted no turn-lane row, so it has no terminal evidence and no
+/// scope to close.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let mut parts = DriveParts::new(prefix, "root-settled", &effect_host, &stores, 8).await;
-    let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
-    parts.host.control.scope_close = closes.clone();
-    // An earlier drain admitted a named run and selected nothing before it
-    // stopped: the run is the session's pending root.
-    let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
-        &parts.store,
-        &parts.session_id,
-        "root-settled-earlier-drain",
-    )
-    .await;
-    let run = parts
-        .store
-        .begin_or_resume_queued_run(
-            &lease.authority(),
-            lash_core::store::BeginQueuedRun {
-                session_id: parts.session_id.clone(),
-                identity: Some(crate::ExecutionScope::queue_drain(
-                    &parts.session_id,
-                    "root-settled-run",
-                )),
-                request: lash_core::store::QueuedRunRequest::Automatic,
-                configuration: crate::RuntimeCommit::persisted_state_for_test(
-                    &parts.initial_state(),
-                    &[],
-                )
-                .config,
-                expected_head_revision: 0,
-                initial_turn_index: 1,
-                generation: None,
-                admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance"),
-            },
-        )
-        .await
-        .expect("an earlier drain admits the run");
-    parts
-        .store
-        .supersede_claim_epoch_for_test(&lease.authority())
-        .await
-        .expect("the earlier drain stops");
-    let root = TurnId::from(run.scope.id());
-    assert_eq!(terminal(&parts, &root).await, None, "the run is pending");
-
-    drive(&runner, &parts, "root-settled-drive").await;
-    let evidence = terminal(&parts, &root)
-        .await
-        .expect("the run's settlement wrote its root's evidence");
-    assert_eq!(evidence.cause, RootTerminalCause::SettledEmpty);
-    assert_eq!(evidence.head_revision, None, "no head commit ended it");
-    assert_eq!(closes.closes(), vec![(root, true)]);
-    assert_eq!(parts.calls(), 0, "nothing ran");
-}
-
-/// L-C1 across a redelivery (FIG-3893, ADR 0105 §2): whether a root's
-/// recorded scope-close step runs is decided by durable facts, never by
-/// whether this execution wrote the root's evidence. A queued root that
-/// applied a session command and settled empty closes its scope; its
-/// execution then dies before the engine records its end. The redelivered
-/// execution reads the settled run back, replays the same journal — the
-/// close step included — and answers the same outcome; the scope owner is
-/// asked to close once.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_settled_queued_roots_redrive_replays_its_scope_close(
+pub async fn a_command_roots_redrive_replays_its_recorded_outcome(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -878,8 +808,8 @@ pub async fn a_settled_queued_roots_redrive_replays_its_scope_close(
     let mut parts = DriveParts::new(prefix, "queued-close-redrive", &effect_host, &stores, 8).await;
     let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
     parts.host.control.scope_close = closes.clone();
-    // A session command alone: the drive admits a queued root, which applies
-    // it and settles its run empty.
+    // A session command alone: the drive admits a command root, which
+    // applies it.
     parts
         .store
         .enqueue_queued_work(
@@ -911,7 +841,7 @@ pub async fn a_settled_queued_roots_redrive_replays_its_scope_close(
                     .map_err(|abort| format!("{abort:?}"));
                 let _ = tx.send(outcome);
                 if crash {
-                    panic!("the drive's execution dies after its queued root ended");
+                    panic!("the drive's execution dies after its command root ended");
                 }
                 crate::ConformanceTurnEnd::Settled
             })
@@ -931,7 +861,7 @@ pub async fn a_settled_queued_roots_redrive_replays_its_scope_close(
         .recv()
         .await
         .expect("the first execution ran")
-        .expect("the first execution drives the queued root");
+        .expect("the first execution drives the command root");
     let again = rx
         .recv()
         .await
@@ -945,20 +875,17 @@ pub async fn a_settled_queued_roots_redrive_replays_its_scope_close(
         .await
         .expect("the redelivered execution replays its recorded journal to its end")
         .expect("the tier settles the drive");
-    let [RootOutcome::Ceded { root }] = first.ran.as_slice() else {
-        panic!("one queued root ran and settled empty: {first:?}");
+    let [RootOutcome::Applied { root }] = first.ran.as_slice() else {
+        panic!("one command root ran and applied the command: {first:?}");
     };
-    assert!(root.as_str().starts_with("drive-run:"), "{first:?}");
+    assert!(root.as_str().starts_with("drive-commands:"), "{first:?}");
     assert_eq!(again, first, "the redrive answers the recorded outcome");
-    let evidence = terminal(&parts, root)
-        .await
-        .expect("the settlement wrote the root's evidence");
-    assert_eq!(evidence.cause, RootTerminalCause::SettledEmpty);
     assert_eq!(
-        closes.closes(),
-        vec![(root.clone(), true)],
-        "the scope owner is asked to close once, after the evidence"
+        terminal(&parts, root).await,
+        None,
+        "a command root admits no turn-lane row and writes no evidence"
     );
+    assert!(closes.closes().is_empty(), "no root scope was opened");
     assert!(
         parts
             .store

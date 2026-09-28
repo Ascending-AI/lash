@@ -30,10 +30,6 @@ where
         interrupted_claim_laws::stale_settlement_cannot_damage_successor(store).await
     })
     .await?;
-    assert_on_fresh_store(make, seed + 6, |store| async move {
-        law_selected_batch_out_of_order_never_loses_work(store).await
-    })
-    .await?;
     assert_on_fresh_store(make, seed + 7, |store| async move {
         law_turn_inputs_apply_once_in_order(store).await
     })
@@ -99,7 +95,7 @@ async fn law_lease_exclusivity_and_claim_generation_fencing(
 async fn law_claimed_work_settles_exactly_once(
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {
-    let batch = store
+    store
         .enqueue_queued_work(queued_draft(0, 0, false))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
@@ -111,15 +107,15 @@ async fn law_claimed_work_settles_exactly_once(
         .acquired()
         .ok_or_else(|| TestCaseError::fail("lease busy"))?;
     let claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session_id(),
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&batch.batch_id),
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("selected work absent"))?;
     let mut state = RuntimeSessionState {
@@ -230,45 +226,16 @@ async fn law_reclaim_mediates_supersession(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
         .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
-    let before_partial_selection = session_snapshot(store.as_ref())
-        .await
-        .map_err(TestCaseError::fail)?;
-    let partial_selection = store
-        .claim_ready_queued_work_by_batch_ids(
-            &session_id(),
-            &successor_lease.fence(),
-            &successor_owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&first.batch_id),
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await;
-    prop_assert!(
-        matches!(
-            &partial_selection,
-            Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
-                required_batch_ids,
-            }) if required_batch_ids == &[first.batch_id.clone(), second.batch_id.clone()]
-        ),
-        "partial selection did not return the literal interrupted composition: {partial_selection:?}"
-    );
-    assert_snapshot_unchanged(
-        store.as_ref(),
-        before_partial_selection,
-        "partial interrupted-composition selected claim",
-    )
-    .await
-    .map_err(TestCaseError::fail)?;
     let successor_claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session_id(),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
-            &[first.batch_id.clone(), second.batch_id.clone()],
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("successor did not reclaim full composition"))?;
 
@@ -312,17 +279,17 @@ async fn law_reclaim_mediates_supersession(
     );
     prop_assert!(
         store
-            .claim_ready_queued_work_by_batch_ids(
+            .claim_ready_queued_work(
                 &session_id(),
                 &successor_lease.fence(),
                 &successor_owner,
                 QueuedWorkClaimBoundary::Idle,
-                std::slice::from_ref(&first.batch_id),
                 crate::testing::queued_work_claim_policy(64),
             )
             .await
+            .map(crate::QueuedWorkClaimOutcome::claim)
             .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .acquired_no_rows(),
+            .is_none(),
         "the rejected predecessor commit released the successor-owned batch"
     );
     store
@@ -349,7 +316,7 @@ async fn law_reclaim_mediates_supersession(
 async fn law_head_cas_serializes_competing_commits(
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {
-    let batch = store
+    store
         .enqueue_queued_work(queued_draft(0, 0, false))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
@@ -370,15 +337,15 @@ async fn law_head_cas_serializes_competing_commits(
         .acquired()
         .ok_or_else(|| TestCaseError::fail("stale-owner lease busy"))?;
     let stale_work = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session_id(),
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&batch.batch_id),
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("queued work absent"))?;
     let stale_input = store
@@ -460,87 +427,6 @@ async fn law_head_cas_serializes_competing_commits(
     Ok(())
 }
 
-async fn law_selected_batch_out_of_order_never_loses_work(
-    store: Arc<dyn RuntimePersistence>,
-) -> Result<(), TestCaseError> {
-    let earlier = store
-        .enqueue_queued_work(queued_draft(0, 0, false))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let later = store
-        .enqueue_queued_work(queued_draft(1, 1, false))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let owner = owner(0);
-    let lease = store
-        .seal_claim_epoch_for_test(&session_id(), &owner, "selected-batch-executor", 60_000)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .acquired()
-        .ok_or_else(|| TestCaseError::fail("lease busy"))?;
-    let claim = store
-        .claim_ready_queued_work_by_batch_ids(
-            &session_id(),
-            &lease.fence(),
-            &owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&later.batch_id),
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| TestCaseError::fail("later batch absent"))?;
-    let mut state = RuntimeSessionState {
-        session_id: session_id(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let result = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(claim.completion()),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    state.apply_persisted_commit_result(result);
-    let remaining = store
-        .list_queued_work(&session_id())
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(remaining.len(), 1);
-    prop_assert_eq!(
-        &remaining[0].batch_id,
-        &earlier.batch_id,
-        "settling batch 2 lost batch 1"
-    );
-    let claim = store
-        .claim_ready_queued_work_by_batch_ids(
-            &session_id(),
-            &lease.fence(),
-            &owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&earlier.batch_id),
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| TestCaseError::fail("earlier batch no longer claimable"))?;
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(claim.completion()),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        store
-            .list_queued_work(&session_id())
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .is_empty()
-    );
-    Ok(())
-}
-
 async fn law_turn_inputs_apply_once_in_order(
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {
@@ -612,10 +498,7 @@ async fn law_commit_atomicity_and_stale_head_non_mutation(
             coalesce: false,
         },
         RuntimePersistenceOp::EnqueueTurnInput { slot: 0, value: 0 },
-        RuntimePersistenceOp::ClaimWork {
-            selected: false,
-            selection: 0,
-        },
+        RuntimePersistenceOp::ClaimWork,
         RuntimePersistenceOp::ClaimTurnInputs { max_inputs: 2 },
         RuntimePersistenceOp::Commit {
             component_mode: 1,

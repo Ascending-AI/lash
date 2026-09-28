@@ -23,20 +23,6 @@ fn select_turn_work_claim_prefix(
     })
 }
 
-fn select_exact_turn_work_claim_prefix(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
-    now_epoch_ms: u64,
-) -> Result<usize, StoreError> {
-    super::select_exact_turn_work_claim_prefix(candidates, boundary, policy, now_epoch_ms).map(
-        |prefix| match prefix {
-            TurnWorkClaimPrefix::Selected { len } => len,
-            TurnWorkClaimPrefix::Refused { .. } => 0,
-        },
-    )
-}
-
 fn select_turn_work_claim_indices(
     candidates: &[ClaimCandidate],
     boundary: QueuedWorkClaimBoundary,
@@ -175,56 +161,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                 }
             },
         )
-}
-
-#[test]
-fn exact_selection_requires_the_literal_interrupted_composition() {
-    let candidates = vec![
-        (crate::BatchId::from("w1"), Some("claim-a".to_string())),
-        (crate::BatchId::from("fresh"), None),
-        (crate::BatchId::from("w2"), Some("claim-a".to_string())),
-    ];
-    assert_eq!(
-        select_interrupted_exact_claim_indices(&candidates, &[crate::BatchId::from("w1")]),
-        Err(vec![crate::BatchId::from("w1"), crate::BatchId::from("w2")])
-    );
-    assert_eq!(
-        select_interrupted_exact_claim_indices(
-            &candidates,
-            &[crate::BatchId::from("w1"), crate::BatchId::from("w2")],
-        ),
-        Ok(Some(vec![0, 2]))
-    );
-
-    let two_claims = vec![
-        (crate::BatchId::from("a1"), Some("claim-a".to_string())),
-        (crate::BatchId::from("a2"), Some("claim-a".to_string())),
-        (crate::BatchId::from("b1"), Some("claim-b".to_string())),
-        (crate::BatchId::from("b2"), Some("claim-b".to_string())),
-    ];
-    assert_eq!(
-        select_interrupted_exact_claim_indices(
-            &two_claims,
-            &[
-                crate::BatchId::from("a1"),
-                crate::BatchId::from("a2"),
-                crate::BatchId::from("b1"),
-            ],
-        ),
-        Err(vec![crate::BatchId::from("b1"), crate::BatchId::from("b2")])
-    );
-    assert_eq!(
-        select_interrupted_exact_claim_indices(
-            &two_claims,
-            &[
-                crate::BatchId::from("a1"),
-                crate::BatchId::from("a2"),
-                crate::BatchId::from("b1"),
-                crate::BatchId::from("b2"),
-            ],
-        ),
-        Ok(Some(vec![0, 1]))
-    );
 }
 
 fn policy(max_context_tokens: usize, action_token_reserve: usize) -> QueuedWorkClaimPolicy {
@@ -559,66 +495,6 @@ fn a_custom_policy_selection_is_clamped_to_the_legal_prefix() {
         )
         .unwrap(),
         vec![0]
-    );
-}
-
-#[test]
-fn an_exact_host_selection_is_never_sized_by_the_automatic_drain_policy() {
-    let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
-    let claim_policy = policy(1_000, 100);
-    assert_eq!(claim_policy.drain_policy.name(), "one_at_a_time");
-    // Automatic drains take the head alone under the shipped default...
-    assert_eq!(
-        select_turn_work_claim_prefix(
-            &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
-            1_000,
-        )
-        .unwrap(),
-        1
-    );
-    // ...but the host named this exact two-row composition, and a partial
-    // exact claim is abandoned as unclaimable by the caller, so shrinking it
-    // would wedge `stream_selected_queued_work` forever.
-    assert_eq!(
-        select_exact_turn_work_claim_prefix(
-            &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
-            1_000,
-        )
-        .unwrap(),
-        2
-    );
-    // `max_rows` is exempt for the same reason: it bounds how many pending
-    // rows Lash gathers on its own, and truncating a host-named composition
-    // with it wedges the claim on a second axis. Redrive already exempts a
-    // committed composition from a successor's row limit.
-    let mut bounded = claim_policy.clone();
-    bounded.max_rows = 1;
-    assert_eq!(
-        select_exact_turn_work_claim_prefix(
-            &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &bounded,
-            1_000,
-        )
-        .unwrap(),
-        2
-    );
-    // A genuine claim law still bounds it: incompatible rows never merge.
-    let mut other_key = candidate(2, Some("other"));
-    other_key.batch_id = "qwb-other".into();
-    assert_eq!(
-        select_exact_turn_work_claim_prefix(
-            &[candidates[0].clone(), other_key],
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
-            1_000,
-        )
-        .unwrap(),
-        1
     );
 }
 

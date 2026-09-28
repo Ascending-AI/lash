@@ -13,7 +13,6 @@ use lash_sansio::core_support::*;
 mod accept;
 mod claim_repair;
 mod commit;
-mod drain_end;
 mod execute;
 mod follow_on_recovery;
 pub(in crate::runtime) mod generation_fence;
@@ -31,11 +30,7 @@ pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
 use execute::TurnDriverRemainder;
 use post_commit::PostCommitDelivery;
 pub(in crate::runtime) use prepare::TurnPrepareContext;
-pub use queued_work::{
-    EmptyQueuedDrainReason, QueuedTurnDrain, SelectedQueuedWorkBatchSatisfaction,
-    SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainOutcome,
-    SelectedQueuedWorkDrainRefusalCause,
-};
+pub use queued_work::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub use resident_session::ResidentSessionState;
 
@@ -628,7 +623,7 @@ mod tests {
         let second = next_physical_turn_id(&first).expect("second");
         assert_eq!(second, "root-turn:agent-frame:2");
         assert_eq!(
-            crate::store::QueuedRunPosition::split_turn_id(&second),
+            crate::store::PhysicalTurn::split_turn_id(&second),
             (TurnId::from("root-turn"), 2)
         );
     }

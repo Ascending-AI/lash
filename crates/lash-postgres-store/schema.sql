@@ -293,31 +293,6 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancellation_bindings (
     admitted_scope_json TEXT
 );
 
-CREATE TABLE IF NOT EXISTS lash_queued_runs (
-    session_id TEXT NOT NULL,
-    scope_id TEXT NOT NULL,
-    status TEXT NOT NULL CONSTRAINT ck_queued_runs_status CHECK (status IN ('pending', 'settled')),
-    revision BIGINT NOT NULL CONSTRAINT ck_queued_runs_revision CHECK (revision >= 0),
-    admission_json TEXT NOT NULL,
-    admitted_generation TEXT NOT NULL,
-    PRIMARY KEY (session_id, scope_id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS lash_queued_runs_pending ON lash_queued_runs(session_id) WHERE status = 'pending';
--- A drain's in-flight queued runs per build generation (FIG-3795 S9).
-CREATE INDEX IF NOT EXISTS idx_lash_queued_runs_admitted_generation
-    ON lash_queued_runs(admitted_generation) WHERE status = 'pending';
-CREATE TABLE IF NOT EXISTS lash_queued_run_members (
-    session_id TEXT NOT NULL,
-    scope_id TEXT NOT NULL,
-    collection_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_collection_kind CHECK (collection_kind IN ('initial', 'current', 'withheld', 'assigned')),
-    ordinal BIGINT NOT NULL CONSTRAINT ck_queued_run_members_ordinal CHECK (ordinal >= 0),
-    member_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_member_kind CHECK (member_kind IN ('input', 'batch')),
-    member_id TEXT NOT NULL,
-    PRIMARY KEY (session_id, scope_id, collection_kind, ordinal),
-    UNIQUE (session_id, scope_id, collection_kind, member_kind, member_id),
-    FOREIGN KEY (session_id, scope_id) REFERENCES lash_queued_runs(session_id, scope_id)
-);
-
 CREATE TABLE IF NOT EXISTS lash_turn_cancel_closure_authorizations (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,

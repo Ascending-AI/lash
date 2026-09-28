@@ -114,15 +114,15 @@ impl lash_core::store::RootStore for CommitRetryStore {
     async fn unfinished_root(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+    ) -> Result<Option<lash_core::store::UnfinishedRoot>, lash_core::StoreError> {
         self.inner.unfinished_root(session_id).await
     }
 
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &lash_core::store::RootInputClaimRequest,
-    ) -> Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
-        self.inner.claim_root_inputs(request).await
+        request: &lash_core::store::AdmitRootRequest,
+    ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
+        self.inner.admit_root(request).await
     }
     async fn root_terminal(
         &self,
@@ -160,48 +160,6 @@ impl lash_core::store::RootStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::QueuedWorkStore for CommitRetryStore {
-    async fn select_queued_run(
-        &self,
-        fence: &lash_core::ClaimAuthority,
-        scope: &lash_core::ExecutionScope,
-        owner: &lash_core::LeaseOwnerIdentity,
-        max_inputs: usize,
-        configuration: &lash_core::PersistedSessionConfig,
-        policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<lash_core::store::SelectedQueuedRun, lash_core::StoreError> {
-        self.inner
-            .select_queued_run(fence, scope, owner, max_inputs, configuration, policy)
-            .await
-    }
-    async fn pending_queued_run(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        self.inner.pending_queued_run(session_id).await
-    }
-    async fn queued_run(
-        &self,
-        scope: &lash_core::ExecutionScope,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        self.inner.queued_run(scope).await
-    }
-    async fn settle_queued_run(
-        &self,
-        fence: &lash_core::ClaimAuthority,
-        settlement: lash_core::store::QueuedRunCommit,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        self.inner.settle_queued_run(fence, settlement).await
-    }
-    async fn begin_or_resume_queued_run(
-        &self,
-        fence: &lash_core::ClaimAuthority,
-        request: lash_core::store::BeginQueuedRun,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        self.inner.begin_or_resume_queued_run(fence, request).await
-    }
-
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: lash_core::runtime::QueuedWorkBatchDraft,
@@ -257,27 +215,6 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
                 turn_id,
                 checkpoint,
                 max_inputs,
-                policy,
-            )
-            .await
-    }
-
-    async fn claim_ready_queued_work_by_batch_ids(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &lash_core::ClaimAuthority,
-        owner: &lash_core::LeaseOwnerIdentity,
-        boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        batch_ids: &[lash_core::BatchId],
-        policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> Result<lash_core::SelectedQueuedWorkClaimOutcome, lash_core::StoreError> {
-        self.inner
-            .claim_ready_queued_work_by_batch_ids(
-                session_id,
-                session_execution_lease,
-                owner,
-                boundary,
-                batch_ids,
                 policy,
             )
             .await

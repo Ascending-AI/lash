@@ -14,7 +14,7 @@
 
 use crate::{FrameNodeId, TurnId};
 
-use super::{QueuedRunPosition, StoreError};
+use super::{PhysicalTurn, StoreError};
 
 /// How many times a drive may recover a pending follow-on before the
 /// follow-on is committed as failed instead (ADR 0101 §3, recovery bound).
@@ -69,10 +69,10 @@ impl PendingFollowOn {
         chain_depth: u32,
         resolved: Option<crate::run_spec::ResolvedRun>,
     ) -> Result<Self, StoreError> {
-        let (root, index) = QueuedRunPosition::split_turn_id(current_turn_id);
+        let (root, index) = PhysicalTurn::split_turn_id(current_turn_id);
         let next = StoreError::checked_monotonic_increment("follow_on_physical_index", index)?;
         Ok(Self {
-            follow_on_turn_id: QueuedRunPosition::derive_turn_id(&root, next),
+            follow_on_turn_id: PhysicalTurn::derive_turn_id(&root, next),
             frame_id,
             task: task.into(),
             options: options.map(Box::new),
@@ -84,7 +84,7 @@ impl PendingFollowOn {
 
     /// The root turn of the logical run this follow-on continues.
     pub fn root_turn_id(&self) -> TurnId {
-        QueuedRunPosition::split_turn_id(&self.follow_on_turn_id).0
+        PhysicalTurn::split_turn_id(&self.follow_on_turn_id).0
     }
 
     /// The root a drive admits this follow-on's recovery under: named by
@@ -110,7 +110,7 @@ impl PendingFollowOn {
 
     /// The follow-on's physical-turn index within its logical run.
     pub fn physical_index(&self) -> u64 {
-        QueuedRunPosition::split_turn_id(&self.follow_on_turn_id).1
+        PhysicalTurn::split_turn_id(&self.follow_on_turn_id).1
     }
 
     /// Whether `turn_id` is this follow-on.

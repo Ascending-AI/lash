@@ -65,10 +65,7 @@ pub enum RuntimePersistenceOp {
         value: u8,
         coalesce: bool,
     },
-    ClaimWork {
-        selected: bool,
-        selection: u8,
-    },
+    ClaimWork,
     ClaimWorkWithStaleLease,
     CancelWork {
         selection: u8,
@@ -200,11 +197,9 @@ enum RunShapeCounter {
     LeaseFenceRejections,
     QueueEnqueues,
     QueueClaims,
-    SelectedBatchClaims,
     QueueCompletions,
     ClaimSupersessionRejections,
     StaleClaimSettlements,
-    OutOfOrderSettlements,
     CoalescedClaims,
     QueueCancellations,
     InputEnqueues,
@@ -235,11 +230,9 @@ impl run_shape::Counter for RunShapeCounter {
         Self::LeaseFenceRejections,
         Self::QueueEnqueues,
         Self::QueueClaims,
-        Self::SelectedBatchClaims,
         Self::QueueCompletions,
         Self::ClaimSupersessionRejections,
         Self::StaleClaimSettlements,
-        Self::OutOfOrderSettlements,
         Self::CoalescedClaims,
         Self::QueueCancellations,
         Self::InputEnqueues,
@@ -270,11 +263,9 @@ impl run_shape::Counter for RunShapeCounter {
             Self::LeaseFenceRejections => "lease_fence_rejections",
             Self::QueueEnqueues => "queue_enqueues",
             Self::QueueClaims => "queue_claims",
-            Self::SelectedBatchClaims => "selected_batch_claims",
             Self::QueueCompletions => "queue_completions",
             Self::ClaimSupersessionRejections => "claim_supersession_rejections",
             Self::StaleClaimSettlements => "stale_claim_settlements",
-            Self::OutOfOrderSettlements => "out_of_order_settlements",
             Self::CoalescedClaims => "coalesced_claims",
             Self::QueueCancellations => "queue_cancellations",
             Self::InputEnqueues => "input_enqueues",
@@ -494,80 +485,26 @@ async fn apply_operation(
                 }
             }
         }
-        ClaimWork {
-            selected,
-            selection,
-        } => {
+        ClaimWork => {
             let Some(lease) = model.current_lease.as_ref() else {
                 return Ok(());
             };
-            let pending = pending_work(model);
-            if pending.is_empty() {
+            if pending_work(model).is_empty() {
                 return Ok(());
             }
-            let claim = if *selected {
-                let batch_id = pending[usize::from(*selection) % pending.len()]
-                    .batch_id
-                    .clone();
-                let required_composition = interrupted_work_composition(model, &batch_id)
-                    .filter(|required| required.len() > 1);
-                let before = required_composition
-                    .as_ref()
-                    .map(|_| session_snapshot(store));
-                let result = store
-                    .claim_ready_queued_work_by_batch_ids(
-                        &session_id(),
-                        &lease.fence(),
-                        &lease.owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        std::slice::from_ref(&batch_id),
-                        crate::testing::queued_work_claim_policy(64),
-                    )
-                    .await;
-                if let Some(required_batch_ids) = required_composition {
-                    if !matches!(
-                        &result,
-                        Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
-                            required_batch_ids: actual,
-                        }) if actual == &required_batch_ids
-                    ) {
-                        return Err(format!(
-                            "partial interrupted-composition selection was not refused with its literal composition {required_batch_ids:?}: {result:?}"
-                        ));
-                    }
-                    assert_snapshot_unchanged(
-                        store,
-                        before
-                            .expect("interrupted-composition refusal captured a snapshot")
-                            .await?,
-                        "partial interrupted-composition selected claim",
-                    )
-                    .await?;
-                    None
-                } else {
-                    result
-                        .map_err(|error| error.to_string())?
-                        .map(|claim| (claim, Some(batch_id)))
-                }
-            } else {
-                store
-                    .claim_ready_queued_work(
-                        &session_id(),
-                        &lease.fence(),
-                        &lease.owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        crate::testing::queued_work_claim_policy(4),
-                    )
-                    .await
-                    .map(crate::QueuedWorkClaimOutcome::claim)
-                    .map_err(|error| error.to_string())?
-                    .map(|claim| (claim, None))
-            };
-            if let Some((claim, selected_id)) = claim {
-                validate_work_claim(model, lease, &claim, selected_id.as_deref())?;
-                if selected_id.is_some() {
-                    shape[RunShapeCounter::SelectedBatchClaims] += 1;
-                }
+            let claim = store
+                .claim_ready_queued_work(
+                    &session_id(),
+                    &lease.fence(),
+                    &lease.owner,
+                    QueuedWorkClaimBoundary::Idle,
+                    crate::testing::queued_work_claim_policy(4),
+                )
+                .await
+                .map(crate::QueuedWorkClaimOutcome::claim)
+                .map_err(|error| error.to_string())?;
+            if let Some(claim) = claim {
+                validate_work_claim(model, lease, &claim)?;
                 if claim.batches.len() > 1 {
                     shape[RunShapeCounter::CoalescedClaims] += 1;
                 }
@@ -759,20 +696,19 @@ async fn claim_work_with_stale_lease(
     model: &ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
-    let (Some(stale), Some(batch)) = (
-        model.stale_leases.last(),
-        pending_work(model).first().cloned(),
-    ) else {
+    let Some(stale) = model.stale_leases.last() else {
+        return Ok(());
+    };
+    if pending_work(model).is_empty() {
         return Ok(());
     };
     let before = session_snapshot(store).await?;
     let result = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session_id(),
             &stale.fence(),
             &stale.owner,
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&batch.batch_id),
             crate::testing::queued_work_claim_policy(64),
         )
         .await;
@@ -1018,28 +954,11 @@ async fn commit_operation(
     )?;
 
     if let Some(claim) = work_claim {
-        let pending_before = model
-            .work
-            .values()
-            .map(|work| work.batch.enqueue_seq)
-            .collect::<Vec<_>>();
         let settled = claim
             .batches
             .iter()
             .map(|batch| batch.batch_id.as_str())
             .collect::<BTreeSet<_>>();
-        let settled_min = claim
-            .batches
-            .iter()
-            .map(|batch| batch.enqueue_seq)
-            .min()
-            .unwrap_or(0);
-        if pending_before
-            .iter()
-            .any(|sequence| *sequence < settled_min)
-        {
-            shape[RunShapeCounter::OutOfOrderSettlements] += 1;
-        }
         model
             .work
             .retain(|_, work| !settled.contains(work.batch.batch_id.as_str()));
@@ -1442,34 +1361,6 @@ fn pending_work(model: &ReferenceModel) -> Vec<QueuedWorkBatch> {
     work
 }
 
-fn interrupted_work_composition(
-    model: &ReferenceModel,
-    selected_batch_id: &str,
-) -> Option<Vec<lash_core::BatchId>> {
-    let pending = pending_work(model)
-        .into_iter()
-        .map(|batch| batch.batch_id)
-        .collect::<BTreeSet<_>>();
-    model
-        .stale_work_claims
-        .iter()
-        .rev()
-        .find(|claim| {
-            claim
-                .batches
-                .iter()
-                .any(|batch| batch.batch_id == selected_batch_id)
-        })
-        .map(|claim| {
-            claim
-                .batches
-                .iter()
-                .filter(|batch| pending.contains(&batch.batch_id))
-                .map(|batch| batch.batch_id.clone())
-                .collect()
-        })
-}
-
 fn pending_inputs(model: &ReferenceModel) -> Vec<PendingTurnInput> {
     let held = active_input_ids(model);
     let mut inputs = model
@@ -1516,7 +1407,6 @@ fn validate_work_claim(
     model: &ReferenceModel,
     lease: &ClaimAuthority,
     claim: &QueuedWorkClaim,
-    selected_id: Option<&str>,
 ) -> Result<(), String> {
     if claim.session_lease_generation != lease.fencing_token {
         return Err("queued-work claim pinned the wrong lease generation".to_string());
@@ -1532,11 +1422,6 @@ fn validate_work_claim(
         .collect::<BTreeSet<_>>();
     if claimed.len() != claim.batches.len() || !claimed.is_subset(&pending) {
         return Err("queued-work claim duplicated or invented a batch".to_string());
-    }
-    if let Some(selected_id) = selected_id
-        && claimed != BTreeSet::from([lash_core::BatchId::from(selected_id)])
-    {
-        return Err("selected-batch drain did not claim exactly the selected id".to_string());
     }
     Ok(())
 }

@@ -9,14 +9,6 @@ pub enum StoreError {
         session_id: crate::SessionId,
         root: crate::TurnId,
     },
-    #[error("selected queued run cannot claim the complete request: {unclaimed_batch_ids:?}")]
-    SelectedQueuedRunIncomplete {
-        unclaimed_batch_ids: Vec<crate::BatchId>,
-    },
-    #[error("session {session_id} already owns a different unfinished queued run")]
-    QueuedRunConflict { session_id: crate::SessionId },
-    #[error("session {session_id} queued run execution configuration changed")]
-    QueuedRunConfigurationChanged { session_id: crate::SessionId },
     /// A pending follow-on owns the session (ADR 0101 §3, FIG-3542): no other
     /// turn commits and no other head write changes the fact until the
     /// follow-on's own terminal commit.
@@ -413,10 +405,6 @@ pub enum StoreError {
         superseding_claim_id: Option<Box<str>>,
         superseding_session_lease_generation: Option<Box<u64>>,
     },
-    #[error(
-        "selected queued work intersects an interrupted claim and requires its full composition: {required_batch_ids:?}"
-    )]
-    SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids: Vec<String> },
     #[error(
         "turn input claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
@@ -861,10 +849,7 @@ impl StoreError {
                 "RequiredConstraintInspectionInconclusive"
             }
             Self::QueuedWorkPredecessorClaimCorrupt { .. } => "QueuedWorkPredecessorClaimCorrupt",
-            Self::SelectedQueuedRunIncomplete { .. } => "SelectedQueuedRunIncomplete",
-            Self::QueuedRunConflict { .. } => "QueuedRunConflict",
             Self::UnfinishedRootConflict { .. } => "UnfinishedRootConflict",
-            Self::QueuedRunConfigurationChanged { .. } => "QueuedRunConfigurationChanged",
             Self::FollowOnPending { .. } => "FollowOnPending",
             Self::FollowOnFrameNotCurrent { .. } => "FollowOnFrameNotCurrent",
             Self::FollowOnHeadInvariant { .. } => "FollowOnHeadInvariant",
@@ -902,9 +887,6 @@ impl StoreError {
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
             Self::CurrentFrameNodeMismatch { .. } => "CurrentFrameNodeMismatch",
             Self::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
-            Self::SelectedQueuedWorkRequiresInterruptedComposition { .. } => {
-                "SelectedQueuedWorkRequiresInterruptedComposition"
-            }
             Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
             Self::UnclaimedTurnInputSettlementSuperseded { .. } => {
                 "UnclaimedTurnInputSettlementSuperseded"

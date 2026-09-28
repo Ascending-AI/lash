@@ -152,9 +152,9 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_prune_removes_queued_run_admission_and_members() {
+async fn postgres_process_prune_removes_an_admitted_roots_record() {
     let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres process-prune queued-run law: database URL is not set");
+        eprintln!("skipping Postgres process-prune root-admission law: database URL is not set");
         return;
     };
     reset(&storage).await;
@@ -206,54 +206,43 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
         .expect("seal drive")
         .acquired()
         .expect("drive sealed");
-    let owner = lease.owner.clone();
     let admission = store
-        .begin_or_resume_queued_run(
-            &lease.authority(),
-            lash_core_execution::store::BeginQueuedRun {
-                session_id: session_id.clone(),
-                identity: None,
-                request: lash_core_execution::store::QueuedRunRequest::Automatic,
-                configuration: lash_core_execution::PersistedSessionConfig::new(
-                    lash_core_execution::TurnBudget::Unbounded,
-                ),
-                expected_head_revision: 0,
-                initial_turn_index: 1,
-                generation: None,
-                admitted_generation: lash_core_execution::engine::BuildGeneration::for_test(
-                    "conformance",
-                ),
+        .admit_root(&lash_core_execution::store::AdmitRootRequest {
+            session_id: session_id.clone(),
+            lease: lease.fence(),
+            owner: lease.owner.clone(),
+            root: lash_core_execution::TurnId::from("prune-root"),
+            head: lash_core_execution::store::AdmittedHead::Input(input.input_id.clone()),
+            max_inputs: 64,
+            policy: lash_core_execution::testing::queued_work_claim_policy(64),
+            base: lash_core_execution::store::SessionHeadRef {
+                generation: 0,
+                revision: 0,
+                leaf: None,
+                checkpoint: None,
             },
-        )
+            turn_index: 1,
+            generation: None,
+            admitted_generation: lash_core_execution::engine::BuildGeneration::for_test(
+                "conformance",
+            ),
+        })
         .await
-        .expect("admit queued run");
-    let selected = store
-        .select_queued_run(
-            &lease.authority(),
-            &admission.scope,
-            &owner,
-            64,
-            &admission.configuration,
-            lash_core_execution::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("freeze queued input");
+        .expect("admit the root")
+        .expect("the root reaches its head");
+    assert_eq!(admission.input_ids(), vec![input.input_id]);
+    let admitted: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lash_session_roots \
+         WHERE session_id = $1 AND admission_json IS NOT NULL",
+    )
+    .bind(session_id.as_str())
+    .fetch_one(storage.pool())
+    .await
+    .expect("count admitted roots before prune");
     assert_eq!(
-        selected.admission.members,
-        Some(vec![lash_core_execution::store::QueuedRunMember::Input(
-            input.input_id
-        )])
+        admitted, 1,
+        "the root's record carries the process-owned admission"
     );
-    for table in ["lash_queued_runs", "lash_queued_run_members"] {
-        let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM {table} WHERE session_id = $1"
-        ))
-        .bind(session_id.as_str())
-        .fetch_one(storage.pool())
-        .await
-        .expect("count admission rows before prune");
-        assert!(count > 0, "{table} contains the process-owned admission");
-    }
     let terminal = registry
         .complete_process(
             &process.id,
@@ -272,17 +261,14 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
         )
         .await
         .expect("prune process-owned session");
-    for table in ["lash_queued_runs", "lash_queued_run_members"] {
-        let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM {table} WHERE session_id = $1"
-        ))
-        .bind(session_id.as_str())
-        .fetch_one(storage.pool())
-        .await
-        .expect("count admission rows after prune");
-        assert_eq!(
-            count, 0,
-            "{table} must not retain a deleted process session"
-        );
-    }
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lash_session_roots WHERE session_id = $1")
+            .bind(session_id.as_str())
+            .fetch_one(storage.pool())
+            .await
+            .expect("count root records after prune");
+    assert_eq!(
+        remaining, 0,
+        "lash_session_roots must not retain a deleted process session"
+    );
 }

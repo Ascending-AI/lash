@@ -100,17 +100,26 @@ async fn seed_and_claim(
         .acquired()
         .expect("fresh store-recovery session lease");
     let claim = store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             session_id,
             &lease.fence(),
             &lease_owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            &[batch.batch_id],
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .expect("claim store-recovery queued work")
         .expect("queued work is claimable");
+    assert_eq!(
+        claim
+            .batches
+            .iter()
+            .map(|claimed| claimed.batch_id.clone())
+            .collect::<Vec<_>>(),
+        vec![batch.batch_id],
+        "the claim takes the seeded batch"
+    );
     (lease, claim)
 }
 
@@ -184,21 +193,20 @@ async fn assert_no_parallel_reclaim(
     session_id: &SessionId,
     lease: &crate::ClaimAuthority,
     claim_owner: &crate::LeaseOwnerIdentity,
-    batch_ids: &[lash_core::BatchId],
 ) {
     assert!(
         store
-            .claim_ready_queued_work_by_batch_ids(
+            .claim_ready_queued_work(
                 session_id,
                 &lease.fence(),
                 claim_owner,
                 crate::QueuedWorkClaimBoundary::Idle,
-                batch_ids,
                 crate::testing::queued_work_claim_policy(64),
             )
             .await
+            .map(crate::QueuedWorkClaimOutcome::claim)
             .expect("probe a second pre-settlement reclaim")
-            .acquired_no_rows(),
+            .is_none(),
         "durably claimed work must not be delivered again before settlement"
     );
 }
@@ -250,24 +258,27 @@ pub async fn expired_claim_is_recoverable_once<F>(
     let successor_owner = owner("claim-expiry:owner-b");
     let batch_ids = claimed_batch_ids(&expired_claim);
     let successor_claim = successor_store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session_id,
             &successor_lease.fence(),
             &successor_owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            &batch_ids,
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .expect("recover expired claim")
         .expect("expired claim is recoverable");
-    assert_eq!(successor_claim.batches.len(), 1);
+    assert_eq!(
+        claimed_batch_ids(&successor_claim),
+        batch_ids,
+        "the successor recovers exactly the expired claim's batch"
+    );
     assert_no_parallel_reclaim(
         &successor_store,
         &session_id,
         &successor_lease,
         &successor_owner,
-        &batch_ids,
     )
     .await;
     successor_store
@@ -337,24 +348,27 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
     let successor_owner = owner("checkpoint-before-settlement:owner-b");
     let batch_ids = claimed_batch_ids(&expired_claim);
     let successor_claim = successor_store
-        .claim_ready_queued_work_by_batch_ids(
+        .claim_ready_queued_work(
             &session_id,
             &successor_lease.fence(),
             &successor_owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            &batch_ids,
             crate::testing::queued_work_claim_policy(64),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .expect("recover checkpoint-associated claim")
         .expect("checkpoint-associated claim is recoverable");
-    assert_eq!(successor_claim.batches.len(), 1);
+    assert_eq!(
+        claimed_batch_ids(&successor_claim),
+        batch_ids,
+        "the successor recovers exactly the expired claim's batch"
+    );
     assert_no_parallel_reclaim(
         &successor_store,
         &session_id,
         &successor_lease,
         &successor_owner,
-        &batch_ids,
     )
     .await;
     successor_store

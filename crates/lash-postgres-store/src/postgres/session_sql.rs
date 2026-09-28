@@ -864,17 +864,6 @@ lash_store_sql::statements! {
              )
              RETURNING item.batch_id
          ),
-         deleted_queued_run_members AS (
-             DELETE FROM queued_run_members
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_queued_runs AS (
-             DELETE FROM queued_runs
-             WHERE session_id = ANY(?1)
-               AND (SELECT count(*) FROM deleted_queued_run_members) >= 0
-             RETURNING session_id
-         ),
          deleted_queued_work_batches AS (
              DELETE FROM queued_work_batches
              WHERE session_id = ANY(?1)
@@ -979,8 +968,6 @@ lash_store_sql::statements! {
              RETURNING session_id
          )
          SELECT (SELECT count(*) FROM deleted_graph_nodes)
-              + (SELECT count(*) FROM deleted_queued_run_members)
-              + (SELECT count(*) FROM deleted_queued_runs)
               + (SELECT count(*) FROM deleted_queued_work_batches)
               + (SELECT count(*) FROM deleted_wake_redelivery_fences)
               + (SELECT count(*) FROM deleted_wake_allocation_floors)

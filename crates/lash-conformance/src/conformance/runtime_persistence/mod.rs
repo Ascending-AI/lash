@@ -37,17 +37,11 @@ mod drive_claim;
 mod enqueue_sequence_identity;
 mod pending_follow_on;
 mod queue_redrive;
-mod queued_run_assignments;
-mod queued_run_cold;
-mod queued_run_composition;
-mod queued_runs;
-mod runtime_basics;
-pub use queued_run_cold::{
-    assert_queued_run_cold_process_recovery, queued_run_cold_process_driver,
-};
 mod reopen_and_commit;
+mod root_admissions;
 mod root_terminals;
 mod run_specs;
+mod runtime_basics;
 mod suite_and_receipts;
 mod turn_input_batches;
 mod turn_inputs_and_reopen;
@@ -63,10 +57,8 @@ pub mod runtime_persistence_macro_support {
     pub use super::enqueue_sequence_identity::*;
     pub use super::pending_follow_on::*;
     pub use super::queue_redrive::*;
-    pub use super::queued_run_assignments::*;
-    pub use super::queued_run_composition::*;
-    pub use super::queued_runs::*;
     pub use super::reopen_and_commit::*;
+    pub use super::root_admissions::*;
     pub use super::root_terminals::*;
     pub use super::run_specs::*;
     pub use super::runtime_basics::*;
@@ -83,10 +75,7 @@ pub use append_receipts::{
     append_request_receipt_replays_after_ancestor_superseded,
     inactive_append_ancestor_precedes_stale_head, tombstoned_old_leaf_is_rejected,
 };
-pub use attachments_and_queue::{
-    queued_work_claims_supersede_across_session_lease_generations,
-    queued_work_exact_claim_preserves_physical_order_and_key_breaks,
-};
+pub use attachments_and_queue::queued_work_claims_supersede_across_session_lease_generations;
 use checkpoint_claims::*;
 pub use checkpoint_claims::{
     checkpoint_claim_probe_transaction_counts, checkpoint_rejects_unknown_component_ref,

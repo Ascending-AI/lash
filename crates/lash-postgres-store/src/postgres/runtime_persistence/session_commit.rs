@@ -302,11 +302,6 @@ impl SessionCommitStore for PostgresSessionStore {
         if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
             ensure_session_execution_lease_tx(&mut tx, &commit.session_id, fence).await?;
         }
-        if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none() {
-            return Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: commit.session_id.clone(),
-            });
-        }
         // A root's commit is fenced by the admission its root was sealed
         // under: a successor's seal refuses it before anything is read or
         // written (ADR 0105 §2).
@@ -658,39 +653,6 @@ impl SessionCommitStore for PostgresSessionStore {
                 None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
             },
         };
-        if let Some(pending) = load_run_tx(&mut tx, &commit.session_id, None).await? {
-            let own_initial_command = pending.members.is_none()
-                && commit.session_execution_lease_fence.is_some()
-                && commit.turn_commit.operation.key == "session-command";
-            if commit
-                .queued_run
-                .as_ref()
-                .is_none_or(|progress| progress.scope != pending.scope)
-                && !own_initial_command
-            {
-                return Err(StoreError::QueuedRunConflict {
-                    session_id: commit.session_id.clone(),
-                });
-            }
-        }
-        let queued_admission = if let Some(progress) = &commit.queued_run {
-            let admission = load_run_tx(&mut tx, &commit.session_id, Some(&progress.scope))
-                .await?
-                .ok_or_else(|| StoreError::QueuedRunConflict {
-                    session_id: commit.session_id.clone(),
-                })?;
-            admission.advance(progress)?;
-            let fence = commit
-                .session_execution_lease_fence
-                .as_ref()
-                .ok_or_else(|| StoreError::SessionExecutionLeaseExpired {
-                    session_id: commit.session_id.clone(),
-                })?;
-            validate_run_members_tx(&mut tx, fence, progress).await?;
-            Some(admission)
-        } else {
-            None
-        };
         // The head row is locked above, so the fact read here is the one this
         // commit publishes over (ADR 0101 §3).
         let existing_pending_follow_on =
@@ -987,21 +949,6 @@ impl SessionCommitStore for PostgresSessionStore {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        }
-        if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
-            if matches!(
-                progress.progress,
-                lash_core_execution::store::QueuedRunProgress::Settle { .. }
-            ) {
-                let fence = commit
-                    .session_execution_lease_fence
-                    .as_ref()
-                    .ok_or_else(|| StoreError::SessionExecutionLeaseExpired {
-                        session_id: commit.session_id.clone(),
-                    })?;
-                settle_run_members_tx(&mut tx, fence, &progress.scope).await?;
-            }
-            write_run_tx(&mut tx, &admission.advance(progress)?, false).await?;
         }
         // The root's final commit writes its terminal evidence in this
         // transaction (FIG-3600 S7).

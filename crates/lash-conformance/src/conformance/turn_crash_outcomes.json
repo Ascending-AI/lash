@@ -4,24 +4,24 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "pending_queued_run"
+          "kind": "unfinished_root"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "The final commit settled the admission and ingress. The successor returns its receipt without repeating the committed turn."
+    "outcome": "No root is admitted yet. The successor reclaims the lane, finds no unfinished root and admits the unchanged durable ingress."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "load_queued_run_admission_head"
+          "kind": "load_session_head_meta"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "The lease is held but no run is admitted. The successor reclaims the lane and admits the unchanged durable ingress."
+    "outcome": "The lease is held but no root is admitted. The successor reclaims the lane and admits the unchanged durable ingress."
   },
   {
     "point": {
@@ -40,24 +40,24 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "claim_next_turn_inputs"
+          "kind": "admit_root"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "The recovered drive uses its recorded admission and input prefix; the claim is fenced by the drive epoch and the turn completes once."
+    "outcome": "No admission is recorded. The recovered drive admits the root on the unchanged durable ingress, fenced by the drive epoch, and the turn completes once."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "claim_next_turn_inputs"
+          "kind": "admit_root"
         }
       },
       "placement": "inside_call"
     },
-    "outcome": "The recovered drive uses its recorded admission and input prefix; the claim is fenced by the drive epoch and the turn completes once."
+    "outcome": "The admission committed before its outcome was journaled. The recovered drive's retry returns the recorded admission, never a wider prefix, and the turn completes once."
   },
   {
     "point": {

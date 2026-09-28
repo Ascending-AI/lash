@@ -2,13 +2,13 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "pending_queued_run"
+      "kind": "unfinished_root"
     }
   },
   {
     "seam": "store",
     "operation": {
-      "kind": "load_queued_run_admission_head"
+      "kind": "load_session_head_meta"
     }
   },
   {
@@ -20,7 +20,7 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "claim_next_turn_inputs"
+      "kind": "admit_root"
     }
   },
   {

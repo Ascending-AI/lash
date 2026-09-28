@@ -178,12 +178,12 @@ impl RecordingStore {
 
 #[async_trait::async_trait]
 impl RuntimePersistenceDecorator for RecordingStore {
-    async fn claim_root_inputs(
+    async fn admit_root(
         &self,
-        request: &crate::store::RootInputClaimRequest,
-    ) -> Result<Option<crate::AcceptedTurnInputDrive>, StoreError> {
+        request: &crate::store::AdmitRootRequest,
+    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
         self.run_claim_hook();
-        self.inner.claim_root_inputs(request).await
+        self.inner.admit_root(request).await
     }
     fn inner(&self) -> &(dyn RuntimePersistence + '_) {
         self.inner.as_ref()
@@ -282,21 +282,6 @@ impl RuntimePersistenceDecorator for RecordingStore {
         self.inner.admit_and_bind_session(binding).await
     }
 
-    async fn select_queued_run(
-        &self,
-        fence: &ClaimAuthority,
-        scope: &crate::ExecutionScope,
-        owner: &crate::LeaseOwnerIdentity,
-        max_inputs: usize,
-        configuration: &crate::PersistedSessionConfig,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::store::SelectedQueuedRun, StoreError> {
-        self.run_claim_hook();
-        self.inner
-            .select_queued_run(fence, scope, owner, max_inputs, configuration, policy)
-            .await
-    }
-
     async fn claim_ready_queued_work(
         &self,
         session_id: &SessionId,
@@ -336,28 +321,6 @@ impl RuntimePersistenceDecorator for RecordingStore {
                 turn_id,
                 checkpoint,
                 max_inputs,
-                policy,
-            )
-            .await
-    }
-
-    async fn claim_ready_queued_work_by_batch_ids(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        boundary: crate::QueuedWorkClaimBoundary,
-        batch_ids: &[crate::BatchId],
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
-        self.run_claim_hook();
-        self.inner
-            .claim_ready_queued_work_by_batch_ids(
-                session_id,
-                session_execution_lease,
-                owner,
-                boundary,
-                batch_ids,
                 policy,
             )
             .await

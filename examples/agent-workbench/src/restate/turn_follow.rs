@@ -558,7 +558,8 @@ async fn watch_until_idle(
 }
 
 /// Whether `session` has no work a watch could still see start: no root a
-/// follower here holds, no pending input, no queued work or queued run.
+/// follower here holds, no pending input, no queued work and no unfinished
+/// root.
 async fn session_is_idle(follows: &RootFollows, session: &lash::LashSession) -> bool {
     if follows.follows_any(&session.session_id()) {
         return false;
@@ -566,7 +567,7 @@ async fn session_is_idle(follows: &RootFollows, session: &lash::LashSession) -> 
     let durable = session.durable();
     matches!(durable.pending_turn_inputs().await, Ok(inputs) if inputs.is_empty())
         && matches!(durable.queued_work().await, Ok(batches) if batches.is_empty())
-        && matches!(durable.pending_queued_run().await, Ok(None))
+        && matches!(durable.unfinished_root().await, Ok(None))
 }
 
 /// The root a physical turn belongs to: a root's later turns are
