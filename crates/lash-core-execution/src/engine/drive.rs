@@ -27,6 +27,33 @@ const DRIVE_ADMISSION_SCOPE_PREFIX: &str = "drive:";
 /// remaining work to a new request.
 pub const MAX_ROOTS_PER_DRIVE: usize = 64;
 
+/// What a driver keeps open for one attempt of one drive invocation
+/// ([`SessionDriver::hold_drive`](crate::runtime::work::SessionDriver::hold_drive)):
+/// dropping it releases what it holds.
+#[must_use = "a drive hold releases what it holds when it is dropped"]
+pub struct DriveHold(Option<Box<dyn Send>>);
+
+impl DriveHold {
+    /// A hold on nothing: a driver that opens nothing per session.
+    pub fn empty() -> Self {
+        Self(None)
+    }
+
+    /// A hold on `held`, released when the hold is dropped.
+    pub fn new(held: impl Send + 'static) -> Self {
+        Self(Some(Box::new(held)))
+    }
+}
+
+impl std::fmt::Debug for DriveHold {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("DriveHold")
+            .field(&self.0.is_some())
+            .finish()
+    }
+}
+
 /// The request-id prefix of a drive's continuation invocations: every leg a
 /// yielded drive hands off to is named under it, so a walk of a session's
 /// drive requests can tell chain legs from new chain roots.

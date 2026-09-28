@@ -25,6 +25,9 @@ pub(crate) struct CoreSessionDriverConfig {
 /// It is installed on the backend's session-work engine at core build.
 pub(crate) struct CoreSessionDriver {
     config: Arc<CoreSessionDriverConfig>,
+    /// The sessions a drive attempt holds open in this process, so its
+    /// admissions and roots share one runtime (FIG-3825).
+    held: super::held_drives::HeldDrives,
     /// The core's resolved work ports, bound once the substrate slot exists:
     /// the reconcile pass asks this port for drives, not the environment's
     /// build-time placeholder.
@@ -38,6 +41,7 @@ impl CoreSessionDriver {
     pub(crate) fn new(config: Arc<CoreSessionDriverConfig>) -> Self {
         Self {
             config,
+            held: super::held_drives::HeldDrives::default(),
             substrate_slot: std::sync::OnceLock::new(),
             administration: std::sync::OnceLock::new(),
         }
@@ -89,8 +93,8 @@ impl CoreSessionDriver {
         let _ = self.substrate_slot.set(slot);
     }
 
-    /// Open `session_id`'s runtime with the core's plugins.
-    async fn open_runtime(
+    /// The runtime a drive step of `session_id` runs on.
+    async fn drive_runtime(
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<DriveRuntime, OpenFailure> {
@@ -99,6 +103,19 @@ impl CoreSessionDriver {
         if let Some(borrow) = self.config.residents.borrow(session_id) {
             return Ok(DriveRuntime::Resident(borrow));
         }
+        let open = Box::pin(self.open_runtime(session_id));
+        let Some(held) = self.held.held(session_id) else {
+            return open.await.map(DriveRuntime::Opened);
+        };
+        let handle = held.runtime(open).await?;
+        Ok(DriveRuntime::Held { handle, held })
+    }
+
+    /// Open `session_id`'s runtime from the store with the core's plugins.
+    async fn open_runtime(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<RuntimeHandle, OpenFailure> {
         let mut policy = self.config.policy.clone();
         policy.session_id = Some(session_id.clone());
         let store = self
@@ -189,18 +206,22 @@ impl CoreSessionDriver {
                 is_root_session,
             )
             .map_err(OpenFailure::Terminal)?;
-        let handle = RuntimeHandle::with_live_replay_store(
+        Ok(RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.config.live_replay_store),
-        );
-        Ok(DriveRuntime::Opened(handle))
+        ))
     }
 }
 
-/// The runtime a drive runs on: the host's open session, borrowed for the
-/// drive, or one opened from the store.
+/// The runtime a drive step runs on: the host's open session, borrowed for
+/// the step; the one a drive attempt holds open across its steps; or one
+/// opened from the store for this step alone.
 enum DriveRuntime {
     Resident(super::residents::ResidentBorrow),
+    Held {
+        handle: RuntimeHandle,
+        held: Arc<super::held_drives::HeldSession>,
+    },
     Opened(RuntimeHandle),
 }
 
@@ -208,7 +229,16 @@ impl DriveRuntime {
     fn handle(&self) -> &RuntimeHandle {
         match self {
             Self::Resident(borrow) => borrow.runtime(),
-            Self::Opened(handle) => handle,
+            Self::Held { handle, .. } | Self::Opened(handle) => handle,
+        }
+    }
+
+    /// The mark of a root that did not end, on a runtime later roots of the
+    /// drive run on too.
+    fn unsettled_root(&self) -> Option<&super::held_drives::UnsettledRoot> {
+        match self {
+            Self::Held { held, .. } => Some(held.unsettled_root()),
+            Self::Resident(_) | Self::Opened(_) => None,
         }
     }
 }
@@ -327,13 +357,17 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         Ok(report.next)
     }
 
+    fn hold_drive(&self, session: &SessionId) -> lash_core::engine::DriveHold {
+        lash_core::engine::DriveHold::new(self.held.hold(session))
+    }
+
     async fn admit(
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         request: &lash_core::engine::DriveRequest,
         ordinal: u32,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
-        let runtime = match self.open_runtime(&request.session).await {
+        let runtime = match self.drive_runtime(&request.session).await {
             Ok(runtime) => runtime,
             // A session that is already deleted — or closed past admission —
             // still owes the journal the recorded step at this position: an
@@ -360,7 +394,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         controller: lash_core::ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
     ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
-        let runtime = match self.open_runtime(admitted.session()).await {
+        let runtime = match self.drive_runtime(admitted.session()).await {
             Ok(runtime) => runtime,
             // A root whose session is already deleted — or closed past
             // admission — still owes the journal its start marker and seal:
@@ -378,6 +412,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
             &self.config.env.core.backend().binding_identity(),
             &controller,
             admitted,
+            runtime.unsettled_root(),
         )
         .await
     }

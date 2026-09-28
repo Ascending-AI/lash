@@ -142,6 +142,20 @@ pub trait SessionDriver: Send + Sync {
         })
     }
 
+    /// Hold `session`'s runtime open for one attempt of one drive
+    /// invocation (FIG-3825).
+    ///
+    /// The engine takes the hold before the attempt's first admission and
+    /// drops it when the attempt ends. While it is held, the attempt's
+    /// admissions, replayed ones included, and every root it calls that runs
+    /// in this process share one runtime, opened by the first of them. An
+    /// attempt ends where the engine stops polling it, so nothing held
+    /// crosses into the next attempt: that one opens the session afresh, as
+    /// a redrive in a fresh process does. The default holds nothing.
+    fn hold_drive(&self, _session: &SessionId) -> crate::engine::DriveHold {
+        crate::engine::DriveHold::empty()
+    }
+
     /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step
     /// through `controller`, which serves
     /// [`drive_admission_scope`](crate::engine::drive_admission_scope).

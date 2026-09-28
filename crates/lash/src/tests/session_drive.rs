@@ -155,6 +155,160 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Resul
     Ok(())
 }
 
+/// A core whose engine drives a session no host holds open, over a session
+/// catalog that records every store it hands out (FIG-3825). Each pending
+/// input is its own root, so one drive admits several; the reconcile tick
+/// is explicit, so the law's ask is the only drive.
+struct HeldDriveFixture {
+    core: LashCore,
+    session: lash_core::SessionId,
+    store: Arc<lash_core::testing::runtime_helpers::RecordingStore>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl HeldDriveFixture {
+    async fn with_pending(session: &str, inputs: usize) -> Result<Self> {
+        let catalog = Arc::new(std::sync::OnceLock::<
+            Arc<lash_core::testing::runtime_helpers::RecordingSessionStoreFactory>,
+        >::new());
+        let installed = Arc::clone(&catalog);
+        let backend = double_backend_over_explicit_reconcile(
+            lash_restate_test::ServerConfig::default(),
+            move |stores| {
+                lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                    .map_session_store_factory(|inner| {
+                        let recording = Arc::new(
+                            lash_core::testing::runtime_helpers::RecordingSessionStoreFactory::over(
+                                inner,
+                            ),
+                        );
+                        let _ = installed.set(Arc::clone(&recording));
+                        recording
+                    })
+                    .into_store_set()
+            },
+        )
+        .await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(
+                crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_claim(1),
+            )
+            .provider(counting_provider(Arc::clone(&calls)))
+            .model(mock_model_spec())
+            .build(crate::testing::runtime_lease_owner())?;
+        let session_id = lash_core::SessionId::from(session);
+        drop(core.session(session).open().await?);
+        let store = catalog
+            .get()
+            .and_then(|catalog| catalog.store_for(&session_id))
+            .expect("the open created the session's store");
+        for index in 0..inputs {
+            lash_core::TurnInputStore::enqueue_pending_turn_input(
+                store.as_ref(),
+                lash_core::PendingTurnInputDraft::new(
+                    session_id.clone(),
+                    lash_core::TurnInputIngress::NextTurn,
+                    TurnInput::text(format!("question {index}")),
+                ),
+            )
+            .await
+            .expect("enqueue the input");
+        }
+        Ok(Self {
+            core,
+            session: session_id,
+            store,
+            calls,
+        })
+    }
+
+    /// Ask for one drive of the session and wait for it to end.
+    async fn drive(&self, request: &str) -> lash_core::engine::DriveOutcome {
+        let engine_port = self.core.substrate_slot.ports().await.queued;
+        let request = lash_core::engine::DriveRequestId::new(request);
+        engine_port.schedule_drive(&self.session, request.clone());
+        tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            engine_port.await_drive(&self.session, &request),
+        )
+        .await
+        .expect("the drive ends")
+        .expect("the drive is not refused")
+    }
+}
+
+/// FIG-3825: one drive invocation loads its session once and runs every
+/// admission ordinal and every root it calls on that runtime. It used to
+/// open a runtime (a plugin host and a session load) per admission and per
+/// root: seven loads for this drive's four admissions and three roots.
+async fn a_drive_invocation_loads_its_session_once_across_its_roots() -> Result<()> {
+    const ROOTS: usize = 3;
+    let fixture = HeldDriveFixture::with_pending("drive-loads-once", ROOTS).await?;
+    let loads_before = fixture.store.load_session_count();
+
+    let outcome = fixture.drive("loads-once").await;
+
+    assert_eq!(outcome.stop, lash_core::engine::DriveStop::Idle);
+    assert_eq!(outcome.ran.len(), ROOTS, "one invocation ran every root");
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), ROOTS);
+    assert_eq!(
+        fixture.store.load_session_count() - loads_before,
+        1,
+        "the drive invocation loads its session once, not per admission and root"
+    );
+    Ok(())
+}
+
+/// FIG-3825: a root whose attempt failed on a live fault is retried on the
+/// runtime its drive still holds, and starts from the durable session: the
+/// failed attempt's residue is discarded first, as a redrive in a fresh
+/// process would never see it. Every input is applied exactly once and the
+/// drive runs on to every root.
+async fn a_root_retried_on_a_held_runtime_starts_from_the_durable_session() -> Result<()> {
+    const ROOTS: usize = 2;
+    let fixture = HeldDriveFixture::with_pending("drive-held-retry", ROOTS).await?;
+    fixture
+        .store
+        .fail_next_runtime_commit(lash_core::StoreError::Backend(
+            "the first root's commit meets a live fault".to_string(),
+        ));
+
+    let outcome = fixture.drive("held-retry").await;
+
+    assert_eq!(outcome.stop, lash_core::engine::DriveStop::Idle);
+    assert_eq!(
+        outcome.ran.len(),
+        ROOTS,
+        "the retried root and the next ran"
+    );
+    assert!(
+        fixture.store.commit_write_transaction_count() > ROOTS,
+        "the first root's attempt met the fault"
+    );
+    assert!(
+        outcome
+            .ran
+            .iter()
+            .all(|root| matches!(root, lash_core::engine::RootOutcome::Committed { .. })),
+        "every root committed: {outcome:?}"
+    );
+    assert_eq!(
+        *fixture.store.runtime_commit_count.lock_recover(),
+        ROOTS,
+        "each root committed once"
+    );
+    let session = fixture.core.session("drive-held-retry").open().await?;
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    assert_eq!(
+        session.durable().turn_input_applications().await?.len(),
+        ROOTS,
+        "every input was applied exactly once"
+    );
+    Ok(())
+}
+
 /// The request ids of `session`'s drive invocations that are not legs of
 /// `request`'s chain: each is the root of a sibling chain (the reconcile
 /// tick asks for `reconcile:` requests). `drive-next:` invocations are
@@ -505,6 +659,17 @@ macro_rules! session_drive_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Result<()> {
                 super::a_scheduled_drive_drains_more_roots_than_one_invocation_runs().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_drive_invocation_loads_its_session_once_across_its_roots() -> Result<()> {
+                super::a_drive_invocation_loads_its_session_once_across_its_roots().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_root_retried_on_a_held_runtime_starts_from_the_durable_session()
+            -> Result<()> {
+                super::a_root_retried_on_a_held_runtime_starts_from_the_durable_session().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

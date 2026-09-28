@@ -321,6 +321,13 @@ impl DriverProxy {
 
 #[async_trait::async_trait]
 impl SessionDriver for DriverProxy {
+    fn hold_drive(&self, session: &lash_core::SessionId) -> lash_core::engine::DriveHold {
+        self.current()
+            .map_or_else(lash_core::engine::DriveHold::empty, |driver| {
+                driver.hold_drive(session)
+            })
+    }
+
     async fn admit(
         &self,
         controller: lash_core::ScopedEffectController<'_>,

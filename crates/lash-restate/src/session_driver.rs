@@ -247,6 +247,10 @@ impl SessionDriver for InstalledSessionDriver {
         self.driver.reconcile(cursor, page).await
     }
 
+    fn hold_drive(&self, session: &SessionId) -> lash_core::engine::DriveHold {
+        self.driver.hold_drive(session)
+    }
+
     async fn admit(
         &self,
         controller: lash_core::ScopedEffectController<'_>,
@@ -920,6 +924,10 @@ async fn drive_session_journal(
     }
     let handler = route.namespace().stable(LashService::SessionDriver).name();
     let driver = slot.driver_for(&handler)?;
+    // This attempt's admissions, and the roots it calls when they run in this
+    // process, share one runtime of the session (FIG-3825); the hold drops
+    // where the attempt ends, so a replaying attempt opens its own.
+    let _hold = driver.hold_drive(&request.session);
     // The generation sentinel rides admission 0, the drive's first command
     // (FIG-3980): a journal of another build parks before it replays past it.
     let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));

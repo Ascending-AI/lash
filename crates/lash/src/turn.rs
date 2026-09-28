@@ -38,11 +38,16 @@ pub(crate) async fn admit_drive_observed(
 
 /// Run one admitted root on `runtime`'s session (FIG-3600), recording every
 /// turn activity on the session's observation.
+///
+/// `unsettled` marks a runtime a drive holds across its roots (FIG-3825):
+/// the root discards what an earlier root that did not end left on it, and
+/// the mark follows this root, both under the runtime's writer.
 pub(crate) async fn run_admitted_root_observed(
     runtime: &RuntimeHandle,
     binding: &lash_core::StoreBindingId,
     controller: &ScopedEffectController<'_>,
     admitted: lash_core::engine::Admitted,
+    unsettled: Option<&crate::core::held_drives::UnsettledRoot>,
 ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
     let session = admitted.session().clone();
     // Marked before the root can commit: a handle that sees its commit waits
@@ -50,6 +55,9 @@ pub(crate) async fn run_admitted_root_observed(
     let _running = crate::send::running(binding, &session, admitted.root());
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
+    if unsettled.is_some_and(crate::core::held_drives::UnsettledRoot::enter) {
+        lash_core::drive::discard_root_residue(&mut writer);
+    }
     let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
     let settled = DepositSettledRoot {
         runtime,
@@ -64,6 +72,11 @@ pub(crate) async fn run_admitted_root_observed(
     };
     let outcome =
         lash_core::drive::run_admitted_root_with(&mut writer, controller, admitted, sinks).await;
+    if outcome.is_ok()
+        && let Some(unsettled) = unsettled
+    {
+        unsettled.settle();
+    }
     runtime.publish_from(&writer);
     outcome
 }

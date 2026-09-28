@@ -13,6 +13,7 @@ use lash_sansio::SessionId;
 
 mod advanced_builder;
 mod drain;
+pub(crate) mod held_drives;
 mod recovery;
 pub(crate) mod residents;
 mod runtime_host_config;

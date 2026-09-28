@@ -461,6 +461,16 @@ pub async fn run_admitted_root_with(
         .map(|run| run.outcome)
 }
 
+/// Discard what a failed root attempt left on `runtime` (FIG-3825): a driver
+/// that runs several roots on one runtime calls it before the next root, so
+/// that root starts from the durable session as a redrive in a fresh process
+/// does, without reopening the runtime. A dropped attempt's guard discards
+/// the same as it drops (FIG-3984).
+#[doc(hidden)]
+pub fn discard_root_residue(runtime: &mut LashRuntime) {
+    runtime.discard_root_residue();
+}
+
 /// What one admitted root's run left behind in this process: how it ended,
 /// the physical turns it assembled when they ran here, and the accepted
 /// inputs its recorded claim drove.
@@ -609,10 +619,7 @@ impl Drop for EngineAttempt<'_> {
         let runtime = &mut *self.runtime;
         runtime.engine_retries_root = false;
         if !self.returned {
-            runtime.drive_root = None;
-            runtime.journaled_drive_claims.clear();
-            runtime.admitted_turn_index = None;
-            runtime.invalidate_resident_session_state();
+            runtime.discard_root_residue();
         }
     }
 }
@@ -765,6 +772,17 @@ impl LashRuntime {
             DriveAbort::Retry(error) if !engine_retries(&error) => DriveAbort::Refused(error),
             abort => abort,
         })
+    }
+
+    /// Discard what an earlier root's attempt left on this runtime (its
+    /// sealed run, its journaled claims, its admitted turn index and the
+    /// resident session state it touched), so the next root starts from the
+    /// durable session exactly as a redrive in a fresh process does.
+    fn discard_root_residue(&mut self) {
+        self.drive_root = None;
+        self.journaled_drive_claims.clear();
+        self.admitted_turn_index = None;
+        self.invalidate_resident_session_state();
     }
 
     /// Seal `admitted`, then run its root.
