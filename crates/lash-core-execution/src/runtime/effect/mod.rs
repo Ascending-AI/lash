@@ -31,6 +31,7 @@ pub use tool_presentation::{
     SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
 };
 mod recorded_stream;
+mod request_digest;
 pub use recorded_stream::{
     CHILD_STREAM_BYTE_BUDGET, ChildStreamTruncation, DecodedChildEvent, RecordedChildChannel,
     RecordedChildEvent, RecordedChildStream,

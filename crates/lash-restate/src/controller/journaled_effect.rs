@@ -15,7 +15,7 @@ use lash_core::{
 use restate_sdk::serde::Json;
 
 use super::context::RestateControllerContext;
-use super::effect_journal::JournaledEffectRecord;
+use super::effect_journal::{JournaledEffectRecord, JournaledEntry};
 use super::journal_budget::{
     JournaledBudgetVerdict, budget_verdict, gave_up_over_budget_entry, group_open_budget_verdict,
     group_open_gave_up_over_budget, journalable_recorded_effect, recorded_effect_from_journal,
@@ -334,11 +334,18 @@ where
         let effect_name = restate_effect_name(metadata);
         let payload_budget = self.options.journaled_effect_byte_budget;
         let poisoned_effect_name = effect_name.clone();
+        let build_generation = self.sentinel_stamp();
+        let first = build_generation.is_some();
         let Json(entry) = self
             .context
             .run_json_or_retry_send(effect_name.clone(), async move {
-                future.await.map(|recorded| {
-                    journalable_recorded_effect(&poisoned_effect_name, payload_budget, recorded)
+                future.await.map(|recorded| JournaledEntry {
+                    build_generation,
+                    record: journalable_recorded_effect(
+                        &poisoned_effect_name,
+                        payload_budget,
+                        recorded,
+                    ),
                 })
             })
             .await
@@ -346,8 +353,8 @@ where
                 effect: effect_name.clone(),
                 terminal: source,
             })?;
-        recorded_effect_from_journal(envelope, &effect_name, entry)
-            .map_err(RestateEffectError::Refused)
+        self.recorded_entry(envelope, &effect_name, entry, first)
+            .await
     }
 
     /// Execute an eager effect (a durable process command) through the
@@ -406,15 +413,62 @@ where
         'ctx: 'run,
     {
         let run_retry_policy = self.options.run_retry_policy.clone();
+        let build_generation = self.sentinel_stamp();
+        let first = build_generation.is_some();
         let Json(entry) = self
             .context
-            .run_json_send(effect_name.clone(), run_retry_policy, future)
+            .run_json_send(
+                effect_name.clone(),
+                run_retry_policy,
+                Box::pin(async move {
+                    JournaledEntry {
+                        build_generation,
+                        record: future.await,
+                    }
+                }),
+            )
             .await
             .map_err(|source| RestateEffectError::Terminal {
                 effect: effect_name.clone(),
                 terminal: source,
             })?;
-        recorded_effect_from_journal(envelope, &effect_name, entry)
+        self.recorded_entry(envelope, &effect_name, entry, first)
+            .await
+    }
+
+    /// Stamp `sentinel`'s generation on the first recorded entry this
+    /// controller journals, and check the one it replays (FIG-3980).
+    pub(crate) fn with_folded_sentinel(
+        mut self,
+        sentinel: Arc<crate::sentinel::FoldedSentinel>,
+    ) -> Self {
+        self.folded_sentinel = Some(sentinel);
+        self
+    }
+
+    /// The generation to stamp on the entry about to be journaled: `Some`
+    /// only on the first recorded entry of a controller that folds its
+    /// handler's generation sentinel (FIG-3980).
+    fn sentinel_stamp(&self) -> Option<serde_json::Value> {
+        self.folded_sentinel
+            .as_ref()
+            .and_then(|sentinel| sentinel.stamp())
+    }
+
+    /// The recorded effect a journaled entry stands for. The `first` entry
+    /// of a folded sentinel is checked for its generation before anything
+    /// else reads it; an entry of another build never answers.
+    async fn recorded_entry(
+        &self,
+        envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+        effect_name: &str,
+        entry: JournaledEntry,
+        first: bool,
+    ) -> Result<RecordedRuntimeEffect, RestateEffectError> {
+        if first && let Some(sentinel) = &self.folded_sentinel {
+            sentinel.check(entry.build_generation.as_ref()).await;
+        }
+        recorded_effect_from_journal(envelope, effect_name, entry.record)
             .map_err(RestateEffectError::Refused)
     }
 }

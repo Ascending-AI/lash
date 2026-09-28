@@ -400,3 +400,84 @@ pub(super) async fn a_send_never_answers_from_a_root_another_store_ran() -> Resu
     );
     Ok(())
 }
+
+/// FIG-3980: a turn's journal does not grow with its transcript, and neither
+/// session-driver handler journals a separate generation sentinel step.
+///
+/// Every turn sends the same large input, so each adds it and its echo to
+/// the transcript the next turn's model request carries. The model-call
+/// steps journal that request by digest, so a later turn's `LashTurn`
+/// journal is the size of an earlier one's.
+#[tokio::test]
+pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step() -> Result<()> {
+    use lash_restate_test::protocol::MessageType;
+
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("request-digest").open().await?;
+    let input = "x".repeat(8_000);
+    let mut turn_bytes = Vec::new();
+    for turn in 0..4 {
+        session
+            .send(TurnInput::text(format!("{turn} {input}")))
+            .id(format!("t{turn}"))
+            .output()
+            .await?;
+        let server = double.server();
+        let turn_target = format!(
+            "LashTurn/{}:request-digestt{turn}/run",
+            "request-digest".len()
+        );
+        let turn_run = server
+            .invocations()
+            .into_iter()
+            .find(|view| view.target == turn_target)
+            .expect("the turn's LashTurn run");
+        let journal = server.journal(&turn_run.id).unwrap_or_default();
+        turn_bytes.push(
+            journal
+                .iter()
+                .map(|entry| entry.payload.len())
+                .sum::<usize>(),
+        );
+        let commands = journal
+            .iter()
+            .filter(|entry| entry.ty.is_command() && entry.ty != MessageType::InputCommand)
+            .collect::<Vec<_>>();
+        assert!(
+            commands
+                .first()
+                .is_some_and(|first| first.ty == MessageType::RunCommand
+                    && first
+                        .name
+                        .as_deref()
+                        .is_some_and(|name| name.starts_with("lash:drive-root-start:"))),
+            "the root's start marker is its first command: {:?}",
+            commands.first()
+        );
+    }
+    let server = double.server();
+    for view in server.invocations() {
+        let sentinels = server
+            .journal(&view.id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.name.as_deref() == Some("lash.build.generation"))
+            .count();
+        if view.target.starts_with("LashSession/") || view.target.starts_with("LashTurn/") {
+            assert_eq!(sentinels, 0, "{} journals no sentinel step", view.target);
+        }
+    }
+    // Each turn carries 16 KB more transcript than the one before it.
+    assert!(
+        turn_bytes[3].abs_diff(turn_bytes[1]) < 1_024,
+        "a LashTurn journal does not grow with the transcript: {turn_bytes:?}"
+    );
+    Ok(())
+}

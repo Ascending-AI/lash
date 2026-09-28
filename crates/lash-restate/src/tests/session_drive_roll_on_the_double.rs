@@ -8,8 +8,7 @@
 //! `DriveRequestId` sent during the roll is admitted once across the
 //! stable object and the `_g` resume handler — the item its admission
 //! admits is consumed once, its root runs once, and a request a lane does
-//! not serve is refused after its generation sentinel with no admission
-//! at all.
+//! not serve is refused before it journals anything.
 
 use super::*;
 use lash_restate_test::protocol::MessageType;
@@ -494,7 +493,8 @@ fn journaled_commands(
 }
 
 /// What a misroute owes: a first-attempt refusal naming the misroute, with
-/// nothing journaled after the generation sentinel.
+/// nothing journaled (the generation sentinel rides the first admission,
+/// FIG-3980).
 fn assert_misrouted(roll: &SessionRoll, view: &lash_restate_test::InvocationView, case: &str) {
     assert_eq!(view.status, "completed", "{case}: {view:?}");
     assert_eq!(view.attempts, 1, "{case}: refused on the first attempt");
@@ -508,11 +508,8 @@ fn assert_misrouted(roll: &SessionRoll, view: &lash_restate_test::InvocationView
     );
     assert_eq!(
         journaled_commands(roll, &view.id),
-        vec![(
-            MessageType::RunCommand,
-            Some(crate::sentinel::GENERATION_SENTINEL.to_string())
-        )],
-        "{case}: nothing is journaled after the sentinel"
+        Vec::new(),
+        "{case}: nothing is journaled"
     );
 }
 
@@ -700,8 +697,8 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         "re-running the unjournaled body consumed nothing twice"
     );
 
-    // Red side: requests a lane does not serve are refused typed, after the
-    // sentinel and before any admission.
+    // Red side: requests a lane does not serve are refused typed, before
+    // any admission.
     let session_red = SessionId::from("l9-red");
     roll.driver.accept(&session_red, "never");
     // A `G_{N+1}`-stamped request on `LashSession_g<G_N>`, and a

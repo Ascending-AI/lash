@@ -41,6 +41,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-lashlang-executable/v1",
     "lash-lashlang-program/v2",
     "lash-lashlang-program/v3",
+    "lash-llm-request-content/v1",
     "lash-model-facing-composition/v2",
     "lash-model-facing-composition/v3",
     "lash-openai-responses-request/v2",

@@ -37,6 +37,12 @@ const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
 /// domain names the hashing construction, not the vocabulary of commands inside
 /// it; it moves only when the construction itself changes.
 ///
+/// A model request's content is journaled by digest, not verbatim (FIG-3980,
+/// changed in place under the pre-1.0 version freeze): see
+/// `request_digest`. The bytes are still this envelope's canonical form for
+/// every command, so the hash fixpoint below holds; a journaled model request
+/// just cannot be decoded back into its command, and nothing needs it to.
+///
 /// Recorded shapes that this build cannot replay are refused by
 /// `validate_replayed_effect_envelope` before hash comparison. The Restate
 /// journal owns the durable record; there is no SQL effect generation to bump.
@@ -50,7 +56,7 @@ impl CanonicalRuntimeEffectEnvelope {
     pub(crate) fn capture(
         envelope: &RuntimeEffectEnvelope,
     ) -> Result<Self, RuntimeEffectControllerError> {
-        let json = crate::stable_hash::stable_json_string(envelope).map_err(|err| {
+        let json = super::request_digest::journaled_envelope_json(envelope).map_err(|err| {
             RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectEnvelopeHash,
                 format!("failed to serialize runtime effect envelope: {err}"),

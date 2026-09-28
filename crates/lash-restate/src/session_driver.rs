@@ -82,6 +82,7 @@ use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
+use crate::sentinel::FoldedSentinel;
 use crate::{
     LashService, RestateAuthorityId, RestateIngressClient, RestateRuntimeEffectController,
     parked_turn_failure,
@@ -108,6 +109,11 @@ use crate::{
 /// Generation 4 (FIG-3600 S7-A): a journaled admission or drive stop that
 /// names a terminal root carries the root's terminal kind and, when a head
 /// commit ended it, that commit, in place of the commit alone.
+///
+/// Generation 4 changed in place under the pre-1.0 version freeze
+/// (FIG-3980): neither handler journals a separate generation sentinel step;
+/// its generation rides the first recorded step, admission 0 or the root's
+/// start marker.
 pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
@@ -752,8 +758,8 @@ fn misaddressed(message: String) -> HandlerError {
 
 /// The typed refusal of a request a generation lane does not serve (FIG-3795,
 /// law L11): it names another generation than the lane's, or none. Nothing
-/// past the generation sentinel is journaled, and nothing is stored: a
-/// misroute is the sender's error, never the drive's outcome.
+/// is journaled and nothing is stored: a misroute is the sender's error,
+/// never the drive's outcome.
 fn misrouted(route: &crate::services::ServiceRoute, detail: &str) -> HandlerError {
     drive_refusal(&lash_core::RuntimeError::new(
         lash_core::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
@@ -844,16 +850,10 @@ async fn drive_session_journal(
             request.session
         )));
     }
-    let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
-    crate::sentinel::check_generation(
-        &route.namespace().stable(LashService::SessionDriver).name(),
-        &recorded,
-        generation,
-    )?;
     // The generation lane is resume-only (FIG-3795): it serves a drive whose
     // request was stamped for exactly this generation. A request naming
     // another generation, sent there by error, is refused before any command
-    // after the sentinel — it is the sender's error, journaled nowhere.
+    // — it is the sender's error, journaled nowhere.
     if let crate::services::Lane::Generation(lane) = route.lane()
         && request.build_generation != *lane
     {
@@ -867,10 +867,35 @@ async fn drive_session_journal(
             ),
         ));
     }
-    let driver = slot.driver_for(&route.namespace().stable(LashService::SessionDriver).name())?;
+    let handler = route.namespace().stable(LashService::SessionDriver).name();
+    let driver = slot.driver_for(&handler)?;
+    // The generation sentinel rides admission 0, the drive's first command
+    // (FIG-3980): a journal of another build parks before it replays past it.
+    let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
         .in_namespace(route.namespace().clone())
-        .with_build_generation(generation.clone());
+        .with_build_generation(generation.clone())
+        .with_folded_sentinel(Arc::clone(&sentinel));
+    sentinel
+        .guard(drive_admissions(
+            driver.as_ref(),
+            &controller,
+            generation,
+            route,
+            request,
+        ))
+        .await?
+}
+
+/// Admission `n`, then the admitted root's `LashTurn`, until admission
+/// answers anything but an admitted root.
+async fn drive_admissions(
+    driver: &dyn SessionDriver,
+    controller: &RestateRuntimeEffectController<'_, ObjectContext<'_>>,
+    generation: &BuildGeneration,
+    route: &crate::services::ServiceRoute,
+    request: DriveRequest,
+) -> Result<DriveOutcome, HandlerError> {
     let admission_scope = drive_admission_scope(&request.session, &request.request);
     let mut ran = Vec::new();
     // The kernel's stop rules, the same ones the in-process drive keeps.
@@ -1027,16 +1052,10 @@ async fn run_root_journal(
             ctx.key()
         )));
     }
-    let recorded = crate::sentinel::record_generation!(&ctx, generation)?;
-    crate::sentinel::check_generation(
-        &route.namespace().stable(LashService::TurnDriver).name(),
-        &recorded,
-        generation,
-    )?;
     // The generation lane serves a root the latest build refused, re-sent by
     // the drain under the generation the drive that admitted it ran on
     // (`sender_generation`). A request naming another generation, or none,
-    // is a misroute refused before any command after the sentinel.
+    // is a misroute refused before any command.
     if let crate::services::Lane::Generation(lane) = route.lane()
         && sender_generation != Some(lane)
     {
@@ -1053,15 +1072,21 @@ async fn run_root_journal(
             ),
         ));
     }
-    let driver = slot.driver_for(&route.namespace().stable(LashService::TurnDriver).name())?;
+    let handler = route.namespace().stable(LashService::TurnDriver).name();
+    let driver = slot.driver_for(&handler)?;
+    // The generation sentinel rides the root's first recorded step, its start
+    // marker (FIG-3980): a journal of another build parks before it replays
+    // past it.
+    let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
         .in_namespace(route.namespace().clone())
-        .with_build_generation(generation.clone());
+        .with_build_generation(generation.clone())
+        .with_folded_sentinel(Arc::clone(&sentinel));
     let scoped = controller
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
     let root = admitted.root().clone();
-    let (ended, result) = match driver.run_root(scoped, admitted).await {
+    let (ended, result) = match sentinel.guard(driver.run_root(scoped, admitted)).await? {
         Ok(outcome) => (outcome.clone(), Ok(outcome)),
         // A retryable end records nothing: the run is not over.
         Err(abort @ (DriveAbort::Retry(_) | DriveAbort::Parked { .. })) => {

@@ -17,8 +17,21 @@
 //!
 //! The step's name and its output encoding are frozen: every later
 //! generation must read a sentinel any earlier one wrote.
+//!
+//! The session driver's `LashSession` and `LashTurn` fold the sentinel into
+//! their first recorded step instead (FIG-3980): that step's journal entry
+//! carries the generation beside its own fields, and [`FoldedSentinel`]
+//! checks it on a replay before the step's outcome reaches the drive. The
+//! first recorded step is the handler's first command, so the check still
+//! comes before any other command replays, and a turn journals one step
+//! fewer per handler.
+
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Poll, Waker};
 
 use lash_core::engine::BuildGeneration;
+use lash_sansio::sync::MutexExt as _;
 use restate_sdk::errors::HandlerError;
 
 /// The journal name of the sentinel step. Frozen.
@@ -48,6 +61,100 @@ macro_rules! record_generation {
     }};
 }
 pub(crate) use record_generation;
+
+/// The generation sentinel of a handler that folds it into its first
+/// recorded step (FIG-3980).
+///
+/// The controller stamps the executing generation on the first recorded
+/// entry it journals, and checks the generation that entry carries: on a
+/// first run it is the stamp just written; on a replay, the recording build's.
+/// A journal of another generation is refused through [`Self::guard`], the
+/// handler's wrapper around its drive: the drive's step never answers, so
+/// nothing past the entry replays and no effect runs, and the handler ends
+/// the attempt with the typed `RetiredGeneration` park.
+pub(crate) struct FoldedSentinel {
+    handler: String,
+    executing: BuildGeneration,
+    pending: AtomicBool,
+    refusal: Mutex<Refusal>,
+}
+
+/// A refusal on its way from the drive's step to the handler's guard.
+#[derive(Default)]
+struct Refusal {
+    refusal: Option<HandlerError>,
+    handler: Option<Waker>,
+}
+
+impl FoldedSentinel {
+    pub(crate) fn new(handler: impl Into<String>, executing: BuildGeneration) -> Self {
+        Self {
+            handler: handler.into(),
+            executing,
+            pending: AtomicBool::new(true),
+            refusal: Mutex::new(Refusal::default()),
+        }
+    }
+
+    /// The generation to stamp on the entry about to be journaled: the
+    /// executing one on the first recorded entry, `None` on every later one.
+    pub(crate) fn stamp(&self) -> Option<serde_json::Value> {
+        if !self.pending.swap(false, Ordering::SeqCst) {
+            return None;
+        }
+        Some(serde_json::Value::String(
+            self.executing.as_str().to_owned(),
+        ))
+    }
+
+    /// Check the generation the first recorded entry carries. On a mismatch
+    /// the refusal goes to the handler and this never completes.
+    pub(crate) async fn check(&self, recorded: Option<&serde_json::Value>) {
+        let recorded = recorded
+            .cloned()
+            .and_then(|recorded| serde_json::from_value::<BuildGeneration>(recorded).ok());
+        let refusal = match &recorded {
+            Some(recorded) => match check_generation(&self.handler, recorded, &self.executing) {
+                Ok(()) => return,
+                Err(refusal) => refusal,
+            },
+            None => crate::parked_turn_failure(format!(
+                "RetiredGeneration: {} journal's first step carries no build generation; this \
+                 build is generation `{}` and parks it for a build of the recording generation",
+                self.handler,
+                self.executing.as_str()
+            )),
+        };
+        let handler = {
+            let mut state = self.refusal.lock_recover();
+            state.refusal = Some(refusal);
+            state.handler.take()
+        };
+        if let Some(handler) = handler {
+            handler.wake();
+        }
+        std::future::pending::<()>().await;
+    }
+
+    /// Run `drive` to its end, unless its first recorded entry turns out to
+    /// be another generation's: then the refusal, with `drive` never polled
+    /// again. The refusal is looked at first on every poll, so the answer is
+    /// deterministic.
+    pub(crate) async fn guard<T>(&self, drive: impl Future<Output = T>) -> Result<T, HandlerError> {
+        let mut drive = std::pin::pin!(drive);
+        std::future::poll_fn(|cx| {
+            {
+                let mut state = self.refusal.lock_recover();
+                if let Some(refusal) = state.refusal.take() {
+                    return Poll::Ready(Err(refusal));
+                }
+                state.handler = Some(cx.waker().clone());
+            }
+            drive.as_mut().poll(cx).map(Ok)
+        })
+        .await
+    }
+}
 
 /// The sentinel's verdict for `handler`: `Ok` when the journal was recorded
 /// by this build's generation, the typed `RetiredGeneration` park failure

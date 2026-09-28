@@ -293,6 +293,8 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     /// it. A controller a host builds inside its own handler names none, and
     /// its groups dispatch on the stable lane.
     build_generation: Option<lash_core::engine::BuildGeneration>,
+    /// The generation sentinel its first recorded entry carries (FIG-3980).
+    folded_sentinel: Option<Arc<crate::sentinel::FoldedSentinel>>,
     /// The namespace of the deployment whose services this controller calls
     /// (FIG-3898): the durable waits, process workflow and effect groups it
     /// addresses are that namespace's.
@@ -320,6 +322,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             options,
             trace: None,
             build_generation: None,
+            folded_sentinel: None,
             namespace: crate::RestateNamespace::default(),
             _ctx: PhantomData,
         }

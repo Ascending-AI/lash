@@ -99,7 +99,9 @@ the three objects of §3) are named once and never split by `G`.
 
 **Generation sentinel.** Every journaling handler records the executing
 build's `G` as its first journaled command. A replay that meets a different
-`G` parks, typed, before any effect runs.
+`G` parks, typed, before any effect runs. The session driver's `LashSession`
+and `LashTurn`, whose first command is always a recorded step, carry `G` in
+that step's journal entry instead of a step of its own (FIG-3980).
 
 **Drain.** `drain_status(G)` reports per generation (Draining, then Drained).
 It counts the invocations pinned to that generation's deployment, parked work

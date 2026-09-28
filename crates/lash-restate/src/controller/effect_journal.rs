@@ -86,6 +86,9 @@ use serde::{Deserialize, Serialize};
 /// Generation 15 also changed in place under the pre-1.0 version freeze
 /// (FIG-3846): a process start's journaled declaration records the lifetime
 /// its start chose (`lifetime`) where it recorded a parent policy (FIG-3607).
+/// It changed in place again for FIG-3980: a model call and the decision
+/// before it journal their request's messages, tools and instructions as
+/// digests rather than verbatim.
 pub const EFFECT_JOURNAL_VERSION: u32 = 15;
 
 /// The entry field the generation is stamped under.
@@ -203,6 +206,64 @@ impl<'de> Deserialize<'de> for JournaledEffectRecord {
         serde_json::from_value(entry)
             .map(Self::GaveUp)
             .map_err(serde::de::Error::custom)
+    }
+}
+
+/// The entry field a handler's first recorded entry carries the build
+/// generation under: the generation sentinel, folded into that entry
+/// (FIG-3980, ADR 0106 §1).
+const BUILD_GENERATION_FIELD: &str = "build_generation";
+
+/// What a recorded effect's journal slot holds: the entry, and on the first
+/// entry of a handler that folds its generation sentinel, the build generation
+/// that wrote the journal beside the entry's own fields.
+///
+/// Every other entry's bytes are exactly its [`JournaledEffectRecord`]'s. The
+/// generation is read from the raw entry before the entry decodes, so a
+/// journal of another build is refused by generation, never by an accident of
+/// decoding, and is kept as its exact journaled value.
+#[derive(Clone, Debug)]
+pub(crate) struct JournaledEntry {
+    pub(crate) build_generation: Option<serde_json::Value>,
+    pub(crate) record: JournaledEffectRecord,
+}
+
+impl Serialize for JournaledEntry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct WithGeneration<'a> {
+            build_generation: &'a serde_json::Value,
+            #[serde(flatten)]
+            record: &'a JournaledEffectRecord,
+        }
+        match &self.build_generation {
+            None => self.record.serialize(serializer),
+            Some(build_generation) => WithGeneration {
+                build_generation,
+                record: &self.record,
+            }
+            .serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for JournaledEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut entry = serde_json::Value::deserialize(deserializer)?;
+        let build_generation = entry
+            .as_object_mut()
+            .and_then(|object| object.remove(BUILD_GENERATION_FIELD));
+        let record = JournaledEffectRecord::deserialize(entry).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            build_generation,
+            record,
+        })
     }
 }
 

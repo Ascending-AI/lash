@@ -1803,23 +1803,29 @@ impl ReplayableRecordingContext {
         self.runs.lock_recover().clone()
     }
 
+    /// Every recorded effect's envelope, decoded back into its command —
+    /// except a model request's, which journals its request by digest
+    /// (FIG-3980) and so has no command to decode back into.
     pub(super) fn recorded_runtime_effect_envelopes(&self) -> Vec<(String, RuntimeEffectEnvelope)> {
         let mut envelopes = self
             .records
             .lock_recover()
             .iter()
             .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
-            .map(|(effect_name, bytes)| {
+            .filter_map(|(effect_name, bytes)| {
                 let recorded = decode_recorded_runtime_effect(bytes);
-                let canonical =
-                    serde_json::to_value(recorded.envelope).expect("canonical envelope value");
-                let json = canonical
-                    .get("json")
-                    .and_then(serde_json::Value::as_str)
+                let json: serde_json::Value = serde_json::from_str(recorded.envelope.json())
                     .expect("canonical envelope json");
+                if matches!(
+                    json.pointer("/command/type")
+                        .and_then(serde_json::Value::as_str),
+                    Some("before_llm_call" | "llm_call")
+                ) {
+                    return None;
+                }
                 let envelope =
-                    serde_json::from_str(json).expect("canonical runtime effect envelope");
-                (effect_name.clone(), envelope)
+                    serde_json::from_value(json).expect("canonical runtime effect envelope");
+                Some((effect_name.clone(), envelope))
             })
             .collect::<Vec<_>>();
         envelopes.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1846,16 +1852,14 @@ impl ReplayableRecordingContext {
         *self.records.lock_recover() = records
             .into_iter()
             .map(|(effect_name, recorded)| {
-                let envelope: RuntimeEffectEnvelope =
-                    serde_json::from_str(recorded.envelope.json())
-                        .expect("decode recorded effect envelope");
+                let envelope: serde_json::Value = serde_json::from_str(recorded.envelope.json())
+                    .expect("decode recorded effect envelope");
                 let entry = JournaledEffectRecord::Recorded(recorded);
                 // Retried runs journal the closure's Result. Recorded runs
                 // journal the stamped entry directly.
-                let bytes = if matches!(
-                    envelope.command,
-                    RuntimeEffectCommand::PresentToolResult { .. }
-                ) {
+                let bytes = if envelope.pointer("/command/type")
+                    == Some(&serde_json::json!("present_tool_result"))
+                {
                     serde_json::to_vec(&Ok::<_, String>(entry))
                 } else {
                     serde_json::to_vec(&entry)
