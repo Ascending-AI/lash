@@ -200,7 +200,6 @@ offsets are stable:
   checkout lock;
 - `+40` distributed-worker S3;
 - `+41`, `+43..+46` process-operations S3, Restate, and PostgreSQL;
-- `+47` version-bump recreation PostgreSQL.
 - `+48` slack-clone live-model platform.
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,

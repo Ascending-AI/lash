@@ -32,10 +32,8 @@ lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 lash-core-execution = { workspace = true }
 rmp-serde = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macros"] }
 tracing = { workspace = true }

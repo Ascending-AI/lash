@@ -1,11 +1,8 @@
 //! The prose lives here, beside the constant it describes, rather than in a
 //! README under `fixtures/durable-read/`, so that tree holds only generated
-//! artifacts. FIG-2808 registers a byte-exact whole-file guard over it, and a
-//! prose edit inside a guarded tree would demand a fixture-version bump that has
-//! no honest way to be made: the constant is asserted equal to the
-//! `fixture_schema_version` embedded in each `expected.json`, so moving it
-//! without regenerating fails read-back. Documentation does not belong inside a
-//! guard over generated artifacts.
+//! artifacts: the constant is asserted equal to the `fixture_schema_version`
+//! embedded in each `expected.json`, so moving it without regenerating fails
+//! read-back.
 //!
 //! Durable read fixture v1.
 //!
@@ -17,11 +14,6 @@
 //!
 //! The fixture format has its own declaration, `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, the
 //! constant below.
-//! `scripts/versioned-surfaces.toml` registers that constant with a whole-file guard over
-//! `fixtures/durable-read/*`, so any change to a file in that tree makes
-//! `scripts/check_version_bumps.py` require the declaration to be strictly greater than its
-//! merge-base value in the same diff.
-//! That check runs in CI only, not pre-commit, because it compares against a merge base.
 //!
 //! ## Two laws: read-back and write shape
 //!
@@ -35,12 +27,8 @@
 //! Content-addressed identities — process-env refs, node ids, turn-commit hashes — move with
 //! the payload shape, so this law catches shape changes the read-back cannot see.
 //!
-//! The schema-declaration gate is a third, weaker thing: it fires only once a
-//! fixture artifact is already in the diff, so it cannot see a shape change that
-//! leaves `fixtures/` untouched. Order of use: the write-shape law says drift
-//! happened, the decision procedure below decides whether to revert the change or
-//! regenerate for it, and the declaration gate then forces the version bump onto the
-//! regeneration.
+//! Order of use: the write-shape law says drift happened, and the decision
+//! procedure below decides whether to revert the change or regenerate for it.
 //!
 //! ### What the write-shape law does not cover
 //!
@@ -371,18 +359,6 @@ fn fixture_effect_omissions() -> lash_core::ProcessEffectOmissions {
         )]),
         lash_core::FleetFormat::current(),
     )
-}
-
-#[allow(dead_code)]
-pub async fn assert_prior_component_encoding_is_refused(store: &dyn RuntimePersistence) {
-    let error = store
-        .load_session()
-        .await
-        .expect_err("component encoding version 1 must be refused during hydration");
-    assert_eq!(
-        error.to_string(),
-        "checkpoint component `execution_state` uses encoding version 1, but this build requires version 2; remedy: drain affected sessions and recreate the store with this Lash version"
-    );
 }
 
 pub struct FixtureHandles {

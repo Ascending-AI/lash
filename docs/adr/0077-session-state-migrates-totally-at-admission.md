@@ -151,23 +151,6 @@ not a waiver for an exact codec mismatch: it is valid only where the owning
 reader explicitly accepts the old representation and tests its unchanged
 meaning.
 
-`scripts/check_version_bumps.py` keeps its source-projection model and extends
-the inventory with an ownership and compatibility disposition for every
-guarded durable shape. A changed projection in the bounded mutable continuation
-must be named by the newly added adjacent session converter step, or carry an
-explicit tested `tolerate_old` declaration. A change with neither fails CI.
-The check also fails a session-version advance without one contiguous registry
-step, a mapping whose source or target codec disagrees with its record counter,
-and a guarded in-scope shape that has no disposition. Shapes outside this
-domain retain their own existing version rule. This mechanical gate proves
-coverage of declared source projections; the fixture and fault laws below
-prove operational totality. The per-PR bump requirement the gate enforces is
-frozen until the lash 1.0 cut under the `[policy]` table's
-`freeze = "pre-1.0"` in `scripts/versioned-surfaces.toml` (FIG-3846): while it
-holds the gate prints its findings, reports the freeze, and exits 0, and
-removing the key restores strict enforcement under the post-1.0 migration
-policy (ADR 0106).
-
 ### Executable state remains pinned
 
 Totality ends at the store-owned projection. A parked Lashlang segment, VM

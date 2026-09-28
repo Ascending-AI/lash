@@ -1,12 +1,8 @@
 //! The hand-written durable encoding of [`SessionPolicy`].
 //!
 //! This pair lives alone in its own file on purpose. The policy travels inside
-//! persisted graph-node bodies, so the version-bump gate has to notice when its
-//! encoding moves; because no symbol projection can see an `impl` block, the
-//! only guard available is a whole-file one, and a whole-file guard over the
-//! module that also holds the runtime session types would demand a schema bump
-//! for every unrelated edit there. Keeping the encoding here makes the guard
-//! precise: this file changes exactly when the persisted policy shape does.
+//! persisted graph-node bodies; keeping the encoding in its own file means this
+//! file changes exactly when the persisted policy shape does.
 //!
 //! Nothing else belongs in this file. The encoder is also the complete durable
 //! projection of the policy -- a field added to the struct is absent from the

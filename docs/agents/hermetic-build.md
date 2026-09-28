@@ -47,7 +47,7 @@ at the end of execution makes the receipt stale. These receipts do not replace
 Bazel's cache or CI's required gates.
 
 `just floor` is an explicit broad tooling checkpoint, not the default per-edit
-command. It runs the dev/feature/clippy and schema checks together. `just bump-check`
+command. It runs the dev/feature/clippy and schema checks together. `just schema-check`
 combines both Rust targets in one Bazel invocation while its script checks run
 beside it. A fork should have only one build request in flight; reuse its result
 or wait before starting another service command.
@@ -129,14 +129,11 @@ gates CI runs as `Test repository scripts`
 `.github/workflows/ci.yml` so the local run cannot drift), minus
 `scripts/test-agent-workbench-dev-reset.sh`, which the local run skips and
 names in its table row because it alone took 170 s — CI still runs it,
-`scripts/ci/repository-gates.sh --all` restores it — and the two
-version-bump checks (frozen pre-1.0 under the `[policy]` table's
-`freeze = "pre-1.0"` in `scripts/versioned-surfaces.toml`, FIG-3846: while it
-holds they print their findings, report the freeze, and exit 0), all run
+`scripts/ci/repository-gates.sh --all` restores it — all run
 concurrently and reported as one PASS/FAIL
-table — run it on a committed head because `check_version_bumps.py` reads
-committed state. `just bump-check` narrows that to the store-bump gates: both
-version-bump checks, `scripts/check-store-sql-ownership.py`, the lash-sim
+table — run it on a committed head so the gates judge the tree that lands.
+`just schema-check` narrows that to the store-schema gates:
+`scripts/check-store-sql-ownership.py`, the lash-sim
 `schema_congruence__test` target, and the lash-core-store unit target that
 holds the runtime-error classification exhaustiveness test. `just
 test-changed [base]` diffs against `<base>` (default `origin/main`), maps the

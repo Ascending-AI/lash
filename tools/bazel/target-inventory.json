@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 180,
+  "cargo_target_count": 179,
   "feature_lane_units": [
     {
       "features": [
@@ -16262,7 +16262,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 239,
+  "generated_label_count": 238,
   "packages": [
     {
       "declared_features": [
@@ -17172,10 +17172,8 @@
         "lash-internal-store-sql",
         "rmp-serde",
         "rusqlite",
-        "schemars",
         "serde",
         "serde_json",
-        "sha2",
         "sqlx",
         "tempfile",
         "tokio",
@@ -19537,12 +19535,6 @@
           "cargo": "lash-e2e-runner",
           "kind": "bin-unit-test",
           "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
-          "tags": []
-        },
-        {
-          "cargo": "lash-e2e-version-bump",
-          "kind": "bin",
-          "label": "//runbooks/restate-postgres-workers:lash-e2e-version-bump__bin",
           "tags": []
         },
         {

@@ -8,7 +8,6 @@
 
 use super::*;
 use crate::postgres_test_support;
-use lash_sansio::SessionId;
 use sqlx::Connection;
 
 /// The DDL artifact is only vendorable if what the crate compiles is what the
@@ -277,29 +276,6 @@ fn expected_artifact_renders_byte_identically() {
     );
 }
 
-/// The database catalog cannot expose fields inside a serialized JSON value, so
-/// this is the database-free half of the drift gate: changing the Rust type
-/// without regenerating the published artifact fails here in the author's diff.
-#[test]
-fn committed_payload_shapes_match_registered_rust_types() {
-    let expected = SchemaShape::expected();
-    for ((table, column), derived) in payload_shape::registered_payload_shapes() {
-        let committed = expected
-            .tables
-            .get(&table)
-            .and_then(|table| table.payload_shapes.get(&column))
-            .unwrap_or_else(|| {
-                panic!("{table}.{column} must publish its registered Rust payload shape")
-            });
-        assert!(
-            committed == &derived,
-            "{table}.{column} changed shape inside its JSON blob; bump SCHEMA_VERSION and \
-             regenerate schema-shape.txt rather than admitting old rows: {}",
-            payload_shape_difference(committed, &derived)
-        );
-    }
-}
-
 #[test]
 fn denormalized_session_relation_drift_names_the_changed_column() {
     let expected = SchemaShape::expected();
@@ -324,51 +300,6 @@ fn denormalized_session_relation_drift_names_the_changed_column() {
     assert!(rendered.contains("COLUMN DRIFT"));
     assert!(rendered.contains("lash_session_meta.relation_kind"));
     assert!(rendered.contains("expected text not-null, found integer not-null"));
-}
-
-#[test]
-fn fig_1219_six_to_two_field_shrink_is_payload_drift() {
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
-    struct Before {
-        session_id: SessionId,
-        session_name: String,
-        created_at: String,
-        model: String,
-        cwd: Option<String>,
-        relation: lash_core_execution::SessionRelation,
-    }
-
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
-    struct After {
-        session_id: SessionId,
-        relation: lash_core_execution::SessionRelation,
-    }
-
-    let mut before = PayloadShape::of::<Before>();
-    before.rust_type = "SessionMeta".to_string();
-    let mut after = PayloadShape::of::<After>();
-    after.rust_type = "SessionMeta".to_string();
-    let mut expected = TableShape::default();
-    expected
-        .payload_shapes
-        .insert("meta_json".to_string(), before);
-    let mut found = TableShape::default();
-    found.payload_shapes.insert("meta_json".to_string(), after);
-    let mut findings = Vec::new();
-    diff_payload_shapes("lash_session_meta", &expected, &found, &mut findings);
-
-    let detail = match findings.as_slice() {
-        [SchemaFinding::PayloadShapeMismatch { detail, .. }] => detail,
-        other => panic!("FIG-1219 shrink must be one payload finding, got {other:?}"),
-    };
-    for removed in ["session_name", "created_at", "model", "cwd"] {
-        assert!(
-            detail.contains(&format!("/properties/{removed}")),
-            "FIG-1219's removed `{removed}` field must be named: {detail}"
-        );
-    }
 }
 
 #[test]

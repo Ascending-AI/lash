@@ -63,11 +63,7 @@ run_release_script_tests() {
   python3 scripts/test_check_feature_coverage.py
   python3 scripts/check_feature_coverage.py check
   python3 scripts/test_check_judged_build_geometry.py
-  python3 scripts/test_check_postgres_json_carrier_coverage.py
-  python3 scripts/test_check_postgres_payload_shape_version.py
   python3 scripts/test_check_service_gate_pinning.py
-  python3 scripts/test_check_transcript_diff.py
-  python3 scripts/test_check_version_bump_fixtures.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
   python3 scripts/test_package_workspace.py
@@ -183,10 +179,6 @@ run_rust_source_guards() {
 
   step "Restate handler panic boundary"
   python3 scripts/check-restate-handler-panics.py
-
-  step "PostgreSQL payload-shape component version"
-  python3 scripts/check-postgres-json-carrier-coverage.py
-  python3 scripts/check-postgres-payload-shape-version.py
 
   step "Store SQL ownership"
   python3 scripts/check-store-sql-ownership.py
@@ -388,19 +380,6 @@ run_s3_conformance() {
 # list from silently drifting away from the first two. A CI gate that appears
 # in none of the three places is an omission, not a decision.
 #
-#   scripts/check_version_bumps.py --base <merge-base>
-#     Base-relative, and the guarantee is CI's rather than the tree's: the
-#     check assumes it is looking at a current merge ref whose target-branch
-#     parent is the latest protected-branch tip (see the script's docstring).
-#     A local merge-base goes stale the moment main moves, so a local answer
-#     is not the answer the merge gets.
-#
-#   scripts/check-transcript-diff.py --enforce
-#     Run above in `--advisory` mode. The enforcing form asks about the pull
-#     request body, which does not exist yet at push time; see the comment at
-#     the invocation.
-#
-#   scripts/check_version_bump_fixtures.py,
 #   scripts/lint_orchestrating_tools.py, actionlint
 #     Owned by the prek hooks in `.pre-commit-config.yaml`: file-scoped, run
 #     on every commit that touches their inputs, and not worth a second full
@@ -440,21 +419,6 @@ scoped RUST_COMPILE "Formatting" run_formatting_gates
 scoped RUST_COMPILE "Clippy" run_clippy_gate
 scoped RUST_COMPILE "Rust source guards" run_rust_source_guards
 scoped WORKFLOWS "Workflow guards" run_workflow_gates
-
-# The two gates below are commit-scoped, not path-scoped: they read the commit
-# range's messages and the semantics of the diff rather than the set of paths
-# it touches, so every non-empty change affects them and no classification can
-# narrow them away.
-step "Durable transcript classification"
-# CI runs this gate as `--enforce` (ci.yml, Lint). Enforcement is a question
-# about the pull request, not about the tree: the `Transcript:` justification
-# lives in the PR body, which the gate reads from the event payload or from the
-# API with GITHUB_TOKEN. At push time the pull request usually does not exist
-# yet and neither source is present, so `--enforce` here would fail every
-# justified change and train people to skip the gate. Advisory prints the same
-# classification — the part that is actionable before pushing — and CI still
-# decides.
-python3 scripts/check-transcript-diff.py --advisory
 
 scoped SCRIPTS "Repository script tests" run_release_script_tests
 

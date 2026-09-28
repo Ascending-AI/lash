@@ -44,7 +44,6 @@ CONSUMERS = (
 COMPOSE_FILES = (
     "runbooks/restate-postgres-workers/docker-compose.yml",
     "runbooks/process-operations/docker-compose.yml",
-    "runbooks/version-bump-recreation/docker-compose.yml",
 )
 WORKFLOWS = (
     ".github/workflows/perf.yml",

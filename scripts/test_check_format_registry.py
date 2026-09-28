@@ -28,11 +28,6 @@ upgrade = "migrate"
 description = "fixture durable format"
 manifest = "Wire"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/demo/src/lib.rs"]
-symbols = ["Wire"]
-
 [[surface]]
 constant = "PEER_PROTOCOL_VERSION"
 constant_path = "crates/demo/src/lib.rs"
@@ -40,21 +35,11 @@ upgrade = "coexist"
 description = "fixture wire protocol"
 outside_manifest = "gates a live peer"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/demo/src/lib.rs"]
-symbols = ["Peer"]
-
 [[surface]]
 constant = "KEY_FAMILY_VERSION"
 constant_path = "crates/demo/src/lib.rs"
 upgrade = "coexist"
 description = "fixture hash domain"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/demo/src/lib.rs"]
-symbols = ["key"]
 
 [[excluded_class]]
 suffix = "_FAMILY_VERSION"

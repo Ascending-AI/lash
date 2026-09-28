@@ -8,9 +8,8 @@
 //! say what nobody looked at, which is the difference between a store that is
 //! clean and a store that was not read.
 //!
-//! Everything here serializes, because the report's second reader is a gate.
-//! The version-bump runbook asserts on these fields directly, which is what
-//! makes "the probe is right" a checked claim rather than a described one.
+//! Everything here serializes, because the report's second reader is a deploy
+//! gate.
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;

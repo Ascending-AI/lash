@@ -80,7 +80,7 @@ fn version_mismatch_refusal_derives_direction_and_range() {
     for message in [&older, &newer, &unstamped] {
         assert!(
             message.contains("has no applicable migration"),
-            "the version-bump companion classifies this refusal by that phrase: {message}"
+            "the refusal must carry the missing-migration phrase: {message}"
         );
         assert!(
             !message.contains("persistence.html"),

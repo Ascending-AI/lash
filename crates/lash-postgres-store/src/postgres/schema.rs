@@ -279,14 +279,14 @@ fn recreate_trust_domain_remedy() -> String {
 /// recreation.
 ///
 /// Every arm keeps the phrase `has no applicable migration` where a migration
-/// is the thing that does not exist: it is what the version-bump runbook
-/// companion classifies this refusal by. The one exception is a database with
+/// is the thing that does not exist: it is the phrase the store tests classify
+/// this refusal by. The one exception is a database with
 /// no installation at all, where the honest statement is that nothing was ever
 /// provisioned.
 ///
 /// `writing_release` names the lash release that wrote the database when the
 /// release stamp could still be read. It rides as a trailing sentence: every
-/// substring the version-bump runbook companion and the store tests pin — the
+/// substring the store tests pin — the
 /// component clause, the `has no applicable migration` phrase, the remedy, the
 /// `SchemaCheck::WarnOnly` sentence — is produced byte-identically, and a
 /// database with no readable stamp produces the message unchanged rather than a

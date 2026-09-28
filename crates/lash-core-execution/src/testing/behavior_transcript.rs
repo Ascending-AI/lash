@@ -5,9 +5,8 @@
 //! `docs/agents/way-of-working.md` ("Expect tests versus conformance
 //! assertions"): a short, deterministic rendering of what one scenario actually
 //! did, judged as *one* diff. This module owns the vocabulary every harness
-//! renders into, so the `Transcript:` PR rule in `docs/agents/pr-style.md`
-//! governs a shared grammar instead of one bespoke renderer. ADR 0050 records
-//! the decision and its rationale.
+//! renders into, so every harness shares one grammar instead of a bespoke
+//! renderer. ADR 0050 records the decision and its rationale.
 //!
 //! It is deliberately **not** a lash type. Nothing in this module imports
 //! anything else from `lash_core`; it consumes only strings, integers, booleans
@@ -87,12 +86,6 @@ pub const TEXT_BUDGET_CHARS: usize = 72;
 pub const JSON_BUDGET_CHARS: usize = 96;
 
 /// Durable-write event names the vocabulary can emit.
-///
-/// `scripts/check-transcript-diff.py` keys the `Transcript:` justification rule
-/// on these tokens (plus the `rev=a->b`, `stored logical=` and
-/// `ref (unchanged)` renderings below). Keep the two in sync: a durable event
-/// name the script does not know about is a durable-semantics change that can
-/// land unremarked.
 pub const DURABLE_WRITE_EVENTS: &[&str] = &[
     CHECKPOINT_COMMIT_EVENT,
     DURABLE_EFFECT_EVENT,
@@ -353,8 +346,7 @@ impl Attr {
 
     /// A durable revision transition, rendered `rev=0->1`.
     ///
-    /// The rendering is fixed here on purpose: it is one of the tokens
-    /// `scripts/check-transcript-diff.py` treats as durable semantics.
+    /// The rendering is fixed here on purpose: it is durable semantics.
     pub fn revision(before: u64, after: u64) -> Self {
         Self {
             key: "rev",

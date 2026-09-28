@@ -107,10 +107,6 @@ use super::executor::RuntimeEffectControllerError;
 
 /// The durable format version of a retained tool-child request.
 ///
-/// Guarded by `scripts/versioned-surfaces.toml`, so a field added to
-/// [`ToolChildRequest`], [`ToolChildAdmission`] or [`ToolChildCompletionRouting`]
-/// without a bump fails the repository gate rather than a production reopen.
-///
 /// Version 1 is the shape FIG-3408 froze. A reader refuses any other value
 /// rather than defaulting: a request it cannot fully reconstruct is a child it
 /// would run under partial authority, which is worse than refusing to run it.

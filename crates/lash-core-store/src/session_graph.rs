@@ -208,9 +208,7 @@ pub struct SessionNodeRecord {
 /// The body is the session graph's persisted history shape: the stored
 /// timestamp plus the whole [`SessionNodePayload`] family it flattens, down
 /// through the conversation record and its message parts. Every change to that
-/// shape advances this constant, and `scripts/versioned-surfaces.toml` makes CI
-/// demand the advance — the guard is what a shape change collides with, so no
-/// node-body field arrives by review attention alone.
+/// shape advances this constant.
 ///
 /// Graph nodes are immutable history, so the generation is an exact fence: a
 /// body loads only when it carries this build's generation, and the stamp is

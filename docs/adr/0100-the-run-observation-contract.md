@@ -363,7 +363,6 @@ kiln clippy
 kiln test
 cargo nextest run --workspace --all-targets --locked --no-fail-fast --profile ci --ignore-default-filter
 git diff --check
-python3 scripts/check_version_bumps.py --base <merge-base>
 ```
 
 The lists below add shape-specific fixtures and CI-only gates. They do not

@@ -67,8 +67,8 @@ on:
   # <head-sha>` waits a bounded window for the run GitHub should have made,
   # dispatches this trigger exactly once if none arrives, then polls that run
   # to a conclusion. A dispatch run is NOT equivalent to the pull-request run
-  # it replaces — the event-conditional `Check versioned surface bumps` step
-  # below does not run, and it builds refs/heads/<branch> rather than the PR
+  # it replaces — the base-relative gates below do not run, and it builds
+  # refs/heads/<branch> rather than the PR
   # merge tree — so the script exits 3, not 0, on a green dispatch. Callers opt
   # in with --accept-dispatch-run.
   workflow_dispatch:
@@ -470,7 +470,6 @@ jobs:
           python3 scripts/test_bazel_source_ownership.py
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
-          python3 scripts/test_check_version_bumps.py
           python3 scripts/test_check_test262_ratchet.py
           python3 scripts/test_check_format_registry.py
           python3 scripts/test_generate_workflow_schemas.py
@@ -479,19 +478,14 @@ jobs:
           python3 scripts/test_test_batch_runner.py
           python3 scripts/test_test_xml.py
           python3 scripts/test_launcher_test_sandbox.py
-          python3 scripts/test_check_checkpoint_component_flatten.py
           python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_restate_suite.py
           python3 scripts/test_check_facade_only_examples.py
-          python3 scripts/test_check_postgres_json_carrier_coverage.py
-          python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_store_sql_ownership.py
           python3 scripts/test_check_service_gate_pinning.py
-          python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_writer_stamps.py
-          python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_toolchain_canary.py
           python3 scripts/test_main_ci_policy.py
           python3 scripts/test_release_version.py
@@ -513,7 +507,6 @@ jobs:
           python3 scripts/test_perf_duration_history_contract.py
           python3 scripts/test_ci_plan.py
           python3 scripts/test_ci_plan_hygiene.py
-          python3 scripts/test_check_upgrade_paths.py
           python3 scripts/test_capture_release_fixtures.py
           python3 scripts/test_checkout_step.py
           python3 scripts/test_ci_workspace_cache.py
@@ -1226,14 +1219,8 @@ jobs:
     # need the shared cache credentials. Untrusted events never see them and
     # keep the Cargo command below.
     environment: build-cache
-    # The transcript gate reads the `Transcript:` justification from the PR
-    # body. A manually dispatched run — the recovery path when GitHub stops
-    # delivering a branch's events — has no pull request in its payload, so the
-    # gate asks the API for it instead. Job-level and read-only: no other job
-    # needs it.
     permissions:
       contents: read
-      pull-requests: read
 
     steps:
       - name: Check out repository
@@ -1256,41 +1243,9 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      # Every event compares against the base its own tree actually sits on.
-      #
-      # PRs compare with their merge-base against main, not their target
-      # branch: main is the sole long-lived branch, and a stacked PR whose
-      # target is a sibling layer would otherwise be judged against a tree
-      # that already carries the window's one version bump. Manual workflow
-      # dispatches have no meaningful base and intentionally skip it.
-      # A merge-queue entry is neither: its head is a queue commit carrying one
-      # or more PRs on top of the base the queue chose, so HEAD~1 would check
-      # only the last commit of a multi-commit PR — passing vacuously when the
-      # change is earlier, and failing falsely when the bump is earlier. The
-      # queue states the base it built on, so use it.
-      # The PR guarantee requires a current merge ref, enforced by an up-to-date
-      # branch rule or merge queue; a stale merge ref has a stale merge-base.
-      # Manual recovery runs skip this gate and immediately emit a warning summary
-      # so their green conclusion cannot be mistaken for version-surface proof.
-      - name: Check versioned surface bumps
-        if: github.event_name != 'workflow_dispatch'
-        env:
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            base="$(git merge-base origin/main HEAD)"
-          elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
-            base="$MERGE_GROUP_BASE_SHA"
-            [ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }
-          else
-            echo "unexpected event $GITHUB_EVENT_NAME for the bump gate"; exit 1
-          fi
-          python3 scripts/check_version_bumps.py --base "$base"
-
       # FIG-3646: the Test262 outcome record only improves against the base
-      # its tree sits on (the same base the bump gate uses): nothing that
-      # passed may stop passing, and nothing that ran cleanly may start
-      # failing.
+      # its tree sits on: nothing that passed may stop passing, and nothing
+      # that ran cleanly may start failing.
       - name: Check the Test262 outcome ratchet
         if: github.event_name != 'workflow_dispatch'
         env:
@@ -1306,7 +1261,7 @@ jobs:
           fi
           python3 scripts/check_test262_ratchet.py --base "$base"
 
-      - name: Explain skipped versioned surface bump gate
+      - name: Explain skipped base-relative gates
         if: github.event_name == 'workflow_dispatch'
         run: bash scripts/ci/report-manual-dispatch-skips.sh
 
@@ -1452,18 +1407,6 @@ jobs:
       - name: Check Restate handler panic boundary
         run: python3 scripts/check-restate-handler-panics.py
 
-      - name: Enforce durable transcript justification
-        env:
-          # Needed only by the dispatch path, where the justification has to be
-          # read from the pull request rather than the event payload.
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python3 scripts/check-transcript-diff.py --enforce
-
-      - name: Check PostgreSQL payload-shape component version
-        run: |
-          python3 scripts/check-postgres-json-carrier-coverage.py
-          python3 scripts/check-postgres-payload-shape-version.py
-
       - name: Install workflow graph frontend dependencies
         run: npm --prefix examples/workflow-graph-roundtrip/frontend ci
 
@@ -1488,15 +1431,6 @@ jobs:
       - name: Check store SQL ownership
         run: python3 scripts/check-store-sql-ownership.py
 
-      # The recreation E2E's fixtures are pinned to the newest component
-      # generation. Catch a stale pin here rather than one container gate later.
-      # This also sweeps the component-version literals in the Postgres store
-      # test suite and the committed fixtures (FIG-3413). The suites that read
-      # them run only when the stores family is selected; this check runs on
-      # every event, so a bump that leaves one behind fails here too.
-      - name: Check version-bump recreation fixtures
-        run: python3 scripts/check_version_bump_fixtures.py
-
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh
 
@@ -1509,14 +1443,8 @@ jobs:
       - name: Check production file-size budget
         run: python3 scripts/check-production-file-size.py
 
-      - name: Check checkpoint-component flatten boundary
-        run: python3 scripts/check_checkpoint_component_flatten.py
-
       - name: Check durable format registry
         run: python3 scripts/check_format_registry.py
-
-      - name: Check upgrade-path declarations
-        run: python3 scripts/check_upgrade_paths.py
 
       - name: Check fleet-format writer stamps
         run: python3 scripts/check_writer_stamps.py
@@ -2163,14 +2091,6 @@ jobs:
             bazel: false
             restate: false
             runner: ubuntu-24.04
-          - name: version-bump-recreation
-            recipe: version-bump-recreation-e2e
-            node: false
-            artifact: version-bump-recreation
-            browser: false
-            bazel: false
-            restate: false
-            runner: ubuntu-24.04
           - name: slack-clone-full-host
             recipe: slack-clone-full-host-e2e
             node: false
@@ -2267,7 +2187,6 @@ jobs:
         if: env.RUN_FUNCTIONAL_E2E == 'true'
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
-          LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
           LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
           AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
@@ -2383,7 +2302,6 @@ jobs:
       - name: Run functional E2E
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
-          LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
 

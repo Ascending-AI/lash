@@ -29,12 +29,6 @@ path = "src/bin/process_operations_worker.rs"
 test = false
 
 [[bin]]
-name = "lash-e2e-version-bump"
-path = "src/bin/version_bump.rs"
-test = false
-
-
-[[bin]]
 name = "lash-e2e-context-overflow-recovery"
 path = "src/bin/context_overflow_recovery.rs"
 test = false

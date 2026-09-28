@@ -12,55 +12,7 @@
 #
 # The manifest re-exports the constants rather than copying them, so this file
 # never repeats a version number; it only says which constants exist and what
-# they version. The rest of this header is about the bump check.
-#
-# Versioned wire/persistence surface inventory for check_version_bumps.py.
-#
-# A `file` guard compares the complete file and may require literal
-# `must_cover` markers. `rust_items` compares only the named Rust
-# declarations/functions (comments and formatting are ignored).
-# `rust_serde_shapes` compares every Serde-derived struct/enum in the matched
-# source files and requires explicit `must_cover` anchors so detection cannot
-# silently lose headline shapes. The latter intentionally fails closed for a
-# few private helper carriers: changing one requires the family bump even if it
-# later proves not to cross the boundary. Whole-file guards such as PostgreSQL's
-# schema.sql inherently cover every table in that authoritative schema file.
-#
-# A surface's diagnostic key is `<constant_path>:<constant>`; use that key with
-# `--surface` when constants such as SCHEMA_VERSION are not globally unique.
-#
-# Adding an entry here does not by itself excuse the bump its shape change
-# would owe. A registration -- an entry whose constant arrives with it, over a
-# shape that moves in the same change -- is burned one at a time into
-# REGISTRATION_BASELINES in check_version_bumps.py, pinned to the surface key
-# and to the exact guarded bytes enrolled. Registering without one fails, and
-# names the fingerprint to burn.
-#
-# This check is deliberately CI-only, unlike the sibling PostgreSQL-payload
-# checker: its merge-base guarantee requires a current fetched target branch. PR
-# protection must require an up-to-date merge ref or merge queue so
-# independently landed version bumps cannot be hidden by a stale merge-base.
-#
-# The bump requirement is FROZEN until the lash 1.0 cut: pre-1.0 nothing is in
-# production and the 1.0 clean slate resets every stored format, so the bump
-# protects nothing while every PR takes "main+1" and collides with the others
-# (FIG-3660). The freeze is the `[policy]` table below -- the one switch every
-# durable-format bump gate reads (check_version_bumps.py,
-# check_version_bump_fixtures.py, check-postgres-payload-shape-version.py;
-# FIG-3846). While `freeze = "pre-1.0"` holds, each gate still runs, prints the
-# findings it would enforce, prints "version freeze active (pre-1.0): findings
-# reported, not enforced", and exits 0. Delete the key at the 1.0 cut and the
-# gates turn strict again unchanged, under the post-1.0 migration policy
-# (ADR 0106). Artifact checks that a generated file still matches the code --
-# schema.sql vs schema-shape.txt and the payload fingerprints, which the Rust
-# tests verify -- are a different rule and stay enforced either way.
-
-# The pre-1.0 version freeze (FIG-3846). Every bump gate reads this one
-# switch; TOML requires a top-level [policy] table to precede the first
-# [[surface]] entry, so keep it here. Removing `freeze` -- or the table --
-# restores strict enforcement.
-[policy]
-freeze = "pre-1.0"
+# they version.
 
 [[surface]]
 constant = "REMOTE_PROTOCOL_VERSION"
@@ -69,22 +21,12 @@ upgrade = "coexist"
 description = "JSON wire structs and enums exchanged by Lash remote peers"
 outside_manifest = "wire protocol: gates a live remote peer, not bytes a store parks"
 
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-remote-protocol/src/*.rs"]
-must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent", "RemoteTurnReport"]
-
 [[surface]]
 constant = "DURABLE_WAIT_REQUEST_VERSION"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
 upgrade = "drain"
 description = "Restate durable-wait nested workflow request wire"
 manifest = "engine:restate.durable_wait_request"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/durable_wait.rs"]
-symbols = ["RestateDurableWaitAwaitRequest", "RestateDurableWaitDeadline"]
 
 [[surface]]
 constant = "RESTATE_PROCESS_JOURNAL_VERSION"
@@ -93,53 +35,12 @@ upgrade = "drain"
 description = "leading journaled commands of a Restate process-segment invocation (segment admission)"
 manifest = "engine:restate.process_journal"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/process/admission.rs"]
-symbols = [
-  "ADMIT_STEP",
-  "START_STEP",
-  "AdmissionVerdict",
-  "StartOutcome",
-  "stamped_journal_version",
-  "decode_stamped_request",
-]
-
-# The process workflow's input and the requests a caller sends into a running
-# process workflow are stamped with this generation and refused by it before
-# their shape is decoded, so a change to any of their shapes bumps it.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/process/mod.rs", "crates/lash-restate/src/process_attach.rs"]
-symbols = [
-  "RestateProcessWorkflowInput",
-  "RestateProcessWorkflowPayload",
-  "RestateProcessCancelRequest",
-  "RestateProcessCompleteRequest",
-  "RestateProcessAwaitRequest",
-  "RestateProcessAttachRequest",
-]
-
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-restate/src/process/stamped_requests.rs"]
-
 [[surface]]
 constant = "JOURNAL_LOGIC_EPOCH"
 constant_path = "crates/lash-restate/src/process/admission.rs"
 upgrade = "drain"
 description = "manual epoch of the Restate journal-bearing handlers' logic: step order, names, and verdict meaning, hashed into the build's drain generation (FIG-3795)"
 outside_manifest = "not a durable format version: it is an input to formats::build_generation, not a row in the durable-format manifest"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/process/admission.rs"]
-symbols = ["JOURNAL_LOGIC_EPOCH", "ADMIT_STEP", "START_STEP", "AdmissionVerdict", "StartOutcome"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/process/workflow.rs"]
-symbols = ["COMPLETE_STEP", "BOUNDARY_STEP", "HANDOVER_STEP", "CANCEL_FORWARD_STEP", "CANCEL_RECORD_STEP", "CANCEL_ROUTE_STEP", "CANCEL_CHILD_TURN_STEP", "RETIRE_STEP"]
 
 [[surface]]
 constant = "LASH_SESSION_DRIVE_VERSION"
@@ -148,56 +49,6 @@ upgrade = "drain"
 description = "leading journaled commands of the Restate session driver: both handlers' generation sentinel, LashSession's admission steps and LashTurn calls, and LashTurn's root start marker and seal (the input stamp of both handlers' requests)"
 manifest = "engine:restate.session_drive"
 
-# ADR 0105 section 12 (FIG-3600 S5). Both handlers' requests carry the
-# generation of the commands their journals lead with, and each handler
-# refuses any other generation, terminally, before it journals anything. Any
-# change to the request shapes, the handlers' leading commands or their order,
-# or the keys they address bumps this constant. The kernel's recorded bodies
-# are guarded by EFFECT_JOURNAL_VERSION. The generation sentinel's name and
-# output are guarded; the drain generation's value is not (the engine's
-# RestateConfig hands it in from formats::build_generation, and the sentinel's
-# journal shape does not depend on it).
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-restate/src/session_driver.rs"]
-must_cover = ["RestateSessionDriveRequest", "RestateTurnDriveRequest"]
-
-# The kernel's engine vocabulary both handlers journal: the admission and
-# seal outcomes, the `LashTurn` request and output, and the `LashSession`
-# output. A shape change here reaches an old journal as a decode failure
-# unless the generation moves with it.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lash-core-execution/src/engine/admission.rs",
-  "crates/lash-core-execution/src/engine/drive.rs",
-  "crates/lash-core-execution/src/engine/contracts.rs",
-]
-must_cover = [
-  "Admitted",
-  "AdmittedWork",
-  "AdmitRequest",
-  "AdmitVerdict",
-  "SealVerdict",
-  "RootOutcome",
-  "DriveOutcome",
-  "DriveStop",
-  "DriveRequest",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/session_driver.rs"]
-symbols = [
-  "DRIVE_HANDLER",
-  "TURN_OUTCOME_STATE",
-  "unstamped_drive_version",
-  "GENERATION_SENTINEL",
-  "turn_workflow_key",
-  "drive_session_journal",
-  "run_root_journal",
-]
-
 [[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
@@ -205,144 +56,12 @@ upgrade = "migrate"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
-# PostgreSQL's schema is intentionally a whole-file guard: schema.sql is the
-# authoritative shape, so even a comment-only edit fails closed.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-postgres-store/schema.sql"]
-must_cover = [
-  "CREATE TABLE IF NOT EXISTS lash_schema_versions",
-  "CREATE TABLE IF NOT EXISTS lash_blobs",
-  "CREATE TABLE IF NOT EXISTS lash_sessions",
-  "CREATE TABLE IF NOT EXISTS lash_graph_nodes",
-  "CREATE TABLE IF NOT EXISTS lash_session_meta",
-  "CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits",
-  "CREATE TABLE IF NOT EXISTS lash_queued_work_batches",
-  "CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs",
-  "CREATE TABLE IF NOT EXISTS lash_attachment_manifest",
-  "CREATE TABLE IF NOT EXISTS lash_processes",
-  "CREATE TABLE IF NOT EXISTS lash_process_events",
-  "CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries",
-  "CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions",
-  "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
-  "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",
-  "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
-]
-
-# ADR 0103 / `CanonicalRuntimeEffectEnvelope`: a change that moves the
-# serialized bytes of a `RuntimeEffectCommand` variant advances both store
-# generations, because a journal of the old bytes no longer reconstructs its
-# recorded hashes and must be refused at open rather than replayed.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-core-execution/src/runtime/effect/envelope.rs"]
-must_cover = [
-  "RuntimeEffectInvocation",
-  "RuntimeEffectEnvelope",
-  "RuntimeEffectCommand",
-  "RuntimeEffectOutcome",
-]
-
-# A root's admission JSON (`session_roots.admission_json`) is decoded under
-# the PostgreSQL component stamp.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/root.rs"]
-symbols = ["RootAdmission", "AdmittedHead"]
-
-# The session head's pending follow-on JSON column (ADR 0101 §3, FIG-3542).
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/pending_follow_on.rs"]
-symbols = ["PendingFollowOn"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/effect_identity.rs"]
-symbols = ["ExecutionScope"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/runtime_error.rs"]
-symbols = ["RuntimeErrorCode"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/session_model/mod.rs"]
-symbols = [
-  "TurnOutcome", "TurnFinish", "TurnStop", "TurnCancellationEvidence",
-  "TurnCancelDisposition", "TurnCancelMode",
-  "SessionAppendNode", "ErrorEnvelope",
-]
-
 [[surface]]
 constant = "TRACE_SCHEMA_VERSION"
 constant_path = "crates/lash-trace/src/lib.rs"
 upgrade = "coexist"
 description = "NDJSON trace records, event variants, contexts, and graph payloads"
 outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
-
-# The trace crate is itself a serialization package. All of its Serde carriers
-# share one schema version, including private decode probes.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-trace/src/*.rs"]
-must_cover = [
-  "TraceRecord",
-  "TraceEvent",
-  "TraceTurnOutcome",
-  "TraceTurnCancellationEvidence",
-  "TraceTurnCompletionReason",
-  "TraceTurnFailureReason",
-  "TraceJournaledEffectStatus",
-  "TraceDurableWaitResolution",
-  "TraceDurableTimerStatus",
-  "TraceAttemptUsageDisposition",
-  "TraceLanguageExecutionPayload",
-  "TraceLashlangGraph",
-  "TraceNodeWaitKind",
-  "TraceNodeAwaited",
-  "TraceNodeWaitResolution",
-  "TraceLashlangNodeObservation",
-  "TraceLashlangGraphNode",
-  "TraceLashlangNodeTerminalStatus",
-  "TraceLanguageExecutionMapNode",
-  "TraceLashlangEventIdentity",
-  "TraceLashlangNodeTerminalSummary",
-  "TraceBranchMembership",
-]
-
-# The NodeFailed carrier embeds these Serde enums from lash-sansio. The trace
-# shape sweep does not follow references into another crate.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/tool_output.rs"]
-symbols = ["ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/workflow.rs"]
-symbols = ["WorkflowExecutionSite"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/execution_node_kind.rs"]
-symbols = ["ExecutionNodeKind"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-trace/src/lashlang_graph.rs"]
-symbols = ["fold_lashlang_graph"]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-trace/src/lashlang_graph/model.rs"]
-must_cover = ["TraceLashlangNodeObservation"]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-trace/src/language_execution_failure.rs"]
-must_cover = ["TraceLanguageExecutionFailure"]
 
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility
@@ -358,66 +77,12 @@ upgrade = "migrate"
 description = "SQLite session-store DDL and stored blob envelopes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-    "crates/lash-sqlite-store/src/schema.rs",
-    "crates/lash-sqlite-store/src/schema_fragments.rs",
-]
-symbols = ["SCHEMA"]
-elide = "sql_idempotent_index"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sqlite-store/src/lib.rs"]
-symbols = ["StoredBlobEnvelope", "BlobArtifactDescriptor", "BlobStorageHint", "BlobCompression"]
-
-# Durable-core root admission JSON must move with the SQLite component stamp.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/root.rs"]
-symbols = ["RootAdmission", "AdmittedHead"]
-
-# The session head's pending follow-on JSON column (ADR 0101 §3, FIG-3542).
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/pending_follow_on.rs"]
-symbols = ["PendingFollowOn"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/effect_identity.rs"]
-symbols = ["ExecutionScope"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/runtime_error.rs"]
-symbols = ["RuntimeErrorCode"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/session_model/mod.rs"]
-symbols = [
-  "TurnOutcome", "TurnFinish", "TurnStop", "TurnCancellationEvidence",
-  "TurnCancelDisposition", "TurnCancelMode",
-  "SessionAppendNode", "ErrorEnvelope",
-]
-
 [[surface]]
 constant = "PROCESS_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
 upgrade = "migrate"
 description = "SQLite process-registry tables, columns, constraints, and unique indexes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-    "crates/lash-sqlite-store/src/schema.rs",
-    "crates/lash-sqlite-store/src/schema_fragments.rs",
-]
-symbols = ["PROCESS_SCHEMA"]
-elide = "sql_idempotent_index"
 
 [[surface]]
 constant = "TRIGGER_SCHEMA_VERSION"
@@ -426,37 +91,12 @@ upgrade = "migrate"
 description = "SQLite trigger-store tables, columns, constraints, and unique indexes"
 outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sqlite-store/src/schema.rs"]
-symbols = ["TRIGGER_SCHEMA"]
-elide = "sql_idempotent_index"
-
-# ADR 0103 / `CanonicalRuntimeEffectEnvelope`: a change that moves the
-# serialized bytes of a `RuntimeEffectCommand` variant advances both store
-# generations, because a journal of the old bytes no longer reconstructs its
-# recorded hashes and must be refused at open rather than replayed.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-core-execution/src/runtime/effect/envelope.rs"]
-must_cover = [
-  "RuntimeEffectInvocation",
-  "RuntimeEffectEnvelope",
-  "RuntimeEffectCommand",
-  "RuntimeEffectOutcome",
-]
-
 [[surface]]
 constant = "FLEET_FORMAT_VERSION"
 constant_path = "crates/lash-core-store/src/store/fleet_format.rs"
 upgrade = "migrate"
 description = "fleet-format row `format_version` (ADR 0106 §1 `F`): the durable-format generation every writer in the fleet emits"
 outside_manifest = "store-resident stamp: recorded in the fleet-format row and read from the deployment through StorePreflight::schema_status, not reported from the build"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/fleet_format.rs"]
-symbols = ["FLEET_FORMAT_VERSION", "FleetFormat", "FleetFormatState"]
 
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
@@ -465,54 +105,17 @@ upgrade = "migrate"
 description = "serialized ProcessWakeDelivery outbox payload"
 manifest = "ProcessWakeDelivery"
 
-# The payload struct and the stamped constant both live in `lash-core-store`;
-# `lash-core` re-exports the constant at its outbox-writer path.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/process_identity.rs"]
-symbols = ["ProcessWakeDelivery"]
-
 [[surface]]
 constant = "START_KEY_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/process_identity.rs"
 upgrade = "coexist"
 description = "process start-key preimage and rendering: the key the registrar's unique start-key index, trigger deliveries, `process:start:<key>` effect ids and start staging owners are addressed by (ADR 0107)"
 
-# Start keys are durable: a redrive re-derives its key and must meet the key
-# the first attempt stored, so a preimage or rendering edit that silently
-# re-keys an idempotent start would start a second process. The guard covers
-# every derivation path, the namespace tags and names, the owner scoping of a
-# host key, and the admitted-scope projection the derived keys share.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/process_identity.rs"]
-symbols = [
-  "START_KEY_DOMAIN",
-  "START_KEY_PREFIX",
-  "StartKeyNamespace",
-  "StartKeyOwner",
-  "derive",
-  "for_tool_intent",
-  "for_orchestration_call",
-  "for_trigger_delivery",
-  "for_host",
-  "for_keyless_host",
-  "write_scope",
-]
-
 [[surface]]
 constant = "TURN_INPUT_SUBMISSION_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/turn_input_vocabulary.rs"
 upgrade = "coexist"
 description = "stable pending turn-input submission digest compared by source-key replay (FIG-3544)"
-
-# Stored digests are compared for equality against fresh ones, so the preimage
-# grammar and the `TurnInput` serde form it hashes as one canonical JSON leaf
-# both move the family version.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/turn_input_vocabulary.rs"]
-symbols = ["turn_input_submission_preimage", "TurnInput", "InputItem"]
 
 [[surface]]
 constant = "LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION"
@@ -521,55 +124,12 @@ upgrade = "drain"
 description = "journal grammar a code cell writes: the replay-key grammar plus the cell's ambient binding set, journaled before its first effect and linked against on redrive (FIG-3587)"
 outside_manifest = "a journal grammar, not a payload: the grammar a cell's journal was written under rides the execution-environment sync outcome, and a cell under any other grammar is refused before it runs"
 
-# The binding record a cell journals and links against: its key suffix, its
-# operation label and the recorded definition map.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-lashlang-runtime/src/cell_bindings.rs"]
-symbols = ["CELL_TOOL_BINDINGS_SUFFIX", "CELL_TOOL_BINDINGS_OPERATION", "resolve_ambient_bindings", "compare"]
-
-# What a recorded binding is judged against the live registry on (FIG-3587),
-# shared with the turn's recorded tool surface (FIG-3672 P7b).
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/session.rs"]
-symbols = ["ToolDispatchSurface", "tool_dispatch_surface"]
-
 [[surface]]
 constant = "INSTRUCTION_ACCOUNTING_VERSION"
 constant_path = "crates/lashlang/src/runtime/mod.rs"
 upgrade = "drain"
 description = "instruction accounting that places a code cell's journaled cancel checkpoints: compiler emission, builtin cost charges, the cooperative-yield granularity and the checkpoint schedule (FIG-3672 P9)"
 outside_manifest = "an accounting, not a payload: a cell replays by re-execution, so its checkpoint peeks land where this accounting puts them; it is pinned into LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION, which the execution-environment sync stamps and refuses on mismatch"
-
-# The checkpoint schedule and the budget granularity it is sampled at.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/mod.rs"]
-symbols = ["CANCEL_CHECKPOINT_INSTRUCTIONS", "CANCEL_CHECKPOINT_INTERVAL_CAP", "cancel_checkpoint_reached", "COOPERATIVE_YIELD_INSTRUCTION_BUDGET"]
-
-# The builtin cost charges. Their call sites sit inside the builtins that
-# charge them; a change to what a builtin charges moves this version too.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/ops.rs"]
-symbols = ["charge_collection_work"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/vm/control.rs"]
-symbols = ["charge_intrinsic_work"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/vm/javascript_regexp.rs"]
-symbols = ["TYPESCRIPT_REGEXP_EXECUTION_FUEL", "TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION", "grant_regexp_fuel"]
-
-# What the compiler emits for a program: each emitted instruction is one unit
-# of the count the schedule reads.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lashlang/src/runtime/compiler/*.rs"]
 
 [[surface]]
 constant = "LASHLANG_REPLAY_KEY_GRAMMAR_VERSION"
@@ -578,35 +138,12 @@ upgrade = "drain"
 description = "issue-ordinal replay-key grammar lashlang cells and process bodies journal their nested effects under (FIG-3586)"
 outside_manifest = "a key grammar, not a payload: the grammar a journal was written under rides the execution-environment sync outcome and the ProcessStarted record, and a run under any other grammar is refused before it issues a command"
 
-# The keys a run journals and reads back: its namespace, the ordinal and seal
-# spelling, the sub-keys each command shape writes, the dispatched-ordinals
-# digest the seal carries, and the call and child ids minted from ordinals.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-lashlang-runtime/src/replay_run.rs"]
-symbols = ["LashlangReplayNamespace", "CommandShape", "DispatchedOrdinalsDigest"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-lashlang-runtime/src/host_identity.rs"]
-symbols = ["LashlangHostIdentities"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/causal.rs"]
-symbols = ["CommandReplayKey"]
-
 [[surface]]
 constant = "FRAME_KEY_VERSION"
 constant_path = "crates/lash-sansio/src/frame_key.rs"
 upgrade = "coexist"
 description = "stable agent-frame key hash preimage"
 outside_manifest = "hash-domain tag of the agent-frame key preimage: the *_FAMILY_VERSION class under another name (see [[excluded_class]])"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/frame_key.rs"]
-symbols = ["derive"]
 
 [[surface]]
 constant = "APPEND_REQUEST_IDENTITY_ENCODING_VERSION"
@@ -615,56 +152,12 @@ upgrade = "coexist"
 description = "stable append-request identity byte projection"
 manifest = "AppendRequestIdentity"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-store/src/store/commit_identity.rs",
-  "crates/lash-core-ids/src/stable_identity.rs",
-]
-symbols = [
-  "push_json_value",
-  "push_message_role",
-  "push_causal_ref",
-  "push_message_origin",
-  "push_attachment_type_metadata",
-  "push_attachment_ref",
-  "push_attachment_source",
-  "push_part_kind",
-  "push_part",
-  "append_node_identity_bytes",
-  "append_request_identity_bytes",
-  # FIG-2887: the projection is minted through the shared IdentityEncoder
-  # primitives (frozen unframed family, ADR 0097), so the framing grammar now
-  # lives in these methods and the guard follows it.
-  "new_unframed",
-  "tag",
-  "u8",
-  "u32",
-  "u64",
-  "i64",
-  "string",
-  "bytes",
-  "optional",
-  "sequence",
-  "finish",
-  "provider_route",
-]
-
 [[surface]]
 constant = "RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 upgrade = "coexist"
 description = "canonical record-config semantic-boundary request encoding (FIG-2480)"
 manifest = "RecordConfigRequestIdentity"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/semantic_boundary.rs"]
-symbols = [
-  "SemanticBoundaryRequestIntent",
-  "semantic_boundary_request_intent_encoding",
-  "semantic_boundary_request_identity",
-]
 
 [[surface]]
 constant = "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION"
@@ -673,15 +166,6 @@ upgrade = "coexist"
 description = "canonical create-session semantic-boundary request encoding (FIG-2480)"
 manifest = "CreateSessionRequestIdentity"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/semantic_boundary.rs"]
-symbols = [
-  "SemanticBoundaryRequestIntent",
-  "semantic_boundary_request_intent_encoding",
-  "semantic_boundary_request_identity",
-]
-
 [[surface]]
 constant = "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
@@ -689,42 +173,11 @@ upgrade = "coexist"
 description = "canonical usage-ledger semantic-boundary request encoding (FIG-2480)"
 manifest = "UsageLedgerRequestIdentity"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/semantic_boundary.rs"]
-symbols = [
-  "SemanticBoundaryRequestIntent",
-  "semantic_boundary_request_intent_encoding",
-  "semantic_boundary_request_identity",
-]
-
 [[surface]]
 constant = "TRIGGER_COMMAND_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers.rs"
 upgrade = "coexist"
 description = "stable trigger-command fingerprint"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers.rs"]
-symbols = ["trigger_command_preimage"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/triggers/router.rs",
-  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
-]
-symbols = [
-  "project_trigger_owner",
-  "project_trigger_actor",
-  "project_trigger_draft",
-  "project_process_event_type",
-  "project_process_value_selector",
-  "project_trigger_process_input",
-  "project_process_payload_leaf",
-  "project_process_schema_leaf",
-]
 
 [[surface]]
 constant = "TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION"
@@ -732,38 +185,11 @@ constant_path = "crates/lash-core-execution/src/triggers.rs"
 upgrade = "coexist"
 description = "stable trigger operation-receipt address"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers.rs"]
-symbols = ["trigger_operation_receipt_preimage"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers/router.rs"]
-symbols = ["project_trigger_owner"]
-
 [[surface]]
 constant = "TRIGGER_DEFINITION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 upgrade = "coexist"
 description = "stable trigger-subscription definition fingerprint"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/triggers/router.rs",
-  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
-]
-symbols = [
-  "trigger_subscription_definition_preimage",
-  "project_trigger_owner",
-  "project_trigger_draft",
-  "project_process_event_type",
-  "project_process_value_selector",
-  "project_trigger_process_input",
-  "project_process_payload_leaf",
-  "project_process_schema_leaf",
-]
 
 [[surface]]
 constant = "TRIGGER_LOOKUP_FAMILY_VERSION"
@@ -771,24 +197,11 @@ constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 upgrade = "coexist"
 description = "stable trigger subscription lookup address"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers/router.rs"]
-symbols = ["trigger_subscription_address_preimage", "project_trigger_owner"]
-
 [[surface]]
 constant = "TRIGGER_SOURCE_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 upgrade = "coexist"
 description = "stable default trigger-source key"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/triggers/router.rs",
-  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
-]
-symbols = ["trigger_source_preimage", "project_process_payload_leaf"]
 
 [[surface]]
 constant = "DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION"
@@ -796,25 +209,11 @@ constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 upgrade = "coexist"
 description = "stable derived trigger-subscription key"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers/router.rs"]
-symbols = ["derived_trigger_subscription_key"]
-
 [[surface]]
 constant = "DIRECT_EFFECT_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/causal.rs"
 upgrade = "coexist"
 description = "stable direct-effect replay key and discriminator"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/causal.rs"]
-symbols = [
-  "direct_effect_replay_preimage",
-  "direct_request_discriminator",
-  "project_direct_causal_ref",
-]
 
 [[surface]]
 constant = "TOOL_CHILD_REQUEST_VERSION"
@@ -823,184 +222,12 @@ upgrade = "drain"
 description = "retained tool-child request of a durable effect group (ADR 0099 section 3)"
 manifest = "ToolChildRequest"
 
-# The request is journaled inside a group child's envelope and read back by a
-# reopen, so a field added, retired or retyped in any of these items changes
-# what a recovered child can reconstruct. The guard names the full serialized
-# closure — every type a request field reaches — because a `rust_items` guard
-# projects only the declarations it lists and nothing their payloads reach:
-# a nested payload changed without a carrier field edit would otherwise leave
-# the signature byte-identical.
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/runtime/effect/tool_child.rs",
-  "crates/lash-core-execution/src/runtime/effect/tool_child/session_facts.rs",
-  "crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs",
-  "crates/lash-core-execution/src/tool_provider.rs",
-  "crates/lash-core-store/src/effect_opener.rs",
-  "crates/lash-core-store/src/turn_control_binding.rs",
-  "crates/lash-core-store/src/effect_identity.rs",
-  "crates/lash-core-store/src/process_identity.rs",
-  "crates/lash-core-store/src/session_identity.rs",
-  "crates/lash-core-store/src/admitted_scope.rs",
-  "crates/lash-sansio/src/tool_output.rs",
-  "crates/lash-sansio/src/tool_contract.rs",
-  "crates/lash-sansio/src/schema_contract.rs",
-  "crates/lash-sansio/src/llm/types.rs",
-  "crates/lash-sansio/src/effect_identity.rs",
-  "crates/lash-sansio/src/causal.rs",
-]
-symbols = [
-  "ToolChildRequest",
-  "ToolChildScope",
-  "ToolChildAdmission",
-  "ToolChildCompletionRouting",
-  # FIG-3712: the session facts a child records at group open.
-  "ToolChildSessionFacts",
-  "UnrecordedSessionSources",
-  "ToolDefinition",
-  "SessionToolAccessWire",
-  "SubagentSessionContext",
-  "ToolAttemptEffectIdentity",
-  "EffectOpener",
-  "AdmittedScope",
-  "AdmittedScopeWire",
-  "TurnControlBindingId",
-  "PreparedToolCall",
-  "ToolExecutionGrant",
-  "RuntimeInvocation",
-  "RuntimeAttribution",
-  "RuntimeSubject",
-  "RuntimeReplay",
-  "RuntimeReplayAttribution",
-  "ToolIntentIdentity",
-  "ProcessExecutionEnvRef",
-  "FrameNodeId",
-  "ToolId",
-  "ToolManifest",
-  "ToolContract",
-  "ToolRetryPolicy",
-  "ToolActivation",
-  "ToolArgumentProjectionPolicy",
-  "ToolOutputContract",
-  "CompactToolContract",
-  "SchemaContract",
-  "SchemaProjectionPolicy",
-  "SchemaProjectionOverride",
-  "ProjectionMode",
-  "ProviderReplayMeta",
-  "ProviderRouteIdentity",
-  "ExecutionScope",
-  "EffectAddress",
-  "CausalRef",
-]
-
-# SessionId/TurnId/ProcessId are generated by `string_identity!`, which
-# rust_items cannot project, so the identity vocabulary file is pinned whole.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-sansio/src/identity.rs"]
-must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId"]
-
 [[surface]]
 constant = "TOOL_SETTLEMENT_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
 upgrade = "drain"
 description = "the semantic settlement a tool child of a durable effect group carries on its outcome (ADR 0099 sections 6 and 13)"
 manifest = "ToolSettlement"
-
-# The settlement is journaled inside a `ToolInvocation` outcome and read back
-# by a replay, so a field added, retired or retyped anywhere in its serialized
-# closure changes what an opener can reconstruct of what its child produced.
-# The guard names every type the settlement's fields reach — intent outcomes,
-# usage deltas, possession, trigger receipts, checkpoint messages, and the
-# projected model return's full message/attachment/causal subtree — because a
-# `rust_items` guard projects only the declarations it lists and nothing their
-# payloads reach. `FlatPart`/`FlatPartRef` are named because `Part` serializes
-# through them; a field added there without a `Part` decl change would
-# otherwise leave the signature byte-identical.
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs",
-  "crates/lash-core-execution/src/tool_dispatch/context.rs",
-  "crates/lash-core-execution/src/triggers.rs",
-  "crates/lash-sansio/src/plugin.rs",
-  "crates/lash-sansio/src/session_model/message.rs",
-  "crates/lash-sansio/src/session_model/mod.rs",
-  "crates/lash-sansio/src/llm/types.rs",
-  "crates/lash-sansio/src/attachment.rs",
-  "crates/lash-sansio/src/tool_output.rs",
-  "crates/lash-sansio/src/effect_identity.rs",
-  "crates/lash-sansio/src/causal.rs",
-  "crates/lash-core-execution/src/runtime/effect/recorded_stream.rs",
-]
-symbols = [
-  "ToolSettlement",
-  # FIG-3712: the recorded stream of a child that ran with no live opener.
-  # Its events are opaque payloads in the journal's own shape, so the stream
-  # DTOs themselves stay outside this closure.
-  "RecordedChildStream",
-  "RecordedChildEvent",
-  "RecordedChildChannel",
-  "ChildStreamTruncation",
-  "ToolUsageDelta",
-  "ToolDispatchOutcome",
-  "PendingToolDispatchOutcome",
-  "ToolTriggerEffectOutcome",
-  "TriggerDeliveryEmitReceipt",
-  "TriggerDeliveryEmitOutcome",
-  "PluginMessage",
-  "MessageRole",
-  "MessageOrigin",
-  "TurnOutputSource",
-  "Part",
-  "FlatPart",
-  "FlatPartRef",
-  "PartAttachment",
-  "PartKind",
-  "TokenUsage",
-  "LlmCallId",
-  "AttachmentSource",
-  "ProviderFileScope",
-  "ProviderReplayMeta",
-  "ProviderReasoningReplay",
-  "ProviderRouteIdentity",
-  "ResponsePhase",
-  "ResponseTextMeta",
-  "AttachmentRef",
-  "AttachmentId",
-  "AttachmentTypeMetadata",
-  "MediaType",
-  "ToolIntentExecutionOutcome",
-  "ToolIntentIdentity",
-  "ToolIntentKind",
-  "ToolIntentRefusalReason",
-  "ModelToolReturn",
-  "ModelToolReturnPart",
-  "AttachmentMaterializationNotice",
-  "AttachmentMaterializationSource",
-  "AttachmentMaterializationReason",
-  "ExecutionScope",
-  "EffectAddress",
-  "CausalRef",
-]
-
-# The `string_identity!` output (SessionId/ProcessId/TurnId/InputId — reached
-# via possession, trigger receipts, ToolIntentIdentity, and MessageOrigin) is
-# macro-generated, so the vocabulary file is pinned whole.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-sansio/src/identity.rs"]
-must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId", "InputId"]
-
-# `ToolIntentKind` is generated from the `tool_intent_variants` arm table;
-# macro_rules! text is invisible to rust_items, so the dedicated vocabulary
-# file is pinned whole — a variant added there must bump this version.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-sansio/src/tool_intents.rs"]
-must_cover = ["tool_intent_variants"]
 
 [[surface]]
 constant = "TOOL_PRESENTATION_VERSION"
@@ -1009,128 +236,12 @@ upgrade = "drain"
 description = "the journaled product of one tool result's ordered presentation chain — the model-facing return plus every retained artifact ref (ADR 0099 section 6, FIG-3420)"
 manifest = "ToolPresentation"
 
-# The presentation is journaled inside a `PresentToolResult` outcome and read
-# back verbatim on replay, so a field added, retired or retyped anywhere in
-# its serialized closure changes what a replay can serve the model. Its
-# `model_return` and `artifacts` reach the same message/attachment/causal
-# leaf set as the settlement's return, guarded here rather than borrowed from
-# the settlement surface because the two records move for different reasons.
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs",
-  "crates/lash-sansio/src/plugin.rs",
-  "crates/lash-sansio/src/session_model/message.rs",
-  "crates/lash-sansio/src/session_model/mod.rs",
-  "crates/lash-sansio/src/llm/types.rs",
-  "crates/lash-sansio/src/attachment.rs",
-  "crates/lash-sansio/src/tool_output.rs",
-  "crates/lash-sansio/src/causal.rs",
-]
-symbols = [
-  "ToolPresentation",
-  "PluginMessage",
-  "MessageRole",
-  "MessageOrigin",
-  "TurnOutputSource",
-  "Part",
-  "FlatPart",
-  "FlatPartRef",
-  "PartAttachment",
-  "PartKind",
-  "AttachmentSource",
-  "ProviderFileScope",
-  "ProviderReplayMeta",
-  "ProviderReasoningReplay",
-  "ProviderRouteIdentity",
-  "ResponsePhase",
-  "ResponseTextMeta",
-  "AttachmentRef",
-  "AttachmentId",
-  "AttachmentTypeMetadata",
-  "MediaType",
-  "ModelToolReturn",
-  "ModelToolReturnPart",
-  "AttachmentMaterializationNotice",
-  "AttachmentMaterializationSource",
-  "AttachmentMaterializationReason",
-  "CausalRef",
-]
-
-# The `string_identity!` output (SessionId/ProcessId — reached via
-# MessageOrigin and AttachmentSource) is macro-generated, so the vocabulary
-# file is pinned whole.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-sansio/src/identity.rs"]
-must_cover = ["string_identity!", "SessionId", "ProcessId"]
-
 [[surface]]
 constant = "TOOL_ATTEMPT_CAPTURE_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
 upgrade = "drain"
 description = "the semantic facts one atomic tool attempt journaled with its outcome (ADR 0099 section 13)"
 manifest = "ToolAttemptCapture"
-
-# The attempt capture rides `RuntimeEffectOutcome::ToolAttempt` — including the
-# ungrouped arm — and is restored into the dispatch buffers when a recorded
-# attempt replays, so a field added, retired or retyped changes what a replay
-# can restore of what the attempt committed. It is guarded separately from the
-# settlement because the two carriers move for different reasons, and it names
-# the full serialized closure for the same reason the settlement does: the
-# capture's `PluginMessage` rows reach the entire message/attachment/causal
-# leaf set, and its `usage` list carries `ToolUsageDelta`/`TokenUsage` with no
-# discriminant of their own.
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs",
-  "crates/lash-sansio/src/plugin.rs",
-  "crates/lash-sansio/src/session_model/message.rs",
-  "crates/lash-sansio/src/session_model/mod.rs",
-  "crates/lash-sansio/src/llm/types.rs",
-  "crates/lash-sansio/src/attachment.rs",
-  "crates/lash-sansio/src/tool_output.rs",
-  "crates/lash-sansio/src/effect_identity.rs",
-  "crates/lash-sansio/src/causal.rs",
-]
-symbols = [
-  "ToolAttemptCapture",
-  "ToolUsageDelta",
-  "LlmCallId",
-  "TokenUsage",
-  "PluginMessage",
-  "MessageRole",
-  "MessageOrigin",
-  "TurnOutputSource",
-  "Part",
-  "FlatPart",
-  "FlatPartRef",
-  "PartAttachment",
-  "PartKind",
-  "ModelToolReturnPart",
-  "AttachmentSource",
-  "ProviderFileScope",
-  "ProviderReplayMeta",
-  "ProviderReasoningReplay",
-  "ProviderRouteIdentity",
-  "ResponsePhase",
-  "ResponseTextMeta",
-  "AttachmentRef",
-  "AttachmentId",
-  "AttachmentTypeMetadata",
-  "MediaType",
-  "ExecutionScope",
-  "EffectAddress",
-  "CausalRef",
-]
-
-# The capture's PluginMessage rows reach the same macro-generated identity
-# vocabulary as the settlement; the file is pinned whole.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-sansio/src/identity.rs"]
-must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId", "InputId"]
 
 [[surface]]
 constant = "TOOL_CHILD_REBIND_VERSION"
@@ -1139,33 +250,11 @@ upgrade = "drain"
 description = "the tool-child rebind checklist: every ToolDispatchContext field's recorded/lent/fresh ruling (ADR 0099 section 3)"
 outside_manifest = "versions a reviewed in-process checklist (REBIND_FIELDS), not stored bytes: nothing durable carries it"
 
-# REBIND_FIELDS is the contract a tool-child driver answers to when it rebuilds
-# a lent opener context for a retained child. `ToolDispatchContext` is named
-# alongside the checklist itself because a field added to the struct IS a
-# checklist change — the meta-test in tool_dispatch/tests/rebind_checklist.rs
-# refuses the unruled field, and this guard makes the ruling's edit cost a
-# conscious version bump. `RebindDisposition` is named for the same reason the
-# FIG-3407 payloads were: it is the vocabulary a ruling is written in.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/tool_dispatch/context.rs"]
-symbols = [
-  "ToolDispatchContext",
-  "RebindField",
-  "RebindDisposition",
-  "REBIND_FIELDS",
-]
-
 [[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/effect_identity.rs"
 upgrade = "coexist"
 description = "stable process-transfer set identity"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/effect_identity.rs"]
-symbols = ["process_transfer_set_preimage"]
 
 [[surface]]
 constant = "AWAIT_EVENT_FAMILY_VERSION"
@@ -1173,21 +262,11 @@ constant_path = "crates/lash-core-effect/src/await_event_identity.rs"
 upgrade = "coexist"
 description = "stable await-event promise identity and authenticated material"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-effect/src/await_event_identity.rs"]
-symbols = ["promise_key_preimage", "sign_material"]
-
 [[surface]]
 constant = "PROCESS_CANCELLATION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/events.rs"
 upgrade = "coexist"
 description = "stable process-cancellation replay address"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/events.rs"]
-symbols = ["cancellation_replay_preimage"]
 
 [[surface]]
 constant = "PROCESS_WAKE_FAMILY_VERSION"
@@ -1195,32 +274,17 @@ constant_path = "crates/lash-core-execution/src/runtime/process/wake.rs"
 upgrade = "coexist"
 description = "stable process-wake identity"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/wake.rs"]
-symbols = ["process_wake_identity_preimage"]
-
 [[surface]]
 constant = "TOOL_BATCH_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/session/tool_execution.rs"
 upgrade = "coexist"
 description = "stable tool-invocation batch identity"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/session/tool_execution.rs"]
-symbols = ["tool_invocation_batch_preimage"]
-
 [[surface]]
 constant = "USAGE_PAYLOAD_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
 upgrade = "coexist"
 description = "stable runtime-usage payload identity and persisted encoding tag"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/runtime_commit.rs"]
-symbols = ["usage_payload_identity_bytes"]
 
 [[surface]]
 constant = "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION"
@@ -1229,72 +293,12 @@ upgrade = "migrate"
 description = "persisted runtime turn-commit receipt in runtime_turn_commits.result_json"
 manifest = "RuntimeCommitReceipt"
 
-# The receipt is the durable `result_json` a committed turn returns on replay.
-# These guards name the receipt declaration and the payload types its fields
-# reach directly; each of those types' own closures is already pinned by its
-# owning surface (SessionCheckpoint, SessionNodeBody, the queue and turn-input
-# vocabularies), and the PostgreSQL/SQLite payload-shape fingerprint covers the
-# full schemars document this guard cannot see.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/runtime_commit.rs"]
-symbols = [
-  "RuntimeCommitReceipt",
-  "RuntimeUsageDeltaIdentity",
-  "decode_runtime_commit_receipt",
-  "ensure_supported_receipt_version",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/runtime_commit_plan.rs"]
-symbols = ["RuntimeCommitReceiptRecord"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/pending_follow_on.rs"]
-symbols = ["PendingFollowOn"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/session_graph.rs"]
-symbols = ["RealizedNodeTimestamp"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/turn_failure_evidence.rs"]
-symbols = [
-  "TurnFailureEvidence",
-  "TurnFailurePartialOutput",
-  "ChargeSafetyRefusalEvidence",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/queued_work_vocabulary.rs"]
-symbols = ["QueuedWorkBatch"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/turn_input_vocabulary.rs"]
-symbols = ["TurnInputApplication"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/turn_control_vocabulary.rs"]
-symbols = ["TurnCancelInputOutcome"]
-
 [[surface]]
 constant = "PRODUCT_EVENT_LOG_FORMAT_VERSION"
 constant_path = "examples/agent-workbench/src/main_sections/state.rs"
 upgrade = "migrate"
 description = "agent-workbench product-event log JSON snapshot"
 outside_manifest = "written by the agent-workbench example host, not by a lash build"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["examples/agent-workbench/src/main_sections/state.rs"]
-symbols = ["ProductEvent", "ProductEventHistory", "PersistedProductEventLog"]
 
 [[surface]]
 constant = "SESSION_CHECKPOINT_SCHEMA_VERSION"
@@ -1303,49 +307,12 @@ upgrade = "migrate"
 description = "persisted session checkpoint manifest"
 manifest = "SessionCheckpointManifest"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/checkpoint.rs"]
-symbols = ["SessionCheckpoint"]
-
 [[surface]]
 constant = "TURN_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-sansio/src/sansio/machine_state.rs"
 upgrade = "drain"
 description = "serialized sans-IO turn checkpoint and pending host-effect vocabulary"
 manifest = "TurnCheckpoint"
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lash-sansio/src/sansio/machine_state.rs",
-  "crates/lash-sansio/src/sansio/turn_protocol.rs",
-]
-must_cover = ["TurnCheckpoint", "MachineState", "Effect"]
-
-# `Effect::Emit` carries `SessionStreamEvent`; the streamed-block vocabulary
-# (block identities on deltas, start/end pairing variants) is part of the
-# checkpoint's serialized reach even though the types live in other modules.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/session_model/mod.rs"]
-symbols = ["SessionStreamEvent"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/llm/types.rs"]
-symbols = ["StreamBlockIdentity", "StreamBlockKind"]
-
-# Checkpoints persist messages and pending effects containing plugin messages.
-# A tool-result part carries the tool's ordered return blocks.
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-sansio/src/session_model/message.rs",
-  "crates/lash-sansio/src/plugin.rs",
-  "crates/lash-sansio/src/tool_output.rs",
-]
-symbols = ["Part", "FlatPart", "FlatPartRef", "PluginMessage", "ModelToolReturnPart"]
 
 [[surface]]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
@@ -1354,76 +321,12 @@ upgrade = "migrate"
 description = "logical bytes stored behind checkpoint component descriptors"
 manifest = "CheckpointComponentEncoding"
 
-# Component bodies are owned by multiple runtime/plugin crates. The descriptor
-# contract is the checkable shared boundary; codec-specific changes must add a
-# narrower versioned surface here when introduced.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/checkpoint.rs"]
-symbols = ["CheckpointComponentDescriptor", "HydratedCheckpointComponent"]
-
 [[surface]]
 constant = "SESSION_HEAD_META_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/mod.rs"
 upgrade = "migrate"
 description = "persisted JSON session-head payload"
 manifest = "SessionHeadMeta"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/mod.rs"]
-symbols = ["SessionHeadPayload"]
-
-# The head payload's config column shape lives in session_graph.rs; guarding
-# it here makes head-config field changes trip this surface directly instead
-# of only the node-body whole-file sweep that happens to share the file.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/session_graph.rs"]
-symbols = ["PersistedSessionConfig"]
-
-# Host instruction capability bytes also persist through the head's ModelSpec.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/llm/capability.rs"]
-symbols = ["ModelCapability", "InstructionRole"]
-
-# Restricted resident-tool authority serializes `Vec<ToolDefinition>` through
-# `SessionToolAccessWire` inside the head's config column. The wire carrier and
-# the definition's whole serialized closure are named here because the closure
-# lives in tool_contract.rs/schema_contract.rs, which this surface's other
-# guards do not sweep. `rust_items` projects attributes too, so a
-# `serde(flatten)` reintroduction on any of them trips this surface.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/session_identity.rs"]
-symbols = [
-  "SessionToolAccess",
-  "SessionResidentToolAccess",
-  "SessionToolAccessWire",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-sansio/src/tool_contract.rs",
-  "crates/lash-sansio/src/schema_contract.rs",
-]
-symbols = [
-  "ToolDefinition",
-  "ToolManifest",
-  "ToolContract",
-  "ToolId",
-  "CompactToolContract",
-  "ToolActivation",
-  "ToolRetryPolicy",
-  "ToolOutputContract",
-  "ToolArgumentProjectionPolicy",
-  "SchemaContract",
-  "SchemaProjectionPolicy",
-  "SchemaProjectionOverride",
-  "ProjectionMode",
-]
 
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
@@ -1432,186 +335,12 @@ upgrade = "migrate"
 description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
 manifest = "SessionNodeBody"
 
-# The node body is the session graph's durable history shape, so its guard
-# follows the shape rather than one file: everything the body can reach and
-# still recover a typed meaning from is guarded here, down to the leaves that
-# are genuinely opaque bytes. A file whose every Serde carrier belongs to the
-# body's family is swept whole and fails closed on a carrier added later; a
-# file that also holds transient stream, prompt, or driver types is named
-# declaration by declaration.
-#
-# `SessionPolicy` is the exception and its guard is a whole-file one: the
-# policy is persisted through a hand-written `impl Serialize`/`impl
-# Deserialize` pair, and no symbol projection here can see an impl block --
-# `rust_items` and `rust_serde_shapes` both match declarations only. That pair
-# therefore lives alone in session_model/session_policy_serde.rs, and the file
-# is guarded whole with `must_cover` markers asserting both impls still exist
-# under those names. Guarding the file that holds only the encoding, rather
-# than the module that also holds the runtime session types, is what keeps the
-# guard from firing on unrelated edits -- a spurious bump is not free here,
-# because under the forward-only fence it makes older binaries refuse rows they
-# could have read.
-#
-# What that buys: any edit to the encoder or to the wire struct inside it
-# demands a bump, and a rename of either impl trips the marker rather than
-# passing silently. What it cannot see is the `SessionPolicy` declaration
-# itself, which stays in session_model/mod.rs -- and does not need to be seen,
-# because the hand-written encoder is the policy's complete durable projection.
-# A field added to the struct is absent from the wire until this file names it,
-# so a struct edit that changes the persisted shape is always also an edit
-# here.
-#
-# Opaque leaves, stated as such rather than as coverage: plugin option bodies
-# and plugin node bodies are `serde_json::Value` owned by the plugin, and the
-# provider replay payloads are provider-owned strings. Their carriers are
-# guarded -- the map, the option, the field that holds them -- but their
-# contents have no shape this repository can version, by design.
-#
-# `ProtocolTurnOptions` is reached only through its own envelope and carries
-# the separate surface declared below.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-core-store/src/session_graph.rs"]
-must_cover = ["StoredSessionNodeBody", "SessionNodePayload", "SessionNodeRecord"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/session_model/mod.rs"]
-symbols = [
-  "SessionHistoryRecord",
-  "ConversationRecord",
-  "ProtocolEvent",
-  "TurnBudget",
-  "NoProgressBudget",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/session_model/message.rs"]
-symbols = [
-  "Message",
-  "MessageRole",
-  "MessageOrigin",
-  "Part",
-  "FlatPart",
-  "FlatPartRef",
-  "PartKind",
-  "PartAttachment",
-]
-
-# A tool-result part's content is the tool's ordered return blocks.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/tool_output.rs"]
-symbols = ["ModelToolReturnPart"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/session_identity.rs"]
-symbols = ["AgentFrameReason", "AgentFrameAssignment"]
-
-# The frame assignment carries the session policy and the plugin options, so
-# both travel in the body.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-core-store/src/session_policy_serde.rs"]
-must_cover = [
-  "impl serde::Serialize for SessionPolicy",
-  "impl<'de> serde::Deserialize<'de> for SessionPolicy",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/execution_state.rs"]
-symbols = ["PluginOptions"]
-
-# The policy's own members: the model spec and its limits, the reasoning and
-# capability vocabulary, and the prompt layer.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-llm/src/model.rs"]
-symbols = ["ModelSpec", "ModelLimits"]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-sansio/src/llm/capability.rs"]
-must_cover = [
-  "ModelCapability",
-  "ReasoningCapability",
-  "ReasoningSelection",
-  "ReasoningEncoding",
-  "ReasoningDisableEncoding",
-  "SamplingCapability",
-  "StreamTermination",
-  "CacheControlDialect",
-]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-sansio/src/session_model/prompt.rs"]
-must_cover = [
-  "PromptLayer",
-  "PromptTemplate",
-  "PromptTemplateSection",
-  "PromptTemplateEntry",
-  "PromptSlot",
-  "PromptSlotLayer",
-  "PromptBuiltin",
-]
-
-# Message parts reach the LLM type family: the attachment source a part
-# carries, the provider replay metadata pinned to tool-call, reasoning, and
-# text parts, and the generation options the policy holds. Those files are
-# wire shape files whole, so they are swept whole.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lash-sansio/src/llm/types.rs",
-  "crates/lash-sansio/src/llm/types/non_negative_finite_f64.rs",
-]
-must_cover = [
-  "AttachmentSource",
-  "ProviderReplayMeta",
-  "ProviderReasoningReplay",
-  "ResponseTextMeta",
-  "ProviderRouteIdentity",
-  "ProviderFileScope",
-  "GenerationOptions",
-  "NonNegativeFiniteF64",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/attachment.rs"]
-symbols = ["MediaType", "AttachmentRef"]
-
 [[surface]]
 constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/protocol_turn_options.rs"
 upgrade = "migrate"
 description = "persisted protocol-specific turn options envelope"
 manifest = "ProtocolTurnOptions"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/protocol_turn_options.rs"]
-# The envelope's wire shape lives in hand-written codecs, not in the in-memory
-# struct: `serialize_protocol_turn_options` is the sole definition of the
-# emitted field names, their order, and the stamped version's type, and
-# `ProtocolTurnOptionsWire` is the accept side. `rust_items` cannot see `impl`
-# blocks, so both must be named here for the guard to cover the wire contract.
-# `ProtocolTurnOptionsSchemaWire` is the schemars mirror the payload-shape
-# enrollment reads. The constant itself is guarded too: its Rust type decides
-# how the stamped value is emitted (`serialize_u32` vs anything else) and, with
-# the in-memory `schema_version: u32` field gone, nothing else in the guard
-# records it.
-symbols = [
-  "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
-  "ProtocolTurnOptions",
-  "ProtocolTurnOptionsWire",
-  "ProtocolTurnOptionsSchemaWire",
-  "serialize_protocol_turn_options",
-]
 
 [[surface]]
 constant = "RLM_SNAPSHOT_VERSION"
@@ -1620,114 +349,12 @@ upgrade = "migrate"
 description = "canonical typed MessagePack RLM execution snapshot: the Lashlang durable heap header, one durable fragment per global, and deferred resolutions"
 manifest = "RlmSnapshotEnvelope"
 
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lash-protocol-rlm/src/executor/state.rs",
-  "crates/lash-lashlang-runtime/src/deferred.rs",
-  "crates/lash-lashlang-runtime/src/deferred_triggers.rs",
-  "crates/lash-protocol-rlm/src/protocol/state.rs",
-  "crates/lash-protocol-rlm/src/projection/bindings.rs",
-]
-must_cover = ["RlmSnapshotRoot", "RlmDriverState", "DeferredTriggerResolutionRecord"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-rlm-types/src/lib.rs"]
-symbols = ["RlmProjectedSeedEntry"]
-
-# `DeferredResolutionRecord.resolutions` carries `Resolution::Resolved` ->
-# `ToolGrant.definition` into the snapshot, and `link_key` carries
-# `EffectAddress`; both declarations live outside the serde-shape sweep above.
-# The definition and the link key's serialized closures are named here so a
-# declaration edit demands the bump. `rust_items` projects attributes too, so
-# a `serde(flatten)` reintroduction on any of them trips this surface.
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-sansio/src/tool_contract.rs",
-  "crates/lash-sansio/src/schema_contract.rs",
-  "crates/lash-sansio/src/effect_identity.rs",
-  "crates/lash-sansio/src/causal.rs",
-]
-symbols = [
-  "ToolDefinition",
-  "ToolManifest",
-  "ToolContract",
-  "ToolId",
-  "CompactToolContract",
-  "ToolActivation",
-  "ToolRetryPolicy",
-  "ToolOutputContract",
-  "ToolArgumentProjectionPolicy",
-  "SchemaContract",
-  "SchemaProjectionPolicy",
-  "SchemaProjectionOverride",
-  "ProjectionMode",
-  "EffectAddress",
-  "ExecutionScope",
-  "CausalRef",
-]
-
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/lib.rs"
 upgrade = "coexist"
 description = "compiled Lashlang instruction and durable VM-continuation contract"
 manifest = "Bytecode"
-
-# `Instruction` is only the outer half of the instruction stream's vocabulary.
-# `Instruction::Intrinsic(IntrinsicOp)` carries no discriminant of its own, so
-# every builtin the VM dispatches directly is an `IntrinsicOp` arm and nothing
-# else; `Instruction::Binary(BinaryOp)` and its three siblings are the same
-# shape for operators. An arm added to, removed from, or re-payloaded in any of
-# them changes what identical source compiles to -- which is the event this
-# constant names -- while `Instruction`'s own text, and therefore the whole
-# guard, stays byte-identical. Deleting the TypeScript process special forms in
-# #1529 moved this constant for its own reasons; nothing would have required it.
-#
-# The list is the type closure of `Instruction`'s payloads, walked rather than
-# recalled: `Instruction` reaches `IntrinsicOp` and the four operator enums,
-# `IntrinsicOp` reaches `JavaScriptUriCodec` and `BinaryOp`, and those five
-# leaves reach nothing further. `rust_items` does not follow type references, so
-# each is named. The operator enums live in ast.rs and belong here rather than
-# on the semantic-hash surface: `write_binary_op` spells every operator as its
-# own atom (crates/lashlang/src/artifact_write_helpers.rs), so a new operator
-# already mints a distinct module ref and re-minting the published ones would
-# be the false incompatibility, whereas the compiled stream is where an operator
-# edit actually lands.
-#
-# Stated boundary rather than claimed coverage: the `Chunk` side tables an
-# operand indexes (`resource_operation_batches`, `assign_paths`,
-# `format_templates`, `functions`) are reached by index, not by type, and the
-# lowering that decides how many instructions a construct emits is reached by
-# neither. Both stay with the author, as they do for `Instruction` itself. What
-# this adds is the vocabulary encoded IN the stream, which no other guard sees.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/instruction.rs"]
-symbols = ["Instruction", "IntrinsicOp", "JavaScriptUriCodec"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/ast.rs"]
-symbols = ["BinaryOp", "JavaScriptBinaryOp", "JavaScriptUnaryOp", "UnaryOp"]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/runtime/vm/continuation.rs"]
-must_cover = ["VmContinuation"]
-
-# FIG-3571: the one compile entry assembles what compiles -- which program of
-# the artifact becomes `main`, which spans and execution context it compiles
-# under -- and stamps the executable identity the program runs as. An edit to
-# either changes what identical input compiles to without touching
-# `Instruction`, and the executable identity every parked run is fenced by
-# moves only with this constant.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/entry_points.rs"]
-symbols = ["compile", "compile_main"]
 
 # The Lashlang runtime's two durable byte formats -- the canonical snapshot and
 # the VM continuation -- share one leaf family: the heap. Both encode a heap
@@ -1763,123 +390,12 @@ upgrade = "migrate"
 description = "canonical MessagePack Lashlang snapshot: globals, heap, and value leaves, whole or as a durable header and per-root fragments"
 manifest = "LashlangSnapshot"
 
-# Every Serde carrier in the state module belongs to the canonical snapshot
-# family, so state.rs and its submodules are swept whole and fail closed on a
-# carrier added later -- including one relocated out of state.rs into
-# state/wire.rs or state/canonical_wire.rs, which today hold only encoder
-# functions and would otherwise leave the fence silently.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lashlang/src/runtime/state.rs",
-  "crates/lashlang/src/runtime/state/*.rs",
-]
-must_cover = [
-  "CanonicalSnapshot",
-  "CanonicalHeap",
-  "CanonicalHeapObject",
-  "CanonicalValue",
-]
-
-# The canonical projected carrier is the one shape BOTH durable writers share,
-# so it is relocated out of state.rs into its own file and guarded by both
-# surfaces. A field added here changes the snapshot bytes and the continuation
-# JSON at once; neither fence may go blind to it.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/runtime/projected_wire.rs"]
-must_cover = [
-  "CanonicalProjectedValue",
-  "CanonicalJsonValue",
-  "CanonicalJsonField",
-]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lashlang/src/runtime/heap.rs",
-  "crates/lashlang/src/runtime/heap/*.rs",
-]
-must_cover = ["ErrorKind", "HeapId"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/value.rs"]
-symbols = ["ImageValue", "ResourceHandle"]
-
 [[surface]]
 constant = "VM_CONTINUATION_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/runtime/vm/continuation.rs"
 upgrade = "drain"
 description = "durable Lashlang VM continuation: frames, heap restore wire, and value leaves"
 manifest = "VmContinuation"
-
-# continuation.rs holds the continuation and its inline wire module; types.rs
-# holds the handler, finally, iterator, and profile sub-shapes it carries. Both
-# are continuation-only files, so both are swept whole.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lashlang/src/runtime/vm/continuation.rs",
-  "crates/lashlang/src/runtime/vm/continuation/types.rs",
-]
-must_cover = [
-  "VmContinuation",
-  "HeapWire",
-  "HeapObjectWire",
-  "ValueWire",
-  "VmHandlerContinuation",
-]
-
-# `ValueWire::Projected` carries the shape the snapshot also writes; see the
-# matching guard on the snapshot surface.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/runtime/projected_wire.rs"]
-must_cover = [
-  "CanonicalProjectedValue",
-  "CanonicalJsonValue",
-  "CanonicalJsonField",
-]
-
-# A pending finally origin embeds this serialized error vocabulary.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/runtime/error.rs"]
-must_cover = ["RuntimeError"]
-
-# Leaves the continuation reaches outside its own files: the execution mode it
-# resumes in, a structured execution-host failure embedded in RuntimeError,
-# and the span it blames a pending error on.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/host.rs"]
-symbols = ["ExecutionMode", "ExecutionHostError"]
-
-# ExecutionHostError's durable classification carrier embeds these external
-# Serde enums, and rust_items guards intentionally do not follow type references.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/tool_output.rs"]
-symbols = ["ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/span.rs"]
-symbols = ["Span"]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lashlang/src/runtime/heap.rs",
-  "crates/lashlang/src/runtime/heap/*.rs",
-]
-must_cover = ["ErrorKind", "HeapId"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/value.rs"]
-symbols = ["ImageValue", "ResourceHandle"]
 
 # The ability boundary is the VM's other contract, and it is not a durable one.
 # An `AbilityOp` is minted by the VM at dispatch, handed to a host bridge, and
@@ -1913,84 +429,12 @@ version_regex = '\bLASHLANG_VM_ABI_VERSION\b\s*:\s*&str\s*=\s*"lashlang-vm-abi-v
 description = "in-process VM-to-host ability contract: the ops a compiled program performs and the results a host returns"
 manifest = "VmAbi"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/host.rs"]
-symbols = [
-  "AbilityOp",
-  "AbilityResult",
-  "AggregateConsumer",
-  "ResourceOperation",
-  "ResourceOperationBatch",
-  "ResourceOperationBatchLeaf",
-  "ResourceOperationBatchResult",
-  "ResourceOperationResult",
-  "ProcessEvent",
-  "ProcessEventKind",
-  "Sleep",
-  "SleepKind",
-]
-
 [[surface]]
 constant = "LASHLANG_SEGMENT_STATE_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/process.rs"
 upgrade = "drain"
 description = "persisted Restate Lashlang segment handover JSON"
 manifest = "LashlangSegmentHandover"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-lashlang-runtime/src/process.rs"]
-symbols = ["LashlangSegmentState"]
-
-# Runtime observations persist owner-relative node paths in occurrence-counter
-# keys. Any owner, path-assignment, or mint change therefore changes both the
-# graph identity contract and the parked-segment handover contract.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/workflow_graph.rs"]
-symbols = ["workflow_node_id"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lashlang/src/workflow_graph/execution_sites.rs",
-  "crates/lashlang/src/workflow_graph/ownership.rs",
-  "crates/lashlang/src/ast_roles.rs",
-  "crates/lashlang/src/tracking.rs",
-]
-symbols = [
-  "from_indices",
-  "indices",
-  "path_for_ast",
-  "for_main",
-  "for_process",
-  "ownership_map",
-  "into_ownership_map",
-  "workflow_projection",
-  "statement_list",
-  "push_statement_list",
-  "is_statement_list",
-  "collect_body",
-  "collect_statement",
-  "statement_value",
-  "map_node_subtree",
-  "check_shape",
-  "process_wrapper_run_path",
-  "execution_sites",
-  "collect_execution_sites",
-  "push_execution_site_descriptor",
-  "collect_child_execution_sites",
-  "workflow_owner",
-  "node_site",
-  "branch_site",
-  "branch_edge_id",
-]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-core-execution/src/runtime/process/engine.rs"]
-must_cover = ["SegmentHandover", "PersistedSegmentHandover"]
 
 [[surface]]
 constant = "PROCESS_EVENT_VOCABULARY_VERSION"
@@ -1999,45 +443,6 @@ upgrade = "migrate"
 description = "runtime-owned durable effect-summary kinds: event types, strict serde payloads, occurrence cap and failure-code mappings"
 manifest = "ProcessEffectSummary"
 
-# The effect-summary module is the wire surface: both event-type constants,
-# the payload types and their only encoder (`append_request`, serde) and
-# decoder (`decode`), the per-node cap, the payload schemas and the tool
-# failure-code mapping. Methods share names across the two payload types, so
-# the file is pinned whole.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-core-execution/src/runtime/process/effect_summary.rs"]
-must_cover = [
-  "PROCESS_EFFECT_OUTCOME_EVENT_TYPE",
-  "PROCESS_EFFECT_OMISSIONS_EVENT_TYPE",
-  "PROCESS_EFFECT_OCCURRENCE_CAP",
-  "struct ProcessEffectSummaryOccurrence",
-  "struct ProcessEffectOmissions",
-  "fn append_request",
-  "fn decode",
-  "fn tool_failure_code",
-  "fn effect_outcome_payload_schema",
-  "fn effect_omissions_payload_schema",
-]
-
-# The kind classification (and the `process.effect_*` reservation) and the
-# generic-append refusal that keeps the kinds runtime-owned.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/events.rs"]
-symbols = ["ProcessEventKind", "from_event_type"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/validation.rs"]
-symbols = ["validate_generic_process_event_append"]
-
-# The Lash-vocabulary code a recorded trigger failure carries.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers.rs"]
-symbols = ["failure_code"]
-
 [[surface]]
 constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph.rs"
@@ -2045,172 +450,12 @@ upgrade = "migrate"
 description = "serialized Lashlang workflow graph document"
 manifest = "WorkflowGraphSchema"
 
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/workflow_graph.rs"]
-must_cover = ["WorkflowGraph"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/ast.rs"]
-symbols = [
-  "Declaration",
-  "TypeDecl",
-  "ProcessDecl",
-  "ProcessParam",
-  "ProcessSignalDecl",
-  "FunctionDecl",
-  "FunctionParam",
-  "LabelMetadata",
-  "AssignTarget",
-  "AssignPathStep",
-  "Expr",
-  "FunctionExpr",
-  "MethodKey",
-  "ProcessLiteralExpr",
-  "TryExpr",
-  "CatchClause",
-  "ListComprehensionClause",
-  "TypeExpr",
-  "UnionMembers",
-  "ProcessSignature",
-  "ProcessType",
-  "ProcessTypeKind",
-  "ProcessTypeWire",
-  "ProcessParamWire",
-  "TypeField",
-  "ResourceRefExpr",
-  "UnaryOp",
-  "JavaScriptUnaryOp",
-  "JavaScriptBinaryOp",
-  "JavaScriptLogicalOp",
-  "BinaryOp",
-]
-
-[[surface.guard]]
-kind = "rust_impls"
-paths = ["crates/lashlang/src/ast.rs"]
-symbols = [
-  "Serialize for UnionMembers",
-  "Deserialize for UnionMembers",
-  "Serialize for ProcessType",
-  "Deserialize for ProcessType",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/ast_string.rs"]
-symbols = ["AstString"]
-
-# The document's value types, shared node mint and projector live in lashlang
-# (FIG-3571); the source identity is the admitted artifact's digest. The
-# TypeScript crate only admits source for facets and runnable views, so guard
-# the functions that build those bytes on both sides.
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lashlang/src/workflow_graph/projection.rs",
-  "crates/lashlang/src/artifact.rs",
-  "crates/lash-typescript/src/workflow_graph/mod.rs",
-]
-symbols = [
-  "workflow_graph_from_source_with_facets",
-  "workflow_graph_from_program",
-  "workflow_graph_from_artifact",
-  "project_process",
-  "project_literal_process",
-  "project_node",
-  "source_identity",
-  "edge",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/workflow_graph.rs"]
-symbols = ["workflow_node_id"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lashlang/src/workflow_graph/execution_sites.rs",
-  "crates/lashlang/src/workflow_graph/ownership.rs",
-  "crates/lashlang/src/ast_roles.rs",
-  "crates/lashlang/src/tracking.rs",
-]
-symbols = [
-  "from_indices",
-  "indices",
-  "path_for_ast",
-  "for_main",
-  "for_process",
-  "ownership_map",
-  "into_ownership_map",
-  "workflow_projection",
-  "statement_list",
-  "push_statement_list",
-  "is_statement_list",
-  "collect_body",
-  "collect_statement",
-  "statement_value",
-  "map_node_subtree",
-  "check_shape",
-  "process_wrapper_run_path",
-  "execution_sites",
-  "collect_execution_sites",
-  "push_execution_site_descriptor",
-  "collect_child_execution_sites",
-  "workflow_owner",
-  "node_site",
-  "branch_site",
-  "branch_edge_id",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/workflow.rs"]
-symbols = ["WorkflowExecutionSite"]
-
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph/facets.rs"
 upgrade = "migrate"
 description = "serialized optional workflow type-facet projection"
 manifest = "WorkflowTypeFacet"
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/workflow_graph/facets.rs"]
-must_cover = ["WorkflowNodeTypeFacets"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/ast.rs"]
-symbols = [
-  "TypeExpr",
-  "UnionMembers",
-  "ProcessSignature",
-  "ProcessType",
-  "ProcessTypeKind",
-  "ProcessTypeWire",
-  "ProcessParamWire",
-  "ProcessParam",
-  "TypeField",
-]
-
-[[surface.guard]]
-kind = "rust_impls"
-paths = ["crates/lashlang/src/ast.rs"]
-symbols = [
-  "Serialize for UnionMembers",
-  "Deserialize for UnionMembers",
-  "Serialize for ProcessType",
-  "Deserialize for ProcessType",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/ast_string.rs"]
-symbols = ["AstString"]
 
 [[surface]]
 constant = "LASHLANG_SEMANTIC_HASH_VERSION"
@@ -2220,82 +465,12 @@ version_regex = '\bLASHLANG_SEMANTIC_HASH_VERSION\b\s*:\s*&str\s*=\s*"lashlang-s
 description = "identity-verified Lashlang and TypeScript module-artifact identity"
 manifest = "ModuleArtifact"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/artifact_dialect.rs"]
-symbols = ["module_ref"]
-
-# FIG-3571: a number literal's identity is its canonical bits.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/ast_number.rs"]
-symbols = ["canonical_bits"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/artifact.rs"]
-symbols = [
-  "hash_host_requirements",
-  "process_component_hash",
-  "write_exports",
-  "write_host_requirements",
-  "write_program",
-  "write_declaration",
-  "write_function",
-  "write_process",
-  "write_type",
-  "write_expr",
-]
-
-# The writers above spell a builtin call generically -- `write_expr` emits the
-# atom `builtin-call`, the name, and the arguments -- so the vocabulary those
-# names are resolved against is invisible to them. That vocabulary is this
-# table: the linker admits a call by it, the compiler picks the intrinsic by it,
-# and the runtime renders arity diagnostics from it. Adding, removing, renaming
-# or re-arity-ing an entry therefore changes what a module ref MEANS without
-# changing a byte any other guard on this surface projects, and the semantic
-# hash is the fence that catches it: it is the first atom of every module-ref
-# hash input (crates/lashlang/src/artifact_dialect.rs), so moving it re-mints
-# every published ref and an artifact minted under the old vocabulary stops
-# matching. That is the fail-closed behaviour a vocabulary change needs, and it
-# is why `__typescript_*` intrinsics -- which source can never spell, so no
-# front-end diagnostic covers them -- belong here rather than nowhere.
-#
-# Stated boundary rather than claimed coverage: this projects the table, so a
-# name/arity edit fails closed. Changing what an already-listed builtin DOES,
-# with its name and arity untouched, is a behaviour change no textual guard over
-# a registry can see; that reading stays with the author.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/builtins.rs"]
-symbols = ["SOURCE_BUILTINS", "TYPESCRIPT_BUILTINS", "Builtin", "Arity"]
-
-# The item guards above project how an artifact is encoded; they say nothing
-# about what a front end chooses to encode. The TypeScript lowerer decides
-# that: a lowering change re-keys what unchanged source means -- and so the
-# module-ref preimage -- while touching no item any symbol-named guard
-# projects, which is how FIG-3728/FIG-3745 first landed without the bump.
-# `ast_roles.rs` sits beside it because the structural roles the lowerer marks
-# a program with are part of what the IR means, not only how it serializes.
-# Both legs are whole-file on purpose: a lowering edit with no vocabulary,
-# shape or writer change still fires, and a provably comment-only move takes
-# the checker's ordinary justify path.
-[[surface.guard]]
-kind = "file"
-paths = ["crates/lash-typescript/src/lower/**", "crates/lashlang/src/ast_roles.rs"]
-must_cover = ["impl Lowerer", "CollectionTransformParts"]
-
 [[surface]]
 constant = "NATIVE_DRIVER_STATE_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/state.rs"
 upgrade = "migrate"
 description = "native RLM parked driver state"
 manifest = "NativeRlmDriverState"
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-protocol-rlm/src/native/state.rs"]
-must_cover = ["RlmDriverState", "Envelope"]
 
 [[surface]]
 constant = "NATIVE_TRANSPORT_VERSION"
@@ -2304,22 +479,12 @@ upgrade = "migrate"
 description = "native RLM durable provider call and repair envelopes"
 manifest = "NativeRlmTransport"
 
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-protocol-rlm/src/native/transport.rs"]
-must_cover = ["Envelope", "Transport"]
-
 [[surface]]
 constant = "CURRENT_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
 upgrade = "migrate"
 description = "complete session continuation generation including mediated plugin state"
 manifest = "SessionStateGeneration"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/plugin_state.rs"]
-symbols = ["PluginState", "PluginNamespaceState"]
 
 [[surface]]
 constant = "DURABLE_READ_FIXTURE_SCHEMA_VERSION"
@@ -2328,36 +493,12 @@ upgrade = "migrate"
 description = "checked-in durable-read fixture databases, dumps, and expectations"
 outside_manifest = "versions checked-in test fixtures, not bytes a lash build writes"
 
-# The fixtures are the authoritative bytes a durable-read regression replays,
-# so this is a whole-file guard over the entire tree: the SQLite databases, the
-# PostgreSQL dump, the per-backend version manifests, and the expectations. Four
-# of the guarded files are binary SQLite databases; the `SQLite format 3` marker
-# below pins that they really are in the signature, so a later narrowing of
-# `paths` fails rather than quietly dropping the files a schema change rewrites.
-[[surface.guard]]
-kind = "file"
-paths = ["fixtures/durable-read/*"]
-must_cover = [
-  "SQLite format 3",
-  "PostgreSQL database dump",
-  "\"fixture_schema_version\"",
-  "\"durable_core\"",
-]
-
 [[surface]]
 constant = "HEAP_SIZE_SCHEDULE_VERSION"
 constant_path = "crates/lashlang/src/runtime/heap.rs"
 upgrade = "migrate"
 description = "byte-charge schedule a persisted Lashlang heap's live_logical_bytes was computed under"
 manifest = "HeapSizeSchedule"
-
-# The schedule is arithmetic, not a serde shape: the per-slot and per-object
-# charges and the value charge function. Charges spelled inline elsewhere in
-# the heap (reference assignment growth) are a stated boundary, not coverage.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lashlang/src/runtime/heap/object.rs"]
-symbols = ["OBJECT_HEADER_BYTES", "VALUE_SLOT_BYTES", "value_logical_bytes"]
 
 [[surface]]
 constant = "SCOPE_STORAGE_PAYLOAD_VERSION"
@@ -2366,34 +507,12 @@ upgrade = "migrate"
 description = "versioned typed scope persisted beside a scope-close row's (kind, id) index projection"
 manifest = "ScopeStoragePayload"
 
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs"]
-symbols = ["ScopeId", "ScopeStoragePayload"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/effect_opener.rs"]
-symbols = ["EffectOpener"]
-
 [[surface]]
 constant = "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION"
 constant_path = "crates/lash-restate/src/controller/process_command.rs"
 upgrade = "drain"
 description = "Restate-journaled process-command admission payload"
 manifest = "engine:restate.process_command_journal"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/controller/process_command.rs"]
-symbols = ["JournaledCancelCommandIdentity", "JournaledCancelAdmission"]
-
-# A Restate process start journals its registration, so a parent's replay
-# reads the recorded start instead of registering again (ADR 0107).
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/start_staging.rs"]
-symbols = ["RegisteredProcessStart"]
 
 [[surface]]
 constant = "DURABLE_WAIT_REGISTRY_FORMAT_VERSION"
@@ -2402,66 +521,12 @@ upgrade = "migrate"
 description = "stored-format stamp every durable-wait registry object-state value carries"
 manifest = "engine:restate.durable_wait_registry_format"
 
-# Object state survives a deployment; every stored value carries a format
-# stamp and decodes through the stamped envelope's version dispatch — the
-# current format directly, one behind through the family's N-1 upcaster slot.
-# The guard projects the state the registry persists, the keys it persists it
-# under, and the shared stamped envelope.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/durable_wait.rs"]
-symbols = [
-  "RestateDurableWaitIndexMetadata",
-  "RestateDurableWaitAwakeableRequest",
-  "RestateDurableWaitClassification",
-  "DURABLE_WAIT_REGISTRY_FORMATS",
-  "DURABLE_WAIT_INDEX_METADATA_KEY",
-  "DURABLE_WAIT_INDEX_WAIT_PREFIX",
-  "DURABLE_WAIT_INDEX_RESOLUTION_PREFIX",
-  "DURABLE_WAIT_INDEX_EFFECT_PREFIX",
-  "DURABLE_WAIT_INDEX_GROUP_PREFIX",
-  "DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX",
-  "DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX",
-]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-restate/src/object_state.rs"]
-must_cover = ["StampedValue"]
-
 [[surface]]
 constant = "EFFECT_GROUP_STATE_FORMAT_VERSION"
 constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
 upgrade = "migrate"
 description = "stored format of the record the effect-group state object retains"
 manifest = "engine:restate.effect_group_state_format"
-
-# Group state survives a deployment: the retained record decodes through the
-# stamped envelope's version dispatch before a handler acts on it. The guard
-# projects the retained record's serde shapes, the key it lives under, and
-# the shared stamped envelope.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lash-restate/src/effect_group.rs",
-  "crates/lash-restate/src/effect_group/state_record.rs",
-  "crates/lash-restate/src/effect_group/shape.rs",
-]
-must_cover = [
-  "EffectGroupStateRecord",
-  "EffectGroupStateLiveRecord",
-  "EffectGroupShape",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/effect_group.rs"]
-symbols = ["INDEX_STATE_KEY", "EFFECT_GROUP_STATE_FORMATS"]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-restate/src/object_state.rs"]
-must_cover = ["StampedValue"]
 
 [[surface]]
 constant = "EFFECT_GROUP_WIRE_VERSION"
@@ -2470,34 +535,12 @@ upgrade = "coexist"
 description = "Restate effect-group wire: the group handlers' request and response shapes callers exchange with them"
 manifest = "engine:restate.effect_group_wire"
 
-# The guard projects the serde shapes callers and the group's handlers
-# exchange.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = [
-  "crates/lash-restate/src/effect_group.rs",
-  "crates/lash-restate/src/effect_group/wire.rs",
-]
-must_cover = [
-  "EffectGroupOpenRequest",
-  "EffectGroupCommitChildResponse",
-  "EffectGroupDrainBlockersResponse",
-  "EffectGroupChildRequest",
-]
-
 [[surface]]
 constant = "EFFECT_GROUP_DISPATCH_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
 upgrade = "drain"
 description = "Restate effect-group dispatch journal: the dispatch workflow's journaled input and the run outputs a replay trusts"
 manifest = "engine:restate.effect_group_dispatch_journal"
-
-# A replayed journal belongs to the generation that wrote it. The guard
-# projects the dispatch workflow's journaled input shape.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-restate/src/effect_group/dispatch.rs"]
-must_cover = ["EffectGroupDispatchRequest"]
 
 [[surface]]
 constant = "EFFECT_GROUP_PAYLOAD_FORMAT_VERSION"
@@ -2506,77 +549,12 @@ upgrade = "migrate"
 description = "stored-format stamp every effect-group payload object-state value carries"
 manifest = "engine:restate.effect_group_payload_format"
 
-# The payload object's bytes and retired marker carry the same stamped
-# envelope; first-writer byte-equality fencing compares the decoded body. The
-# guard projects the keys the object persists under and the shared envelope.
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/effect_group/payload.rs"]
-symbols = [
-  "PAYLOAD_STATE_KEY",
-  "PAYLOAD_RETIRED_KEY",
-  "EFFECT_GROUP_PAYLOAD_FORMATS",
-]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-restate/src/object_state.rs"]
-must_cover = ["StampedValue"]
-
 [[surface]]
 constant = "EFFECT_JOURNAL_VERSION"
 constant_path = "crates/lash-restate/src/controller/effect_journal.rs"
 upgrade = "drain"
 description = "Restate effect journal: every recorded effect's `lash:{replay_key}` ctx.run entry (the canonical envelope, the outcome and its error, the give-up entry) and its position"
 manifest = "engine:restate.effect_journal"
-
-# ADR 0105 section 12. Every entry a recorded effect journals is stamped with
-# the generation that wrote it, and the controller refuses an entry stamped
-# with any other generation, or none, as a parked replay divergence before the
-# replay acts on it. Any change that moves the bytes a recorded effect
-# journals, or the position of a recorded effect in the journal, bumps this
-# constant. The guards project the entry shapes, the envelope and outcome
-# vocabulary, and the error an outcome carries. Leaf payloads reached through
-# an outcome (model responses, tool records, process events) are guarded by
-# their own surfaces; a change there that moves recorded effect bytes bumps
-# this constant as well.
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-restate/src/controller/effect_journal.rs"]
-must_cover = ["RecordedRuntimeEffect", "GaveUpEntry", "Stamped", "FrontierMark"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-restate/src/controller/effect_journal.rs"]
-symbols = ["JournaledEffectRecord", "EFFECT_JOURNAL_VERSION_FIELD", "stamped"]
-
-[[surface.guard]]
-kind = "rust_impls"
-paths = ["crates/lash-restate/src/controller/effect_journal.rs"]
-symbols = [
-  "Serialize for JournaledEffectRecord",
-  "Deserialize for JournaledEffectRecord",
-]
-
-[[surface.guard]]
-kind = "rust_serde_shapes"
-paths = ["crates/lash-core-execution/src/runtime/effect/envelope.rs"]
-must_cover = [
-  "RuntimeEffectInvocation",
-  "RuntimeEffectEnvelope",
-  "RuntimeEffectCommand",
-  "RuntimeEffectOutcome",
-]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/effect/validation.rs"]
-symbols = ["CanonicalRuntimeEffectEnvelope"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-store/src/runtime_error.rs"]
-symbols = ["RuntimeEffectControllerError", "RuntimeEffectReplayMismatchReport"]
 
 # Hash-domain family tags. A `*_FAMILY_VERSION` names the preimage family
 # inside a content-addressed key, fingerprint, or retry identity; it is an

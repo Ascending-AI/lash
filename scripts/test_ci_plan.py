@@ -364,7 +364,7 @@ class PathClassifierTests(unittest.TestCase):
 
     def test_store_fixtures_select_stores_without_failing_open(self) -> None:
         for path in (
-            "fixtures/checkpoint-component-v1-refusal/postgres/fixture.sql",
+            "fixtures/durable-read/v1/postgres/fixture.sql",
             "fixtures/durable-read/v1/sqlite/durable-core.db",
         ):
             with self.subTest(path=path):
@@ -380,7 +380,6 @@ class PathClassifierTests(unittest.TestCase):
         for path in (
             "AGENTS.md",
             "README.md",
-            "fixtures/checkpoint-component-v1-refusal/README.md",
             "schemas/host/README.md",
             "runbooks/agent-service-branching/README.md",
             "docs/agents/pr-style.md",
@@ -970,7 +969,7 @@ class DevTestScopeTests(unittest.TestCase):
                 self.assertFalse(scope.broad or scope.repository)
 
     def test_a_script_runs_the_suite_only_when_a_rust_job_runs_it(self) -> None:
-        checker = self.scope("scripts/check_version_bumps.py")
+        checker = self.scope("scripts/check_format_registry.py")
         self.assertTrue(checker.repository)
         self.assertFalse(checker.broad)
         digest = self.scope("scripts/ci/bazel_profile_digest.py")
@@ -2192,7 +2191,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
         self.assertEqual(["process-operations"],
                          [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
         self.assertEqual({"agent-service", "agent-workbench", "effect-group-conformance",
-                          "server-double", "workflow-graph-roundtrip", "version-bump-recreation",
+                          "server-double", "workflow-graph-roundtrip",
                           "slack-clone-full-host"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))

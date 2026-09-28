@@ -12,46 +12,7 @@ MATRIX = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MATRIX)
 
 
-SELF_CONTAINED_OPERATOR_RUNBOOKS = {
-    "version-bump-recreation": (
-        "01-seed.jsonl",
-        "02-refusal.jsonl",
-        "03-recreation.jsonl",
-        "04-health.jsonl",
-    ),
-}
-
-
-def self_contained_operator_runbook_violations(
-    runbooks: dict[str, str],
-) -> list[str]:
-    """Find external-page dependencies or evidence-free Phase 4 judgments."""
-    violations = []
-    for scenario, required_evidence in SELF_CONTAINED_OPERATOR_RUNBOOKS.items():
-        text = runbooks[scenario]
-        for deleted_page in ("docs/operations.html", "docs/PUBLISHING.md"):
-            if deleted_page in text:
-                violations.append(f"{scenario}: depends on deleted {deleted_page}")
-        try:
-            phase_four = text.split("## Phase 4", 1)[1].split("## Phase 5", 1)[0]
-        except IndexError:
-            violations.append(f"{scenario}: has no bounded Phase 4 judgment")
-            continue
-        if "Independent behavior evidence" not in phase_four:
-            violations.append(f"{scenario}: Phase 4 does not distinguish behavior evidence")
-        for artifact in required_evidence:
-            if artifact not in phase_four:
-                violations.append(f"{scenario}: Phase 4 omits {artifact}")
-    return violations
-
-
 class JudgedRunbookMatrixTests(unittest.TestCase):
-    def operator_runbooks(self) -> dict[str, str]:
-        return {
-            scenario: (ROOT / "runbooks" / scenario / "runbook.md").read_text()
-            for scenario in SELF_CONTAINED_OPERATOR_RUNBOOKS
-        }
-
     def test_every_existing_runbook_has_exactly_one_typescript_row(self) -> None:
         # Discovery plus the row shape in one test: a runbook directory that
         # nobody classified is as invisible as a scenario that quietly emits a
@@ -151,7 +112,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             if policy["emits"]
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 33)
+        self.assertEqual(expected, 32)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -290,11 +251,6 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                     MATRIX.parse_shard(bad)
         self.assertEqual(MATRIX.parse_shard("2/3"), (2, 3))
 
-    def test_operator_runbooks_are_self_contained_and_keep_observed_evidence(self) -> None:
-        self.assertEqual(
-            self_contained_operator_runbook_violations(self.operator_runbooks()), []
-        )
-
     def test_deleted_operator_pages_have_no_documentation_or_example_consumers(self) -> None:
         candidates = [ROOT / "CONTRIBUTING.md"]
         candidates.extend((ROOT / "runbooks").glob("**/*.md"))
@@ -307,22 +263,6 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                 if deleted_page in text:
                     violations.append(f"{path.relative_to(ROOT)}: {deleted_page}")
         self.assertEqual(violations, [])
-
-    def test_operator_runbook_guard_rejects_external_and_evidence_free_judgment(
-        self,
-    ) -> None:
-        # Exercise both failure classes without pinning the runbooks' prose. A
-        # guard that only reads the shipped tree can stay green after its own
-        # checks stop detecting the regression it exists to prevent.
-        runbooks = self.operator_runbooks()
-        runbooks["version-bump-recreation"] += "\nRead docs/operations.html before scoring.\n"
-        runbooks["version-bump-recreation"] = runbooks[
-            "version-bump-recreation"
-        ].replace("04-health.jsonl", "health-artifact")
-        violations = self_contained_operator_runbook_violations(runbooks)
-        self.assertTrue(any("depends on deleted" in item for item in violations))
-        self.assertTrue(any("Phase 4 omits 04-health.jsonl" in item for item in violations))
-
 
 if __name__ == "__main__":
     unittest.main()

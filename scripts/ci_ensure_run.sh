@@ -46,9 +46,9 @@ set -euo pipefail
 # ci.yml conditions real gates off `github.event_name`, so a workflow_dispatch
 # run of a PR head SKIPS:
 #
-#   * `Check versioned surface bumps`  (if: event_name != 'workflow_dispatch')
-#     — the gate that fails a PR changing a versioned surface without bumping
-#     it (scripts/check_version_bumps.py, scripts/versioned-surfaces.toml).
+#   * `Check the Test262 outcome ratchet`  (if: event_name != 'workflow_dispatch')
+#     — the ratchet that fails a PR letting a previously passing Test262 case
+#     stop passing.
 # It also builds a different tree: a `pull_request` run carries
 # `refs/pull/<n>/merge` (the merged result), a dispatch carries
 # `refs/heads/<branch>` (the branch tip alone). A green dispatch therefore

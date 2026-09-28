@@ -4,7 +4,7 @@
 # line (the command's last non-empty output). Exits nonzero when any command
 # failed; a failure never cancels the commands still running.
 #
-# Shared by the justfile's `floor` and `bump-check` recipes, which are the same
+# Shared by the justfile's `floor` and `schema-check` recipes, which are the same
 # gate over different command lists.
 set -uo pipefail
 

@@ -5,7 +5,7 @@
 Every ``*_VERSION`` / ``*_EPOCH`` constant defined in non-test Rust under
 ``crates/`` and ``examples/`` must be one of:
 
-- a registered ``[[surface]]`` (bump-guarded by ``check_version_bumps.py``);
+- a registered ``[[surface]]``;
 - a member of a ``[[excluded_class]]`` suffix, whose reason is written once
   for the whole class; or
 - an ``[[unregistered]]`` entry naming the constant and why it versions no

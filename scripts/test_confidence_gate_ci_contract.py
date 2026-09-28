@@ -985,11 +985,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self_tests = shell_function_body(push_gate, "run_release_script_tests")
 
         # A self-test proves the gate works; only the gate proves the tree does.
-        # This script ran `test_check_service_gate_pinning.py` and
-        # `test_check_transcript_diff.py` while running neither gate, so both
-        # CI-blocking failures were invisible until CI.
+        # This script ran `test_check_service_gate_pinning.py` while not running
+        # its gate, so the CI-blocking failure was invisible until CI.
         self.assertIn("python3 scripts/check_service_gate_pinning.py", push_gate)
-        self.assertIn("python3 scripts/check-transcript-diff.py", push_gate)
 
         # Locally a gate may live in this script or in the prek hooks; what it
         # may not do is exist only as a self-test. Comment lines are stripped
@@ -1036,7 +1034,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         for name, recipe in (
             ("process-operations", "process-operations-e2e"),
-            ("version-bump-recreation", "version-bump-recreation-e2e"),
         ):
             self.assertIn(f"- name: {name}", functional)
             self.assertIn(f"recipe: {recipe}", functional)
@@ -1044,7 +1041,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         for artifact_dir in (
             "process-operations",
-            "version-bump-recreation",
         ):
             self.assertIn(
                 f"target/functional-e2e-artifacts/{artifact_dir}", functional
@@ -2643,24 +2639,7 @@ derive_mutation_jobs() {{
         self.assertIn("cancel-in-progress: false", release_cache_workflow)
         self.assertIn("if: github.ref == 'refs/heads/main'", release_cache_workflow)
 
-        # A queue head carries a whole PR — often several commits — on top of the
-        # base the queue chose, so HEAD~1 checks only its last commit: the gate
-        # passes vacuously when the change is earlier and fails falsely when the
-        # bump is. The queue states its base; the gate uses it.
-        lint = workflow_job_block(workflow, "lint")
-        bumps = workflow_step_block(lint, "Check versioned surface bumps")
-        self.assertIn(
-            "MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}", bumps
-        )
-        self.assertIn('elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then', bumps)
-        self.assertIn('base="$MERGE_GROUP_BASE_SHA"', bumps)
-        # An empty base would silently become `--base ""`, so it fails loudly.
-        self.assertIn(
-            '[ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }',
-            bumps,
-        )
-
-    def test_manual_dispatch_explains_skipped_version_bump_gate(self) -> None:
+    def test_manual_dispatch_explains_skipped_base_relative_gates(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         for trigger in (
             "  workflow_dispatch:\n",
@@ -2671,9 +2650,9 @@ derive_mutation_jobs() {{
         self.assertNotIn("\n  push:\n", workflow)
 
         lint = workflow_job_block(workflow, "lint")
-        bumps = workflow_step_block(lint, "Check versioned surface bumps")
-        self.assertIn("if: github.event_name != 'workflow_dispatch'", bumps)
-        manual = workflow_step_block(lint, "Explain skipped versioned surface bump gate")
+        ratchet = workflow_step_block(lint, "Check the Test262 outcome ratchet")
+        self.assertIn("if: github.event_name != 'workflow_dispatch'", ratchet)
+        manual = workflow_step_block(lint, "Explain skipped base-relative gates")
         self.assertIn("if: github.event_name == 'workflow_dispatch'", manual)
         self.assertIn("bash scripts/ci/report-manual-dispatch-skips.sh", manual)
 
@@ -2688,26 +2667,12 @@ derive_mutation_jobs() {{
             )
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertIn("::warning", result.stdout)
-            self.assertIn("Check versioned surface bumps", result.stdout)
             self.assertIn("green manual run does not prove it passed", result.stdout)
             self.assertIn("Check the Test262 outcome ratchet", result.stdout)
             summary_text = summary.read_text(encoding="utf-8")
             self.assertIn("Manual CI run is incomplete", summary_text)
-            self.assertIn("Check versioned surface bumps", summary_text)
             self.assertIn("green manual run does not prove that gate passed", summary_text)
             self.assertIn("Check the Test262 outcome ratchet", summary_text)
-
-    def test_the_transcript_gate_can_read_a_queued_pull_request(self) -> None:
-        gate = (ROOT / "scripts" / "check-transcript-diff.py").read_text(
-            encoding="utf-8"
-        )
-
-        # In the queue there is no pull request in the payload and the ref is
-        # nobody's head branch, so the by-head lookup finds nothing. The queue
-        # ref names the PR; the gate has to use it or it fails a justified change
-        # at the last gate before merge.
-        self.assertIn("gh-readonly-queue/[^/]+/pr-(?P<number>\\d+)-[0-9a-f]+", gate)
-        self.assertIn("def queried_pull_request_body_by_number(", gate)
 
     def test_every_shared_debug_cache_reader_resolves_the_writer_rustflags(
         self,

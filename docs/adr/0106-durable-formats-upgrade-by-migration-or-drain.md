@@ -176,9 +176,8 @@ arbitration and wake scheduling that ADR 0104 §1 deletes.
 
 ### 4. Per-surface policy
 
-`scripts/upgrade-paths.toml` declares the policy of every registered surface,
-and `scripts/check_upgrade_paths.py` keeps it exhaustive against
-`versioned-surfaces.toml`.
+The `upgrade` field in `versioned-surfaces.toml` declares the policy of every
+registered surface, and `scripts/check_format_registry.py` checks it.
 
 | Surface | Persisted in / read by | Policy |
 |---|---|---|
@@ -235,8 +234,8 @@ it. SQLite keeps migrating on open, after a backup.
 
 ### 6. Tests and gates
 
-**Change lifecycle.** `check_version_bumps.py` still requires a bump for every
-format change. The author of the bump also supplies the upgrade path:
+**Change lifecycle.** Every format change is a version bump, and the author of
+the bump also supplies the upgrade path:
 
 - **M:** a migration with its phase, or an upcaster from the previous version.
 - **D:** a `G` input (a D row or `JOURNAL_LOGIC_EPOCH`) and evidence that the
@@ -260,20 +259,19 @@ starting from a fixture frozen at the previous release tag by
 - **Rollback:** a store expanded and written by N+1 before finalize is served
   by N.
 
-**Mixed-version rolling E2E.** This replaces `version-bump-recreation-e2e.sh`.
-The harness brings up Restate, PostgreSQL, the release-tag image and head. It
+**Mixed-version rolling E2E.** The harness brings up Restate, PostgreSQL, the
+release-tag image and head. It
 seeds live turns, parked processes, effect groups and triggers on N, runs
 `lash migrate`, rolls half the fleet under traffic and checks for no refusals,
 no duplicate effects, and both builds reading each other's rows. It rolls back
 and forward again, drains, retires the old deployment and finalizes. It runs
 on every PR that touches a registered surface, and nightly.
 
-**Gates.** `check_upgrade_paths.py` holds `upgrade-paths.toml` exhaustive
-today. After 1.0 it also checks every bump: an M or C bump needs its
+**Gates.** After 1.0 a gate checks every bump: an M or C bump needs its
 predecessor fixture plus an upcaster or migration from a registry a test
-enumerates, and a D bump needs its `G` input. `check_version_bump_fixtures.py`
-requires a migration from the release component, and a contract step may drop
-an object only when no build in the window reads it.
+enumerates, and a D bump needs its `G` input. A migration must run from the
+release component, and a contract step may drop an object only when no build in
+the window reads it.
 
 **Deprecation.** A reader for an old format stays until the upgrade sweep or
 backfill leaves zero old values and no retained release reads them. History
@@ -312,23 +310,15 @@ build must already honour, because 1.0 is the N-1 of the first upgrade:
 7. **FIG-3816:** the `lash migrate` command (expand phase) and the
    `lash_migrations` ledger in the 1.0 schema.
 
-**At the 1.0 cut** the pre-1.0 version freeze (FIG-3846) lifts in one change:
+**At the 1.0 cut** the pre-1.0 freeze lifts in one change:
 
-1. Remove the freeze switch — delete `freeze = "pre-1.0"` (and the `[policy]`
-   table it sits in) from `scripts/versioned-surfaces.toml` — so every bump
-   gate turns strict again: the findings it printed now fail.
-2. Reset every guarded constant the registry names to its 1.0 baseline.
-3. Start the migrate catalog (`EXPAND_MIGRATIONS` and the `lash_migrations`
-   ledger) empty at the baseline.
-4. Regenerate the fixtures that pin a generation: the recreation E2E's
-   constants, the `COMPONENT_VERSION_PINS` literals, and the committed
-   durable-read catalogs.
-5. Prove strictness returned: a guarded-shape change without a bump fails
-   `check_version_bumps.py` again. Gates whose derivations went stale while
-   the freeze let shapes move under them — `check_version_bump_fixtures.py`
-   still derives from the `SCHEMA_MIGRATIONS` catalog the expand-migrate
-   model replaced — are repaired or retired in the same change; a gate that
-   cannot evaluate fails strict mode.
+1. Reset every guarded constant the registry names to its 1.0 baseline.
+2. Reinstate a strict bump gate over the 1.0 tree with empty baselines; the
+   deleted gate is recoverable from 932f652b45.
+3. Start `EXPAND_MIGRATIONS` empty and rewrite `migrate.rs`
+   `a_component_without_an_expand_step_is_refused` (the `found = 138` pin).
+4. Run `python3 scripts/capture_release_fixtures.py --regenerate --tag v1.0.0`.
+5. Point the upgrade read-back law at `fixtures/release/v1.0.0`.
 
 **After 1.0**, under the operations arc FIG-3794, each before its first use:
 FIG-3817 (backfill at finalize, the contract gate, tested rollback), FIG-3800

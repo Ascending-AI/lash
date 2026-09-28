@@ -51,8 +51,7 @@ pub use crate::tool_dispatch::{
 };
 
 /// `runtime::causal::{direct_effect_invocation, direct_request_discriminator}`
-/// are crate-private and sit under a version-bump gate that reads the file's
-/// guarded shape, so the relocated effect suite reaches them through these
+/// are crate-private, so the relocated effect suite reaches them through these
 /// wrappers instead of widening them in place.
 pub mod causal {
     pub fn direct_effect_invocation(

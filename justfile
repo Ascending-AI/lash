@@ -340,9 +340,6 @@ restate-postgres-workers-e2e:
 process-operations-e2e:
   bash "{{repo}}/scripts/process-operations-e2e.sh"
 
-version-bump-recreation-e2e:
-  bash "{{repo}}/scripts/version-bump-recreation-e2e.sh"
-
 # Fast live proof of the shared Postgres/S3/Restate gate isolation contract.
 gate-container-smoke:
   bash "{{repo}}/scripts/gate-container-smoke.sh"
@@ -420,9 +417,8 @@ seal:
 # `scripts/test-agent-workbench-dev-reset.sh` locally (170 s, it alone
 # bounded the floor) and says so in its table row; CI's `Test repository
 # scripts` job still runs it, and `scripts/ci/repository-gates.sh --all`
-# restores it here. Run it on a COMMITTED head —
-# check_version_bumps.py reads committed state, so work that exists only in
-# the worktree is invisible to that leg.
+# restores it here. Run it on a COMMITTED head so the gates judge the tree
+# that will land.
 floor:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -434,27 +430,20 @@ floor:
     'git diff --check' \
     'scripts/ci/repository-gates.sh' \
     'npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types' \
-    'python3 scripts/check_version_bumps.py --base origin/main' \
-    'python3 scripts/check_version_bump_fixtures.py' \
     'python3 scripts/check_format_registry.py' \
-    'python3 scripts/check_upgrade_paths.py' \
     'python3 scripts/check_writer_stamps.py' \
-    'python3 scripts/check_checkpoint_component_flatten.py' \
     | scripts/gate-table.sh
 
-# The store-bump gates only: both version-bump checks, the durable format
-# registry, the store SQL ownership gate, the lash-sim schema congruence
-# target, and the lash-core-store unit target that holds the runtime-error
-# classification exhaustiveness test.
-bump-check:
+# The store-schema gates only: the durable format registry, the store SQL
+# ownership gate, the lash-sim schema congruence target, and the
+# lash-core-store unit target that holds the runtime-error classification
+# exhaustiveness test.
+schema-check:
   #!/usr/bin/env bash
   set -euo pipefail
   cd "{{repo}}"
   printf '%s\n' \
-    'python3 scripts/check_version_bumps.py --base origin/main' \
-    'python3 scripts/check_version_bump_fixtures.py' \
     'python3 scripts/check_format_registry.py' \
-    'python3 scripts/check_upgrade_paths.py' \
     'python3 scripts/check_writer_stamps.py' \
     'python3 scripts/check-store-sql-ownership.py' \
     'kiln test //crates/lash-sim:schema_congruence__test //crates/lash-core-store:lash-core-store__unit_test' \

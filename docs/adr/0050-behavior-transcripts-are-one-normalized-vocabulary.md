@@ -48,10 +48,7 @@ what a reviewer scans by.
 
 `docs/agents/way-of-working.md` already rules on *when* to write an expect test:
 when the review artifact is a short deterministic behavior transcript judged as
-one diff. `docs/agents/pr-style.md` already enforces the consequence: a durable
-line changing in an inline snapshot requires a named `Transcript:` justification,
-keyed on `Checkpoint`, `DurableEffect`, `stored logical=`, `ref (unchanged)` and
-`rev=`. Both were written for a population of **one** renderer —
+one diff. The rule was written for a population of **one** renderer —
 `SimulationTrace::render_transcript`, reachable only from `lash-sim` — and one
 transcript expect test. The doctrine and the enforcement machinery existed; the
 population did not, and the four scenario harnesses of ADR 0007 could not join it
@@ -118,14 +115,6 @@ projection from an `Effect` stream onto the vocabulary is shared once more in
   the actor column is always present (the old renderer dropped it for
   single-session renders, which meant two grammars), and turn changes are an
   attribute rather than a header line.
-- `scripts/check-transcript-diff.py` keys on the vocabulary's durable event names
-  (`checkpoint.commit`, `checkpoint.request`, `durable.effect`) as well as the
-  mandatory typed `usage` component, other component renderings, and `rev=`. The
-  legacy `Checkpoint` / `DurableEffect`
-  tokens stay listed so nothing already blessed silently stops being flagged. The
-  Rust-side list is `behavior_transcript::DURABLE_WRITE_EVENTS`; the two are kept
-  in sync by hand, and a durable event name the script does not know about is a
-  durable-semantics change that can land unremarked.
 - Every new transcript expect test carries mutation evidence in the same change
   that blesses it, per ADR 0044's deletion/blessing rule. A snapshot without a
   demonstrated plausible-bug mutation is decoration and does not land.

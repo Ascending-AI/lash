@@ -407,7 +407,7 @@ production controller's race, loser, and escalation behavior.
   landed first. There is no journal mismatch, and each tool call runs once
   unless the crash lost its result. The matrix found the retire and handover
   replay faults above. The resume step changes the process journal's shape
-  without a generation bump: bumps are paused until the 1.0 cut (FIG-3660).
+  without a generation bump.
 - **The process-await guard (FIG-3808).** A process `Await`'s existence
   guard is one recorded step (`process-await-guard`). It records `Ok` or
   the typed refusal. A redrive after the child finished and was pruned

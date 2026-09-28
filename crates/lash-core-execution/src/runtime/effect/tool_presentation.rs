@@ -21,8 +21,7 @@ use serde::{Deserialize, Serialize};
 use super::executor::RuntimeEffectControllerError;
 
 /// The durable format version [`ToolPresentation`] stamps and
-/// [`ToolPresentation::validate`] refuses mismatches against. Guarded by
-/// `scripts/versioned-surfaces.toml`.
+/// [`ToolPresentation::validate`] refuses mismatches against.
 ///
 /// Version 2 (FIG-3515) carries message parts whose tool results hold ordered
 /// text and attachment blocks, one result per call.

@@ -1,8 +1,7 @@
 # E2E Scenario: Host-Provisioned PostgreSQL Schema
 
 > **Read [../RULES.md](../RULES.md) first.** This runbook documents a deterministic,
-> operator-only rehearsal — the counterpart to `version-bump-recreation`'s companion,
-> not a judged browser journey. Its executable half is the
+> operator-only rehearsal, not a judged browser journey. Its executable half is the
 > `host_provisioned_rollout` integration test in `crates/lash-postgres-store`, run
 > against a disposable PostgreSQL by `scripts/ci/with-service.sh`; the same leg CI's
 > `postgres-store` job uses for every other store suite.

@@ -42,10 +42,8 @@
 //!   `ModelToolReturn` — which the opener incorporates as evidence and never
 //!   re-executes.
 //!
-//! Both carry their own format version and are guarded by
-//! `scripts/versioned-surfaces.toml` through [`TOOL_SETTLEMENT_VERSION`] and
-//! [`TOOL_ATTEMPT_CAPTURE_VERSION`], for the same reason
-//! `TOOL_CHILD_REQUEST_VERSION` guards the request: a build that cannot
+//! Both carry their own format version, for the same reason
+//! `TOOL_CHILD_REQUEST_VERSION` versions the request: a build that cannot
 //! reconstruct a fact completely must refuse it rather than silently serve an
 //! opener a prefix of what its child produced. They are **separate** constants,
 //! not two guards on one shape: the attempt carrier also rides the ungrouped
@@ -115,11 +113,6 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 
 /// The durable format version of a tool child's settlement.
 ///
-/// Guarded by `scripts/versioned-surfaces.toml` over [`ToolSettlement`] and
-/// [`ToolUsageDelta`] — the named types and every type their payloads reach
-/// that this crate owns — so a field added, retired or retyped fails the
-/// repository gate rather than a production replay.
-///
 /// Version 1 is the shape FIG-2266 minted. Version 2 renames
 /// [`ToolUsageDelta::provider_attempt`] from a count to the sealed provider
 /// attempt's own ordinal — usage is journaled one fact per provider attempt,
@@ -147,8 +140,6 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
-/// Guarded by `scripts/versioned-surfaces.toml` over [`ToolAttemptCapture`]
-/// and [`ToolUsageDelta`], which the capture's `usage` list is made of.
 /// Version 1 is the shape FIG-2266 minted; version 2 is the same
 /// [`ToolUsageDelta`] rename [`TOOL_SETTLEMENT_VERSION`] records; version 3 is
 /// the same `source`/`model` addition [`TOOL_SETTLEMENT_VERSION`] 4 records —
