@@ -113,6 +113,7 @@ enum CaseName {
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
+    LostRootRecovery,
     PendingFollowOnRaise,
     RootClaimReplay,
     RefusedSurfaceOnDeletedSession,
@@ -168,6 +169,7 @@ impl CaseName {
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
+            Self::LostRootRecovery => "lost_root_recovery",
             Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
             Self::RootClaimReplay => "root_claim_replays_exact_result_after_lease_handoff",
             Self::RefusedSurfaceOnDeletedSession => {
@@ -638,6 +640,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
         claim_cases::turn_input_claim_superseded_after_reclaim(),
         session_lifecycle_cases::delete_then_attempt_admission_case(),
         surface_sweep::surface_sweep_case(),
+        surface_sweep::lost_root_recovery_case(),
         surface_sweep::pending_follow_on_raise_case(),
         surface_sweep::root_claim_replay_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
@@ -2331,7 +2334,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 32);
+    assert_eq!(cases.len(), 33);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2360,6 +2363,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "turn_input_claim_superseded_after_successor_reclaim",
             "delete_then_attempt_admission",
             "store_surface_sweep",
+            "lost_root_recovery",
             "pending_follow_on_raise_and_clear",
             "root_claim_replays_exact_result_after_lease_handoff",
             "refused_surface_on_deleted_session_leaves_no_residue",

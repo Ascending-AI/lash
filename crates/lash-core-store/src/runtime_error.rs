@@ -322,6 +322,8 @@ pub enum RuntimeErrorCode {
     EngineProcessTurnCancelContextMissing,
     EngineProcessTerminalEncode,
     EngineTurnTerminalAttach,
+    /// The engine ended a root's only run without a Lash outcome.
+    EngineRootSubstrateLost,
     /// A Restate terminal attachment elapsed; re-attaching is safe.
     EngineTurnTerminalAttachCeilingElapsed,
     EngineTurnTerminalDecode,
@@ -684,6 +686,7 @@ impl RuntimeErrorCode {
             }
             Self::EngineProcessTerminalEncode => "engine_process_terminal_encode",
             Self::EngineTurnTerminalAttach => "engine_turn_terminal_attach",
+            Self::EngineRootSubstrateLost => "engine_root_substrate_lost",
             Self::EngineTurnTerminalAttachCeilingElapsed => {
                 "engine_turn_terminal_attach_ceiling_elapsed"
             }
@@ -925,6 +928,7 @@ impl RuntimeErrorCode {
         Self::EngineProcessTurnCancelContextMissing,
         Self::EngineProcessTerminalEncode,
         Self::EngineTurnTerminalAttach,
+        Self::EngineRootSubstrateLost,
         Self::EngineTurnTerminalAttachCeilingElapsed,
         Self::EngineTurnTerminalDecode,
         Self::EngineTurnTerminalInvalidResolution,
@@ -1120,6 +1124,7 @@ impl RuntimeErrorCode {
             }
             "engine_process_terminal_encode" => Self::EngineProcessTerminalEncode,
             "engine_turn_terminal_attach" => Self::EngineTurnTerminalAttach,
+            "engine_root_substrate_lost" => Self::EngineRootSubstrateLost,
             "engine_turn_terminal_attach_ceiling_elapsed" => {
                 Self::EngineTurnTerminalAttachCeilingElapsed
             }

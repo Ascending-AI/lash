@@ -336,6 +336,9 @@ pub struct ParkReconcileReport {
     /// finished their current segment's execution without their terminal (an
     /// operator's kill): nothing would ever run them again.
     pub ended_processes: Vec<crate::ProcessId>,
+    /// Roots whose only engine run failed without a Lash terminal. Their
+    /// scope close is now owed by the terminal row.
+    pub ended_roots: Vec<RootRef>,
     /// Sessions whose stopped drive this pass resumed: it stopped only behind
     /// a redrive that has since settled (D15). Any other stopped drive is
     /// never resumed here (ADR 0109 §3): it is parked, and only the park's

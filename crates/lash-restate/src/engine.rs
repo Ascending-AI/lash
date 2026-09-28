@@ -141,9 +141,11 @@ impl RestateEngine {
             namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
                 admin: admin.clone(),
+                ingress: RestateIngressClient::new(connection.clone()),
                 namespace: namespace.clone(),
                 processes: stores.process_registry(),
                 continuations: stores.process_continuations(),
+                sessions: stores.session_store_factory(),
             }),
         ));
         Self {

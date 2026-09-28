@@ -593,6 +593,56 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         self.read_root_terminal(session_id, root).await
     }
 
+    async fn non_terminal_roots_page(
+        &self,
+        after: Option<&lash_core_execution::engine::RootRef>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core_execution::engine::RootRef>, StoreError> {
+        let Some(conn) = self.control_ledger().await? else {
+            return Ok(Vec::new());
+        };
+        let session = after.map_or_else(String::new, |key| key.session.to_string());
+        let root = after.map_or_else(String::new, |key| key.root.to_string());
+        conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                crate::session_roots::session_roots_sql()
+                    .roots
+                    .select_open_page
+                    .sql(),
+            )?;
+            let rows = stmt.query_map(params![session, root, limit.get() as i64], |row| {
+                Ok(lash_core_execution::engine::RootRef {
+                    session: SessionId::from(row.get::<_, String>(0)?),
+                    root: lash_sansio::TurnId::from(row.get::<_, String>(1)?),
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+        .await
+        .map_err(sqlite_error)
+    }
+
+    async fn end_lost_root(
+        &self,
+        target: &lash_core_execution::engine::RootRef,
+        at_ms: u64,
+    ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
+        let Some(conn) = self.control_ledger().await? else {
+            return Ok(None);
+        };
+        let target = target.clone();
+        conn.write_flow(move |tx| {
+            Ok(
+                match crate::session_roots::end_lost_root_conn(tx, &target, at_ms) {
+                    Ok(terminal) => crate::conn::TxOutcome::Commit(Ok(terminal)),
+                    Err(error) => crate::conn::TxOutcome::Rollback(Err(error)),
+                },
+            )
+        })
+        .await
+        .map_err(sqlite_error)?
+    }
+
     async fn list_control_intents(
         &self,
         after: Option<lash_core_execution::store::ControlIntentId>,

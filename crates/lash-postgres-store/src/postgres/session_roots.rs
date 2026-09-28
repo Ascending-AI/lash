@@ -154,6 +154,137 @@ pub(crate) async fn write_root_terminal_conn(
     Ok(())
 }
 
+/// Store half of recovery after the engine proves a root run failed without
+/// an outcome. The terminal, ingress settlement and scope-close arm commit
+/// together under the session history lock.
+pub(crate) async fn end_lost_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target: &lash_core_execution::engine::RootRef,
+    at_ms: u64,
+) -> Result<Option<RootTerminal>, StoreError> {
+    let session = &target.session;
+    let root = &target.root;
+    crate::runtime_persistence::lock_session_history_mutation_tx(tx, session).await?;
+    if root_terminal_conn(&mut *tx, session, root).await?.is_some() {
+        return Ok(None);
+    }
+    if sqlx::query(session_roots_sql().roots.select_terminal.sql())
+        .bind(session.as_str())
+        .bind(root.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let request = sqlx::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests_postgres
+            .select_request
+            .sql(),
+    )
+    .bind(session.as_str())
+    .bind(root.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let cancelled_by = request
+        .map(|row| row.try_get::<String, _>(0).map_err(store_sqlx_error))
+        .transpose()?;
+    let cause = RootTerminalCause::SubstrateLost {
+        cancelled_by: cancelled_by.clone(),
+    };
+    let terminal = RootTerminal {
+        session_id: session.clone(),
+        root: root.clone(),
+        kind: cause.kind(),
+        cause,
+        head_revision: None,
+        at_ms,
+    };
+    sqlx::query(
+        crate::session_sql::session_sql()
+            .head
+            .clear_pending_follow_on
+            .sql(),
+    )
+    .bind(session.as_str())
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    write_root_terminal_conn(&mut *tx, &terminal).await?;
+
+    let sql = &session_roots_sql().verbs;
+    let mut inputs: Vec<String> = sqlx::query_scalar(sql.bound_inputs.sql())
+        .bind(session.as_str())
+        .bind(root.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let mut run = crate::runtime_persistence::queued_run::load_run_tx(tx, session, None)
+        .await?
+        .filter(|run| run.scope.id() == root.as_str());
+    let mut batches = Vec::new();
+    if let Some(run) = run.as_ref() {
+        for member in run
+            .members
+            .iter()
+            .flatten()
+            .chain(run.withheld_members.iter())
+        {
+            match member {
+                lash_core_execution::store::QueuedRunMember::Input(id) => {
+                    inputs.push(id.to_string())
+                }
+                lash_core_execution::store::QueuedRunMember::Batch(id) => {
+                    batches.push(id.to_string())
+                }
+            }
+        }
+    }
+    inputs.sort();
+    inputs.dedup();
+    for input in inputs {
+        sqlx::query(sql.input.sql())
+            .bind(session.as_str())
+            .bind(input)
+            .bind("cancelled")
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    for batch in batches {
+        sqlx::query(sql.delete_batch_items.sql())
+            .bind(&batch)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(sql.delete_batch.sql())
+            .bind(session.as_str())
+            .bind(batch)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    for statement in [sql.release_inputs.sql(), sql.release_batches.sql()] {
+        sqlx::query(statement)
+            .bind(session.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    if let Some(run) = run.as_mut() {
+        run.revision += 1;
+        run.terminal = Some(lash_core_execution::store::QueuedRunTerminal::Failed {
+            code: lash_core_execution::RuntimeErrorCode::EngineRootSubstrateLost,
+            message: format!("root `{root}` lost its engine execution"),
+        });
+        crate::runtime_persistence::queued_run::write_run_tx(tx, run, false).await?;
+    }
+    Ok(Some(terminal))
+}
+
 /// The root input `input` of `session_id` is bound to, read on `conn`.
 pub(crate) async fn root_binding_conn(
     conn: &mut PgConnection,

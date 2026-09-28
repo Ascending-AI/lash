@@ -451,6 +451,17 @@ gone is killed.
 reports, and arms, a row that should owe an obligation and does not. It never
 finds work in the steady state.
 
+An operator can kill an admitted `LashTurn` workflow after its ingress
+obligation was delivered but before the root became terminal. Restate retries
+deployment and worker failures; an explicit kill ends the workflow key for
+good. The existing engine-owned lost-run pass (D23) also reads non-terminal
+session roots in bounded `(session, root)` pages and checks their Restate run
+status. It leaves active and paused runs alone. A run that finished failed
+without a Lash outcome ends the root `SubstrateLost` (cancelled when a durable
+cancel request exists), settles its bound ingress in the same transaction,
+and arms the existing `ScopeClose` obligation. No new obligation kind or
+host-driven recovery path is introduced (D26, FIG-3942).
+
 ## 4. Two-phase session delete
 
 Delete writes the `CloseSession` intent, marks the session closing and

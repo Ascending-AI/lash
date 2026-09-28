@@ -130,6 +130,9 @@ pub enum RootTerminalCause {
     },
     /// The session was deleted (its `CloseSession` intent).
     SessionDeleted { intent: ControlIntentId },
+    /// The engine ended this root's only run without a Lash outcome. A
+    /// cancellation request already recorded for it makes the end cancelled.
+    SubstrateLost { cancelled_by: Option<String> },
 }
 
 impl RootTerminalCause {
@@ -142,6 +145,13 @@ impl RootTerminalCause {
             Self::SettledEmpty => RootTerminalKind::Answered,
             Self::OperatorCancelled { .. } | Self::Forked { .. } | Self::SessionDeleted { .. } => {
                 RootTerminalKind::Cancelled
+            }
+            Self::SubstrateLost { cancelled_by } => {
+                if cancelled_by.is_some() {
+                    RootTerminalKind::Cancelled
+                } else {
+                    RootTerminalKind::Failed
+                }
             }
         }
     }

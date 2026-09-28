@@ -62,6 +62,12 @@ crate::statements! {
              WHERE session_id = ?1 AND terminal_kind IS NULL
              ORDER BY root";
 
+        /// Bounded recovery page after the `(session_id, root)` cursor.
+        select_open_page = "SELECT session_id, root FROM session_roots
+             WHERE terminal_kind IS NULL
+               AND (session_id > ?1 OR (session_id = ?1 AND root > ?2))
+             ORDER BY session_id, root LIMIT ?3";
+
         /// Every root of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_roots WHERE session_id = ?1";
     }

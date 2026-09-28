@@ -1122,6 +1122,30 @@ impl RestateAdminClient {
         .await
     }
 
+    /// Run status for the open logical roots in this page. The store supplies
+    /// the keys, so retained engine history cannot displace a root still
+    /// awaiting its terminal. All lanes are returned to protect a live run
+    /// from a failed run under another generation's service name.
+    pub(crate) async fn root_runs(
+        &self,
+        namespace: &crate::RestateNamespace,
+        root_keys: &[String],
+    ) -> Result<Vec<RestateInvocationStatus>, RestateHttpError> {
+        if root_keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let roots = namespace.service_lanes_sql(crate::LashService::TurnDriver);
+        let keys = root_keys
+            .iter()
+            .map(|key| sql_string_literal(key))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.query_json(&format!(
+            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {roots} AND target_handler_name = 'run' AND target_service_key IN ({keys})"
+        ))
+        .await
+    }
+
     /// Who serves `service` on the server now: the deployment that
     /// registered it last and the metadata that registration declared, or
     /// `None` when no deployment serves it.

@@ -630,6 +630,22 @@ impl SessionStoreFactory for CrashSessionFactory {
         self.inner.root_terminal(session_id, root).await
     }
 
+    async fn non_terminal_roots_page(
+        &self,
+        after: Option<&lash_core::engine::RootRef>,
+        limit: std::num::NonZeroUsize,
+    ) -> StoreResult<Vec<lash_core::engine::RootRef>> {
+        self.inner.non_terminal_roots_page(after, limit).await
+    }
+
+    async fn end_lost_root(
+        &self,
+        target: &lash_core::engine::RootRef,
+        at_ms: u64,
+    ) -> StoreResult<Option<lash_core::store::RootTerminal>> {
+        self.inner.end_lost_root(target, at_ms).await
+    }
+
     async fn list_control_intents(
         &self,
         after: Option<lash_core::store::ControlIntentId>,

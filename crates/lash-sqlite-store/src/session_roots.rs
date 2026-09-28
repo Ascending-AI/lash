@@ -154,6 +154,130 @@ pub(crate) fn write_root_terminal_conn(
     Ok(())
 }
 
+/// The engine proved the root's workflow run ended without an outcome. This
+/// transaction makes its inputs and root terminal together, so the existing
+/// scope-close obligation takes over before recovery acknowledges the loss.
+pub(crate) fn end_lost_root_conn(
+    tx: &Connection,
+    target: &lash_core_execution::engine::RootRef,
+    at_ms: u64,
+) -> Result<Option<RootTerminal>, StoreError> {
+    let session = &target.session;
+    let root = &target.root;
+    if root_terminal_conn(tx, session, root)?.is_some() {
+        return Ok(None);
+    }
+    let exists: bool = tx
+        .query_row(
+            session_roots_sql().roots.select_terminal.sql(),
+            params![session.as_str(), root.as_str()],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .unwrap_or(false);
+    if !exists {
+        return Ok(None);
+    }
+    let request: Option<String> = tx
+        .query_row(
+            crate::turn_ingress::turn_ingress_sql()
+                .cancel_requests_sqlite
+                .select_record
+                .sql(),
+            params![session.as_str(), root.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let cancelled_by = request
+        .map(|json| {
+            serde_json::from_str::<lash_core_execution::TurnCancelRequestRecord>(&json)
+                .map(|record| record.request.request_id)
+                .map_err(|error| StoreError::Backend(format!("turn cancellation: {error}")))
+        })
+        .transpose()?;
+    let cause = RootTerminalCause::SubstrateLost {
+        cancelled_by: cancelled_by.clone(),
+    };
+    let terminal = RootTerminal {
+        session_id: session.clone(),
+        root: root.clone(),
+        kind: cause.kind(),
+        cause,
+        head_revision: None,
+        at_ms,
+    };
+    tx.execute(
+        crate::session_sql::session_sql()
+            .head
+            .clear_pending_follow_on
+            .sql(),
+        params![session.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    write_root_terminal_conn(tx, &terminal)?;
+
+    let sql = &session_roots_sql().verbs;
+    let mut inputs = {
+        let mut stmt = tx.prepare(sql.bound_inputs.sql()).map_err(sqlite_error)?;
+        stmt.query_map(params![session.as_str(), root.as_str()], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?
+    };
+    let mut run = crate::persistence::queued_run::load_run_conn(tx, session, None)?
+        .filter(|run| run.scope.id() == root.as_str());
+    let mut batches = Vec::new();
+    if let Some(run) = run.as_ref() {
+        for member in run
+            .members
+            .iter()
+            .flatten()
+            .chain(run.withheld_members.iter())
+        {
+            match member {
+                lash_core_execution::store::QueuedRunMember::Input(id) => {
+                    inputs.push(id.to_string())
+                }
+                lash_core_execution::store::QueuedRunMember::Batch(id) => {
+                    batches.push(id.to_string())
+                }
+            }
+        }
+    }
+    inputs.sort();
+    inputs.dedup();
+    for input in inputs {
+        tx.execute(
+            sql.input.sql(),
+            params![session.as_str(), input, "cancelled"],
+        )
+        .map_err(sqlite_error)?;
+    }
+    for batch in batches {
+        tx.execute(sql.delete_batch_items.sql(), params![batch])
+            .map_err(sqlite_error)?;
+        tx.execute(sql.delete_batch.sql(), params![session.as_str(), batch])
+            .map_err(sqlite_error)?;
+    }
+    for statement in [sql.release_inputs.sql(), sql.release_batches.sql()] {
+        tx.execute(statement, params![session.as_str()])
+            .map_err(sqlite_error)?;
+    }
+    if let Some(run) = run.as_mut() {
+        run.revision += 1;
+        run.terminal = Some(lash_core_execution::store::QueuedRunTerminal::Failed {
+            code: lash_core_execution::RuntimeErrorCode::EngineRootSubstrateLost,
+            message: format!("root `{root}` lost its engine execution"),
+        });
+        crate::persistence::queued_run::write_run_conn(tx, run, false)?;
+    }
+    Ok(Some(terminal))
+}
+
 /// Write the terminal evidence `commit` carries, if any, in its transaction
 /// at head revision `head_revision`: the commit of a root's final physical
 /// turn ends the root (FIG-3600 S7).

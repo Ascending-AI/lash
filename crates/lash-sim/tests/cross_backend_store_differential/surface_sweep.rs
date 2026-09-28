@@ -106,6 +106,8 @@ pub(super) enum SurfaceMethod {
     /// of the sweep's drain root: none before its settlement, and the failed
     /// settlement's evidence after it (FIG-3600 S7).
     RootTerminal,
+    NonTerminalRootsPage,
+    EndLostRoot,
     /// [`RootStore::root_binding`](lash_core::store::RootStore::root_binding)
     /// of the sweep's next-turn input.
     RootBinding,
@@ -231,6 +233,8 @@ impl SurfaceMethod {
             }
             Self::LoadPendingFollowOn => "surface:load_pending_follow_on",
             Self::RootTerminal => "surface:root_terminal",
+            Self::NonTerminalRootsPage => "surface:non_terminal_roots_page",
+            Self::EndLostRoot => "surface:end_lost_root",
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
@@ -546,6 +550,41 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
             surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::Vacuum),
+        ],
+    }
+}
+
+/// A failed engine run settles the same open root on every SQL backend.
+pub(super) fn lost_root_recovery_case() -> GeneratedCase {
+    GeneratedCase {
+        name: CaseName::LostRootRecovery,
+        operations: vec![
+            StoreOperation::Commit {
+                label: "seed_lost_root_graph",
+                expected_head_revision: 0,
+                graph: append(
+                    vec![
+                        NodeSpec::new("root", None, "root"),
+                        NodeSpec::new("active-frame", Some("root"), "active"),
+                    ],
+                    Some("active-frame"),
+                ),
+                turn_commit: None,
+                checkpoint: CheckpointSpec::Empty,
+                usage: false,
+                adopt_attachment: false,
+            },
+            StoreOperation::EnqueueClaimableQueuedWork,
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::First,
+                owner: "lost-root-owner",
+            },
+            surface(SurfaceMethod::BeginOrResumeQueuedRun),
+            surface(SurfaceMethod::NonTerminalRootsPage),
+            surface(SurfaceMethod::EndLostRoot),
+            surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::EndLostRoot),
+            surface(SurfaceMethod::NonTerminalRootsPage),
         ],
     }
 }
@@ -1352,6 +1391,38 @@ impl BackendRunner {
                         format!("kind={:?} cause={cause}", terminal.kind)
                     }
                     None => "terminal=none".to_string(),
+                }
+            }
+            SurfaceMethod::NonTerminalRootsPage => {
+                let factory = self.factory();
+                let mut after = None;
+                let mut own_roots = 0;
+                loop {
+                    let page = factory
+                        .non_terminal_roots_page(
+                            after.as_ref(),
+                            std::num::NonZeroUsize::MIN.saturating_add(127),
+                        )
+                        .await?;
+                    own_roots += page
+                        .iter()
+                        .filter(|root| root.session == session_id)
+                        .count();
+                    if page.len() < 128 {
+                        break;
+                    }
+                    after = page.last().cloned();
+                }
+                format!("own_open_roots={own_roots}")
+            }
+            SurfaceMethod::EndLostRoot => {
+                let root = lash_core::engine::RootRef {
+                    session: session_id.clone(),
+                    root: lash_core::TurnId::from(surface_drain_scope(&session_id).id()),
+                };
+                match self.factory().end_lost_root(&root, 1).await? {
+                    Some(terminal) => format!("ended={:?}", terminal.kind),
+                    None => "ended=none".to_string(),
                 }
             }
             SurfaceMethod::RootBinding => {

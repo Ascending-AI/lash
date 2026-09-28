@@ -639,7 +639,7 @@ impl Driver {
 
     /// Send the held root `root` on `session` (with a child that lives until
     /// it ends, when `child`) and wait until it reaches its model call.
-    async fn send_held(
+    pub(super) async fn send_held(
         &mut self,
         session: &SessionId,
         root: &str,
@@ -689,7 +689,11 @@ impl Driver {
     /// Cancel the held root `root` of `session` until the host sees the
     /// cancel answered: a host that died inside it retries after the
     /// restart, since a held root ends only by its cancel.
-    async fn cancel(&mut self, session: &SessionId, root: &str) -> Result<String, String> {
+    pub(super) async fn cancel(
+        &mut self,
+        session: &SessionId,
+        root: &str,
+    ) -> Result<String, String> {
         let root = root.to_owned();
         let mut last = String::new();
         for _ in 0..20 {
@@ -728,7 +732,7 @@ impl Driver {
     /// Delete a session through a handler of the host's own, once. A host
     /// that died inside it does not retry: the handler replays on the next
     /// deployment, and the deletion is owed once its close intent commits.
-    async fn delete(&mut self, session: SessionRef) -> Result<String, String> {
+    pub(super) async fn delete(&mut self, session: SessionRef) -> Result<String, String> {
         let id = self.slot(session)?.id.clone();
         let mut pinned = 0;
         let mut unanswered = 0;

@@ -286,6 +286,7 @@ impl RuntimeErrorCode {
             Self::EngineProcessTerminalEncode => Terminal,
             // engine interaction failed; re-attaching is safe.
             Self::EngineTurnTerminalAttach => Retryable,
+            Self::EngineRootSubstrateLost => Terminal,
             // the attach ceiling elapsed; re-attaching is safe.
             Self::EngineTurnTerminalAttachCeilingElapsed => Retryable,
             // the terminal does not decode.

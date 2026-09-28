@@ -738,6 +738,56 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         )
     }
 
+    async fn non_terminal_roots_page(
+        &self,
+        after: Option<&lash_core_execution::engine::RootRef>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core_execution::engine::RootRef>, StoreError> {
+        let session = after.map_or("", |key| key.session.as_str());
+        let root = after.map_or("", |key| key.root.as_str());
+        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
+        let rows = sqlx::query(
+            crate::session_roots::session_roots_sql()
+                .roots
+                .select_open_page
+                .sql(),
+        )
+        .bind(session)
+        .bind(root)
+        .bind(limit.get() as i64)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(crate::store_sqlx_error)?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(lash_core_execution::engine::RootRef {
+                    session: SessionId::from(
+                        row.try_get::<String, _>(0)
+                            .map_err(crate::store_sqlx_error)?,
+                    ),
+                    root: lash_sansio::TurnId::from(
+                        row.try_get::<String, _>(1)
+                            .map_err(crate::store_sqlx_error)?,
+                    ),
+                })
+            })
+            .collect()
+    }
+
+    async fn end_lost_root(
+        &self,
+        target: &lash_core_execution::engine::RootRef,
+        at_ms: u64,
+    ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
+        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
+        let mut tx = sqlx::Connection::begin(&mut *connection)
+            .await
+            .map_err(crate::store_sqlx_error)?;
+        let result = crate::session_roots::end_lost_root_tx(&mut tx, target, at_ms).await?;
+        tx.commit().await.map_err(crate::store_sqlx_error)?;
+        Ok(result)
+    }
+
     async fn list_control_intents(
         &self,
         after: Option<lash_core_execution::store::ControlIntentId>,

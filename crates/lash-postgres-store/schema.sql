@@ -551,6 +551,9 @@ CREATE INDEX IF NOT EXISTS idx_lash_session_roots_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_session_roots_obligation_stalled
     ON lash_session_roots(obligation_id)
     WHERE obligation_state = 'stalled';
+CREATE INDEX IF NOT EXISTS idx_lash_session_roots_open
+    ON lash_session_roots(session_id, root)
+    WHERE terminal_kind IS NULL;
 
 CREATE TABLE IF NOT EXISTS lash_session_root_inputs (
     session_id TEXT NOT NULL,

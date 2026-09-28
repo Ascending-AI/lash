@@ -552,6 +552,32 @@ pub trait SessionStoreFactory:
         root: &crate::TurnId,
     ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError>;
 
+    /// Open logical roots in `(session, root)` order, after `after`. Recovery
+    /// checks their engine runs in bounded pages; it never guesses liveness
+    /// from a missing terminal row alone.
+    async fn non_terminal_roots_page(
+        &self,
+        _after: Option<&crate::engine::RootRef>,
+        _limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::engine::RootRef>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "non_terminal_roots_page",
+        })
+    }
+
+    /// End a root only after the engine proved its one workflow run failed
+    /// terminally. The write settles the root's ingress and arms scope close
+    /// atomically. An already terminal or deleted root is a no-op.
+    async fn end_lost_root(
+        &self,
+        _target: &crate::engine::RootRef,
+        _at_ms: u64,
+    ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "end_lost_root",
+        })
+    }
+
     /// Retained intents, including permanent engine refusals, in ID order.
     async fn list_control_intents(
         &self,

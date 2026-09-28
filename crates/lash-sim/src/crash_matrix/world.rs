@@ -501,6 +501,12 @@ impl CrashWorld {
     /// pass. A pass that dies with the deployment is not an
     /// error of the tick. Answers the tick's engine time.
     pub async fn tick(&self) -> Result<u64, String> {
+        self.tick_with_page(std::num::NonZeroUsize::MIN.saturating_add(63))
+            .await
+    }
+
+    /// Run one recovery tick with a chosen page size, for pagination laws.
+    pub async fn tick_with_page(&self, page: std::num::NonZeroUsize) -> Result<u64, String> {
         let tick_ms = super::TICK.as_millis() as u64;
         let jittered = tick_ms - tick_ms / 10 + self.draw(0..tick_ms / 5 + 1);
         let ticked_at = {
@@ -516,11 +522,7 @@ impl CrashWorld {
             .current()
             .ok_or_else(|| "no deployment is up to tick".to_owned())?;
         let cursor = self.interval.lock().await.cursor.clone();
-        let pass = self.spawn_host(async move {
-            driver
-                .reconcile(&cursor, std::num::NonZeroUsize::MIN.saturating_add(63))
-                .await
-        });
+        let pass = self.spawn_host(async move { driver.reconcile(&cursor, page).await });
         match tokio::time::timeout(TICK_WALL_LIMIT, pass).await {
             Ok(Ok(Ok(next))) => {
                 self.interval.lock().await.cursor = next;

@@ -448,6 +448,137 @@ pub async fn run(config: SoakConfig) -> SoakReport {
 mod tests {
     use super::*;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn cancelled_child_root_closes_after_engine_loss() {
+        let seed = 0x3942;
+        let mut driver = driver::Driver::new(seed).await.expect("world");
+        for step in [
+            plan::Step::Open {
+                session: 0,
+                lane: plan::Lane::Plain,
+                parent: None,
+            },
+            plan::Step::Open {
+                session: 1,
+                lane: plan::Lane::Held,
+                parent: Some(0),
+            },
+        ] {
+            driver.step(seed, &step).await.expect("open session");
+        }
+        let child = driver.ledger.sessions[1].id.clone();
+        let root = "held-child";
+        driver
+            .send_held(&child, root, true)
+            .await
+            .expect("held root");
+        let invocation = driver
+            .world
+            .invocations()
+            .await
+            .into_iter()
+            .find(|view| {
+                view.target
+                    .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
+                    && view.target.contains(root)
+                    && view.status != "completed"
+            })
+            .expect("running root invocation");
+        driver
+            .world
+            .kill_invocation(&invocation.id)
+            .await
+            .expect("lose root invocation");
+        driver.cancel(&child, root).await.expect("request cancel");
+        driver.delete(0).await.expect("delete parent");
+        let mut report = EpochReport {
+            seed,
+            ..EpochReport::default()
+        };
+        finish(&mut driver, &mut report).await;
+        assert!(report.passed(), "{}", report.evidence());
+        driver.world.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn lost_root_scan_pages_all_roots_and_keeps_active_root() {
+        let seed = 0x3943;
+        let mut driver = driver::Driver::new(seed).await.expect("world");
+        let roots = ["held-lost-first", "held-lost-second", "held-still-active"];
+        let mut sessions = Vec::new();
+        for (session, root) in roots.iter().copied().enumerate() {
+            driver
+                .step(
+                    seed,
+                    &plan::Step::Open {
+                        session,
+                        lane: plan::Lane::Held,
+                        parent: None,
+                    },
+                )
+                .await
+                .expect("open session");
+            let id = driver.ledger.sessions[session].id.clone();
+            driver.send_held(&id, root, true).await.expect("held root");
+            sessions.push(id.clone());
+            if session < 2 {
+                let invocations = driver.world.invocations().await;
+                let invocation = invocations
+                    .iter()
+                    .find(|view| {
+                        view.target
+                            .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
+                            && view.target.contains(root)
+                            && view.status != "completed"
+                    })
+                    .unwrap_or_else(|| panic!("running root invocation: {invocations:?}"));
+                driver
+                    .world
+                    .kill_invocation(&invocation.id)
+                    .await
+                    .expect("lose root invocation");
+                driver.cancel(&id, root).await.expect("cancel lost root");
+            }
+        }
+        for _ in 0..4 {
+            driver
+                .world
+                .tick_with_page(std::num::NonZeroUsize::MIN)
+                .await
+                .expect("reconcile one-root pages");
+        }
+        let factory = driver.world.backend().session_store_factory();
+        for (session, root) in sessions.iter().zip(roots).take(2) {
+            assert!(
+                factory
+                    .root_terminal(session, &lash_core::TurnId::from(root))
+                    .await
+                    .expect("terminal read")
+                    .is_some(),
+                "lost root {root} was skipped by the paged pass"
+            );
+        }
+        assert!(
+            factory
+                .root_terminal(&sessions[2], &lash_core::TurnId::from(roots[2]))
+                .await
+                .expect("active terminal read")
+                .is_none(),
+            "the active root is still owned by its workflow"
+        );
+        driver
+            .cancel(&sessions[2], roots[2])
+            .await
+            .expect("cancel active root");
+        let mut report = EpochReport {
+            seed,
+            ..EpochReport::default()
+        };
+        finish(&mut driver, &mut report).await;
+        assert!(report.passed(), "{}", report.evidence());
+        driver.world.finish().await;
+    }
+
     #[test]
     fn durations_and_seeds_parse() {
         assert_eq!(parse_duration("90m"), Some(Duration::from_secs(5_400)));

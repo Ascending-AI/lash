@@ -719,10 +719,12 @@ impl LiveConformanceHarness {
             crate::RestateNamespace::default(),
             Arc::new(crate::session_control::RestateSessionControl {
                 admin: self.admin_client(),
+                ingress: crate::RestateIngressClient::new(self.connection.clone()),
                 namespace: crate::RestateNamespace::default(),
                 processes: self.stores.process_registry(),
                 continuations: self.stores.process_registry()
                     as Arc<dyn lash_core::ProcessContinuationStore>,
+                sessions: self.stores.session_store_factory(),
             }),
         )
     }
