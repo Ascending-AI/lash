@@ -536,18 +536,17 @@ pub(super) async fn a_started_process_whose_run_restate_purged_ends_substrate_lo
     );
     let target = format!("LashProcessWorkflow/{process_id}/run");
     let run = world.wait_for_status(&target, "running").await;
+    // The kill trails the body's entry, not only the journaled start: the
+    // marker commits in admission and the runner's first poll is a
+    // scheduling gap of awaits later, so a kill ordered on the marker alone
+    // can abort the attempt before it counted its body — leaving `runs` at
+    // zero, with no started work for the resubmission to be measured
+    // against.
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-    while world
-        .registry
-        .get_process(&process_id)
-        .await
-        .expect("read the process")
-        .and_then(|record| record.first_started)
-        .is_none()
-    {
+    while world.runner.runs.load(Ordering::SeqCst) == 0 {
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the process's run never recorded its start"
+            "the process's run never entered its body"
         );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
