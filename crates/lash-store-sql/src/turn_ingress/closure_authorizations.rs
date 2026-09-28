@@ -7,13 +7,6 @@ pub const TABLE: &str = "turn_cancel_closure_authorizations";
 /// Every column an insert writes.
 pub const INSERT_COLUMNS: &str = "session_id, turn_id, authorization_json";
 
-/// The authorization keyed by its session, for the catalog-wide sweep that
-/// asks which sessions still pin a scope.
-///
-/// `turn_id` is absent because the sweep decides per session and orders by the
-/// turn without reading it.
-pub const SESSION_KEYED_COLUMNS: &str = "session_id, authorization_json";
-
 crate::statements! {
     /// `turn_cancel_closure_authorizations` statements both backends issue
     /// verbatim.

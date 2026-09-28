@@ -16,8 +16,8 @@
 //! Four of the family's operations reach outside it: the deleted-session root
 //! reclaim, the per-session forget, the live-root probe and the aged-intent
 //! forget read `deleted_sessions`, `graph_nodes`, `runtime_turn_commits` and
-//! the process registry. The first two fork on a boolean literal and are
-//! dialect-only; the last two are shared, and each exists **twice**.
+//! the process registry. The first two fork on a boolean literal; the last
+//! two are shared, and each exists **twice**.
 //!
 //! The pair is the deployment, not a parameter. A deployment with a process
 //! registry bound can prove a process owner dead — the owning process is

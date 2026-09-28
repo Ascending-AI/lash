@@ -10,15 +10,6 @@ pub const TABLE: &str = "usage_deltas";
 /// backend, and the read below is the only thing that names it.
 pub const INSERT_COLUMNS: &str = "session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json";
 
-/// One ledger entry as the session load folds it.
-///
-/// The identity columns are deliberately absent. They exist to make the insert
-/// idempotent — the ledger is merged by
-/// `merge_token_ledger_entries_checked`, which reads only the accounting
-/// columns — and a projection that carried them would invite a caller to
-/// re-derive identity from a row instead of from the operation it belongs to.
-pub const LEDGER_COLUMNS: &str = "source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json";
-
 crate::statements! {
     /// `usage_deltas` statements both backends issue verbatim.
     pub struct UsageDeltaStatements @ "usage_delta" {

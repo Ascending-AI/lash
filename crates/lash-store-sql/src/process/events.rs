@@ -10,9 +10,6 @@ pub const TABLE: &str = "process_events";
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str = "process_id, sequence, event_type, idempotency_key, event_json";
 
-/// Payload-free event-page projection.
-pub const LITE_PAGE_COLUMNS: &str = "sequence, event_type";
-
 crate::statements! {
     /// `process_events` statements both backends issue verbatim.
     pub struct EventStatements @ "process_event" {

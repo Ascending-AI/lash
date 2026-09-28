@@ -19,9 +19,7 @@
 //! `lash_core::WakeDeliveryState` (FIG-2815, FIG-2844). No statement in this
 //! family spells either: each names the predicate it wants as a
 //! `{{term(column)}}` token and the backend's [`crate::Vocabulary`] expands it
-//! at startup from the one source those labels have. The ownership gate
-//! refuses a spelled literal over those two columns, and `lash-sim`'s
-//! `process_lifecycle_vocabulary` refuses one anywhere in either store.
+//! at startup from the one source those labels have.
 
 pub mod artifact_cleanup;
 pub mod change_clock;

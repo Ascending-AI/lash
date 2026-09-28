@@ -180,9 +180,6 @@ run_rust_source_guards() {
   step "Restate handler panic boundary"
   python3 scripts/check-restate-handler-panics.py
 
-  step "Store SQL ownership"
-  python3 scripts/check-store-sql-ownership.py
-
   step "Core/UI boundary guard"
   bash scripts/check-core-ui-boundary.sh
 

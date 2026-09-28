@@ -1,8 +1,7 @@
 //! Every process-family statement this store issues, rendered once.
 //!
 //! The shared halves live in `lash_store_sql::process`; the sets below are the
-//! statements only SQLite issues, and each one has a `[[dialect_only]]` entry
-//! in `crates/lash-store-sql/dialect-only.toml` saying why its text forks.
+//! statements only SQLite issues.
 //!
 //! The process registry is its own SQLite database and addresses its tables
 //! unqualified — the spelling every `INDEXED BY` plan in this crate was

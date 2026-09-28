@@ -284,12 +284,6 @@ pub(crate) struct ResolvedTable {
     oid: i64,
 }
 
-impl ResolvedTable {
-    pub(crate) fn oid(&self) -> i64 {
-        self.oid
-    }
-}
-
 /// These are the relations lash's own unqualified statements would hit, so a
 /// database that has them is not the installation the rest of the check just
 /// verified — regardless of whether the anchored copy is itself perfect. Any

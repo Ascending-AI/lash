@@ -11,15 +11,6 @@ pub const TABLE: &str = "artifact_owners";
 /// Every column, in insert order. The whole row is its primary key.
 pub const INSERT_COLUMNS: &str = "namespace, artifact_ref, owner_kind, owner_id";
 
-/// What SQLite's transfer copies out of the source edge.
-///
-/// The two placeholders are in the projection because the statement rewrites
-/// the row rather than reading it: the artifact's identity columns are carried
-/// over from the source edge and the owner pair is substituted, so that "the
-/// destination edge exists only if the source edge did" is one statement and
-/// not a read followed by a write.
-pub const TRANSFER_SELECT_COLUMNS: &str = "namespace, artifact_ref, ?3, ?4";
-
 crate::statements! {
     /// `artifact_owners` statements both backends issue verbatim.
     pub struct OwnerStatements @ "artifact_owner" {

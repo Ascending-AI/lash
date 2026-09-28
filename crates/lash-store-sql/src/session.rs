@@ -7,7 +7,7 @@
 //! freezes both names — renaming either would invalidate every existing
 //! database — so the head is two table modules, [`head`] and [`sessions`],
 //! each named only by the backend that has it, and every head statement is
-//! dialect-only by construction rather than by choice.
+//! backend-only by construction rather than by choice.
 
 pub mod checkpoint_blob_refs;
 pub mod deleted_sessions;

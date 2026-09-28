@@ -14,15 +14,6 @@ pub const INSERT_COLUMNS: &str =
     "session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version";
 
-/// The prior receipt, as the commit planner adjudicates a replay from it.
-///
-/// `committed_at_ms` is absent: the decision compares the stored commit hash
-/// and the stored append-request identity, and never the instant. The ancestor
-/// column stays outside deliberately — the request hash already binds it.
-pub const RECEIPT_COLUMNS: &str = "turn_commit_hash, result_json,
-                        request_identity_hash, identity_encoding_version,
-                        requested_node_count";
-
 /// A settled turn's identity and result, as the failure-evidence and
 /// turn-input reads fold them.
 ///

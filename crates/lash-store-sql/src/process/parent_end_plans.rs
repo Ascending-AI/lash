@@ -11,19 +11,9 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "parent_end_plans";
 
-/// An obligation's standing: its state and the claims taken since it was
-/// armed, which name the attempt a delivery is under (ADR 0109).
-pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
-
 /// Every column, in insert order. `settled_at_ms` and the obligation
 /// columns are absent: a plan is recorded unsettled and armed by the record.
 pub const INSERT_COLUMNS: &str = "parent_kind, parent_id, parent_payload, ended_at_ms";
-
-/// The columns of one row the key's own read returns: the typed payload
-/// (the authority; the projection columns are never parsed back), the two
-/// instants, and the obligation the row owes (ADR 0109).
-pub const STAMP_COLUMNS: &str =
-    "parent_payload, ended_at_ms, settled_at_ms, obligation_id, obligation_state";
 
 crate::statements! {
     /// `parent_end_plans` statements both backends issue verbatim.
@@ -64,10 +54,6 @@ crate::statements! {
 /// attempt count after the claim, then the row's key.
 pub const OBLIGATION_CLAIM_COLUMNS: &str =
     "obligation_id, obligation_attempts, parent_kind, parent_id";
-
-/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
-/// with the stall's reason, last error and instant before the key.
-pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, parent_kind, parent_id";
 
 crate::statements! {
     /// `parent_end_plans` obligation statements (ADR 0109): a closed scope's plan owes its children's cancels. Both backends issue

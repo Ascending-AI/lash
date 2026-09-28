@@ -17,24 +17,6 @@ pub const TABLE: &str = "attachment_manifest";
 pub const INSERT_COLUMNS: &str = "attachment_id, session_id, canonical_uri, intent_at_ms, write_id,
      written_at_ms, committed_at_ms, owner_kind, owner_id";
 
-/// What adoption writes: a row that is committed the moment it exists.
-///
-/// Narrow on purpose, and not for speed. Adoption owns no write attempt, so
-/// `write_id` must stay NULL, and it carries no owner edge, so the owner
-/// pair must stay NULL — `ck_attachment_manifest_owner_identity` refuses any
-/// partially filled owner. Naming those four columns in this insert would
-/// invite a later edit to bind one of them.
-pub const ADOPTION_COLUMNS: &str =
-    "attachment_id, session_id, canonical_uri, intent_at_ms, written_at_ms, committed_at_ms";
-
-/// The manifest row as the retention sweep reports it.
-///
-/// Every column except `write_id`. The write identity is the fence between one
-/// writer and its own superseded attempts; it is meaningless outside the
-/// transaction that minted it, and no caller of the sweep has ever read it.
-pub const ENTRY_COLUMNS: &str = "attachment_id, session_id, canonical_uri, intent_at_ms,
-     committed_at_ms, owner_kind, owner_id, written_at_ms";
-
 crate::statements! {
     /// `attachment_manifest` statements both backends issue verbatim.
     pub struct ManifestStatements @ "attachment_manifest" {

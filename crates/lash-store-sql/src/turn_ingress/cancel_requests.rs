@@ -13,25 +13,9 @@ pub const TABLE: &str = "turn_cancel_requests";
 /// The columns SQLite's insert writes: one document plus its revision.
 pub const INSERT_COLUMNS: &str = "session_id, turn_id, record_json, intent_revision";
 
-/// The columns PostgreSQL's insert writes: the request's fields, typed.
-pub const INSERT_COLUMNS_TYPED: &str = "session_id, turn_id, request_id, origin, reason,
-     disposition, mode, intent_revision";
-
-/// SQLite's stored request document with its revision: the intent snapshot.
-pub const RECORD_WITH_REVISION_COLUMNS: &str = "record_json, intent_revision";
-
 /// PostgreSQL's request fields, without the revision: what a record read
 /// rebuilds the request from before attaching its affected-input receipts.
 pub const REQUEST_COLUMNS: &str = "request_id, origin, reason, disposition, mode";
-
-/// [`REQUEST_COLUMNS`] with the revision: PostgreSQL's intent snapshot.
-///
-/// A separate list because the snapshot and the record are different reads with
-/// different consumers — the snapshot is a compare-and-swap predicate, the
-/// record is evidence — and pinning them to one list would make every
-/// revision-free read decode a revision it must not act on.
-pub const REQUEST_WITH_REVISION_COLUMNS: &str = "request_id, origin, reason, disposition, mode,
-     intent_revision";
 
 crate::statements! {
     /// `turn_cancel_requests` statements both backends issue verbatim.

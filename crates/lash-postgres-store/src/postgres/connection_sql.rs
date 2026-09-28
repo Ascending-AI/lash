@@ -8,11 +8,10 @@
 //! times verbatim. They name no table, so the table-ownership rules cannot
 //! reach them; this module is the home that makes them reachable instead.
 //!
-//! Everything here is declared once, named, and rendered once at startup, and
-//! the ownership gate holds this module to the same "one statement, one name"
-//! rule it holds a table module to. A statement that names a lash table does
-//! **not** belong here — it belongs to that table's family — and the gate
-//! refuses one that does.
+//! Everything here is declared once, named, and rendered once at startup —
+//! the same "one statement, one name" rule a table module lives by. A
+//! statement that names a lash table does
+//! **not** belong here — it belongs to that table's family.
 //!
 //! The lock *keys* stay with their callers: what a key is built from is the
 //! caller's decision about what it is serialising, and two callers that share
@@ -166,70 +165,6 @@ lash_store_sql::statements! {
         notify_channel = "SELECT pg_notify(?1, '')";
     }
 }
-
-/// Every `CHECK` constraint on the catalog OIDs in `$1`, with whether it is
-/// validated, whether it is enforced, and its expression.
-///
-/// `conenforced` arrived in PostgreSQL 18; reading it out of the row's `jsonb`
-/// projection is what lets one statement serve every supported server rather
-/// than branching on `server_version_num`.
-///
-/// A plain constant rather than a `statements!` declaration, and that is the
-/// rule for a catalog probe: it reads `pg_catalog.pg_constraint` in a table
-/// position, and the renderer refuses a relation `lash-store-sql` does not
-/// own — correctly, since a system catalog is not a lash table and must never
-/// acquire the `lash_` prefix. So this one spells `$1` itself.
-pub(crate) const SELECT_CHECK_CONSTRAINTS: &str = "SELECT c.conrelid::bigint AS table_oid,
-            c.conname::text AS name,
-            c.convalidated AS validated,
-            COALESCE(
-                (pg_catalog.to_jsonb(c) ->> 'conenforced')::boolean,
-                TRUE
-            ) AS enforced,
-            pg_catalog.pg_get_expr(
-                c.conbin,
-                c.conrelid,
-                false
-            ) AS expression
-     FROM pg_catalog.pg_constraint AS c
-     WHERE c.contype = 'c'
-       AND c.conrelid::bigint = ANY($1::bigint[])";
-
-/// The foreign-key twin of [`SELECT_CHECK_CONSTRAINTS`]: every `contype='f'`
-/// constraint on the resolved tables, with the referential actions and
-/// deferral flags the registered-clause comparison pins. `confdeltype` and
-/// `confupdtype` are the single-character `pg_constraint` encodings; the
-/// caller maps them to the canonical `no action`/`restrict`/`cascade`/
-/// `set null`/`set default` spellings.
-pub(crate) const SELECT_FOREIGN_KEY_CONSTRAINTS: &str = "SELECT c.conrelid::bigint AS table_oid,
-            ARRAY(
-                SELECT a.attname::text
-                FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality)
-                JOIN pg_catalog.pg_attribute AS a
-                    ON a.attrelid = c.conrelid AND a.attnum = key.attnum
-                ORDER BY key.ordinality
-            ) AS columns,
-            parent.relname::text AS referenced_table,
-            ARRAY(
-                SELECT a.attname::text
-                FROM unnest(c.confkey) WITH ORDINALITY AS key(attnum, ordinality)
-                JOIN pg_catalog.pg_attribute AS a
-                    ON a.attrelid = c.confrelid AND a.attnum = key.attnum
-                ORDER BY key.ordinality
-            ) AS referenced_columns,
-            c.confdeltype::text AS on_delete,
-            c.confupdtype::text AS on_update,
-            c.condeferrable AS deferrable,
-            c.condeferred AS initially_deferred,
-            c.convalidated AS validated,
-            COALESCE(
-                (pg_catalog.to_jsonb(c) ->> 'conenforced')::boolean,
-                TRUE
-            ) AS enforced
-     FROM pg_catalog.pg_constraint AS c
-     JOIN pg_catalog.pg_class AS parent ON parent.oid = c.confrelid
-     WHERE c.contype = 'f'
-       AND c.conrelid::bigint = ANY($1::bigint[])";
 
 /// Every connection-scoped statement, rendered once at first use.
 static CONNECTION_SQL: LazyLock<ConnectionStatements> =

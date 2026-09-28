@@ -23,10 +23,6 @@ pub const TABLE: &str = "process_park_events";
 pub const INSERT_COLUMNS: &str =
     "seq, process_id, park_id, kind, cause, reason_json, at_ms, park_build_generation";
 
-/// The read projection a feed page decodes.
-pub const EVENT_COLUMNS: &str =
-    "seq, process_id, park_id, kind, cause, reason_json, at_ms, park_build_generation";
-
 crate::statements! {
     /// `process_park_events` statements both backends issue verbatim.
     pub struct ProcessParkEventStatements @ "process_park_event" {

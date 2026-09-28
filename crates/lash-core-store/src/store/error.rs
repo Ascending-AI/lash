@@ -156,17 +156,6 @@ pub enum StoreError {
     SessionDeleted { session_id: SessionId },
     #[error("store does not support `{operation}`")]
     UnsupportedStoreOperation { operation: &'static str },
-    /// A required-constraint inspection reached SQL outside the deliberately
-    /// small grammar it can compare without guessing at semantic equivalence.
-    #[error(
-        "{backend} required-constraint inspection is inconclusive for `{table}.{constraint}`: {detail}"
-    )]
-    RequiredConstraintInspectionInconclusive {
-        backend: &'static str,
-        table: String,
-        constraint: String,
-        detail: String,
-    },
     /// A persisted queued-work row carries only half of the predecessor claim
     /// correlation that an abandon would have to restore.
     #[error(
@@ -845,9 +834,7 @@ impl StoreError {
             Self::InvalidSessionId { .. } => "InvalidSessionId",
             Self::SessionDeleted { .. } => "SessionDeleted",
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
-            Self::RequiredConstraintInspectionInconclusive { .. } => {
-                "RequiredConstraintInspectionInconclusive"
-            }
+
             Self::QueuedWorkPredecessorClaimCorrupt { .. } => "QueuedWorkPredecessorClaimCorrupt",
             Self::UnfinishedRootConflict { .. } => "UnfinishedRootConflict",
             Self::FollowOnPending { .. } => "FollowOnPending",

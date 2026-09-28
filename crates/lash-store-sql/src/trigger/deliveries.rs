@@ -17,33 +17,6 @@ pub const INSERT_COLUMNS: &str =
     "occurrence_id, subscription_id, process_id, subscription_incarnation,
                 subscription_revision, subscription_snapshot_json, created_at_ms";
 
-/// What a caller reading one occurrence's reservations needs: the process the
-/// delivery started, when it was reserved, and the frozen subscription.
-///
-/// Narrow because the occurrence is already in the caller's hand — it is the
-/// occurrence whose id keyed this read — so re-reading its id, and the
-/// incarnation and revision the snapshot already carries, would be reading the
-/// same facts twice.
-pub const SNAPSHOT_COLUMNS: &str = "process_id, created_at_ms, subscription_snapshot_json";
-
-/// The delivery's identity, and nothing else: what a retention pass compares
-/// against the process registry to decide whether a delivery is still owed.
-///
-/// Narrow because the sweep loads every row in the table and never decodes
-/// one: carrying `subscription_snapshot_json` here would read the whole frozen
-/// subscription — an unbounded column — once per delivery, to answer a
-/// question about three ids.
-pub const RETENTION_CANDIDATE_COLUMNS: &str = "occurrence_id, subscription_id, process_id";
-
-/// What a delivery listing reports: the reservation joined to the occurrence
-/// that caused it.
-///
-/// The one projection of this table that spans two of them. It is narrow on
-/// both sides — the delivery's own incarnation and revision columns are in the
-/// snapshot, and the occurrence contributes only its record.
-pub const RESERVATION_COLUMNS: &str = "d.process_id, d.created_at_ms, o.record_json,
-                    d.subscription_snapshot_json";
-
 /// SQLite's spelling of the owning session of a frozen subscription snapshot.
 ///
 /// Not a column list: an expression the retention sweep projects to enumerate
@@ -57,10 +30,6 @@ pub const SESSION_OWNER_SCOPE_SQLITE: &str = "'session:' || json_extract(
                                     subscription_snapshot_json,
                                     '$.owner_scope.session_id'
                                 )";
-
-/// PostgreSQL's spelling of [`SESSION_OWNER_SCOPE_SQLITE`].
-pub const SESSION_OWNER_SCOPE_POSTGRES: &str = "'session:' ||
-                    (subscription_snapshot_json::jsonb #>> '{owner_scope,session_id}')";
 
 crate::statements! {
     /// `trigger_deliveries` statements both backends issue verbatim.

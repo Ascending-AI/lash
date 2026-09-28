@@ -22,23 +22,6 @@ pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, rea
 /// The stored record's read projection.
 pub const RECORD_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation";
 
-/// The grouped count `count_parks_by_reason` reads for drain status.
-///
-/// Narrow on purpose: the deployment drain wants each reason's live park
-/// count and nothing else, so the projection carries the reason code and the
-/// aggregate — none of the park row's payload columns.
-pub const REASON_COUNT_COLUMNS: &str = "reason_code, COUNT(*) AS parks";
-
-/// The grouped count `count_retired_parks_by_executable_generation` reads for
-/// drain status (FIG-3571).
-///
-/// Narrow on purpose: the deployment drain wants each retired executable
-/// generation's live park count and nothing else, so the projection carries
-/// the projected generation column and the aggregate — none of the park row's
-/// payload columns.
-pub const EXECUTABLE_GENERATION_COUNT_COLUMNS: &str =
-    "park_executable_generation, COUNT(*) AS parks";
-
 crate::statements! {
     /// `turn_parks` statements both backends issue verbatim.
     pub struct TurnParkStatements @ "turn_park" {

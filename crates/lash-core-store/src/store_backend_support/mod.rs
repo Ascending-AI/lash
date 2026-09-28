@@ -6,7 +6,6 @@ use lash_sansio::SessionId;
 mod append_identity;
 mod attachment_owner_sql;
 mod process_lifecycle_sql;
-pub mod required_constraints;
 mod run_spec_admission;
 mod session_meta;
 mod turn_input_batch;

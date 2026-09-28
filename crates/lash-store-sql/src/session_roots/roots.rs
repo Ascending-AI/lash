@@ -5,23 +5,6 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_roots";
 
-/// An obligation's standing: its state and the claims taken since it was
-/// armed, which name the attempt a delivery is under (ADR 0109).
-pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
-
-/// The terminal evidence columns, in the order both backends decode them.
-pub const TERMINAL_COLUMNS: &str =
-    "terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms";
-
-/// The key columns alone: opening a root writes its identity and nothing
-/// else, so its terminal columns stay NULL until an end writes them.
-pub const KEY_COLUMNS: &str = "session_id, root";
-
-/// An unfinished root's identity and recorded admission: all the session's
-/// admission order needs to resume it (FIG-3927), and nothing of its terminal,
-/// which it does not have yet.
-pub const UNFINISHED_COLUMNS: &str = "root, admission_json";
-
 crate::statements! {
     /// `session_roots` statements both backends issue verbatim.
     pub struct SessionRootStatements @ "session_root" {
@@ -129,10 +112,6 @@ impl RootVerbStatements {
 /// The obligation columns a claim reads back (ADR 0109 §1.3): the id, the
 /// attempt count after the claim, then the row's key.
 pub const OBLIGATION_CLAIM_COLUMNS: &str = "obligation_id, obligation_attempts, session_id, root";
-
-/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
-/// with the stall's reason, last error and instant before the key.
-pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, session_id, root";
 
 crate::statements! {
     /// `session_roots` obligation statements (ADR 0109): a terminal root owes its scope close. Both backends issue

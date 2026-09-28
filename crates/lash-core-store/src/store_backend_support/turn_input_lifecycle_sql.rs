@@ -17,10 +17,6 @@
 //! Each of these is registered as a `{{term(column)}}` vocabulary term by both
 //! store backends (ADR 0098 §3), so a neutral statement names the partition and
 //! never spells it.
-//!
-//! Schema `CHECK` vocabularies are deliberately *not* generated here: they are
-//! the durable constraint surface owned by
-//! [`required_constraints`](super::required_constraints).
 
 use crate::TurnInputStateKind;
 

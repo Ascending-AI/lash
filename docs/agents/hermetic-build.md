@@ -133,8 +133,7 @@ names in its table row because it alone took 170 s — CI still runs it,
 concurrently and reported as one PASS/FAIL
 table — run it on a committed head so the gates judge the tree that lands.
 `just schema-check` narrows that to the store-schema gates:
-`scripts/check-store-sql-ownership.py`, the lash-sim
-`schema_congruence__test` target, and the lash-core-store unit target that
+the durable format registry and the lash-core-store unit target that
 holds the runtime-error classification exhaustiveness test. `just
 test-changed [base]` diffs against `<base>` (default `origin/main`), maps the
 changed files to their Bazel packages, queries reverse dependencies within `//...`, intersects them with the canonical

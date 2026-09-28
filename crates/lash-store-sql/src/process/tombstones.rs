@@ -9,13 +9,6 @@ pub const TABLE: &str = "process_tombstones";
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str = "process_id, terminal_label, pruned_at_ms, pruned_change_seq";
 
-/// What a caller asking after a pruned process is told.
-///
-/// The two facts a `ProcessTombstoneStamp` carries: how the process ended and
-/// when its row was reclaimed. The change sequence is absent because it
-/// belongs to the feed, not to the answer.
-pub const TERMINAL_STAMP_COLUMNS: &str = "terminal_label, pruned_at_ms";
-
 /// What the SQLite change feed reports for a pruned row.
 ///
 /// The deleted arm of the feed's `UNION ALL`: the same three result columns as
@@ -30,17 +23,6 @@ pub const SQLITE_CHANGE_FEED_DELETED_COLUMNS: &str = "pruned_change_seq, 'delete
                         'pruned_at_ms', pruned_at_ms,
                         'pruned_change_seq', pruned_change_seq
                     ) AS payload";
-
-/// What the PostgreSQL change feed reports for a pruned row. See
-/// [`SQLITE_CHANGE_FEED_DELETED_COLUMNS`].
-pub const PG_CHANGE_FEED_DELETED_COLUMNS: &str = "pruned_change_seq,
-                    'deleted' AS kind,
-                    json_build_object(
-                        'process_id', process_id,
-                        'terminal_label', terminal_label,
-                        'pruned_at_ms', pruned_at_ms,
-                        'pruned_change_seq', pruned_change_seq
-                    )::TEXT AS payload";
 
 crate::statements! {
     /// `process_tombstones` statements both backends issue verbatim.

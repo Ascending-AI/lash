@@ -25,9 +25,6 @@
 //! range — no [`SchemaCheck`] relaxes it (FIG-3797).
 //! [`PostgresStorage::verify_schema_for`] exposes the same check against a bare
 //! pool so a host can gate its own migration CI on it. See ADR 0052.
-//! [`PostgresStorage::inspect_required_constraints_for`] separately inspects the
-//! registered named `CHECK` definitions and validation/enforcement state. It is
-//! explicit and read-only; normal startup does not run it.
 //!
 //! Do not run schema migrations concurrently with an open or a verification:
 //! lash's advisory lock serializes only the participants that take it.
@@ -1142,40 +1139,6 @@ impl PostgresStorage {
         verify_schema_shape(connection).await
     }
 
-    /// Inspect the registered named `CHECK` constraints against a pool.
-    ///
-    /// This explicit diagnostic is separate from normal startup. It takes the
-    /// published advisory lock in shared mode, then reads one post-lock
-    /// `REPEATABLE READ` snapshot. It performs no DDL or repair. An empty report
-    /// covers only registered checks; it does not establish component-version
-    /// compatibility, openability, every database constraint, or row integrity.
-    ///
-    /// ```no_run
-    /// # async fn inspect(pool: sqlx::PgPool) -> Result<(), lash_core_execution::StoreError> {
-    /// let report = lash_postgres_store::PostgresStorage::inspect_required_constraints_for(
-    ///     &pool,
-    /// ).await?;
-    /// assert!(report.is_conformant(), "{report:?}");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn inspect_required_constraints_for(
-        pool: &PgPool,
-    ) -> Result<RequiredConstraintReport, StoreError> {
-        required_constraints::inspect_required_constraints_under_advisory_lock(pool).await
-    }
-
-    /// Inspect registered named `CHECK`s on a caller-owned connection.
-    ///
-    /// This form takes no lock and starts no transaction. A migration tool that
-    /// needs one stable view must hold the published advisory key and pass a
-    /// `REPEATABLE READ` transaction, as for [`Self::verify_schema_on`].
-    pub async fn inspect_required_constraints_on(
-        connection: &mut sqlx::PgConnection,
-    ) -> Result<RequiredConstraintReport, StoreError> {
-        required_constraints::inspect_required_constraints(connection).await
-    }
-
     /// The advisory-lock key lash holds while provisioning, opening, or verifying
     /// the schema, as `(namespace, key)` arguments to the `pg_advisory_lock` family.
     ///
@@ -1500,8 +1463,6 @@ mod recovery_leader;
 mod release_stamp;
 #[cfg(test)]
 mod rendered_statement_sets_tests;
-#[path = "postgres/required_constraints.rs"]
-mod required_constraints;
 #[path = "postgres/root_verbs.rs"]
 mod root_verbs;
 #[path = "postgres/runtime_persistence/mod.rs"]
@@ -1547,9 +1508,6 @@ mod turn_ingress;
 mod turn_input_settlement;
 
 pub use backend::PostgresStoreSet;
-pub use lash_core_execution::store_backend_support::required_constraints::{
-    RequiredConstraintFinding, RequiredConstraintReport,
-};
 pub use migrate::{MigrationPhase, MigrationReport, MigrationStep};
 pub use preflight::PostgresStorePreflight;
 pub use process_definitions::PostgresProcessDefinitionRegistry;

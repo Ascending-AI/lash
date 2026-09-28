@@ -9,10 +9,6 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "control_intents";
 
-/// An obligation's standing: its state and the claims taken since it was
-/// armed, which name the attempt a delivery is under (ADR 0109).
-pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
-
 /// Every column a row decoder reads, in the order both backends index.
 pub const ROW_COLUMNS: &str = "intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id";
 
@@ -92,10 +88,6 @@ crate::statements! {
 /// The obligation columns a claim reads back (ADR 0109 §1.3): the id, the
 /// attempt count after the claim, then the row's key.
 pub const OBLIGATION_CLAIM_COLUMNS: &str = "obligation_id, obligation_attempts, intent_id";
-
-/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
-/// with the stall's reason, last error and instant before the key.
-pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, intent_id";
 
 crate::statements! {
     /// `control_intents` obligation statements (ADR 0109): an intent owes its engine half and its follow-on drive. Both backends issue

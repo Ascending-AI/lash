@@ -552,27 +552,6 @@
     "peak_bytes": 17166336,
     "samples": 3
   },
-  "//crates/lash-sim:process_lifecycle_vocabulary__test": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.83,
-    "peak_bytes": 18579456,
-    "samples": 3
-  },
-  "//crates/lash-sim:retention_classification__test": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 18423808,
-    "samples": 3
-  },
-  "//crates/lash-sim:schema_congruence__test": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 17633280,
-    "samples": 3
-  },
   "//crates/lash-sim:signal_replay_key_constructor__test": {
     "cpu_count": 1,
     "memory_kb": 1048576,

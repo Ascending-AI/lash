@@ -34,8 +34,7 @@ Lash owns two effect engines and delegates to a third:
   queued-work claims, and `SessionExecutionLeaseStore`. The engine share is
   about 13.8k code lines in `lash-sqlite-store` and 12.2k in
   `lash-postgres-store`. The decisions are shared (`decide_*` and `plan_*`), but
-  every transaction around them is written twice: 45 mirrored modules and 293
-  dialect-only statements, 68 of them lock or clock forks.
+  every transaction around them is written twice across 45 mirrored modules.
 - **The native effect host**, which FIG-3585 deleted under ADR 0102.
 - **Restate**, through `lash-restate`. It implements `Backend`, `EffectHost` and
   `RuntimeEffectController` over the Restate SDK and forwards every other port

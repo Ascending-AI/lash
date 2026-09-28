@@ -10,9 +10,6 @@ pub const TABLE: &str = "node_anchors";
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str = "node_id, checkpoint_ref, source_session_id";
 
-/// What a pin lookup reads back: the anchor minus the node id it was keyed by.
-pub const ANCHOR_COLUMNS: &str = "checkpoint_ref, source_session_id";
-
 /// The anchor half of the retained-checkpoint union, which ranks an explicit
 /// anchor ahead of a session head that happens to point at the same node.
 ///
@@ -26,12 +23,6 @@ pub const RETAINED_PRIORITY_COLUMNS: &str = "source_session_id, checkpoint_ref, 
 /// point and whether it is pinned.
 pub const FORK_POINT_COLUMNS_SQLITE: &str =
     "node_id, checkpoint_ref, source_session_id, 1 AS pinned, 0 AS priority";
-
-/// The PostgreSQL spelling of [`FORK_POINT_COLUMNS_SQLITE`]: the same
-/// projection with a boolean literal, which PostgreSQL's `pinned` column is
-/// and SQLite's integer one is not.
-pub const FORK_POINT_COLUMNS_POSTGRES: &str =
-    "node_id, checkpoint_ref, source_session_id, TRUE AS pinned, 0 AS priority";
 
 crate::statements! {
     /// `node_anchors` statements both backends issue verbatim.

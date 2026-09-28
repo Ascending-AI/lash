@@ -13,10 +13,3 @@ pub const TABLE: &str = "fleet_format";
 
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str = "singleton, format_version";
-
-/// The row as a reader consults it.
-///
-/// The full row minus `singleton`: the flag is the primary key of a one-row
-/// table, so it is always the same value and carries no information a reader
-/// could use.
-pub const FORMAT_COLUMNS: &str = "format_version";

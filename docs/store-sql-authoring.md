@@ -1,16 +1,14 @@
 # Writing a table module for the SQL stores
 
-How to add a table to the single-owner layout, and how to add a dialect-only
+How to add a table to the single-owner layout, and how to add a backend-only
 statement to one that is already there. The reasoning behind the layout is
 [ADR 0098](adr/0098-one-owner-per-sql-table-across-both-stores.md); this is the
 procedure.
 
-Every table family is converted (FIG-3387), so `scripts/check-store-sql-ownership.py`
-is **total**: it reads both store crates whole, and there is no list of families
-it is silent about. Practically, that means a new statement cannot be written at
-a call site at all. It is declared in a `statements!` block in a listed owner
-module, or — if it names no table — in that backend's connection module, and
-anything else is a refusal naming the file and line.
+Every table family is converted (FIG-3387). Practically, that means a new
+statement is not written at a call site: it is declared in a `statements!`
+block in the family's owner module, or — if it names no table — in that
+backend's connection module.
 
 The worked example is the attachment family (FIG-3380):
 
@@ -33,8 +31,8 @@ Then diff the two backends statement by statement and sort each one into:
 * **identical after rendering** — placeholders, table prefix and schema
   qualifier are the only differences. This is shared.
 * **anything else** — a `FOR UPDATE`, an `ON CONFLICT`, a server-clock
-  expression, a boolean literal, a `RETURNING`. This is two dialect-only
-  statements with a manifest entry each.
+  expression, a boolean literal, a `RETURNING`. This is two backend-only
+  statements.
 
 Do not close a gap to make a statement shareable. Adding `ON CONFLICT DO
 NOTHING` to a backend that does not need it turns a constraint error into a
@@ -146,9 +144,7 @@ expression.
 Some predicates are neither dialect nor prose. `status IN ('running',
 'waiting')` is the *live process* partition, generated from `ProcessStatus` by
 `lash_core_execution::store_backend_support` so that adding a variant is one edit rather
-than seventy-nine (FIG-2815, FIG-2844). A statement may not retype it — the
-`process_lifecycle_vocabulary` gate in `lash-sim` refuses that, and so does this
-layout's own gate for a column a family declares vocabulary-valued.
+than seventy-nine (FIG-2815, FIG-2844). A statement may not retype it.
 
 So a neutral statement **names** the predicate, as a token:
 
@@ -203,20 +199,11 @@ Two rules about what this is **not**:
 * **It is not a template mechanism for dialect forks.** A token names domain
   vocabulary that both backends spell identically and that is generated from
   one source. A statement whose text forks between backends is still two
-  statements, two owners and a manifest entry each. ADR 0098 rejects
+  statements, two owners. ADR 0098 rejects
   templating at fork points, and this does not reopen it.
 * **It does not give the vocabulary a second source.** `lash-store-sql` has no
   `lash-core` dependency and no copy of any label. It holds the token; the
   enum still holds the words.
-
-Declare the vocabulary-valued columns in the family's manifest block, and the
-gate refuses a statement that spells the vocabulary instead of naming it:
-
-```toml
-[families.process.vocabulary_columns]
-processes = ["status"]
-process_wake_deliveries = ["state"]
-```
 
 **Partial indexes are why byte identity matters.** `idx_processes_non_terminal`
 is `ON processes(process_id) WHERE status IN ('running', 'waiting')`, and a
@@ -228,7 +215,7 @@ also pins that a real non-terminal page statement renders to the bytes its `form
 site produces today. Any family whose statements pin a partial index adds its
 indexes to those tests.
 
-## 4. Write each backend's dialect-only set
+## 4. Write each backend's backend-only set
 
 Same macro, same family prefix, in the backend's table module:
 
@@ -252,9 +239,8 @@ lash_store_sql::statements! {
 ```
 
 The family prefix is **the same** on both sides on purpose: the shared and
-dialect-only names share one namespace, so a per-backend copy of a shared
-statement's name is a collision the gate reports as shadowing rather than a
-quiet override.
+backend-only names share one namespace, so a per-backend copy of a shared
+statement's name is a collision, not a quiet override.
 
 ## 5. Render once, at startup
 
@@ -372,156 +358,11 @@ Two shapes worth knowing, both visible in the attachment family:
   them. The probe and the write that consults it already ran inside the
   caller's transaction, so the isolation is unchanged.
 
-## 7. Manifest every fork
-
-One `[[dialect_only]]` entry per dialect-only statement in
-`crates/lash-store-sql/dialect-only.toml`:
-
-```toml
-[[dialect_only]]
-statement = "queued_work_batch.insert_new"
-backends = ["sqlite", "postgres"]
-kind = "RETURNING; parameter order"
-reason = """
-Both stores bind the shared session allocation explicitly. PostgreSQL
-returns the inserted batch id; SQLite uses the affected-row count and reads
-the batch back. Their insert call sites bind the allocation in different slots.
-"""
-```
-
-`backends` must match the declarations exactly. A statement declared in one
-backend only carries `backends = ["sqlite"]` and a reason that says why the
-other backend has no such operation — that entry *is* how "exists in one backend
-only" gets named.
-
-`kind` is the short tag; `reason` is the prose. Both are required. The tag is
-what makes the manifest countable — the per-reason census in ADR 0098 is summed
-from it — so reuse an existing tag where one fits rather than inventing a synonym.
-
-A new family gets a `[families.<name>]` block: its tables, its statement
-prefixes, its shared, sqlite and postgres owner modules, its schema artifacts, a
-`table_modules` map, and `vocabulary_columns` if any of its columns carry domain
-vocabulary. A family is checked because it is declared there; there is no second
-list to add it to.
-
-### Adding a dialect-only statement to a family that is already there
-
-Four edits, and the gate names each one you forget:
-
-1. Declare it in that backend's owner module for the family, in a `statements!`
-   block whose `@ "prefix"` is one of the family's statement prefixes. The
-   neutral text uses `?N` even on PostgreSQL; the renderer rewrites it.
-2. Add the field to the backend's rendered `…Sql` struct and its `render`
-   constructor, so it is rendered once at startup rather than per call.
-3. Add a `[[dialect_only]]` entry with `backends`, `kind` and `reason`.
-   `backends` must match the declarations exactly — a statement only PostgreSQL
-   has carries `backends = ["postgres"]`, and that entry *is* how "exists in one
-   backend only" gets named.
-4. Call it. A declared statement that nothing issues is refused: a statement set
-   holds what the store sends, not what it might send.
-
-If the statement projects two or more columns of the table, the projection must
-already be one of the table module's column-list constants, or become one.
-
-### Statements that name no table
-
-Pragmas, `ATTACH`, advisory locks, isolation levels, the server clock and
-catalog probes are SQL the table rules cannot see: they name no relation. They
-have one home per backend, listed in the manifest:
-
-```toml
-[[connection]]
-path = "crates/lash-postgres-store/src/postgres/connection_sql.rs"
-reason = """
-PostgreSQL's connection-scoped SQL: the advisory-lock shapes, the isolation
-levels, the two `set_config` timeouts, the two clock reads and the `CHECK`
-constraint catalog probe.
-"""
-```
-
-Two rules hold that list to being a home rather than an exemption. A literal
-there that is SQL over an owned table is refused — that statement belongs to
-the table's family. And two literals with the same text in one store crate are
-refused, which is the duplicate rule applied to the SQL the duplicate rule
-cannot otherwise reach: before FIG-3387, `SELECT
-pg_advisory_xact_lock(hashtextextended($1, 0))` existed six times verbatim
-across six modules.
-
-PostgreSQL's connection module is mostly a `statements!` set, so each one is
-named for tracing and rendered once. SQLite's is plain constants, because a
-pragma takes no bound parameter and no table name and there is nothing for the
-renderer to rewrite.
-
-Two shapes cannot be declared statements. The first is **a probe that reads a
-system catalog in a table position.** `FROM pg_catalog.pg_constraint`
-and `FROM sqlite_schema` name relations `lash-store-sql` does not own, and the
-renderer refuses those — correctly, since a system catalog must never acquire
-the `lash_` prefix. Such a probe is a plain constant in the connection module
-and spells its own placeholders. The refusal is a `LazyLock` panic at first
-use, so it is a startup failure rather than a bad query — and
-`rendered_statement_sets_tests.rs` in each store crate forces every set so that
-failure lands in the ordinary unit test rather than only in a service-backed
-suite PR CI does not run.
-
-The second is **a table whose name is also a column of another table.** The
-renderer rewrites a table name wherever the token appears, not only in a table
-position, so registering `schema_versions` would rewrite
-`lash_release_stamp.schema_versions` too and every PostgreSQL open would fail.
-That table stays with its schema artifacts, which the gate already lists.
-Check a new table's name against the schemas' column names before adding it to
-`TABLES`; there is exactly one such collision today and it is this one.
-
-What does **not** belong there: anything that reaches a row lash stores. The
-`lash_release_stamp` privilege probe reads a table, so it is a `release_stamp`
-statement in the session-core family even though `has_table_privilege` takes
-the relation as text — which is the one place the `lash_` prefix is spelled
-rather than rendered, named as such in its manifest reason.
-
-### Statements that span families
-
-Some statements are genuinely over more than one family: the attachment GC
-probe asks about attachment rows, deleted sessions and committed turns in one
-breath, and PostgreSQL's session delete is one CTE over twelve tables across
-three families. Splitting them is not an option — the parts would race — so
-the rule is ownership, not containment. **One owner module, one declaration,
-and the other families' tables written down:**
-
-```toml
-[[cross_family]]
-statement = "attachment_manifest.select_live_root_proving_process_death"
-owner = "crates/lash-store-sql/src/attachment/manifest.rs"
-touches = ["deleted_sessions", "processes", "runtime_turn_commits"]
-reason = """
-An attachment owned by a process outlives its owner only until the owner's row
-is gone, and "is the owner still there?" is the same question as "may this
-root be reclaimed?". Asking it separately would read the process row outside
-the transaction that decides the attachment's fate, so the attachment family
-owns the whole predicate and reads the process family's table inside it.
-"""
-```
-
-`touches` is exactly the set of owned tables outside the owner's family
-that the statement is SQL over — the gate computes that set and compares, so
-an entry cannot drift from the statement. A statement that reaches another
-family with no entry is refused, and so is an entry for a statement that
-reaches nothing. When your family converts, a statement of *another* family
-that already reads your tables will appear here: that is where to look for it,
-rather than in your own modules.
-
-An `exempt` entry is not an alternative. It is for sources that are not
-production runtime SQL at all — the deterministic-simulation reset, the
-out-of-runtime runbook harness (`runbooks/restate-postgres-workers/`, a
-subtree exemption: a path ending in `/`), and the three `testing`-feature
-modules no production build compiles — and no production runtime statement may
-be parked there.
-
-## 8. Prove it
+## 7. Prove it
 
 ```
 kiln test //crates/lash-sqlite-store:all
 kiln test //crates/lash-postgres-store:lash-postgres-store__unit_test
-python3 scripts/check-store-sql-ownership.py
-python3 scripts/test_check_store_sql_ownership.py
 bash scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
 ```
 
@@ -538,8 +379,3 @@ ask for, and asking for one fails with `unknown store suite`.
 The conformance and cross-backend suites are the oracle for "no behaviour
 changed", and they pass **unedited**. If a suite needs a change to go green, the
 change is the finding.
-
-The gate's own suite seeds each violation it claims to catch and asserts the
-refusal, against a copy of the real tree rather than a fixture. Any rule you add
-to the gate gets the same treatment: a gate observed only passing proves
-nothing.

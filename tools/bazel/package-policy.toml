@@ -356,13 +356,6 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["signal_replay_key_constructor"]
 compile_data = ["//:workspace_rust_sources"]
 
-# The gate scans lash-core's sources as well as the two store packages'.
-[[rule]]
-packages = ["lash-sim"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["process_lifecycle_vocabulary"]
-compile_data = ["//crates/lash-core:rust_sources"]
-
 # The workbench unit test shells out to Node for its browser-projection case.
 # Its interpreter is a pinned Bazel input, including on feature-lane variants.
 [[rule]]

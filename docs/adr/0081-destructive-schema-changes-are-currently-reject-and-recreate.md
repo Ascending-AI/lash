@@ -43,16 +43,6 @@ constraint, and expression, and the gate fails when the published DDL omits it.
 The registry is independent of ADR 0052's generated Postgres schema fingerprint;
 that fingerprint's scope is unchanged.
 
-Amended 2026-09-11 (FIG-2837): the shared registry is now runtime-reachable as
-well as CI-reachable. PostgreSQL exposes explicit read-only inspection through
-`PostgresStorage::inspect_required_constraints_for` and
-`inspect_required_constraints_on`; SQLite exposes
-`inspect_required_constraints_at(path, SqliteDatabase)`. A report covers only
-the registered named checks in the inspected snapshot and is not a schema-
-version, openability, complete-integrity, or row-validation claim. Unsupported
-comparison grammar is a typed inconclusive error. These calls remain outside
-ordinary startup and never apply DDL or repair data.
-
 ## The store records which release wrote it
 
 A reject-and-recreate boundary is only actionable if the operator can tell which
@@ -81,9 +71,6 @@ left to work backwards from two integers.
 - Creation-only migrations and their machinery stay in place as the supported
   evolutionary seam; they are not generalized into destructive migrations by
   this decision.
-- New durable `CHECK` constraints must be added to the appropriate dialect
-  registry as well as both DDL artifacts. The registry supplements rather than
-  expands the ADR 0052 fingerprint.
 - The pending-turn-input claim id and claim token are an all-or-none pair in
   both SQL schemas. PostgreSQL component 86 and SQLite durable-core version 57
   are reject-and-recreate boundaries for that new guard; neither backend adds a

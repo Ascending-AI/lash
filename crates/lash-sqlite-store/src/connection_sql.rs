@@ -7,7 +7,7 @@
 //! at seven call sites and two of them — `ATTACH DATABASE ?1 AS
 //! process_registry` — were the same text written twice.
 //!
-//! This module is their named home. The ownership gate lists it and holds it
+//! This module is their named home, held
 //! to two rules: nothing here may name a table a family owns (that statement
 //! belongs to that family), and no two of these literals may be the same text.
 //!
@@ -87,12 +87,6 @@ pub(crate) const SELECT_RELEASE_STAMP_TABLE_EXISTS: &str =
 /// has opened it.
 pub(crate) const SELECT_FLEET_FORMAT_TABLE_EXISTS: &str =
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'fleet_format'";
-
-/// Every table's declared DDL, which the constraint inspector parses its named
-/// `CHECK`s out of. SQLite has no `pg_constraint`; the text is the catalog.
-pub(crate) const SELECT_TABLE_DDL: &str = "SELECT name, sql
-     FROM sqlite_schema
-     WHERE type = 'table' AND sql IS NOT NULL";
 
 /// The database clock, in epoch milliseconds: what the recovery leader lease
 /// compares against (ADR 0109 §1.6), so hosts with skewed clocks agree on a

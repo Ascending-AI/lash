@@ -482,7 +482,6 @@ jobs:
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_restate_suite.py
           python3 scripts/test_check_facade_only_examples.py
-          python3 scripts/test_check_store_sql_ownership.py
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_writer_stamps.py
@@ -1424,12 +1423,6 @@ jobs:
         env:
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
         run: bash scripts/ci/lint-contracts.sh
-
-      # One owner per table across both SQL stores (FIG-3380): no stray
-      # statement, no duplicate, no shadowed shared statement, and every
-      # dialect-only operation named in the manifest with a reason.
-      - name: Check store SQL ownership
-        run: python3 scripts/check-store-sql-ownership.py
 
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh

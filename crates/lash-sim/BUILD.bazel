@@ -225,67 +225,6 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "process_lifecycle_vocabulary__test",
-    crate_features = [],
-    crate_name = "process_lifecycle_vocabulary",
-    crate_root = "tests/process_lifecycle_vocabulary.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-sim", "process_lifecycle_vocabulary", "//crates/lash-sim:process_lifecycle_vocabulary__test"),
-    extra_compile_data = [
-        "//crates/lash-postgres-store:package_files",
-        "//crates/lash-sqlite-store:package_files",
-        "//crates/lash-core:rust_sources",
-    ],
-    library = ":lash-sim",
-    library_crate_name = "lash_sim",
-    manifest_dir = "crates/lash-sim",
-    package_name = "lash-sim",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
-    name = "retention_classification__test",
-    crate_features = [],
-    crate_name = "retention_classification",
-    crate_root = "tests/retention_classification.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-sim", "retention_classification", "//crates/lash-sim:retention_classification__test"),
-    extra_compile_data = [
-        "//crates/lash-postgres-store:package_files",
-        "//crates/lash-sqlite-store:package_files",
-    ],
-    library = ":lash-sim",
-    library_crate_name = "lash_sim",
-    manifest_dir = "crates/lash-sim",
-    package_name = "lash-sim",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
-    name = "schema_congruence__test",
-    crate_features = [],
-    crate_name = "schema_congruence",
-    crate_root = "tests/schema_congruence.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-sim", "schema_congruence", "//crates/lash-sim:schema_congruence__test"),
-    extra_compile_data = [
-        "//crates/lash-postgres-store:package_files",
-        "//crates/lash-sqlite-store:package_files",
-    ],
-    library = ":lash-sim",
-    library_crate_name = "lash_sim",
-    manifest_dir = "crates/lash-sim",
-    package_name = "lash-sim",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
     name = "session_delete_bounds__test",
     crate_features = [],
     crate_name = "session_delete_bounds",
@@ -359,9 +298,6 @@ lash_batch_test(
         ":logical_turn__test",
         ":parent_end_detection_bounds__test",
         ":possession_conservation__test",
-        ":process_lifecycle_vocabulary__test",
-        ":retention_classification__test",
-        ":schema_congruence__test",
         ":session_delete_bounds__test",
         ":signal_replay_key_constructor__test",
     ],

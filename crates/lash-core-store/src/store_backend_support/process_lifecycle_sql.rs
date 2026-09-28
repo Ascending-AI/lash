@@ -11,10 +11,6 @@
 //! ([`ProcessStatus::is_live`](crate::ProcessStatus::is_live),
 //! [`ProcessStatus::is_retired`](crate::ProcessStatus::is_retired)) cannot
 //! drift.
-//!
-//! Schema `CHECK` vocabularies are deliberately *not* generated here: they are
-//! the durable constraint surface owned by
-//! [`required_constraints`](super::required_constraints) and FIG-2811.
 
 use crate::{ProcessStatus, WakeDeliveryState};
 

@@ -15,8 +15,8 @@
 //! because a fixture re-spelling the surrounding format drifts exactly the same
 //! way the eight did.
 //!
-//! Shape: a source-scanning lint test with a documented exemption inventory,
-//! modelled on `process_lifecycle_vocabulary.rs` (FIG-2844). It needs no CI
+//! Shape: a source-scanning lint test with a documented exemption inventory.
+//! It needs no CI
 //! wiring because it runs with the workspace suite. It scans the whole
 //! repository, not just `crates/`, because the runbook binary is exactly the
 //! copy that could escape the workspace unnoticed.

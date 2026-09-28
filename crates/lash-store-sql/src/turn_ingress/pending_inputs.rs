@@ -3,10 +3,6 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "pending_turn_inputs";
 
-/// An obligation's standing: its state and the claims taken since it was
-/// armed, which name the attempt a delivery is under (ADR 0109).
-pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
-
 /// Every column a reader decodes, in the order the row decoders expect.
 ///
 /// Before FIG-3383 this list was hand-spelled at ten call sites across the two
@@ -29,15 +25,6 @@ pub const INSERT_COLUMNS: &str =
 /// unbounded `input_json`; the full row is read back only on a match.
 pub const REPLAY_COLUMNS: &str = "input_id, submission_digest";
 
-/// The facts provisioned-id adoption consults (FIG-3513).
-///
-/// Narrow for the same reason [`REPLAY_COLUMNS`] is: whether a re-run of one
-/// acceptance adopts the row its id already names, or refuses a foreign one,
-/// depends only on the holder's session and admission-time digest, so deciding
-/// it never decodes the unbounded `input_json`; the full row is read back only
-/// on a match.
-pub const ADOPTION_COLUMNS: &str = "session_id, submission_digest";
-
 /// The facts the settlement verdict
 /// [`require_settleable_turn_input`](lash_core::store_backend_support::require_settleable_turn_input)
 /// consults, and nothing else.
@@ -47,27 +34,6 @@ pub const ADOPTION_COLUMNS: &str = "session_id, submission_digest";
 /// part of the settlement decision looks at. Decoding them here would put the
 /// size of a user's submission on the commit path.
 pub const SETTLEMENT_COLUMNS: &str = "claim_id, claim_token, claim_session_lease_generation, state";
-
-/// The facts an orphaned-active-turn scan consults.
-///
-/// Narrow for the same reason [`SETTLEMENT_COLUMNS`] is: the scan asks
-/// [`orphaned_active_turn_input_is_repairable`](lash_core::store_backend_support::orphaned_active_turn_input_is_repairable)
-/// about every active-turn row of the session and reports only the turn ids, so
-/// it never needs the unbounded `input_json`. The repair that follows does, and
-/// reads [`COLUMNS`].
-pub const ORPHAN_SCAN_COLUMNS: &str = "state, ingress_json, claim_token,
-     claim_session_lease_generation";
-
-/// The facts the steering admission check consults about the input an
-/// addressed turn was started by (FIG-3838): whether it is still undelivered,
-/// and the spec it runs under.
-pub const RUN_SPEC_COLUMNS: &str = "state, run_spec_hash";
-
-/// The ordering key the pending-work comparison reads.
-///
-/// Narrow because the comparison is only ever between this pair and the queued
-/// batches' identical pair; nothing decodes a row.
-pub const ORDERING_COLUMNS: &str = "enqueued_at_ms, enqueue_seq";
 
 crate::statements! {
     /// `pending_turn_inputs` statements both backends issue verbatim.
@@ -314,18 +280,6 @@ crate::statements! {
 /// attempt count after the claim, then the row's key.
 pub const OBLIGATION_CLAIM_COLUMNS: &str =
     "obligation_id, obligation_attempts, session_id, input_id";
-
-/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
-/// with the stall's reason, last error and instant before the key.
-pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, session_id, input_id";
-
-/// A due obligation's instant and id, read without claiming it: what the
-/// ingress ledger merges across its two tables before it claims either
-/// (ADR 0109 §3).
-///
-/// Narrow because the merge only orders by due instant and names which table
-/// to claim from; the claim itself reads [`OBLIGATION_CLAIM_COLUMNS`].
-pub const OBLIGATION_DUE_COLUMNS: &str = "obligation_due_at_ms, obligation_id";
 
 crate::statements! {
     /// `pending_turn_inputs` obligation statements (ADR 0109): an admitted

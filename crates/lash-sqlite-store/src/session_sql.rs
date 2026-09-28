@@ -4,7 +4,7 @@
 //! tables, `session_head`, `graph_nodes`, `node_anchors`, `fork_lineage`,
 //! `runtime_turn_commits`, `deleted_sessions`, `usage_deltas`,
 //! `release_stamp` and `checkpoint_blob_refs` is either one of
-//! `lash_store_sql::session`'s shared statements or one of the dialect-only
+//! `lash_store_sql::session`'s shared statements or one of the backend-only
 //! statements declared here. No other module in this crate spells one.
 //!
 //! **Why so much of this family forks.** Three reasons, and none of them is
@@ -16,7 +16,7 @@
 //!   every read carrying the reachability predicate is two statements.
 //! * The durable head is spelled `session_head` here and `sessions` there, a
 //!   name both backends have frozen. That makes *every* head statement
-//!   dialect-only by construction.
+//!   backend-specific by construction.
 //! * SQLite binds a variable-length list through `json_each` where PostgreSQL
 //!   uses `unnest` or `= ANY(...)`, and writes through `INSERT OR IGNORE` /
 //!   `INSERT OR REPLACE` where PostgreSQL writes `ON CONFLICT`.

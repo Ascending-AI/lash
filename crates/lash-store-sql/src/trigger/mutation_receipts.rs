@@ -9,14 +9,6 @@ pub const TABLE: &str = "trigger_mutation_receipts";
 pub const INSERT_COLUMNS: &str = "operation_id, owner_kind, owner_id,
                 request_fingerprint, result_json, created_at_ms";
 
-/// What a replayed operation reads back: the fingerprint that says whether
-/// this is the same request, and the result it is owed if it is.
-///
-/// Narrow because the receipt is keyed by the operation id the caller already
-/// holds, and because the two owner columns exist for retention — they are
-/// read by no operation, only deleted by one.
-pub const RECEIPT_COLUMNS: &str = "request_fingerprint, result_json";
-
 crate::statements! {
     /// `trigger_mutation_receipts` statements both backends issue verbatim.
     pub struct MutationReceiptStatements @ "trigger_mutation_receipt" {

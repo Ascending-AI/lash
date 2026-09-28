@@ -13,10 +13,6 @@ pub const INSERT_COLUMNS: &str = "batch_id, item_index, item_id, payload_json";
 /// re-derive an order the `ORDER BY` already fixed.
 pub const ITEM_COLUMNS: &str = "item_id, payload_json";
 
-/// [`ITEM_COLUMNS`] keyed by batch, for the multi-batch hydration that reads
-/// one page of items for a whole claim rather than one query per batch.
-pub const KEYED_ITEM_COLUMNS: &str = "batch_id, item_id, payload_json";
-
 crate::statements! {
     /// `queued_work_items` statements both backends issue verbatim.
     pub struct QueuedItemStatements @ "queued_work_item" {

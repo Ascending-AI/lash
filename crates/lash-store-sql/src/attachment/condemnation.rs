@@ -10,34 +10,6 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "attachment_condemnations";
 
-/// Every column, in the order the table declares them.
-pub const ALL_COLUMNS: &str = "attachment_id, phase, write_token, write_session_id";
-
-/// What condemning a digest writes.
-///
-/// Narrow because the other two columns are a writer's claim, and
-/// `ck_attachment_condemnations_write_token_pairing` refuses a half-filled
-/// one: a fresh condemnation is sweep-owned by construction, and naming the
-/// token columns here would invite an insert that claims on the sweeper's
-/// behalf.
-pub const CONDEMN_COLUMNS: &str = "attachment_id, phase";
-
-/// The restoring writer's claim on a condemned digest.
-///
-/// The two columns are read together because either both are set or neither
-/// is; quiescent recovery needs the session to locate the writer's manifest
-/// row, and the token to match its own conditional writes.
-pub const CLAIM_COLUMNS: &str = "write_token, write_session_id";
-
-/// What the writer half of the fence decides on: the phase, and whether the
-/// row is already claimed.
-///
-/// `write_session_id` is deliberately absent. The writer compares presence,
-/// never identity — it is deciding whether *somebody* holds the claim, and a
-/// projection carrying the session would invite a comparison the fence does
-/// not make.
-pub const PHASE_CLAIM_COLUMNS: &str = "phase, write_token";
-
 crate::statements! {
     /// `attachment_condemnations` statements both backends issue verbatim.
     pub struct CondemnationStatements @ "attachment_condemnation" {

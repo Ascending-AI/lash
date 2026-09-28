@@ -11,9 +11,8 @@
 //!   the renderer refuses a statement naming anything else, so a typo is a
 //!   startup failure rather than a query that runs against the wrong relation.
 //! * one column-list constant per **named projection**, and no other column
-//!   list anywhere. `scripts/check-store-sql-ownership.py` refuses a projection
-//!   of two or more columns that is not one of them, which is what stops the
-//!   per-call-site column subsets this crate exists to delete.
+//!   list anywhere, which is what stops the per-call-site column subsets this
+//!   crate exists to delete.
 //!   When the row is already a port type of the shared driver that consumes it,
 //!   the table module names the column list and the port type stays where the
 //!   driver defines it: one owner per fact, not two.
@@ -73,11 +72,6 @@
 //! 2. Add `TABLE` to [`TABLES`].
 //! 3. In each backend, declare a `statements!` block for the statements that
 //!    fork, and render both sets once into a `LazyLock`.
-//! 4. Add one `[[dialect_only]]` entry per forked statement to
-//!    `crates/lash-store-sql/dialect-only.toml`, with a reason, and list the
-//!    module under its family there. The ownership gate is total over both
-//!    store crates: a statement in a module it does not know is a refusal,
-//!    not a statement it is silent about.
 //!
 //! `docs/store-sql-authoring.md` is the long form.
 
@@ -325,7 +319,7 @@ impl Rendered {
 }
 
 /// Every statement is a single string literal in neutral form, so the set is
-/// readable as SQL and parseable by the ownership gate. The generated type has
+/// readable as SQL. The generated type has
 /// one [`Rendered`] field per statement, a `NEUTRAL` inventory, and a `render`
 /// constructor a backend calls exactly once.
 ///

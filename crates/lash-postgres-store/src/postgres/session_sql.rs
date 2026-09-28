@@ -4,7 +4,7 @@
 //! tables, `sessions`, `graph_nodes`, `node_anchors`, `fork_lineage`,
 //! `runtime_turn_commits`, `deleted_sessions`, `usage_deltas`,
 //! `release_stamp` and `checkpoint_blob_refs` is either one of
-//! `lash_store_sql::session`'s shared statements or one of the dialect-only
+//! `lash_store_sql::session`'s shared statements or one of the backend-only
 //! statements declared here. No other module in this crate spells one.
 //!
 //! What forks and why is the mirror image of

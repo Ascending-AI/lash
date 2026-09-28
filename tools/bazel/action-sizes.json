@@ -832,20 +832,6 @@
     "peak_bytes": 957132800,
     "samples": 328
   },
-  "lash-sim/process_lifecycle_vocabulary": {
-    "cpu_count": 2,
-    "memory_kb": 1572864,
-    "p95_cores": 1.47,
-    "peak_bytes": 598757376,
-    "samples": 299
-  },
-  "lash-sim/schema_congruence": {
-    "cpu_count": 2,
-    "memory_kb": 1572864,
-    "p95_cores": 1.47,
-    "peak_bytes": 646930432,
-    "samples": 321
-  },
   "lash-sim/stack_policy": {
     "cpu_count": 2,
     "memory_kb": 2097152,

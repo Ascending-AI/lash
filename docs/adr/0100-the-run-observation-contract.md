@@ -453,7 +453,7 @@ read fixtures, Restate interruption captures, and the cross-backend store
 differential oracle. Both stores must register the kind and preserve normal
 event sequence allocation.
 
-Additional gates: `crates/lash-sim/tests/schema_congruence.rs`, the SQLite and
+Additional gates: the SQLite and
 PostgreSQL durable-read fixture suites,
 `scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store`,
 `scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh

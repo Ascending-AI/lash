@@ -19,18 +19,6 @@ pub const INSERT_COLUMNS: &str = "delivery_id, process_id, target_session_id, se
 pub const REPORT_COLUMNS: &str = "delivery_id, state, claim_token, attempts, first_attempt_ms,
                     next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json";
 
-/// [`REPORT_COLUMNS`] without the key, for the read that is already keyed by
-/// `delivery_id` and would only be decoding a value it bound.
-pub const KEYED_REPORT_COLUMNS: &str = "state, claim_token, attempts, first_attempt_ms,
-                    next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json";
-
-/// What the preflight walk reports for an undelivered wake.
-///
-/// Narrow on purpose: the walk is an operator report over a whole table, so it
-/// carries the queue position an operator drains by and the payload, and
-/// decodes no attempt bookkeeping.
-pub const WALK_COLUMNS: &str = "delivery_id, process_id, target_session_id, state, delivery_json";
-
 crate::statements! {
     /// `process_wake_deliveries` statements both backends issue verbatim.
     pub struct WakeDeliveryStatements @ "process_wake_delivery" {

@@ -7,14 +7,10 @@
 //!
 //! `status` carries domain vocabulary (`lash_core::ProcessStatus`). A
 //! statement here names a lifecycle partition as a `{{term(column)}}` token
-//! and never spells it; the ownership gate refuses the literal.
+//! and never spells it.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "processes";
-
-/// An obligation's standing: its state and the claims taken since it was
-/// armed, which name the attempt a delivery is under (ADR 0109).
-pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
 
 /// Every column, in insert order. The only statements that name all of them
 /// are the two backends' registration inserts.
@@ -23,46 +19,6 @@ pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
                 last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
                 lifetime, cancel_requested_at_ms, record_json";
 
-/// The parked projection's columns, written by every fold that changes the
-/// park and `NULL` at registration (FIG-3659 NOW-B). A `retired_generation`
-/// park also names its retired executable generation (FIG-3571); a park whose
-/// writer records one names the build generation of the checkpoint it resumes
-/// (FIG-3795).
-pub const PARKED_COLUMNS: &str =
-    "parked_since_ms, parked_reason_code, park_executable_generation, park_build_generation";
-
-/// The grouped read `summarize_parked` answers drain and the parked-work
-/// gauges from: each reason's live park count and its oldest `since_ms`, and
-/// none of the record's payload.
-pub const PARK_SUMMARY_COLUMNS: &str = "parked_reason_code, COUNT(*), MIN(parked_since_ms)";
-
-/// The grouped count `count_retired_parks_by_executable_generation` reads for
-/// drain status (FIG-3571).
-///
-/// Narrow on purpose: the deployment drain wants each retired executable
-/// generation's live process park count and nothing else, so the projection
-/// carries the projected generation column and the aggregate — none of the
-/// record's payload.
-pub const EXECUTABLE_GENERATION_COUNT_COLUMNS: &str = "park_executable_generation, COUNT(*)";
-
-/// The key and the record: what a read reports when the caller needs both the
-/// row's identity and its contents.
-///
-/// Narrow on purpose, and the only two-column projection of this table. A
-/// prune candidate is reported by the key it is pruned by plus the record that
-/// names its artifacts; a `UNION ALL` arm carries the key it is ordered by
-/// beside the record the caller decodes. Neither needs an indexed column it
-/// has already filtered on, because every one of them is in the record.
-pub const KEYED_RECORD_COLUMNS: &str = "process_id, record_json";
-
-/// What the preflight's started-process walk reports per live process
-/// (FIG-3571): the key it pages by, the status and wake session a drain list
-/// names it by, and the record whose start stamp and input the probe compares.
-///
-/// Narrow on purpose: none of the indexed projections the record already
-/// holds, only the key and the two columns a drain list shows beside it.
-pub const PREFLIGHT_STARTED_COLUMNS: &str = "process_id, status, wake_session_id, record_json";
-
 /// What the change feed reports for a live row.
 ///
 /// The feed unions live rows with tombstones, so both arms carry the same
@@ -70,21 +26,6 @@ pub const PREFLIGHT_STARTED_COLUMNS: &str = "process_id, status, wake_session_id
 /// says which arm produced the row, and the payload. The literal `'upsert'` is
 /// the arm's name, not a lifecycle label.
 pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, record_json AS payload";
-
-/// What the unrecorded-opener-parent survey reports per scope: the canonical
-/// parent key, its kind, and one record carrying it.
-///
-/// Narrow on purpose, and dialect-spelled twice because the two backends pick
-/// their representative row differently. `lifetime_scope_id` is the
-/// collision-free projection and is never parsed back; the kind disambiguates
-/// a turn from a queue drain for the caller's confirmation read;
-/// `record_json` is the authority. Every row sharing the key names the same
-/// typed parent, so any child row answers for the group — SQLite picks it
-/// with `MIN`, Postgres with `DISTINCT ON` — and neither needs an indexed
-/// column the WHERE clause has already read.
-pub const UNRECORDED_OPENER_PARENT_COLUMNS_SQLITE: &str =
-    "child.lifetime_scope_id, child.lifetime_scope_kind, MIN(child.record_json)";
-pub const UNRECORDED_OPENER_PARENT_COLUMNS_POSTGRES: &str = "ON (child.lifetime_scope_id) child.lifetime_scope_id, child.lifetime_scope_kind, child.record_json";
 
 crate::statements! {
     /// `processes` statements both backends issue verbatim.
@@ -162,7 +103,7 @@ crate::statements! {
              GROUP BY park_executable_generation";
 
         /// Every live process, whole. The unpaged read behind the in-memory
-        /// registry rebuild; the paged non-terminal scans are dialect-only because
+        /// registry rebuild; the paged non-terminal scans are backend-only because
         /// SQLite pins them to a partial index by name.
         collect_non_terminal_records = "SELECT record_json FROM processes
                          WHERE {{live_process_status(status)}}
@@ -173,16 +114,6 @@ crate::statements! {
 /// The obligation columns a claim reads back (ADR 0109 §1.3): the id, the
 /// attempt count after the claim, then the row's key.
 pub const OBLIGATION_CLAIM_COLUMNS: &str = "obligation_id, obligation_attempts, process_id";
-
-/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
-/// with the stall's reason, last error and instant before the key.
-pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, process_id";
-
-/// A process's terminal publication as the registry reports it (ADR 0109
-/// §3): the obligation's id and state. Narrow on purpose: the reader decides
-/// only whether the publication is still owed, so neither the claim, the
-/// stall nor the record is read.
-pub const OBLIGATION_PUBLICATION_COLUMNS: &str = "obligation_id, obligation_state";
 
 crate::statements! {
     /// `processes` obligation statements (ADR 0109): a terminal process owes its terminal publication. Both backends issue
@@ -301,15 +232,6 @@ impl crate::obligation::ObligationStatementSet for ProcessObligationStatements {
         }
     }
 }
-
-/// A stalled start obligation as an operator lists it: the obligation's id,
-/// attempts, stall reason, last error and settled instant, then the row's key.
-pub const START_OBLIGATION_STALLED_COLUMNS: &str = "start_obligation_id, start_obligation_attempts, start_obligation_stall_reason, start_obligation_last_error, start_obligation_settled_at_ms, process_id";
-
-/// A start obligation's standing as its claim reads it back: the state and
-/// the attempts taken since it was armed.
-pub const START_OBLIGATION_STANDING_COLUMNS: &str =
-    "start_obligation_state, start_obligation_attempts";
 
 crate::statements! {
     /// `processes` start-obligation statements (ADR 0109): a registered process owes its first engine run. Both backends issue

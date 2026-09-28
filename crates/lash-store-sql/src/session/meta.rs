@@ -4,10 +4,6 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_meta";
 
-/// An obligation's standing: its state and the claims taken since it was
-/// armed, which name the attempt a delivery is under (ADR 0109).
-pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
-
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str =
     "session_id, session_state_version, relation_kind, parent_session_id,
@@ -33,15 +29,6 @@ pub const RELATION_COLUMNS: &str = "session_id, relation_kind, parent_session_id
     caused_by_subscription_revision, caused_by_node_id, source_session_id,
     source_node_id";
 
-/// The four lineage columns alone.
-///
-/// Admission reads this inside its own transaction to decide whether a re-bind
-/// agrees with what was recorded, so it must not open a nested one and must
-/// not pay for the observer-intent reads a full metadata
-/// load performs.
-pub const LINEAGE_COLUMNS: &str =
-    "relation_kind, parent_session_id, source_session_id, source_node_id";
-
 /// The SQLite catalog projection: [`RELATION_COLUMNS`] qualified by the
 /// catalog's `meta` alias, with the two catalog timestamps, the joined head
 /// revision and the deleted flag the union's other arm supplies as `1`.
@@ -63,27 +50,6 @@ pub const CATALOG_COLUMNS_SQLITE: &str =
                     meta.created_at_ms,
                     meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted";
 
-/// The PostgreSQL spelling of [`CATALOG_COLUMNS_SQLITE`].
-///
-/// It forks for the same two reasons the catalog statement does: the head
-/// table is spelled `sessions` here (ADR 0098), and `deleted` is a real
-/// boolean rather than SQLite's integer. `created_at_ms` is additionally
-/// `COALESCE`d, because PostgreSQL's column is nullable where SQLite's is not.
-pub const CATALOG_COLUMNS_POSTGRES: &str =
-    "meta.session_id, meta.relation_kind, meta.parent_session_id,
-                    meta.caused_by_kind,
-                    meta.caused_by_session_id, meta.caused_by_turn_id,
-                    meta.caused_by_effect_id, meta.caused_by_call_id,
-                    meta.caused_by_process_id, meta.caused_by_process_event_sequence,
-                    meta.caused_by_occurrence_id, meta.caused_by_subscription_id,
-                    meta.caused_by_subscription_incarnation,
-                    meta.caused_by_subscription_revision, meta.caused_by_node_id,
-                    meta.source_session_id, meta.source_node_id,
-                    COALESCE(meta.created_at_ms, 0) AS created_at_ms,
-                    meta.last_commit_at_ms,
-                    COALESCE(session.head_revision, 0) AS head_revision,
-                    FALSE AS deleted";
-
 /// What a session's permanent deletion evidence is copied from.
 ///
 /// Five metadata columns plus the head revision the session reached, joined
@@ -102,24 +68,6 @@ pub const DELETED_EVIDENCE_COLUMNS_POSTGRES: &str =
     "meta.session_id, meta.created_at_ms, meta.last_commit_at_ms,
                     COALESCE(session.head_revision, 0), meta.relation_kind,
                     meta.parent_session_id";
-
-/// What a process-prune batch copies into the deleted set, per target id.
-///
-/// The same six facts as [`DELETED_EVIDENCE_COLUMNS_POSTGRES`], `COALESCE`d
-/// against the target list rather than against the metadata row: a
-/// process-owned session id may have a head and no metadata row, and the
-/// evidence must still cover it.
-pub const BATCH_DELETED_EVIDENCE_COLUMNS: &str =
-    "target.session_id, COALESCE(meta.created_at_ms, 0),
-                meta.last_commit_at_ms, COALESCE(session.head_revision, 0),
-                COALESCE(meta.relation_kind, 'root'), meta.parent_session_id";
-
-/// A session's drive epoch and the admission that last raised it (ADR 0105
-/// §2, B3): the fence every claim, reclaim and settlement checks. The start
-/// marker of the execution that sealed the admission rides with it (L-S8),
-/// and so does the control intent a closing session closes under.
-pub const DRIVE_EPOCH_COLUMNS: &str =
-    "drive_epoch, drive_admission_id, drive_root_start, closing_intent";
 
 crate::statements! {
     /// `session_meta` statements both backends issue verbatim.
@@ -197,10 +145,6 @@ crate::statements! {
 /// The obligation columns a claim reads back (ADR 0109 §1.3): the id, the
 /// attempt count after the claim, then the row's key.
 pub const OBLIGATION_CLAIM_COLUMNS: &str = "obligation_id, obligation_attempts, session_id";
-
-/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
-/// with the stall's reason, last error and instant before the key.
-pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, session_id";
 
 crate::statements! {
     /// `session_meta` obligation statements (ADR 0109): a closing session owes its physical delete. Both backends issue
@@ -304,10 +248,6 @@ impl crate::obligation::ObligationStatementSet for SessionMetaObligationStatemen
         }
     }
 }
-
-/// A session's `SessionDelete` obligation as its delete reads it back
-/// (ADR 0109 §4): the id and the state.
-pub const DELETE_OBLIGATION_COLUMNS: &str = "obligation_id, obligation_state";
 
 crate::statements! {
     /// `session_meta` reads of a session's two-phase delete (ADR 0109 §4).

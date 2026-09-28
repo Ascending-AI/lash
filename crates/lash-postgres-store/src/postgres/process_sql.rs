@@ -1,9 +1,8 @@
 //! Every process-family statement this store issues, rendered once.
 //!
 //! The shared halves live in `lash_store_sql::process`; the sets below are the
-//! statements only PostgreSQL issues, and each one has a `[[dialect_only]]`
-//! entry in `crates/lash-store-sql/dialect-only.toml` saying why its text
-//! forks. Most of the forks are one of four things: a `FOR UPDATE` or
+//! statements only PostgreSQL issues. Most of the forks are one of four
+//! things: a `FOR UPDATE` or
 //! `FOR SHARE` lock suffix that SQLite does not need under `BEGIN IMMEDIATE`,
 //! an `ON CONFLICT` clause that detects a race SQLite's write lock makes
 //! unreachable, an array parameter where SQLite binds a JSON list, and the

@@ -16,8 +16,6 @@ mod parent_end_registration_race;
 mod process_definitions_registry;
 #[path = "release_stamp.rs"]
 mod release_stamp;
-#[path = "required_constraints.rs"]
-mod required_constraints;
 #[path = "session_read_view.rs"]
 mod session_read_view;
 #[path = "storage_fixes.rs"]

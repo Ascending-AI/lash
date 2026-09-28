@@ -21,7 +21,7 @@ logical ingress; of `session_ingress` only the per-session sequence counter
 
 Amended 2026-09-27 (FIG-3861): the effect journal, wait tables and their
 scope fences are deleted. The effect and wait rendering examples below record
-the historical migration; the ownership gate now covers storage tables only.
+the historical migration; the ownership rules now cover storage tables only.
 
 Amended 2026-09-24 (FIG-3669), **partly implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
@@ -75,7 +75,7 @@ fork.
 
 **Membership is byte-identical after rendering, never "similar".** A statement
 that differs by a `FOR UPDATE`, an `ON CONFLICT`, a server clock or a boolean
-literal is two statements with two owners and a manifest entry each. Nothing is
+literal is two statements with two owners. Nothing is
 templated, concatenated or string-surgeried at a fork point: the one mechanism
 that would let "similar" statements share is exactly the mechanism that lets
 them drift invisibly.
@@ -106,7 +106,7 @@ the same way both backends render it, deterministically and identically — the
 same class as the table prefix — where templating at a fork point exists to
 make *different* texts look shared. The distinction is enforced, not asserted:
 tokens name vocabulary, a text that forks is still two statements with two
-owners and a manifest entry each, and the byte identity the mechanism depends
+owners, and the byte identity the mechanism depends
 on is pinned per backend against the schema's own partial indexes, which a
 planner only uses when the query's predicate matches them character for
 character.
@@ -162,49 +162,7 @@ them, and the registry's copy is reached through a different layout —
 `FenceLocations` already named those two locations and now selects between
 them.
 
-**Every fork is a checked-in declaration.** `crates/lash-store-sql/dialect-only.toml`
-lists each dialect-only statement, the backends that declare it, and why. A
-statement declared in one backend only is the same kind of entry, which is what
-makes "this operation exists on PostgreSQL and nowhere else" a fact somebody
-wrote down rather than one somebody has to notice.
-
-**A statement that spans families has one owner and says so (FIG-3399).** Some
-questions are genuinely over several families — quiescence reads effect rows,
-effect groups and promises in one breath; PostgreSQL's session delete is one
-CTE over twelve tables across three families — and splitting them would open
-the window they exist to close. Such a statement is declared once, in one owner
-module, with a `[[cross_family]]` entry naming the other families' tables it
-reaches and why. The gate computes that set from the statement text and
-compares, so the declaration cannot drift from the query, and a family's
-converters find the other families' statements over their tables in one list
-rather than by grepping.
-
-**A repo gate enforces all of it, over both store crates whole (FIG-3387).**
-There is no list of families it is silent about: a family is checked because it
-is declared. It refuses a production SQL literal over an owned table outside its owner
-modules, a duplicated statement text within one backend, a shared statement
-shadowed by a per-backend copy of its name, a dialect-only statement missing
-from the manifest or listed for a backend that does not declare it, a
-projection of two or more columns that is not one of the column lists its table
-module declares, an undeclared cross-family statement, and a statement that
-spells a lifecycle literal over a column its family declares vocabulary-valued
-— which is how this gate and FIG-2844's come to agree rather than merely not
-collide.
-
-FIG-3387 added the rules that make "total" mean what it says. A production
-string literal anywhere under either store crate that *is* a SQL statement — it
-opens with an upper-case SQL statement keyword — and has no declared home is
-refused, which is what finally reaches the SQL the table rules are structurally
-blind to: a pragma, an `ATTACH`, an advisory lock, an isolation level, a server
-clock read, a catalog probe. Those get one **connection module** per backend,
-listed with a reason, and held to two rules of their own: a literal there that
-reaches an owned table is refused, because that statement belongs to the
-table's family, and two with the same text in one store crate are refused,
-which is the duplicate rule applied where it could not previously see. A
-`[[dialect_only]]` entry must carry a short `kind` beside its prose, because a
-census of the dialect-specific surface has to be summable. And a declared
-statement that nothing issues is refused: a statement set holds what the store
-sends, not what it might send.
+**The layout is a convention held by review and by the renderer's `TABLES` boundary.**
 
 Rendering is checked by a test rather than only at startup.
 `crates/lash-{sqlite,postgres}-store/src/rendered_statement_sets_tests.rs`
@@ -212,13 +170,6 @@ forces every rendered set — and, on SQLite, every layout — so a statement th
 renderer refuses fails the ordinary unit test. Without it the refusal is a
 `LazyLock` panic at the set's first use, and for PostgreSQL that first use is
 inside a service-backed suite per-PR CI does not run.
-
-It reads a literal as SQL over a table only when the table stands in a relation
-position, after `FROM`, `INTO`, `UPDATE`, `JOIN`, `TABLE` or `TRUNCATE`. A
-statement keyword alone matched prose: a conformance test name about merging
-wakes "across processes", the tool name `triggers.update`, the route
-`/api/sessions/select`. Requiring structure is what lets the gate stay total
-for a family without an exemption list of sentences.
 
 **No schema, table name, durable encoding or version constant moves.** The
 `lash_` prefix on PostgreSQL stays and is a render parameter exactly like the
@@ -259,8 +210,7 @@ call sites picking their own columns.
   statements shareable, and it is the mechanism that makes a drift invisible.
   The vocabulary tokens added by FIG-3399 are not a way back in: a term names
   domain vocabulary that renders identically for both backends, never a
-  dialect difference, and the gate refuses a statement that spells the
-  vocabulary rather than naming it.
+  dialect difference.
 
 Also not adopted, and worth naming because it was close: **`lash-store-sql` has
 no dependency on `lash-core`.** It is a leaf that owns SQL text, column lists
@@ -326,54 +276,9 @@ whose name is also a *column* of another table
 wherever the token appears, so registering it prefixes that column too and
 every PostgreSQL open fails with `column "lash_schema_versions" of relation
 "lash_release_stamp" does not exist`. Provisioning owns the stamp; its one read
-is a named constant in `postgres/schema.rs`, which the gate already lists as a
-schema artifact for every family. A future table whose name collides with a
-column of another table has the same two choices — rename one of them, which
+is a named constant in `postgres/schema.rs`. A future table whose name collides
+with a column of another table has the same two choices — rename one of them, which
 ADR 0098 freezes, or leave the table to its schema artifacts.
-
-### The dialect-specific surface, by reason
-
-279 `[[dialect_only]]` entries, 124 of them naming both backends (the same
-operation, two texts) and 155 naming one (the operation exists on one backend
-only). Counted by `kind` tag, with an entry contributing to each tag it
-carries:
-
-| count | fork class |
-|---|---|
-| 64 | operation exists on one backend only |
-| 44 | head table differs (`session_head` / `sessions`, frozen above) |
-| 37 | `FOR UPDATE` |
-| 33 | boolean representation (`0`/`1` versus `FALSE`/`TRUE`) |
-| 19 | `ON CONFLICT` versus `INSERT OR IGNORE`/`OR REPLACE` |
-| 13 | JSON extraction (`json_extract` versus `->>`) |
-| 12 | table exists on one backend only |
-| 12 | server clock |
-| 12 | list bind (`json_each` versus `unnest`/`= ANY`) |
-| 9 | array parameter |
-| 9 | durable shape (a fact stored differently, frozen) |
-| 8 | `SKIP LOCKED` |
-| 6 | `FOR SHARE` |
-| 6 | bound id list |
-| 5 | JSON pushdown |
-| 4 each | scalar versus optional row; `INDEXED BY`; parameter cast; generated key |
-| 3 each | `RETURNING`; bulk bind |
-| 2 each | result ordering; `FOR KEY SHARE`; JSON assembly |
-| 1 each | ten singletons, including the one remaining CAS predicate (FIG-3381) |
-
-Two readings worth keeping. First, the single largest class — 64 — is not a
-difference in how a query is spelled but an operation one backend simply does
-not have, and the second largest, 44, is a table name ADR 0098 freezes. Neither
-is addressable by any sharing mechanism. Second, the row-lock classes together
-(`FOR UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `SKIP LOCKED`, 53 entries) are the
-cost of PostgreSQL needing explicit locks where every SQLite write path already
-holds `BEGIN IMMEDIATE`; that is the surface FIG-3381's decision layer would
-have to shrink, and it shrank one of them.
-
-Fifteen `[[cross_family]]` entries name the statements that genuinely span
-families, and the gate recomputes each one's `touches` set from the statement
-text, so an entry cannot drift from its query. Five `[[exempt]]` paths and two
-`[[connection]]` modules are the whole of what is allowed to hold SQL without
-owning a table.
 
 ### What we did not adopt, and why
 

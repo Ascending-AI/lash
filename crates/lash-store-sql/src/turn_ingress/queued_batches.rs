@@ -3,10 +3,6 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "queued_work_batches";
 
-/// An obligation's standing: its state and the claims taken since it was
-/// armed, which name the attempt a delivery is under (ADR 0109).
-pub const OBLIGATION_STANDING_COLUMNS: &str = "obligation_state, obligation_attempts";
-
 /// Every column a reader decodes.
 ///
 /// Both backends carried this as a 14-element `QUEUED_WORK_COLUMNS` array that
@@ -20,10 +16,6 @@ pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delive
 pub const INSERT_COLUMNS: &str =
     "enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
      authority_json, merge_key, enqueued_at_ms";
-
-/// The columns written by the PostgreSQL insert.
-pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, batch_id, session_id, source_key,
-     delivery_policy, work_kind, authority_json, merge_key, enqueued_at_ms";
 
 /// The facts the settlement verdict
 /// [`require_settleable_queued_work`](lash_core::store_backend_support::require_settleable_queued_work)
@@ -44,18 +36,6 @@ pub const HEAD_CANDIDATE_COLUMNS: &str = "enqueue_seq AS head_enqueue_seq,
      batch_id AS head_batch_id,
      delivery_policy AS head_delivery_policy,
      claim_id AS head_claim_id";
-
-/// [`HEAD_CANDIDATE_COLUMNS`], qualified for the boundary form's self-join
-/// against the unfiltered head.
-pub const QUALIFIED_HEAD_CANDIDATE_COLUMNS: &str = "candidate.enqueue_seq AS head_enqueue_seq,
-     candidate.batch_id AS head_batch_id,
-     candidate.delivery_policy AS head_delivery_policy,
-     candidate.claim_id AS head_claim_id";
-
-/// The ordering key the pending-work comparison reads. Narrow because the
-/// comparison is between this pair and the pending inputs' identical pair;
-/// nothing decodes a row.
-pub const ORDERING_COLUMNS: &str = "enqueued_at_ms, enqueue_seq";
 
 crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
@@ -211,18 +191,6 @@ crate::statements! {
 /// attempt count after the claim, then the row's key.
 pub const OBLIGATION_CLAIM_COLUMNS: &str =
     "obligation_id, obligation_attempts, session_id, batch_id";
-
-/// A stalled obligation as an operator lists it: [`OBLIGATION_CLAIM_COLUMNS`]
-/// with the stall's reason, last error and instant before the key.
-pub const OBLIGATION_STALLED_COLUMNS: &str = "obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, session_id, batch_id";
-
-/// A due obligation's instant and id, read without claiming it: what the
-/// ingress ledger merges across its two tables before it claims either
-/// (ADR 0109 §3).
-///
-/// Narrow because the merge only orders by due instant and names which table
-/// to claim from; the claim itself reads [`OBLIGATION_CLAIM_COLUMNS`].
-pub const OBLIGATION_DUE_COLUMNS: &str = "obligation_due_at_ms, obligation_id";
 
 crate::statements! {
     /// `queued_work_batches` obligation statements (ADR 0109): an admitted

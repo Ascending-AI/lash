@@ -2,7 +2,7 @@
 //!
 //! Written only by the `RegisterProcessDefinition` intent, under a
 //! revision-and-fingerprint compare-and-swap. Both backends issue every
-//! statement over this table verbatim, so it has no dialect-only set at all.
+//! statement over this table verbatim, so it has no backend-only set at all.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_definitions";
@@ -11,14 +11,6 @@ pub const TABLE: &str = "process_definitions";
 pub const INSERT_COLUMNS: &str = "definition_id, owner_scope, name, revision, fingerprint,
               lifecycle, deleted_at_ms, change_seq, created_at_ms,
               updated_at_ms, record_json";
-
-/// What the registration compare-and-swap reads.
-///
-/// Narrow on purpose: the CAS compares the revision it expected and the
-/// fingerprint it pinned, and returns the stored definition only so a
-/// no-op re-registration can answer from it. Nothing on this path reads the
-/// lifecycle columns, which the deletion frontier owns.
-pub const CAS_COLUMNS: &str = "revision, fingerprint, record_json";
 
 crate::statements! {
     /// `process_definitions` statements both backends issue verbatim.

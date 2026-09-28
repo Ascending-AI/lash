@@ -434,8 +434,7 @@ floor:
     'python3 scripts/check_writer_stamps.py' \
     | scripts/gate-table.sh
 
-# The store-schema gates only: the durable format registry, the store SQL
-# ownership gate, the lash-sim schema congruence target, and the
+# The store-schema gates only: the durable format registry and the
 # lash-core-store unit target that holds the runtime-error classification
 # exhaustiveness test.
 schema-check:
@@ -445,8 +444,7 @@ schema-check:
   printf '%s\n' \
     'python3 scripts/check_format_registry.py' \
     'python3 scripts/check_writer_stamps.py' \
-    'python3 scripts/check-store-sql-ownership.py' \
-    'kiln test //crates/lash-sim:schema_congruence__test //crates/lash-core-store:lash-core-store__unit_test' \
+    'kiln test //crates/lash-core-store:lash-core-store__unit_test' \
     | scripts/gate-table.sh
 
 # Reverse-dependency selection uses the same input-identified plan as dev-test.

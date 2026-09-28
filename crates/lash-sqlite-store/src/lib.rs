@@ -126,7 +126,6 @@ mod process_registry_completion;
 mod queued_work;
 mod recovery_leader;
 mod release_stamp;
-mod required_constraints;
 mod root_verbs;
 mod schema;
 mod schema_fragments;
@@ -168,11 +167,7 @@ pub(crate) const DURABLE_CORE_DB_FILE: &str = "durable-core.db";
 pub(crate) const SQLITE_BACKEND: &str = "sqlite";
 
 use conn::TxOutcome;
-pub use lash_core_execution::store_backend_support::required_constraints::{
-    RequiredConstraintFinding, RequiredConstraintReport,
-};
 pub use preflight::{SqliteStorePreflight, verify_schema_at};
-pub use required_constraints::inspect_required_constraints_at;
 pub use schema::SqliteDatabase;
 
 mod control_intent_ledger;

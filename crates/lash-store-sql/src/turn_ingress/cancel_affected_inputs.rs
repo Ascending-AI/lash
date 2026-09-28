@@ -5,10 +5,9 @@
 //! process wake the turn held undelivered (`item_kind`, FIG-3543) — ordered by `ordinal` so the
 //! settlement replays them in the order the turn observed. The table exists on
 //! PostgreSQL only: SQLite keeps the same facts as one `record_json` document
-//! on its cancel-request row, so both statements over this table are
-//! dialect-only and carry a manifest entry. It is still a table with one
+//! on its cancel-request row. It is still a table with one
 //! owner, one name and one column list per projection — a backend having no
-//! counterpart is a reason for a manifest entry, not a reason to leave the
+//! counterpart is no reason to leave the
 //! statements unnamed at their call sites (FIG-3387).
 
 /// The table's unprefixed name.
