@@ -545,7 +545,14 @@ impl LashlangHostCatalog {
     }
 
     pub fn try_extend(&mut self, other: Self) -> Result<(), LashlangHostCatalogError> {
-        let mut merged = self.clone();
+        *self = self.clone().try_merged(other)?;
+        Ok(())
+    }
+
+    /// [`Self::try_extend`] for a caller that discards the catalog on
+    /// refusal, so the merge need not copy it first.
+    pub fn try_merged(self, other: Self) -> Result<Self, LashlangHostCatalogError> {
+        let mut merged = self;
         let LashlangHostCatalog {
             module_instances,
             resource_types,
@@ -613,8 +620,7 @@ impl LashlangHostCatalog {
         for data_type in named_data_types.into_values() {
             merged.merge_named_data_type(data_type)?;
         }
-        *self = merged;
-        Ok(())
+        Ok(merged)
     }
 
     pub fn satisfies(&self, required: &Self) -> bool {

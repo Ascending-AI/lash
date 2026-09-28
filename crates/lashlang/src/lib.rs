@@ -192,7 +192,7 @@ pub use trigger::{
     TriggerListRequest, TriggerPruneRequest, TriggerRegistrationRequest,
     add_trigger_resource_operations, check_trigger_compatibility, event_type_for_source,
     is_resolved_type_assignable, is_trigger_resource_type, list_call_args, register_call_args,
-    trigger_event_placeholder_expr,
+    trigger_event_placeholder_expr, with_trigger_resource_operations,
 };
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{

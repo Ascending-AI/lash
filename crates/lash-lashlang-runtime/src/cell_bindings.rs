@@ -102,7 +102,13 @@ impl CellToolBindings {
     /// The catalog the cell links against: the live catalog with every call
     /// path the record decides replaced by what it records — the recorded
     /// definition, or nothing.
-    pub fn link_catalog(&self, live: &lash_core::ToolCatalog) -> lash_core::ToolCatalog {
+    ///
+    /// An undrifted record links against `live` itself, so the documents
+    /// derived from it (the imported host resources) carry across cells.
+    pub fn link_catalog<'live>(
+        &self,
+        live: &'live lash_core::ToolCatalog,
+    ) -> std::borrow::Cow<'live, lash_core::ToolCatalog> {
         // A live tool at a recorded path that is not the recorded tool — a
         // path the live pass found unbound, or another tool now claiming a
         // bound one — would link differently than the record.
@@ -117,7 +123,7 @@ impl CellToolBindings {
         };
         // An undrifted record is the live catalog at every path it decides.
         if self.drifted.is_empty() && !foreign_at_recorded_path() {
-            return live.clone();
+            return std::borrow::Cow::Borrowed(live);
         }
         let recorded_ids = self
             .recorded
@@ -139,7 +145,7 @@ impl CellToolBindings {
             })
             .collect::<Vec<_>>();
         definitions.extend(self.recorded.values().flatten().cloned());
-        lash_core::ToolCatalog::from_tool_definitions(definitions)
+        std::borrow::Cow::Owned(lash_core::ToolCatalog::from_tool_definitions(definitions))
     }
 }
 

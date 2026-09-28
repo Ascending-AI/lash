@@ -507,7 +507,8 @@ async fn execute_code_inner(
         }
         None => lash_lashlang_runtime::CellToolBindings::default(),
     };
-    let link_catalog = cell_bindings.link_catalog(ctx.tool_catalog().as_ref());
+    let live_catalog = ctx.tool_catalog();
+    let link_catalog = cell_bindings.link_catalog(&live_catalog);
 
     let mut host_environment = if let Some(_program) = parsed_program
         .as_ref()

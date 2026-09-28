@@ -1,7 +1,9 @@
+use std::any::Any;
 use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::llm::types::LlmToolSpec;
+use crate::sync::MutexExt;
 use crate::{
     PromptContribution, PromptFingerprint, ToolActivation, ToolContract, ToolDefinition,
     ToolManifest, prompt_tool_names_fingerprint,
@@ -54,6 +56,28 @@ pub struct ToolCatalog {
     tool_names: OnceLock<Arc<Vec<String>>>,
     #[serde(skip)]
     tool_names_fingerprint: OnceLock<PromptFingerprint>,
+    #[serde(skip)]
+    derived_documents: DerivedDocuments,
+}
+
+/// Documents a downstream crate derives from exactly this membership, one per
+/// document type. Like the other memos, a clone carries the ones already
+/// derived, so every copy of one catalog generation derives each only once.
+#[derive(Default)]
+struct DerivedDocuments(Mutex<Vec<DerivedDocument>>);
+
+type DerivedDocument = Arc<dyn Any + Send + Sync>;
+
+fn find_derived<T: Any + Send + Sync>(documents: &[DerivedDocument]) -> Option<Arc<T>> {
+    documents
+        .iter()
+        .find_map(|document| Arc::clone(document).downcast::<T>().ok())
+}
+
+impl Clone for DerivedDocuments {
+    fn clone(&self) -> Self {
+        Self(Mutex::new(self.0.lock_recover().clone()))
+    }
 }
 
 impl Clone for ToolCatalog {
@@ -63,6 +87,7 @@ impl Clone for ToolCatalog {
             model_tool_specs: OnceLock::new(),
             tool_names: OnceLock::new(),
             tool_names_fingerprint: OnceLock::new(),
+            derived_documents: self.derived_documents.clone(),
         };
         if let Some(value) = self.model_tool_specs.get() {
             let _ = clone.model_tool_specs.set(Arc::clone(value));
@@ -92,6 +117,7 @@ impl Default for ToolCatalog {
             model_tool_specs: OnceLock::new(),
             tool_names: OnceLock::new(),
             tool_names_fingerprint: OnceLock::new(),
+            derived_documents: DerivedDocuments::default(),
         }
     }
 }
@@ -99,13 +125,40 @@ impl Default for ToolCatalog {
 impl ToolCatalog {
     /// Prompt-only projection. The original catalogue retains execution authority.
     pub fn inline_tools(&self) -> Self {
-        let tools = self
-            .tools
-            .iter()
-            .filter(|entry| entry.manifest.inline)
-            .cloned()
-            .collect();
-        Self::from_entries(tools)
+        self.filtered(|entry| entry.manifest.inline)
+    }
+
+    /// The members `keep` accepts, as a new catalog that derives its own
+    /// documents rather than inheriting this one's.
+    pub fn filtered(&self, mut keep: impl FnMut(&ToolCatalogEntry) -> bool) -> Self {
+        Self::from_entries(
+            self.tools
+                .iter()
+                .filter(|entry| keep(entry))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// The document of type `T` derived from this catalog's membership,
+    /// computed by `derive` on first request and shared by every clone after.
+    ///
+    /// The document is a function of `tools` alone, so a caller that edits
+    /// `tools` in place must start from a fresh catalog ([`Self::filtered`])
+    /// rather than a clone.
+    pub fn derived<T: Any + Send + Sync>(&self, derive: impl FnOnce(&Self) -> T) -> Arc<T> {
+        if let Some(document) = find_derived(&self.derived_documents.0.lock_recover()) {
+            return document;
+        }
+        // Derived outside the lock; a racing derivation of the same document
+        // yields to whichever landed first.
+        let document = Arc::new(derive(self));
+        let mut documents = self.derived_documents.0.lock_recover();
+        if let Some(existing) = find_derived(&documents) {
+            return existing;
+        }
+        documents.push(Arc::clone(&document) as DerivedDocument);
+        document
     }
 
     pub fn from_tool_definitions(tools: Vec<ToolDefinition>) -> Self {
@@ -140,6 +193,7 @@ impl ToolCatalog {
             model_tool_specs: OnceLock::new(),
             tool_names: OnceLock::new(),
             tool_names_fingerprint: OnceLock::new(),
+            derived_documents: DerivedDocuments::default(),
         }
     }
 
@@ -422,6 +476,34 @@ mod tests {
         assert_eq!(contract_resolutions.load(Ordering::SeqCst), 1);
         assert_eq!(catalog.model_tool_specs().len(), 1);
         assert_eq!(contract_resolutions.load(Ordering::SeqCst), 1);
+    }
+
+    /// A derived document is paid once per catalog generation, and a filtered
+    /// catalog — different membership — never reads its parent's.
+    #[test]
+    fn derived_documents_follow_clones_but_not_filtered_membership() {
+        struct MemberCount(usize);
+        let derivations = AtomicUsize::new(0);
+        let count = |catalog: &ToolCatalog| {
+            derivations.fetch_add(1, Ordering::SeqCst);
+            MemberCount(catalog.tools.len())
+        };
+        let catalog = build_tool_catalog(build_input(
+            vec![tool("read_file"), tool("write_file")],
+            Vec::new(),
+        ))
+        .expect("complete resident definitions");
+
+        let first = catalog.derived(count);
+        let clone = catalog.clone();
+        assert!(Arc::ptr_eq(&first, &catalog.derived(count)));
+        assert!(Arc::ptr_eq(&first, &clone.derived(count)));
+        assert_eq!(derivations.load(Ordering::SeqCst), 1);
+
+        let filtered = catalog.filtered(|entry| entry.manifest.name == "read_file");
+        assert_eq!(filtered.derived(count).0, 1);
+        assert_eq!(first.0, 2);
+        assert_eq!(derivations.load(Ordering::SeqCst), 2);
     }
 
     #[test]

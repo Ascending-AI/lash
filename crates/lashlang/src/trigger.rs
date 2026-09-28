@@ -227,14 +227,22 @@ fn trigger_registration_schema() -> Value {
     })
 }
 
+pub fn add_trigger_resource_operations(
+    catalog: &mut LashlangHostCatalog,
+) -> Result<(), LashlangHostCatalogError> {
+    *catalog = with_trigger_resource_operations(catalog.clone())?;
+    Ok(())
+}
+
+/// [`add_trigger_resource_operations`] for a caller that discards the catalog
+/// on refusal, so the extension need not copy it first.
 #[expect(
     clippy::expect_used,
     reason = "TRIGGER_REGISTRATION_TYPE's schema is generated right here in trigger_registration_schema() and is a valid named data type"
 )]
-pub fn add_trigger_resource_operations(
-    catalog: &mut LashlangHostCatalog,
-) -> Result<(), LashlangHostCatalogError> {
-    let mut extended = catalog.clone();
+pub fn with_trigger_resource_operations(
+    mut extended: LashlangHostCatalog,
+) -> Result<LashlangHostCatalog, LashlangHostCatalogError> {
     extended.add_named_data_type(
         NamedDataType::from_schema(TRIGGER_REGISTRATION_TYPE, &trigger_registration_schema())
             .expect("trigger registration is a valid named data type"),
@@ -248,8 +256,7 @@ pub fn add_trigger_resource_operations(
             &OperationContract::new(operation.input_schema(), operation.output_schema()),
         )?;
     }
-    *catalog = extended;
-    Ok(())
+    Ok(extended)
 }
 
 pub struct TriggerRegistrationCall<'expr> {

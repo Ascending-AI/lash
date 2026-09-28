@@ -1983,6 +1983,87 @@ fn surface_merges_plugin_extensions() {
     );
 }
 
+/// Masking a path over the catalog's memoized import builds exactly the
+/// environment of the catalog and surface without the masked members — down
+/// to the serialized bytes — and leaves the unmasked environment intact.
+#[test]
+fn masked_host_environment_is_the_environment_without_the_masked_members() {
+    let tool = |id: &str, module: &str, operation: &str, authority: &str| {
+        lash_core::ToolDefinition::raw(
+            format!("tool:test/{id}"),
+            id,
+            format!("{id} fixture"),
+            serde_json::json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"]
+            }),
+            serde_json::json!({ "type": "string" }),
+        )
+        .with_tool_binding(ToolBinding::new([module], operation).with_authority_type(authority))
+    };
+    let mut internal = tool("internal_read", "fs", "internal", "Filesystem");
+    internal.manifest.activation = lash_core::ToolActivation::Internal;
+    let unmasked_tools = vec![
+        tool("fs_write", "fs", "write", "Filesystem"),
+        tool("mirror_read", "mirror", "read", "Filesystem"),
+        internal,
+    ];
+    let masked_tools = [
+        tool("fs_read", "fs", "read", "Filesystem"),
+        tool("web_fetch", "web", "fetch", "Web"),
+    ];
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(
+        masked_tools
+            .into_iter()
+            .chain(unmasked_tools.clone())
+            .collect(),
+    );
+    let masked = [
+        "fs.read",
+        "web.fetch",
+        "tools.lookup",
+        "absent.path",
+        "undotted",
+    ]
+    .map(String::from)
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    let surface = |operations: &[&str]| {
+        LashlangSurface::default()
+            .with_resources(LashlangHostCatalog::tool_default(
+                operations.iter().copied(),
+            ))
+            .expect("surface resources are unique")
+    };
+
+    let environment = surface(&["lookup", "list"])
+        .host_environment_masking(&catalog, &masked)
+        .expect("masked environment builds");
+    let expected = surface(&["list"])
+        .host_environment(&lash_core::ToolCatalog::from_tool_definitions(
+            unmasked_tools,
+        ))
+        .expect("environment without the masked members builds");
+    assert_eq!(environment, expected);
+    assert_eq!(
+        serde_json::to_string(&environment).expect("environment serializes"),
+        serde_json::to_string(&expected).expect("environment serializes"),
+    );
+
+    let unmasked = surface(&["lookup", "list"])
+        .host_environment(&catalog)
+        .expect("unmasked environment builds");
+    assert!(unmasked.resources.provides_module_operation("fs", "read"));
+    assert_eq!(
+        unmasked,
+        surface(&["lookup", "list"])
+            .host_environment(&catalog.filtered(|_| true))
+            .expect("a fresh import of the same members builds"),
+        "masking never edits the catalog's memoized import"
+    );
+}
+
 #[test]
 fn surface_resources_return_typed_catalog_conflicts() {
     let surface = LashlangSurface::default()

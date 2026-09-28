@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lash_sansio::sync::MutexExt;
 
 use crate::{
     LashlangHostEnvironment, LashlangSurface, ToolBindingError, lashlang_tool_operation_contract,
@@ -378,25 +379,29 @@ pub async fn resolve_and_build_deferred_environment_from_references(
             .host_environment(catalog)
             .map_err(|source| DeferredResolutionError::Ambient(Box::new(source)));
     }
-    let referenced_for_ambient = referenced.clone();
     let recorded_paths = record
         .resolutions
         .keys()
         .filter(|path| referenced.contains(*path))
         .cloned()
         .collect::<BTreeSet<_>>();
+    // The environment live classification built, kept for the final build
+    // when that masks the same paths.
+    let classified = std::sync::Mutex::new(None);
     let outcomes = journal_deferred_outcomes(
         referenced.clone(),
-        move || {
+        || {
             // Retained outcomes own their exact paths. Classify live ambient
             // availability only after masking them, so later incompatible
             // schemas cannot preempt journal replay during environment build.
             let host_environment = surface.host_environment_masking(catalog, &recorded_paths)?;
-            Ok(referenced_for_ambient
+            let ambient = referenced
                 .iter()
                 .filter(|path| already_provided(&host_environment, path))
                 .cloned()
-                .collect())
+                .collect();
+            *classified.lock_recover() = Some(host_environment);
+            Ok(ambient)
         },
         resolver,
         record,
@@ -404,9 +409,16 @@ pub async fn resolve_and_build_deferred_environment_from_references(
     )
     .await?;
     let masked_paths = outcomes.keys().cloned().collect::<BTreeSet<_>>();
-    let mut host_environment = surface
-        .host_environment_masking(catalog, &masked_paths)
-        .map_err(|source| DeferredResolutionError::Ambient(Box::new(source)))?;
+    let classified = classified
+        .lock_recover()
+        .take()
+        .filter(|_| masked_paths == recorded_paths);
+    let mut host_environment = match classified {
+        Some(host_environment) => host_environment,
+        None => surface
+            .host_environment_masking(catalog, &masked_paths)
+            .map_err(|source| DeferredResolutionError::Ambient(Box::new(source)))?,
+    };
     apply_deferred_outcomes(&mut host_environment, &outcomes, resolver, ctx)?;
     record.resolutions = outcomes;
 
@@ -436,7 +448,6 @@ use journal::{apply_deferred_outcomes, journal_deferred_outcomes};
 mod tests {
     use super::*;
     use crate::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
-    use lash_sansio::sync::MutexExt;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};

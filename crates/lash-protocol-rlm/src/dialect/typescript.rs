@@ -226,14 +226,9 @@ impl TypescriptDialect {
     fn render_host_surface_section(
         &self,
         tool_catalog: &lash_core::ToolCatalog,
-    ) -> Result<String, SessionError> {
-        let host_environment = self
-            .surface
-            .host_environment(tool_catalog)
-            .map_err(|error| {
-                SessionError::Protocol(format!("invalid host tool surface: {error}"))
-            })?;
-        let mut inventory = crate::protocol::prompt::host_surface_inventory(&host_environment);
+        host_environment: &lashlang::LashlangHostEnvironment,
+    ) -> String {
+        let mut inventory = crate::protocol::prompt::host_surface_inventory(host_environment);
         // FIG-2999: the trigger operations are no longer gated by an ability,
         // so the prompt gates them on there being something to register. With
         // no declared trigger source a cell cannot build a `source` value, and
@@ -271,7 +266,7 @@ impl TypescriptDialect {
             && inventory.constructors.is_empty()
             && inventory.trigger_sources.is_empty()
         {
-            return Ok(String::new());
+            return String::new();
         }
         let mut section = String::from("\n\n### Host Surface");
         if !operations.is_empty() {
@@ -348,7 +343,7 @@ impl TypescriptDialect {
                 .join("\n");
             section.push_str(&format!("\n\nTrigger source protocol metadata:\n\n{lines}"));
         }
-        Ok(section)
+        section
     }
 }
 
@@ -469,7 +464,13 @@ impl TypescriptDialect {
         } else {
             format!("\n\n### Tools\n\n{tools}")
         };
-        let host_surface = self.render_host_surface_section(tool_catalog)?;
+        let environment = self
+            .surface
+            .host_environment(tool_catalog)
+            .map_err(|error| {
+                SessionError::Protocol(format!("invalid host tool surface: {error}"))
+            })?;
+        let host_surface = self.render_host_surface_section(tool_catalog, &environment);
         let allowed_sections = if host_surface.is_empty() {
             "**Tools**"
         } else {
@@ -492,10 +493,6 @@ impl TypescriptDialect {
             )
             .to_string(),
         };
-        let environment = self
-            .surface
-            .host_environment(tool_catalog)
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let durable = typescript_process_prompt(catalogue_has_process_surface(tool_catalog));
         let durable = if durable.is_empty() {
             durable

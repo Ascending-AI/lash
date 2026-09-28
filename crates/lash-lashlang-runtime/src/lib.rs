@@ -357,7 +357,7 @@ impl LashlangSurface {
     /// Builds the link-time environment while excluding exact ambient call
     /// paths already decided by the deferred-resolution journal.
     ///
-    /// Filtering happens before the flat Tool Catalog and contributed surface
+    /// Masking happens before the flat Tool Catalog and contributed surface
     /// resources are merged and validated. Thus a recorded authority can mask
     /// every later ambient claimant for its path, while unrelated collisions
     /// and malformed definitions retain their normal failures.
@@ -367,13 +367,9 @@ impl LashlangSurface {
         masked_call_paths: &BTreeSet<String>,
     ) -> Result<LashlangHostEnvironment, ToolBindingError> {
         let mut resources = self.resources.clone();
-        for path in masked_call_paths {
-            if let Some((module_path, operation)) = path.rsplit_once('.') {
-                resources.mask_module_operation(module_path, operation);
-            }
-        }
-        lashlang_host_environment_from_tool_catalog(
-            &filtered_tool_catalog(catalog, masked_call_paths),
+        mask_call_paths(&mut resources, masked_call_paths);
+        lashlang_host_environment_from_resources(
+            masked_tool_catalog_resources(catalog, masked_call_paths)?,
             self.abilities,
             self.language_features,
             resources,
@@ -381,26 +377,57 @@ impl LashlangSurface {
     }
 }
 
+fn mask_call_paths(resources: &mut LashlangHostCatalog, masked_call_paths: &BTreeSet<String>) {
+    for path in masked_call_paths {
+        if let Some((module_path, operation)) = path.rsplit_once('.') {
+            resources.mask_module_operation(module_path, operation);
+        }
+    }
+}
+
+/// The catalog's imported resources, derived once per catalog generation: a
+/// cell or prompt against an unchanged tool set reuses them rather than
+/// re-importing every tool schema. `None` when the whole catalog does not
+/// import.
+struct ToolCatalogResources(Option<LashlangHostCatalog>);
+
+/// The resources the catalog's members outside `masked_call_paths` import.
+///
+/// When every member imports, this is the memoized import with the masked
+/// paths removed, which is exactly what importing the remaining members
+/// builds: a tool-only import binds every operation to one module, so
+/// masking a path takes out that member's binding and whatever only it held.
+/// When the whole catalog does not import, a masked member may be what fails,
+/// so the remaining members are imported afresh and their own error stands.
+fn masked_tool_catalog_resources(
+    catalog: &lash_core::ToolCatalog,
+    masked_call_paths: &BTreeSet<String>,
+) -> Result<LashlangHostCatalog, ToolBindingError> {
+    let imported = catalog.derived(|catalog| {
+        ToolCatalogResources(lashlang_resources_from_tool_catalog(catalog).ok())
+    });
+    let Some(resources) = &imported.0 else {
+        return lashlang_resources_from_tool_catalog(&filtered_tool_catalog(
+            catalog,
+            masked_call_paths,
+        ));
+    };
+    let mut resources = resources.clone();
+    mask_call_paths(&mut resources, masked_call_paths);
+    Ok(resources)
+}
+
 fn filtered_tool_catalog(
     catalog: &lash_core::ToolCatalog,
     masked_call_paths: &BTreeSet<String>,
 ) -> lash_core::ToolCatalog {
-    if masked_call_paths.is_empty() {
-        return catalog.clone();
-    }
-    let mut filtered = catalog.clone();
-    filtered.tools.retain(|entry| {
+    catalog.filtered(|entry| {
         let Ok(binding) = required_tool_typescript_executable(&entry.manifest) else {
             // Preserve ordinary validation for malformed unrelated entries.
             return true;
         };
-        !masked_call_paths.contains(&format!(
-            "{}.{}",
-            binding.module_path.join("."),
-            binding.operation
-        ))
-    });
-    filtered
+        !masked_call_paths.contains(&binding.call_path())
+    })
 }
 
 pub fn lashlang_host_environment_from_tool_catalog(
@@ -409,8 +436,21 @@ pub fn lashlang_host_environment_from_tool_catalog(
     language_features: LashlangLanguageFeatures,
     host_resources: LashlangHostCatalog,
 ) -> Result<LashlangHostEnvironment, ToolBindingError> {
-    let mut resources = lashlang_resources_from_tool_catalog(catalog)?;
-    resources.try_extend(host_resources)?;
+    lashlang_host_environment_from_resources(
+        masked_tool_catalog_resources(catalog, &BTreeSet::new())?,
+        abilities,
+        language_features,
+        host_resources,
+    )
+}
+
+fn lashlang_host_environment_from_resources(
+    tool_resources: LashlangHostCatalog,
+    abilities: LashlangAbilities,
+    language_features: LashlangLanguageFeatures,
+    host_resources: LashlangHostCatalog,
+) -> Result<LashlangHostEnvironment, ToolBindingError> {
+    let mut resources = tool_resources.try_merged(host_resources)?;
     for (operation, host_operation) in [
         (
             lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
@@ -432,11 +472,11 @@ pub fn lashlang_host_environment_from_tool_catalog(
             ),
         )?;
     }
-    lashlang::add_trigger_resource_operations(&mut resources)?;
-    Ok(
-        LashlangHostEnvironment::new(resources, abilities)
-            .with_language_features(language_features),
+    Ok(LashlangHostEnvironment::new(
+        lashlang::with_trigger_resource_operations(resources)?,
+        abilities,
     )
+    .with_language_features(language_features))
 }
 
 pub fn lashlang_resources_from_tool_catalog(
