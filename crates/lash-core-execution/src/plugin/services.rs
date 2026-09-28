@@ -20,7 +20,6 @@ pub enum PluginOperationInvokeError {
 #[derive(Clone)]
 pub struct RuntimeServices {
     pub plugins: Arc<PluginSession>,
-    pub tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub clock: Arc<dyn crate::Clock>,
@@ -65,7 +64,6 @@ impl RuntimeServices {
     ) -> Self {
         Self {
             plugins,
-            tool_children: None,
             attachment_store,
             process_env_store,
             clock: Arc::new(crate::SystemClock),
@@ -76,14 +74,6 @@ impl RuntimeServices {
 
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
         self.clock = clock;
-        self
-    }
-
-    pub fn with_tool_children(
-        mut self,
-        tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
-    ) -> Self {
-        self.tool_children = tool_children;
         self
     }
 
@@ -117,7 +107,6 @@ impl PersistentRuntimeServices {
     ) -> Self {
         Self(RuntimeServices {
             plugins,
-            tool_children: None,
             attachment_store,
             process_env_store,
             clock: Arc::new(crate::SystemClock),

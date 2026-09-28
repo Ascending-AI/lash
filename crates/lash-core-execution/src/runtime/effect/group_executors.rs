@@ -14,17 +14,6 @@ pub trait GroupExecutors: Send + Sync {
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>>;
 
-    /// Keep locally available tool contexts reachable while a handler-driven
-    /// group outlives the execution that opened it. A runtime may have pinned
-    /// them earlier, before group formation's first await.
-    fn pin_group(&self, _group: &super::group::RuntimeEffectGroup) {}
-
-    /// Release a child's local context after its handler has completed.
-    fn release_child(&self, _envelope: &RuntimeEffectEnvelope) {}
-
-    /// Release contexts when an open finds that the group cannot run.
-    fn release_group(&self, _group_key: &str) {}
-
     /// Whether this host runs `envelope`'s child at all, wherever the child's
     /// opener is live.
     ///

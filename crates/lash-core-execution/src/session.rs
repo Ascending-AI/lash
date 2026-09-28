@@ -824,7 +824,6 @@ impl Session {
         .map(|context| {
             context
                 .with_execution_env_spec(execution_env_spec)
-                .with_tool_children(self.services.tool_children.clone())
                 .with_fleet_format(
                     self.services
                         .store
