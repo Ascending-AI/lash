@@ -561,8 +561,10 @@ impl RestateProcessIngressRunner {
         // that key. A key it no longer holds runs the segment's admission,
         // which starts a segment that never started, ends a started one whose
         // journal is gone as `SubstrateLost`, and ignores a segment that has
-        // already handed over. The engine recovery pass reaches substrate
-        // loss, and the reference is observational only.
+        // already handed over. The engine recovery pass's lost-run scan
+        // resubmits a live process whose current segment Restate no longer
+        // holds through here (`end_lost_process_runs`), and the reference is
+        // observational only.
         let latest_handover = self
             .continuations
             .latest_segment_handover(&process_id)

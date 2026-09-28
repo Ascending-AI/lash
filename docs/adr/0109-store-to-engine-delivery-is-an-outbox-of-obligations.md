@@ -15,8 +15,11 @@ Lash-executed process in the same SQL transaction. The relay submits its
 current segment to the engine and settles the obligation after ingress accepts
 it. Restate coalesces repeated `run` submissions by workflow key; its workflow
 `run` handler rejects an idempotency-key header, so the relay's attempt key
-remains local to Lash's claim. Lost or paused runs remain the engine recovery
-pass's responsibility.
+remains local to Lash's claim. The obligation is delivered once and nothing
+re-arms it. Lost or paused runs remain the engine recovery pass's
+responsibility: its lost-run scan resubmits the current segment of a live
+process whose run Restate no longer holds, and that segment's admission ends a
+started process `SubstrateLost` (ADR 0110 §2).
 
 **S8-T (process terminal publication) is implemented.** Every transaction
 that makes a process terminal arms the row's `ProcessTerminal` obligation;

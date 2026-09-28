@@ -91,9 +91,19 @@ kill from the invocation that started the run. Restate runs a workflow key's
 `run` once, so no redrive or sweep reaches the process again. The recovery
 tick's park reconcile reads such failed runs back through the admin API and
 ends each live process whose current segment's run it was `Abandoned` with
-`ResumeRefused { SubstrateLost }`. The terminal transaction arms the
+`ResumeRefused { SubstrateLost }`. A process whose park refuses is left to
+its park: its refused run ended by design. The terminal transaction arms the
 `ProcessTerminal` publication, so the process's waiters are served
 (FIG-3890).
+
+A run Restate no longer holds at all is the same loss: an operator purged it,
+or Restate's state was lost. The process start is delivered once, so nothing
+else would submit the process again. The same reconcile asks Restate, in one
+query per page of live processes, which current segments it holds a run of.
+It resubmits the latest segment of each live process it holds none of, at most
+one page of processes per pass. That segment's admission ends a started
+process `Abandoned` with `ResumeRefused { SubstrateLost }` and starts one that
+never started (FIG-3962).
 
 A boundary's write of its successor's external reference is part of the
 boundary's journaled handover step. A store fault there fails the step and the

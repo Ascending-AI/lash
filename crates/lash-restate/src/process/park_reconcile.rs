@@ -42,6 +42,12 @@
 //! (ADR 0110): its execution is lost as surely as a lost journal. The
 //! terminal transaction arms the `ProcessTerminal` publication, so the
 //! process's waiters are served.
+//!
+//! The same query finds the current segments Restate holds no run of at all:
+//! a run purged, or Restate's state lost. The `ProcessStart` obligation was
+//! delivered once and nothing re-arms it, so the pass resubmits the latest
+//! segment itself, and that segment's admission ends a started process
+//! `SubstrateLost`.
 
 use std::sync::Arc;
 
@@ -53,7 +59,8 @@ use lash_core::{
 use lash_sansio::ProcessId;
 
 use crate::ingress::{
-    RestateAdminClient, RestateInvocationId, RestateInvocationStatus, RestatePausedInvocation,
+    RestateAdminClient, RestateIngressClient, RestateInvocationId, RestateInvocationStatus,
+    RestatePausedInvocation,
 };
 use crate::services::LashService;
 
@@ -161,23 +168,42 @@ pub(crate) async fn reconcile_process_invocations(
 pub(crate) struct LostRunPass {
     /// Processes this pass ended `SubstrateLost`.
     pub ended: Vec<ProcessId>,
-    /// Failed runs left as they were: the process is gone or already
-    /// terminal, or a later segment carries it.
+    /// Processes whose current segment Restate no longer held, resubmitted
+    /// by this pass: the segment's admission ends a started one
+    /// `SubstrateLost` and starts one that never started.
+    pub resubmitted: Vec<ProcessId>,
+    /// Failed runs left as they were: the process is gone, already
+    /// terminal or refusing in its park, or a later segment carries it.
     pub unchanged: usize,
-    /// Failed runs this pass could not settle, by invocation id, with why.
+    /// Runs this pass could not settle, with why: a failed run by its
+    /// invocation id, a missing one by its workflow key.
     pub failed: Vec<(String, String)>,
 }
 
-/// End `SubstrateLost` every live process whose current segment's `run` the
-/// engine finished with a failure.
+/// End every live process whose current segment's `run` the engine finished
+/// with a failure, and resubmit every one whose current segment Restate no
+/// longer holds.
 ///
 /// The scan is bounded by the live processes lash still waits on, never by
 /// the engine's retained history: it reads the registry's non-terminal
-/// non-terminal registry records in pages of `limit`, and asks Restate only about those
+/// records in pages of `limit`, and asks Restate once per page about those
 /// processes' current segments' `run` invocations. A segment's external
 /// reference names its workflow key (a handover's reference carries no
 /// invocation id — the key is the owner), and a key's `run` executes once,
 /// so the key identifies the one run lash waits on.
+///
+/// A process whose park refuses is left to the park: its body refused, and
+/// the refused run ended by design. A failed run ends any other process
+/// `SubstrateLost` here. A reference exists
+/// only once Restate accepted a run for it, so a key Restate holds no run of
+/// was purged or lost with its journal (ADR 0110). The pass resubmits the
+/// process's latest segment, as the start delivered it: under a key Restate
+/// no longer holds the submission runs the segment's admission, which ends a
+/// started segment whose journal is gone `SubstrateLost`, starts one that
+/// never started, and ignores one that already handed over. A key the query
+/// missed only because Restate had not yet applied its run coalesces onto
+/// that run, so a resubmission is never a second execution. At most `limit`
+/// processes are resubmitted per pass; the rest wait for the next one.
 ///
 /// Idempotent: a process this pass ended is terminal, so the next pass that
 /// reads the same run leaves it. One run that fails to settle never fails
@@ -187,11 +213,18 @@ pub(crate) struct LostRunPass {
 /// When the registry page read or Restate's admin query fails.
 pub(crate) async fn end_lost_process_runs(
     admin: &RestateAdminClient,
+    ingress: &RestateIngressClient,
     namespace: &crate::RestateNamespace,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
     limit: std::num::NonZeroUsize,
 ) -> Result<LostRunPass, PluginError> {
+    let starts = super::RestateProcessIngressRunner::over_ingress(
+        ingress.clone(),
+        namespace.clone(),
+        Arc::clone(registry),
+        Arc::clone(continuations),
+    );
     let mut pass = LostRunPass::default();
     let mut continuation = None;
     loop {
@@ -199,27 +232,47 @@ pub(crate) async fn end_lost_process_runs(
             .list_non_terminal_processes_page(limit, continuation)
             .await?;
         continuation = page.continuation;
-        let segment_keys: Vec<String> = page
+        let segments: Vec<(String, &ProcessRecord)> = page
             .records
             .iter()
+            .filter(|record| !record.input.is_externally_owned() && !record.is_refusing_park())
             .filter_map(|record| {
                 let reference = record.external_ref.as_ref()?;
                 (reference.backend == "restate").then(|| {
-                    super::process_segment_workflow_key(&record.id, reference.segment_ordinal())
+                    (
+                        super::process_segment_workflow_key(
+                            &record.id,
+                            reference.segment_ordinal(),
+                        ),
+                        record,
+                    )
                 })
             })
             .collect();
+        let segment_keys: Vec<String> = segments.iter().map(|(key, _)| key.clone()).collect();
         let runs = admin
-            .failed_segment_runs(namespace, &segment_keys)
+            .segment_runs(namespace, &segment_keys)
             .await
             .map_err(|error| {
-                PluginError::Session(format!("read failed process runs from Restate: {error}"))
+                PluginError::Session(format!("read process runs from Restate: {error}"))
             })?;
-        for run in runs {
-            match end_lost_run(registry, continuations, &run).await {
+        for run in runs.iter().filter(|run| run.completed_with_failure()) {
+            match end_lost_run(registry, continuations, run).await {
                 Ok(Some(process_id)) => pass.ended.push(process_id),
                 Ok(None) => pass.unchanged += 1,
                 Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
+            }
+        }
+        for (key, record) in segments {
+            let held = runs
+                .iter()
+                .any(|run| run.target_service_key.as_deref() == Some(key.as_str()));
+            if held || pass.resubmitted.len() >= limit.get() {
+                continue;
+            }
+            match starts.submit_record(record.clone(), "lost_run").await {
+                Ok(()) => pass.resubmitted.push(record.id.clone()),
+                Err(error) => pass.failed.push((key, error.to_string())),
             }
         }
         if continuation.is_none() {
@@ -240,7 +293,9 @@ async fn end_lost_run(
     else {
         return Ok(None);
     };
-    if record.is_terminal() {
+    // A refusing park's run failed by design: the park holds the process
+    // until the drain's re-send or an operator's verb resumes it.
+    if record.is_terminal() || record.is_refusing_park() {
         return Ok(None);
     }
     // A segment that handed over is carried by its successor's run.

@@ -501,9 +501,12 @@ impl SessionControlEngine for RestateSessionControl {
         }
         // A process segment's run the engine finished without the process's
         // terminal (an operator's kill) strands the process: Restate never
-        // runs that key again. End each one `SubstrateLost` (ADR 0110).
+        // runs that key again. End each one `SubstrateLost` (ADR 0110). A
+        // segment whose run Restate no longer holds is resubmitted, and its
+        // admission ends a started process `SubstrateLost`.
         match crate::process::park_reconcile::end_lost_process_runs(
             &self.admin,
+            &self.ingress,
             &self.namespace,
             &self.processes,
             &self.continuations,
@@ -512,6 +515,13 @@ impl SessionControlEngine for RestateSessionControl {
         .await
         {
             Ok(pass) => {
+                for process_id in &pass.resubmitted {
+                    tracing::warn!(
+                        event = "process.run_missing",
+                        process_id = process_id.as_str(),
+                        "Restate no longer holds a process's current segment; it was resubmitted"
+                    );
+                }
                 report.ended_processes.extend(pass.ended);
                 report.unchanged += pass.unchanged;
                 report.failed.extend(
@@ -523,7 +533,7 @@ impl SessionControlEngine for RestateSessionControl {
             Err(error) => {
                 tracing::warn!(
                     %error,
-                    "lost-run reconcile could not read failed process runs; the next pass retries it"
+                    "lost-run reconcile could not read process runs; the next pass retries it"
                 );
             }
         }

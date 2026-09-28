@@ -578,17 +578,20 @@ impl Roll {
         self.server.settle().await;
     }
 
-    /// Redeliver the current segment under its stable workflow key.
-    async fn sweep(&self, process_id: &ProcessId) {
-        let runner = RestateProcessIngressRunner::new(
-            self.connection.clone(),
-            Arc::clone(&self.registry),
-            Arc::clone(&self.continuations),
-        );
-        runner
-            .deliver_process_start(process_id, "test:1")
-            .await
-            .expect("redeliver process start");
+    /// One lost-run pass of the deployment's recovery tick over the shared
+    /// stores: it resubmits only a live process whose current segment the
+    /// server no longer holds.
+    async fn sweep(&self) -> crate::process::park_reconcile::LostRunPass {
+        crate::process::park_reconcile::end_lost_process_runs(
+            &crate::RestateAdminClient::new(self.connection.clone()),
+            &self.ingress,
+            &crate::services::DEFAULT_NAMESPACE,
+            &self.registry,
+            &self.continuations,
+            std::num::NonZeroUsize::new(16).expect("non-zero"),
+        )
+        .await
+        .expect("the lost-run pass")
     }
 
     /// Every invocation of a generation lane of the process workflow.
@@ -997,11 +1000,10 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
     );
 }
 
-/// L5 (live stable segment): a recovery sweep after N+1 registered
-/// addresses the route segment 2's handover recorded — the stable name — and
-/// coalesces onto the run that name's key already holds on N: one start, no
-/// second invocation, no generation lane. Once the process ends, the sweep
-/// submits nothing.
+/// L5 (live stable segment): the recovery tick's lost-run pass after N+1
+/// registered finds the run segment 2's recorded key already holds on N and
+/// leaves it: one start, no second invocation, no generation lane. Once the
+/// process ends, the pass submits nothing.
 async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
     let case = format!("seed {seed}");
     let roll = Roll::start(seed, PROGRAM, true).await;
@@ -1034,8 +1036,13 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
         "{case}: the recorded route"
     );
 
-    roll.sweep(&process_id).await;
-    roll.sweep(&process_id).await;
+    for _ in 0..2 {
+        let pass = roll.sweep().await;
+        assert!(
+            pass.resubmitted.is_empty() && pass.ended.is_empty(),
+            "{case}: the pass leaves the live segment alone: {pass:?}"
+        );
+    }
     let live = roll.invocations_of(&stable_successor);
     assert_eq!(
         live.len(),
@@ -1077,7 +1084,7 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
         .unwrap_or_else(|error| panic!("{case}: the awaiter failed: {error}"));
     roll.settle().await;
     let invocations = roll.server.invocations().len();
-    roll.sweep(&process_id).await;
+    roll.sweep().await;
     roll.settle().await;
     assert_eq!(
         roll.server.invocations().len(),
@@ -1087,9 +1094,9 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
     assert_eq!(roll.runs_of(SUCCESSOR).len(), 1, "{case}: still one start");
 }
 
-/// L5 (refused successor): while the process is parked for `G_N`, a sweep
-/// addresses the recorded stable route and coalesces onto the refused run
-/// that key retains — no second refusal, no dispatch. After the drain's
+/// L5 (refused successor): while the process is parked for `G_N`, the
+/// lost-run pass finds the refused run the recorded key retains and leaves
+/// it — no second refusal, no dispatch. After the drain's
 /// re-send ran the segment on `_g<G_N>` and ended the process, a forced
 /// stable-lane redrive of the segment (its refused run purged) is fenced by
 /// admission against the ended process and enters no runner.
@@ -1110,12 +1117,16 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
     .await;
     roll.settle().await;
 
-    roll.sweep(&process_id).await;
+    let pass = roll.sweep().await;
     roll.settle().await;
+    assert!(
+        pass.resubmitted.is_empty() && pass.ended.is_empty(),
+        "{case}: the pass leaves the refused run alone: {pass:?}"
+    );
     assert_eq!(
         roll.invocations_of(&stable_successor).len(),
         1,
-        "{case}: the sweep coalesced onto the refused run"
+        "{case}: one refused run"
     );
     assert!(roll.runs_of(SUCCESSOR).is_empty(), "{case}: zero dispatch");
     let park = roll.record(&process_id).await.park.expect("still parked");

@@ -1029,9 +1029,10 @@ pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
     );
 }
 
-/// The sweep submits every live row under its latest handover's key, whatever
-/// the external reference says: a reference that already names the segment
-/// no longer hides a segment whose workflow Restate lost.
+/// The recovery pass's lost-run scan resubmits a live, started process whose
+/// current segment Restate no longer holds, under its latest handover's key,
+/// whatever the external reference says: a reference that already names the
+/// segment no longer hides a segment whose workflow Restate lost.
 #[tokio::test]
 pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_current() {
     let segment = HandedOverSegment::new().await;
@@ -1048,29 +1049,48 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
         )
         .await
         .expect("the reference names segment 1");
-    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "202 Accepted",
-        body: r#"{"invocationId":"inv_current_ref","status":"PreviouslyAccepted"}"#,
-    }])
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![
+        MockHttpResponse {
+            status: "200 OK",
+            body: r#"{"rows":[]}"#,
+        },
+        MockHttpResponse {
+            status: "202 Accepted",
+            body: r#"{"invocationId":"inv_current_ref","status":"Accepted"}"#,
+        },
+    ])
     .await;
-    RestateProcessIngressRunner::new(
-        base_url,
-        Arc::clone(&segment.registry),
-        Arc::clone(&segment.continuations),
+    let pass = crate::process::park_reconcile::end_lost_process_runs(
+        &crate::RestateAdminClient::new(base_url.clone()),
+        &RestateIngressClient::new(base_url),
+        &crate::services::DEFAULT_NAMESPACE,
+        &segment.registry,
+        &segment.continuations,
+        std::num::NonZeroUsize::new(16).expect("non-zero"),
     )
-    .deliver_process_start(&segment.process_id, "test:1")
     .await
-    .expect("sweep the pending rows");
+    .expect("the lost-run pass");
+    assert_eq!(
+        pass.resubmitted,
+        vec![segment.process_id.clone()],
+        "{pass:?}"
+    );
     server.await.expect("capture server");
     let requests = captured.lock_recover().clone();
-    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests.len(), 2, "{requests:?}");
     assert!(
-        requests[0].starts_with(&format!(
+        requests[0].starts_with("POST /query ")
+            && requests[0].contains(&format!("'{}#1'", segment.process_id)),
+        "the pass asks Restate for the current segment's run: {}",
+        requests[0]
+    );
+    assert!(
+        requests[1].starts_with(&format!(
             "POST /LashProcessWorkflow/{}%231/run/send ",
             segment.process_id
         )),
         "the sweep addresses the latest segment's key: {}",
-        requests[0]
+        requests[1]
     );
     // The sweep repeats the handover's send: it carries the generation of
     // the build that wrote the handover as its sender (FIG-3795 S6).
@@ -1083,9 +1103,9 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
         .written_generation
         .expect("the handover records its writer's generation");
     assert!(
-        requests[0].contains(&format!("\"sender_generation\":\"{written}\"")),
+        requests[1].contains(&format!("\"sender_generation\":\"{written}\"")),
         "the sweep stamps the handover writer's generation: {}",
-        requests[0]
+        requests[1]
     );
 }
 

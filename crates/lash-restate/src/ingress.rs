@@ -1093,16 +1093,18 @@ impl RestateAdminClient {
         )).await
     }
 
-    /// The failed `run` invocations of the segment workflow keys in
-    /// `segment_keys`, on every lane of the process workflow. A segment's run
-    /// answers its process's outcome as its output, so one that failed ended
-    /// without it: an operator's kill, which Restate cascades from the
-    /// invocation that started it, or a run the engine gave up on.
+    /// The `run` invocations Restate retains for the segment workflow keys
+    /// in `segment_keys`, in any status, on every lane of the process
+    /// workflow. A segment's run answers its process's outcome as its output,
+    /// so one that failed ended without it: an operator's kill, which Restate
+    /// cascades from the invocation that started it, or a run the engine gave
+    /// up on. A key with no row is one Restate no longer holds: its run was
+    /// purged or its state lost.
     ///
     /// The query is keyed by the segments lash still waits on — never a
-    /// newest-first page of the engine's retained history — so a killed run
-    /// is found however many failed runs the engine has kept since.
-    pub(crate) async fn failed_segment_runs(
+    /// newest-first page of the engine's retained history — so a killed or
+    /// missing run is found however many runs the engine has kept since.
+    pub(crate) async fn segment_runs(
         &self,
         namespace: &crate::RestateNamespace,
         segment_keys: &[String],
@@ -1117,7 +1119,7 @@ impl RestateAdminClient {
             .collect::<Vec<_>>()
             .join(", ");
         self.query_json(&format!(
-            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {segments} AND target_handler_name = 'run' AND status = 'completed' AND completion_result = 'failure' AND target_service_key IN ({keys})"
+            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {segments} AND target_handler_name = 'run' AND target_service_key IN ({keys})"
         ))
         .await
     }
@@ -1409,6 +1411,11 @@ impl RestateInvocationStatus {
     pub fn completed_successfully(&self) -> bool {
         self.status == RestateInvocationLifecycle::Completed
             && self.completion_result.as_deref() == Some("success")
+    }
+
+    pub fn completed_with_failure(&self) -> bool {
+        self.status == RestateInvocationLifecycle::Completed
+            && self.completion_result.as_deref() == Some("failure")
     }
 }
 

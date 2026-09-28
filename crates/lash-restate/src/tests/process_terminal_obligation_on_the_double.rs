@@ -184,6 +184,7 @@ impl World {
         .expect("reconcile paused processes");
         crate::process::park_reconcile::end_lost_process_runs(
             &self.admin,
+            &self.ingress,
             &crate::services::DEFAULT_NAMESPACE,
             &self.registry,
             &self.continuations,
@@ -479,6 +480,7 @@ pub(super) async fn a_killed_run_ends_substrate_lost_however_many_newer_failed_r
 
     let pass = crate::process::park_reconcile::end_lost_process_runs(
         &world.admin,
+        &world.ingress,
         &crate::services::DEFAULT_NAMESPACE,
         &world.registry,
         &world.continuations,
@@ -515,5 +517,105 @@ pub(super) async fn a_killed_run_ends_substrate_lost_however_many_newer_failed_r
                     }
         ),
         "the killed process ends substrate-lost: {outcome:?}"
+    );
+}
+
+/// FIG-3962: a started process whose run Restate no longer holds — killed
+/// and then purged, so no failed run is left to read either — is reached by
+/// the recovery tick's lost-run pass. Its `ProcessStart` was delivered once
+/// and nothing re-arms it; the pass resubmits the current segment, whose
+/// admission ends the process `SubstrateLost`, and its waiter is served.
+#[tokio::test]
+pub(super) async fn a_started_process_whose_run_restate_purged_ends_substrate_lost() {
+    let world = World::new_hanging(3962).await;
+    let process_id = world.register().await;
+    let start = || {
+        relay_due(
+            &world.start_relay,
+            &lash_core::facade_support::SystemClock,
+            std::num::NonZeroUsize::new(16).expect("non-zero"),
+        )
+    };
+    let delivered = start().await.expect("deliver the process start");
+    assert_eq!(
+        delivered.delivered, 1,
+        "the start is delivered: {delivered:?}"
+    );
+    let target = format!("LashProcessWorkflow/{process_id}/run");
+    let run = world.wait_for_status(&target, "running").await;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    while world
+        .registry
+        .get_process(&process_id)
+        .await
+        .expect("read the process")
+        .and_then(|record| record.first_started)
+        .is_none()
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the process's run never recorded its start"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(world.server.kill_and_await(&run.id).await, Some(true));
+    assert_eq!(world.server.purge(&run.id), Some(true), "the run is purged");
+    let again = start().await.expect("the start relay's next pass");
+    assert_eq!(again.claimed, 0, "nothing re-arms the start: {again:?}");
+
+    let pass = crate::process::park_reconcile::end_lost_process_runs(
+        &world.admin,
+        &world.ingress,
+        &crate::services::DEFAULT_NAMESPACE,
+        &world.registry,
+        &world.continuations,
+        std::num::NonZeroUsize::new(16).expect("non-zero"),
+    )
+    .await
+    .expect("the lost-run pass");
+    assert_eq!(pass.resubmitted, vec![process_id.clone()], "{pass:?}");
+
+    let waiter = world.waiter(&process_id);
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while !waiter.is_finished() {
+            world.relay_pass().await;
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the waiter is served");
+    let outcome = waiter
+        .await
+        .expect("the waiter task")
+        .expect("the waiter's call");
+    assert!(
+        matches!(
+            outcome,
+            ProcessAwaitOutput::Abandoned { ref evidence, .. }
+                if evidence.writer
+                    == lash_core::AbandonWriter::ResumeRefused {
+                        reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+                    }
+        ),
+        "the purged process ends substrate-lost: {outcome:?}"
+    );
+    assert_eq!(
+        world.runner.runs.load(Ordering::SeqCst),
+        1,
+        "no started work re-ran from scratch"
+    );
+    let pass = crate::process::park_reconcile::end_lost_process_runs(
+        &world.admin,
+        &world.ingress,
+        &crate::services::DEFAULT_NAMESPACE,
+        &world.registry,
+        &world.continuations,
+        std::num::NonZeroUsize::new(16).expect("non-zero"),
+    )
+    .await
+    .expect("the next lost-run pass");
+    assert!(
+        pass.resubmitted.is_empty(),
+        "the ended process is left: {pass:?}"
     );
 }
